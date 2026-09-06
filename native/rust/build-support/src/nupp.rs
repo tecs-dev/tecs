@@ -25,7 +25,7 @@ pub const DEFAULT_TARGET: &str = "headless";
 // Benchmarks live under the `tecs` namespace because several reach
 // `tecs.internal` modules, which the checker restricts to importers whose
 // first namespace segment matches.
-pub const BENCHMARKS: &str = "bench/nupp/tecs";
+pub const BENCHMARKS: &str = "bench/nupp/tecs/bench/programs";
 
 /// Where the rendered Nupp documentation site is written.
 pub const DOCUMENTATION: &str = "out/docs";
@@ -720,6 +720,32 @@ fn which(program: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn benchmark_modules_cannot_shadow_runtime_modules() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        for entry in std::fs::read_dir(root.join(super::BENCHMARKS)).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|value| value.to_str()) != Some("nupp") {
+                continue;
+            }
+            let module = path.strip_prefix(root.join("bench/nupp")).unwrap();
+            assert!(
+                !root.join("src").join(module).exists(),
+                "benchmark shadows a source module: {}",
+                module.display()
+            );
+            assert!(
+                !root
+                    .join("src")
+                    .join(module.with_extension(""))
+                    .join("init.nupp")
+                    .exists(),
+                "benchmark shadows an init module: {}",
+                module.display()
+            );
+        }
+    }
+
     use super::*;
     use serde_json::json;
 

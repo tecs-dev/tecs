@@ -1,0 +1,214 @@
+local ecs = require("tecs.ecs")
+local gfx = require("tecs.gfx")
+local data = require("tecs.data")
+local physics = require("tecs.physics")
+local audio = require("tecs.audio")
+local audiobackend = require("tecs.platform.audiobackend")
+local mcp = require("tecs.mcp")
+local registry = require("tecs.internal.mcpregistry")
+local schemas = require("tecs.internal.mcpschemas")
+local entityworld = require("tecs.internal.world")
+local json = require("nupp.data.json")
+local files = require("nupp.io.files")
+local test = require("nupp.test")
+local suite = {}
+
+local function call(name: string, arguments: {[string]: any}?): any
+    local reply = json.decode(
+        mcp.dispatch(
+            json.encode({
+                jsonrpc = "2.0",
+                id = 1,
+                method = "tools/call",
+                params = {name = name, arguments = arguments or json.EMPTY_OBJECT}
+            })
+        )
+    )
+
+    return reply.result
+end
+
+local function content(name: string, arguments: {[string]: any}?): any
+    local result = call(name, arguments)
+    test.assert(result.isError == nil, name .. ": " .. tostring(result.content[1].text))
+    return result.structuredContent
+end
+
+local function equalTree(actual: any, expected: any): nil
+    test.equal(type(actual), type(expected))
+    if type(expected) ~= "table" then
+        test.equal(actual, expected)
+        return
+    end
+    for key, value in pairs(expected) do
+        equalTree(actual[key], value)
+    end
+    for key in pairs(actual) do
+        test.assert(expected[key] ~= nil, "unexpected schema key: " .. tostring(key))
+    end
+end
+
+function suite.restoredInputSchemasMatchTheHistoricalWireListing(): nil
+    local historical = json.decode(assert(files.read("tests/fixtures/mcp/historical-tools.json")))
+    local checked = 0
+    for _, tool in ipairs(historical.tools) do
+        if schemas.inputs[tool.name] ~= nil then
+            equalTree(schemas.inputs[tool.name], tool.inputSchema)
+            local found = registry.findTool(tool.name)
+            assert(found ~= nil, "missing restored tool " .. tool.name)
+            equalTree(found.inputSchema, tool.inputSchema)
+            checked = checked + 1
+        end
+    end
+    test.equal(checked, 22)
+    for _, name in ipairs({
+        "screenshot",
+        "sample_pixels",
+        "reload_shaders",
+        "reload_image",
+        "watch",
+        "physics_debug"
+    }) do
+        test.equal(registry.findTool(name), nil)
+    end
+end
+
+function suite.inspectionReadsCommittedArchetypesAndAnonymousResources(): nil
+    local world = ecs.newWorld()
+    local entity = world:spawn(gfx.Camera2D(3, 4))
+    world:commit()
+    local key = data.newKey("test.mcp.resource", "")
+    local anonymous = data.newKey(nil, 0)
+    world.resources[key] = "data"
+    world.resources[anonymous] = 4
+    mcp.bind(world)
+    local listed = content("archetypes_list")
+    test.assert(listed.total > 0)
+    local info = content("archetypes_info", {id = listed.archetypes[1].id})
+    test.assert(info.entities > 0)
+    local resources = content("resources_list")
+    test.equal(resources.total, 2)
+    test.equal(content("resources_info", {name = "test.mcp.resource"}).present, true)
+    test.equal(content("resources_info", {name = "missing"}).present, false)
+    local detached = entityworld.inspectArchetypes(world)
+    detached[1].components[1] = "changed"
+    test.assert(content("archetypes_list").archetypes[1].components[1] ~= "changed")
+    world:despawn(entity)
+    world:commit()
+    test.equal(content("archetypes_list").total, 0)
+    test.assert(content("archetypes_list", {empty = true}).total > 0)
+    mcp.bind(nil)
+end
+
+function suite.cameraMovementUsesTheRenderersSelectedEntity(): nil
+    local world = ecs.newWorld()
+    world:spawn(gfx.Camera2D(1, 2))
+    local selected = world:spawn(gfx.Camera2D(10, 20, 2, 0.5), gfx.ActiveCamera)
+    world:spawn(gfx.Camera2D(30, 40), gfx.ActiveCamera)
+    world:commit()
+    mcp.bind(world)
+    test.equal(content("camera_info").entity, selected)
+    local moved = content("camera_move", {x = 50, zoom = 3})
+    test.equal(moved.x, 50)
+    test.equal(moved.y, 20)
+    test.equal(moved.zoom, 3)
+    test.equal(call("camera_move", {zoom = 0}).isError, true)
+    test.equal(call("camera_move", {extra = true}).isError, true)
+    test.equal(content("render_info").observations.gpuCounters, false)
+    test.equal(content("layers_list").total, 16)
+    test.equal(content("layers_info", {layer = 1}).layer, 1)
+    test.equal(call("layers_info", {layer = 1.5}).isError, true)
+    mcp.bind(nil)
+end
+
+function suite.discoveryDescribesFamiliesAndRemainsAvailableAfterCrash(): nil
+    local contract = content("describe", {command = "snapshot"})
+    test.equal(#contract.verbs, 2)
+    test.equal(content("help", {command = "camera"}).command.name, "camera")
+    test.equal(content("capabilities").tools, #mcp.listTools())
+    mcp.setCrashed("test failure")
+    test.assert(#content("help").sections > 0)
+    test.equal(call("physics_info").isError, true)
+    mcp.setCrashed(nil)
+end
+
+function suite.realPhysicsInspectionAndRaycast(): nil
+    local world = ecs.newWorld()
+    physics.install(world, {gravity = {0, 0}})
+    local body = world:spawn(ecs.Transform2D(20, 20), physics.Body(0), physics.Collider(0, 5, 5))
+    world:update(1 / 60)
+    mcp.bind(world)
+    test.equal(content("physics_info").bodies, 1)
+    local hit = content("physics_raycast", {x1 = 0, y1 = 20, x2 = 40, y2 = 20})
+    test.equal(hit.hit, true)
+    test.equal(hit.entity, body)
+    local saved = content("snapshot_save", {name = "mcp-contract-rapier-test.bin"})
+    world:despawn(body)
+    world:update(1 / 60)
+    test.equal(content("physics_info").bodies, 0)
+    content("snapshot_load", {path = saved.path})
+    world:update(1 / 60)
+    test.equal(content("physics_info").bodies, 1)
+    test.equal(content("physics_raycast", {x1 = 0, y1 = 20, x2 = 40, y2 = 20}).entity, body)
+    assert(files.remove(saved.path))
+    world:shutdown()
+    mcp.bind(nil)
+end
+
+function suite.snapshotToolRoundTripPreservesBinaryHandlerDataAndNumericKeys(): nil
+    local world = ecs.newWorld()
+    local restored: any = nil
+    world:addSnapshotHandler({
+        name = "test.mcp.binary",
+        save = function(exclusive _world: ecs.World): any
+            return {[0] = "\0\255\128", [4.5] = false}
+        end,
+        load = function(exclusive _world: ecs.World, value: any): nil
+            restored = value
+        end
+    })
+    local entity = world:spawn(ecs.Name("saved"))
+    world:commit()
+    mcp.bind(world)
+    local name = "mcp-contract-snapshot-test.bin"
+    local saved = content("snapshot_save", {name = name})
+    test.equal(saved.format, "binary")
+    world:despawn(entity)
+    world:commit()
+    local loaded = content("snapshot_load", {path = saved.path})
+    test.equal(loaded.entities, 1)
+    test.equal(restored[0], "\0\255\128")
+    test.equal(restored[4.5], false)
+    test.equal(world:get(entity, ecs.Name), "saved")
+    test.equal(call("snapshot_save", {name = "../escape.bin"}).isError, true)
+    assert(files.write(saved.path, "invalid"))
+    test.equal(call("snapshot_load", {path = saved.path}).isError, true)
+    test.equal(world:getStats().entities, 1)
+    assert(files.remove(saved.path))
+    mcp.bind(nil)
+end
+
+function suite.audioInspectionUsesTheWorldMixer(): nil
+    local world = ecs.newWorld()
+    mcp.bind(world)
+    test.equal(content("audio").installed, false)
+    local mixer = audio.install(world, {backend = audiobackend.silent()})
+    test.equal(content("audio").available, false)
+    test.equal(content("audio").installed, true)
+    test.equal(call("reload_sound", {path = "not-loaded.wav"}).isError, true)
+    mixer:destroy()
+    world:shutdown()
+    mcp.bind(nil)
+end
+
+function suite.profileToolsWriteAReportAndCanStartAgain(): nil
+    content("profile_start", {intervalMs = 1, zone = "test-never-entered"})
+    test.equal(call("profile_start").isError, true)
+    local report = content("profile_stop", {name = "mcp-contract-profile-test.collapsed"})
+    test.equal(report.samples, 0)
+    test.equal(assert(files.read(report.path)), "")
+    assert(files.remove(report.path))
+    test.equal(call("profile_stop").isError, true)
+end
+
+return suite

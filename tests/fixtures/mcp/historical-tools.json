@@ -1,0 +1,2012 @@
+{
+    "commit": "70549c8ea5b29751b27be3d190373173b2facc5f",
+    "tools": [
+        {
+            "name": "ping",
+            "description": "Confirms the game is running and answering. Reports a crash rather than refusing to answer after one.",
+            "inputSchema": {
+                "type": "object",
+                "properties": []
+            },
+            "annotations": {
+                "whenCrashedHint": true,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "name": "context",
+            "description": "What this build is, what it can do, and what the world it is running holds.",
+            "inputSchema": {
+                "type": "object",
+                "properties": []
+            },
+            "annotations": {
+                "whenCrashedHint": true,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "name": "get_logs",
+            "description": "Reads the log file from a byte offset. Poll with the returned offset to follow it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "contains": {
+                        "type": "string",
+                        "description": "Only return lines containing this text."
+                    },
+                    "after": {
+                        "type": "integer",
+                        "description": "Byte offset to read from. Omit to start at 0."
+                    }
+                }
+            },
+            "annotations": {
+                "whenCrashedHint": true,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "name": "screenshot",
+            "description": "Captures the last rendered frame to a PNG and returns its path.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "File name under the writable root. Defaults to screenshot.png."
+                    }
+                }
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "name": "sample_pixels",
+            "description": "Reads the color of specific pixels from the last frame.",
+            "inputSchema": {
+                "properties": {
+                    "points": {
+                        "description": "Points to sample, as {x, y} pairs.",
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            }
+                        }
+                    }
+                },
+                "type": "object",
+                "required": ["points"]
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "name": "send_event",
+            "description": "Pushes an event into the input stream, as if it had come from the platform.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "x": {
+                        "type": "number"
+                    },
+                    "data2": {
+                        "type": "integer",
+                        "description": "Second payload."
+                    },
+                    "scancode": {
+                        "type": "integer",
+                        "description": "For keyDown, keyUp."
+                    },
+                    "which": {
+                        "type": "integer",
+                        "description": "Device, window or display the event is about."
+                    },
+                    "recording": {
+                        "type": "boolean",
+                        "description": "Whether an audio device records."
+                    },
+                    "wheelX": {
+                        "type": "number",
+                        "description": "For mouseWheel."
+                    },
+                    "wheelY": {
+                        "type": "number",
+                        "description": "For mouseWheel."
+                    },
+                    "wheelTicksX": {
+                        "type": "integer",
+                        "description": "Whole notches, for mouseWheel."
+                    },
+                    "wheelTicksY": {
+                        "type": "integer",
+                        "description": "Whole notches."
+                    },
+                    "flipped": {
+                        "type": "boolean",
+                        "description": "Send the wheel event as a platform with natural scrolling does, which arrives negated."
+                    },
+                    "clicks": {
+                        "type": "integer",
+                        "description": "Clicks in the run, for mouseDown and mouseUp. One when omitted."
+                    },
+                    "scale": {
+                        "type": "number",
+                        "description": "Zoom factor, for the pinch kinds."
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Event kind. Call with no kind to list them."
+                    },
+                    "button": {
+                        "type": "integer",
+                        "description": "For mouseDown, mouseUp."
+                    },
+                    "repeated": {
+                        "type": "boolean",
+                        "description": "For keyDown."
+                    },
+                    "penState": {
+                        "type": "integer",
+                        "description": "SDL_PEN_INPUT_* mask, for the pen kinds."
+                    },
+                    "data1": {
+                        "type": "integer",
+                        "description": "First payload, for the window and display kinds."
+                    },
+                    "y": {
+                        "type": "number"
+                    }
+                }
+            },
+            "annotations": {
+                "whenCrashedHint": true,
+                "readOnlyHint": false,
+                "destructiveHint": true
+            }
+        },
+        {
+            "name": "audio",
+            "description": "Sound output: the clips loaded, the voices sounding, and the gains, mutes and pauses over them.",
+            "inputSchema": {
+                "type": "object",
+                "properties": []
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "name": "reload_shaders",
+            "description": "Re-reads shaders and materials from their files and rebuilds the pipelines. Refuses where a reload would change what already-drawn entities mean.",
+            "inputSchema": {
+                "type": "object",
+                "properties": []
+            },
+            "annotations": {
+                "whenCrashedHint": true,
+                "readOnlyHint": false,
+                "destructiveHint": true
+            }
+        },
+        {
+            "name": "reload_image",
+            "description": "Re-reads an image file and uploads it over the one already registered under that path. Refuses a file whose size changed.",
+            "inputSchema": {
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The path the image was registered under."
+                    }
+                },
+                "type": "object",
+                "required": ["path"]
+            },
+            "annotations": {
+                "whenCrashedHint": true,
+                "readOnlyHint": false,
+                "destructiveHint": true
+            }
+        },
+        {
+            "name": "reload_sound",
+            "description": "Re-reads a sound file over the clip already loaded from that path. A streamed clip holds nothing, so it reports that rather than replacing anything.",
+            "inputSchema": {
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The path the clip was loaded from."
+                    }
+                },
+                "type": "object",
+                "required": ["path"]
+            },
+            "annotations": {
+                "whenCrashedHint": true,
+                "readOnlyHint": false,
+                "destructiveHint": true
+            }
+        },
+        {
+            "name": "watch",
+            "description": "Reports, starts, stops or steps the content file watcher, which reloads shaders, images and sounds when their files change.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "Starts or stops the watcher. Omit to leave it as it is."
+                    },
+                    "poll": {
+                        "type": "boolean",
+                        "description": "Looks at every watched file now, without waiting for the interval."
+                    }
+                }
+            },
+            "annotations": {
+                "whenCrashedHint": true,
+                "readOnlyHint": false,
+                "destructiveHint": true
+            }
+        },
+        {
+            "name": "run_lua",
+            "description": "Runs Lua with `world` in scope. Returns an envelope {returned, values}. State persists between calls, so a handle stashed in a global is there next time. Prefer a structured tool where one covers the operation.",
+            "inputSchema": {
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "Lua to run. A bare expression is returned."
+                    }
+                },
+                "type": "object",
+                "required": ["code"]
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": true
+            }
+        },
+        {
+            "name": "components_info",
+            "description": "Lists the components these tools can name, with the fields each carries and whether the bound world carries any.",
+            "inputSchema": {
+                "type": "object",
+                "properties": []
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "name": "query",
+            "description": "Finds entities carrying every named component. Returns their ids and, unless values is false, their component values.",
+            "inputSchema": {
+                "properties": {
+                    "include": {
+                        "description": "Component names an entity must have.",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "values": {
+                        "type": "boolean",
+                        "description": "Include component values. Default true."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Default 50."
+                    }
+                },
+                "type": "object",
+                "required": ["include"]
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "name": "info",
+            "description": "Everything known about one entity.",
+            "inputSchema": {
+                "properties": {
+                    "entity": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object",
+                "required": ["entity"]
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "name": "spawn",
+            "description": "Creates an entity carrying the given components.",
+            "inputSchema": {
+                "properties": {
+                    "components": {
+                        "type": "object",
+                        "description": "Component name to its field values."
+                    }
+                },
+                "type": "object",
+                "required": ["components"]
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": true
+            }
+        },
+        {
+            "name": "set",
+            "description": "Replaces a component in full, adding it if absent. Fields the payload omits take the component's defaults, so prefer modify for changing a value without disturbing the rest.",
+            "inputSchema": {
+                "properties": {
+                    "values": {
+                        "type": "object"
+                    },
+                    "entity": {
+                        "type": "integer"
+                    },
+                    "component": {
+                        "type": "string"
+                    }
+                },
+                "type": "object",
+                "required": ["entity", "component"]
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": true
+            }
+        },
+        {
+            "name": "modify",
+            "description": "Changes only the named fields, leaving the rest alone. An entity without the component is skipped rather than gaining one, so a typo cannot silently add a component.",
+            "inputSchema": {
+                "properties": {
+                    "values": {
+                        "type": "object"
+                    },
+                    "entity": {
+                        "type": "integer"
+                    },
+                    "component": {
+                        "type": "string"
+                    }
+                },
+                "type": "object",
+                "required": ["entity", "component", "values"]
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": true
+            }
+        },
+        {
+            "name": "remove",
+            "description": "Removes a component from an entity.",
+            "inputSchema": {
+                "properties": {
+                    "component": {
+                        "type": "string"
+                    },
+                    "entity": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object",
+                "required": ["entity", "component"]
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": true
+            }
+        },
+        {
+            "name": "despawn",
+            "description": "Destroys an entity.",
+            "inputSchema": {
+                "properties": {
+                    "entity": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object",
+                "required": ["entity"]
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": true
+            }
+        },
+        {
+            "description": "Lists every registered command with its one-line help, grouped by section, or explains one command: its signature, its arguments, and its verbs. Call describe instead for a machine-readable contract.",
+            "name": "help",
+            "outputSchema": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "object",
+                        "description": "The named command, when one was named."
+                    },
+                    "sections": {
+                        "description": "Sections holding at least one command, in presentation order.",
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string"
+                                },
+                                "commands": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "name": {
+                                                "type": "string"
+                                            },
+                                            "signature": {
+                                                "type": "string"
+                                            },
+                                            "shortHelp": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "inputSchema": {
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "command name; omitted lists every command"
+                    }
+                },
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Reports everything one command declares: the tool each of its actions projects to, the input schema, the output schema, and the safety hints. Call it before an unfamiliar tool, or to discover a command's verbs.",
+            "name": "describe",
+            "outputSchema": {
+                "properties": {
+                    "section": {
+                        "type": "string"
+                    },
+                    "action": {
+                        "type": "object",
+                        "description": "The command's own action, when it carries one."
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "examples": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "verbs": {
+                        "type": "array",
+                        "items": {
+                            "type": "object"
+                        }
+                    }
+                },
+                "type": "object",
+                "required": ["name", "section"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "command name"
+                    }
+                },
+                "required": ["command"],
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Reports how many commands and tools this session registered and which sections they fall into. Call it once after connecting to learn which command families apply before listing tools.",
+            "name": "capabilities",
+            "outputSchema": {
+                "properties": {
+                    "sections": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string"
+                                },
+                                "commands": {
+                                    "type": "integer"
+                                }
+                            }
+                        }
+                    },
+                    "commands": {
+                        "type": "integer",
+                        "description": "Registered commands."
+                    },
+                    "tools": {
+                        "type": "integer",
+                        "description": "Tools those commands project to."
+                    }
+                },
+                "type": "object",
+                "required": ["commands", "tools", "sections"]
+            },
+            "inputSchema": {
+                "properties": {},
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Reports the camera's center in world pixels, its zoom, its rotation in radians, and the world rectangle it covers at the size of the last composited frame. The viewport and the bounds are absent until the renderer has drawn once. Call it before capturing a screenshot to check that the entity you care about falls inside `viewBounds`.",
+            "name": "camera_info",
+            "outputSchema": {
+                "properties": {
+                    "rotation": {
+                        "type": "number",
+                        "description": "The rotation in radians, counter-clockwise on screen."
+                    },
+                    "viewBounds": {
+                        "properties": {
+                            "minY": {
+                                "type": "number",
+                                "description": "Top edge in world pixels."
+                            },
+                            "maxY": {
+                                "type": "number",
+                                "description": "Bottom edge in world pixels."
+                            },
+                            "maxX": {
+                                "type": "number",
+                                "description": "Right edge in world pixels."
+                            },
+                            "minX": {
+                                "type": "number",
+                                "description": "Left edge in world pixels."
+                            }
+                        },
+                        "description": "The world rectangle this camera sees at that viewport, widened to an axis-aligned box while the camera is rotated. Absent whenever `viewport` is.",
+                        "type": "object",
+                        "required": ["minX", "minY", "maxX", "maxY"]
+                    },
+                    "x": {
+                        "type": "number",
+                        "description": "The horizontal center of the view in world pixels."
+                    },
+                    "y": {
+                        "type": "number",
+                        "description": "The vertical center of the view in world pixels, increasing downward."
+                    },
+                    "viewport": {
+                        "properties": {
+                            "width": {
+                                "type": "integer",
+                                "description": "Viewport width in pixels."
+                            },
+                            "height": {
+                                "type": "integer",
+                                "description": "Viewport height in pixels."
+                            }
+                        },
+                        "description": "The pixel size of the last composited frame, which is what the bounds were resolved against. Absent before the renderer has drawn a frame.",
+                        "type": "object",
+                        "required": ["width", "height"]
+                    },
+                    "zoom": {
+                        "type": "number",
+                        "description": "The magnification, where two shows half as much world."
+                    }
+                },
+                "type": "object",
+                "required": ["x", "y", "zoom", "rotation"]
+            },
+            "inputSchema": {
+                "properties": {},
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Writes the camera's center in world pixels, its zoom and its rotation in radians, leaving every omitted value where it was, and answers with the whole placement afterwards. The renderer copies the camera during extraction, so a move lands on the next frame rather than the one in flight, and it changes what every later screenshot shows. Call camera info to read a placement back without changing one.",
+            "name": "camera_move",
+            "outputSchema": {
+                "properties": {
+                    "rotation": {
+                        "type": "number",
+                        "description": "The rotation in radians, counter-clockwise on screen."
+                    },
+                    "viewBounds": {
+                        "properties": {
+                            "minY": {
+                                "type": "number",
+                                "description": "Top edge in world pixels."
+                            },
+                            "maxY": {
+                                "type": "number",
+                                "description": "Bottom edge in world pixels."
+                            },
+                            "maxX": {
+                                "type": "number",
+                                "description": "Right edge in world pixels."
+                            },
+                            "minX": {
+                                "type": "number",
+                                "description": "Left edge in world pixels."
+                            }
+                        },
+                        "description": "The world rectangle this camera sees at that viewport, widened to an axis-aligned box while the camera is rotated. Absent whenever `viewport` is.",
+                        "type": "object",
+                        "required": ["minX", "minY", "maxX", "maxY"]
+                    },
+                    "x": {
+                        "type": "number",
+                        "description": "The horizontal center of the view in world pixels."
+                    },
+                    "y": {
+                        "type": "number",
+                        "description": "The vertical center of the view in world pixels, increasing downward."
+                    },
+                    "viewport": {
+                        "properties": {
+                            "width": {
+                                "type": "integer",
+                                "description": "Viewport width in pixels."
+                            },
+                            "height": {
+                                "type": "integer",
+                                "description": "Viewport height in pixels."
+                            }
+                        },
+                        "description": "The pixel size of the last composited frame, which is what the bounds were resolved against. Absent before the renderer has drawn a frame.",
+                        "type": "object",
+                        "required": ["width", "height"]
+                    },
+                    "zoom": {
+                        "type": "number",
+                        "description": "The magnification, where two shows half as much world."
+                    }
+                },
+                "type": "object",
+                "required": ["x", "y", "zoom", "rotation"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "x": {
+                        "type": "number",
+                        "description": "Sets the horizontal center of the view in world pixels."
+                    },
+                    "y": {
+                        "type": "number",
+                        "description": "Sets the vertical center of the view in world pixels, increasing downward."
+                    },
+                    "rotation": {
+                        "type": "number",
+                        "description": "Sets the rotation in radians, turning the scene counter-clockwise on screen."
+                    },
+                    "zoom": {
+                        "description": "Sets the magnification, where two shows half as much world at twice the size. Must be greater than zero.",
+                        "type": "number",
+                        "minimum": 1e-6
+                    }
+                },
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Reports each enabled domain's resident instance count, its capacity, what it dropped, what it rewrote, and what its extraction cost, plus the aggregate extraction time. Read `dropped` first: instances that did not fit the buffer are silently not drawn, so a non-zero value is the reason something is missing from a frame. Call camera info next when nothing was dropped and the entity is still not visible.",
+            "name": "render_info",
+            "outputSchema": {
+                "properties": {
+                    "domains": {
+                        "description": "Names the rendering domains this renderer enabled, as `sprites`, `meshes`, or both. A domain named here has an object of the same name in this answer.",
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["sprites", "meshes"]
+                        }
+                    },
+                    "meshes": {
+                        "properties": {
+                            "count": {
+                                "type": "integer",
+                                "description": "Instances resident after the last extraction."
+                            },
+                            "capacity": {
+                                "type": "integer",
+                                "description": "The instance capacity fixed when the domain was created, which `count` cannot exceed."
+                            },
+                            "vertexCount": {
+                                "type": "integer",
+                                "description": "Vertices registered for immutable residency."
+                            },
+                            "materialCount": {
+                                "type": "integer",
+                                "description": "Resident material slots, counting the neutral built-in slot zero."
+                            },
+                            "lightCapacity": {
+                                "type": "integer",
+                                "description": "The local-light capacity fixed at creation, and zero while the lane is disabled."
+                            },
+                            "dropped": {
+                                "type": "integer",
+                                "description": "Instances the last extraction could not fit in the domain's buffer. Check this field first when something is missing from a frame: a dropped instance is not drawn and nothing raises, so the only symptom is the gap on screen. Anything above zero means the domain's `capacity` is too small for the world."
+                            },
+                            "rewritten": {
+                                "type": "integer",
+                                "description": "Instances the last extraction rewrote, which is the work a dirty column cost."
+                            },
+                            "indexCount": {
+                                "type": "integer",
+                                "description": "Indices registered for immutable residency."
+                            },
+                            "lightCount": {
+                                "type": "integer",
+                                "description": "Local point and spot lights extracted for the last frame, and zero while the lane is disabled."
+                            },
+                            "textureCount": {
+                                "type": "integer",
+                                "description": "Unique images uploaded to the mesh texture array."
+                            },
+                            "meshCount": {
+                                "type": "integer",
+                                "description": "Meshes registered for immutable residency."
+                            },
+                            "indexCapacity": {
+                                "type": "integer",
+                                "description": "The index capacity fixed at creation."
+                            },
+                            "extractSeconds": {
+                                "type": "number",
+                                "description": "Seconds the domain's last extraction took, or zero while measurement is inactive."
+                            },
+                            "vertexCapacity": {
+                                "type": "integer",
+                                "description": "The vertex capacity fixed at creation, which registering a mesh past it cannot exceed."
+                            }
+                        },
+                        "description": "The 3D domain, and absent when creation omitted mesh options.",
+                        "type": "object",
+                        "required": ["count", "dropped", "rewritten", "extractSeconds", "capacity"]
+                    },
+                    "sprites": {
+                        "properties": {
+                            "rewritten": {
+                                "type": "integer",
+                                "description": "Instances the last extraction rewrote, which is the work a dirty column cost."
+                            },
+                            "count": {
+                                "type": "integer",
+                                "description": "Instances resident after the last extraction."
+                            },
+                            "capacity": {
+                                "type": "integer",
+                                "description": "The instance capacity fixed when the domain was created, which `count` cannot exceed."
+                            },
+                            "dropped": {
+                                "type": "integer",
+                                "description": "Instances the last extraction could not fit in the domain's buffer. Check this field first when something is missing from a frame: a dropped instance is not drawn and nothing raises, so the only symptom is the gap on screen. Anything above zero means the domain's `capacity` is too small for the world."
+                            },
+                            "extractSeconds": {
+                                "type": "number",
+                                "description": "Seconds the domain's last extraction took, or zero while measurement is inactive."
+                            }
+                        },
+                        "description": "The 2D domain, and absent when creation disabled it.",
+                        "type": "object",
+                        "required": ["count", "dropped", "rewritten", "extractSeconds", "capacity"]
+                    },
+                    "extractSeconds": {
+                        "type": "number",
+                        "description": "Seconds the last extraction took across every enabled domain, or zero while measurement is inactive."
+                    }
+                },
+                "type": "object",
+                "required": ["domains", "extractSeconds"]
+            },
+            "inputSchema": {
+                "properties": {},
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Lists all `max` layers from one upward with their whole configuration, and names separately the ones a game changed from the default, because most scenes leave most layers untouched. Higher layers draw nearer, so a HUD on a high layer covers a world on a low one. Call layers info on a layer for its depth band.",
+            "name": "layers_list",
+            "outputSchema": {
+                "properties": {
+                    "configured": {
+                        "description": "The layer numbers whose configuration differs from the default, which is where a game said something deliberate. Empty when nothing has called `tecs.gfx.layers.configure`.",
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "layers": {
+                        "description": "Every layer in ascending order, from one through `max`.",
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "ignoreZoom": {
+                                    "type": "boolean",
+                                    "description": "Reports whether contents follow the camera's position but keep their drawn size."
+                                },
+                                "unlit": {
+                                    "type": "boolean",
+                                    "description": "Reports whether contents bypass the lighting pass and appear at their own color."
+                                },
+                                "overlay": {
+                                    "type": "boolean",
+                                    "description": "Reports whether opaque contents are routed through the sprite forward lane, which runs after meshes and bloom."
+                                },
+                                "viewCulled": {
+                                    "type": "boolean",
+                                    "description": "Reports whether the camera's view rectangle decides if contents draw. False on a layer the camera does not place where its world bound says, which is any layer using screen or virtual space, parallax, or `ignoreZoom`."
+                                },
+                                "sort": {
+                                    "description": "How contents order inside the layer's band, as `topdown`, `z` or `isometric`.",
+                                    "type": "string",
+                                    "enum": ["topdown", "z", "isometric"]
+                                },
+                                "layer": {
+                                    "type": "integer",
+                                    "description": "The layer number, from one through `max`."
+                                },
+                                "isDefault": {
+                                    "type": "boolean",
+                                    "description": "Reports whether the layer still holds the configuration it starts with: sorted `topdown`, positioned in `world` space, parallax one, lit, and neither zoom-independent nor an overlay."
+                                },
+                                "space": {
+                                    "description": "The coordinate space contents are positioned in. `world` follows the camera, `screen` uses target pixels and ignores it, and `virtual` uses the authored `virtualWidth` by `virtualHeight` system stretched to the target.",
+                                    "type": "string",
+                                    "enum": ["world", "screen", "virtual"]
+                                },
+                                "parallax": {
+                                    "type": "number",
+                                    "description": "How much the camera's position carries contents. One moves them with the world and a half drifts them at half speed."
+                                }
+                            },
+                            "type": "object",
+                            "required": [
+                                "layer",
+                                "sort",
+                                "space",
+                                "parallax",
+                                "ignoreZoom",
+                                "unlit",
+                                "overlay",
+                                "viewCulled",
+                                "isDefault"
+                            ]
+                        }
+                    },
+                    "revision": {
+                        "type": "integer",
+                        "description": "A count that rises with every `configure`. Compare it across two calls to learn whether a layer changed; the number itself means nothing else."
+                    },
+                    "max": {
+                        "type": "integer",
+                        "description": "How many depth bands divide the range, which is sixteen and is load-bearing at that value."
+                    },
+                    "depthResolution": {
+                        "type": "number",
+                        "description": "The smallest depth difference two entities one world unit apart receive, over every sort mode. A depth format with a larger step keeps the bands and loses the sort inside them."
+                    }
+                },
+                "type": "object",
+                "required": ["layers", "configured", "max", "revision", "depthResolution"]
+            },
+            "inputSchema": {
+                "properties": {},
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Reports one layer's whole configuration plus the depth band it occupies, as the near and far edges of the range its contents sort inside. Depth runs from zero nearest to one farthest, so a higher layer holds a band closer to zero and draws over a lower one. Call layers list first when you do not know which layer a game put something on.",
+            "name": "layers_info",
+            "outputSchema": {
+                "properties": {
+                    "ignoreZoom": {
+                        "type": "boolean",
+                        "description": "Reports whether contents follow the camera's position but keep their drawn size."
+                    },
+                    "unlit": {
+                        "type": "boolean",
+                        "description": "Reports whether contents bypass the lighting pass and appear at their own color."
+                    },
+                    "overlay": {
+                        "type": "boolean",
+                        "description": "Reports whether opaque contents are routed through the sprite forward lane, which runs after meshes and bloom."
+                    },
+                    "bandNear": {
+                        "type": "number",
+                        "description": "The near edge of the layer's depth band, which is the smallest depth its contents can receive."
+                    },
+                    "viewCulled": {
+                        "type": "boolean",
+                        "description": "Reports whether the camera's view rectangle decides if contents draw. False on a layer the camera does not place where its world bound says, which is any layer using screen or virtual space, parallax, or `ignoreZoom`."
+                    },
+                    "sort": {
+                        "description": "How contents order inside the layer's band, as `topdown`, `z` or `isometric`.",
+                        "type": "string",
+                        "enum": ["topdown", "z", "isometric"]
+                    },
+                    "layer": {
+                        "type": "integer",
+                        "description": "The layer number, from one through `max`."
+                    },
+                    "isDefault": {
+                        "type": "boolean",
+                        "description": "Reports whether the layer still holds the configuration it starts with: sorted `topdown`, positioned in `world` space, parallax one, lit, and neither zoom-independent nor an overlay."
+                    },
+                    "space": {
+                        "description": "The coordinate space contents are positioned in. `world` follows the camera, `screen` uses target pixels and ignores it, and `virtual` uses the authored `virtualWidth` by `virtualHeight` system stretched to the target.",
+                        "type": "string",
+                        "enum": ["world", "screen", "virtual"]
+                    },
+                    "depthResolution": {
+                        "type": "number",
+                        "description": "The smallest depth difference two entities one world unit apart receive, over every sort mode. A depth format with a larger step keeps the bands and loses the sort inside them."
+                    },
+                    "bandFar": {
+                        "type": "number",
+                        "description": "The far edge of the layer's depth band. Contents never sort past it into another layer's band."
+                    },
+                    "parallax": {
+                        "type": "number",
+                        "description": "How much the camera's position carries contents. One moves them with the world and a half drifts them at half speed."
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "layer",
+                    "sort",
+                    "space",
+                    "parallax",
+                    "ignoreZoom",
+                    "unlit",
+                    "overlay",
+                    "viewCulled",
+                    "isDefault",
+                    "bandNear",
+                    "bandFar",
+                    "depthResolution"
+                ]
+            },
+            "inputSchema": {
+                "properties": {
+                    "layer": {
+                        "maximum": 16,
+                        "description": "Selects the layer, which is the fourth argument of a Transform2D.",
+                        "type": "number",
+                        "minimum": 1
+                    }
+                },
+                "required": ["layer"],
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Lists archetypes with their entity counts and component names, most recently created last. Empty archetypes are left out unless `empty` is set, because a world keeps the ones it has emptied. Call archetypes info on an id for that archetype's dirty columns.",
+            "name": "archetypes_list",
+            "outputSchema": {
+                "properties": {
+                    "total": {
+                        "type": "integer",
+                        "description": "Archetypes matching the filter, which the limit does not reduce."
+                    },
+                    "archetypes": {
+                        "description": "The archetypes the limit admitted.",
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "entities": {
+                                    "type": "integer",
+                                    "description": "Entities the archetype currently holds."
+                                },
+                                "components": {
+                                    "description": "Component names in the archetype's signature order.",
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "id": {
+                                    "type": "integer",
+                                    "description": "Identifies the archetype."
+                                }
+                            },
+                            "type": "object",
+                            "required": ["id", "entities", "components"]
+                        }
+                    },
+                    "returned": {
+                        "type": "integer",
+                        "description": "Archetypes the answer carries, at most `limit`."
+                    }
+                },
+                "type": "object",
+                "required": ["archetypes", "total", "returned"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "limit": {
+                        "description": "Caps how many archetypes the answer carries. (default: 50)",
+                        "type": "number",
+                        "minimum": 1
+                    },
+                    "empty": {
+                        "type": "boolean",
+                        "description": "Includes archetypes holding no entities. (default: false)"
+                    }
+                },
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Reports one archetype's entity count and its components, each with whether that column is dirty right now. A column is dirty from the write that marked it until the end of the world update it happened in, so read this while the world is frozen to learn what a step changed.",
+            "name": "archetypes_info",
+            "outputSchema": {
+                "properties": {
+                    "entities": {
+                        "type": "integer",
+                        "description": "Entities the archetype currently holds."
+                    },
+                    "components": {
+                        "description": "The archetype's columns in signature order.",
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "description": "Names the component."
+                                },
+                                "dirty": {
+                                    "type": "boolean",
+                                    "description": "Reports whether this column is currently marked dirty."
+                                }
+                            },
+                            "type": "object",
+                            "required": ["name", "dirty"]
+                        }
+                    },
+                    "id": {
+                        "type": "integer",
+                        "description": "Identifies the archetype."
+                    }
+                },
+                "type": "object",
+                "required": ["id", "entities", "components"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "id": {
+                        "description": "Identifies the archetype by the id `archetypes list` reports.",
+                        "type": "number",
+                        "minimum": 0
+                    }
+                },
+                "required": ["id"],
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Reports how many entities, archetypes, components and systems the world holds, plus the simulated time the fixed-step overload policy abandoned. The world counts entities by walking every archetype, so read this as a snapshot at a moment rather than polling it every frame.",
+            "name": "stats",
+            "outputSchema": {
+                "properties": {
+                    "archetypes": {
+                        "type": "integer",
+                        "description": "Archetypes, including emptied ones."
+                    },
+                    "systems": {
+                        "type": "integer",
+                        "description": "Systems registered on the world."
+                    },
+                    "fixedTimeDropped": {
+                        "type": "number",
+                        "description": "Simulated seconds the fixed-step overload policy abandoned."
+                    },
+                    "entities": {
+                        "type": "integer",
+                        "description": "Active entities."
+                    },
+                    "fixedStepsDropped": {
+                        "type": "integer",
+                        "description": "Fixed steps the overload policy abandoned."
+                    },
+                    "components": {
+                        "type": "integer",
+                        "description": "Components registered in this process."
+                    }
+                },
+                "type": "object",
+                "required": ["entities", "archetypes", "components", "systems", "fixedTimeDropped", "fixedStepsDropped"]
+            },
+            "inputSchema": {
+                "properties": {},
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Lists every store key the world has a value under, in key id order, with the Lua type of each value. A key created without a name reports its id and no name. Call resources info to ask about one name, and run_lua to read a value.",
+            "name": "resources_list",
+            "outputSchema": {
+                "properties": {
+                    "total": {
+                        "type": "integer",
+                        "description": "Keys the world holds a value under."
+                    },
+                    "resources": {
+                        "description": "The keys the world holds a value under, in key id order.",
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "description": "Names the key, and is absent for an unnamed one."
+                                },
+                                "id": {
+                                    "type": "integer",
+                                    "description": "Identifies the key in this process."
+                                },
+                                "valueType": {
+                                    "type": "string",
+                                    "description": "Reports the Lua type of the stored value."
+                                }
+                            },
+                            "type": "object",
+                            "required": ["id", "valueType"]
+                        }
+                    }
+                },
+                "type": "object",
+                "required": ["resources", "total"]
+            },
+            "inputSchema": {
+                "properties": {},
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Reports whether the world holds a value under one named store key, and what Lua type that value has. A name no key was registered under answers `present` false rather than failing, because a key exists only once something has created it. The value itself is never returned; read it with run_lua.",
+            "name": "resources_info",
+            "outputSchema": {
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Echoes the name that was asked about."
+                    },
+                    "valueType": {
+                        "type": "string",
+                        "description": "Reports the Lua type of the value, and is absent when there is none."
+                    },
+                    "present": {
+                        "type": "boolean",
+                        "description": "Reports whether the world holds a value under that key."
+                    }
+                },
+                "type": "object",
+                "required": ["name", "present"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Names the store key, as `resources list` reports it."
+                    }
+                },
+                "required": ["name"],
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Lists every material name with the id an instance carries to select it, in id order, starting from the default at id zero. Call it to learn which materials a build has before setting a Material component.",
+            "name": "materials_list",
+            "outputSchema": {
+                "properties": {
+                    "total": {
+                        "type": "integer",
+                        "description": "Materials in the dispatch."
+                    },
+                    "materials": {
+                        "description": "The materials in id order.",
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "id": {
+                                    "type": "integer",
+                                    "description": "The id a Material component carries to select it."
+                                },
+                                "name": {
+                                    "type": "string",
+                                    "description": "Names the material."
+                                }
+                            },
+                            "type": "object",
+                            "required": ["id", "name"]
+                        }
+                    }
+                },
+                "type": "object",
+                "required": ["materials", "total"]
+            },
+            "inputSchema": {
+                "properties": {},
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Resolves one material name to the id a Material component carries, and fails with `unknown_material` when this build has no such material. Call materials list first when you are unsure of the spelling.",
+            "name": "materials_info",
+            "outputSchema": {
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Echoes the material name."
+                    },
+                    "id": {
+                        "type": "integer",
+                        "description": "The id a Material component carries to select it."
+                    }
+                },
+                "type": "object",
+                "required": ["name", "id"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Names the material, which is its file name without the extension."
+                    }
+                },
+                "required": ["name"],
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Writes every non-transient component of every entity to a binary file under the writable root and answers with its absolute path, which is what `snapshot load` takes back. It does not disturb the running game. Reusing a name overwrites that file, so name each save you mean to keep.",
+            "name": "snapshot_save",
+            "outputSchema": {
+                "properties": {
+                    "bytes": {
+                        "type": "integer",
+                        "description": "The size of the written file, and absent when the platform declined to report it."
+                    },
+                    "format": {
+                        "type": "string",
+                        "description": "The representation on disk, which is always `binary`."
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "The absolute path the snapshot was written to."
+                    }
+                },
+                "type": "object",
+                "required": ["path", "format"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Names the file under the writable root that receives the snapshot. (default: snapshot.bin)"
+                    }
+                },
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Despawns every entity in the world and restores the ones the file holds, so the world it replaces is gone and anything holding an entity id from before the load is stale. Answers with the snapshot's format version and the counts it declared. Call snapshot save first if the current world is worth keeping.",
+            "name": "snapshot_load",
+            "outputSchema": {
+                "properties": {
+                    "archetypes": {
+                        "type": "integer",
+                        "description": "The archetypes the snapshot declared, and absent when its writer did not count them."
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Echoes the path that was read."
+                    },
+                    "bytes": {
+                        "type": "integer",
+                        "description": "The size of the file that was read."
+                    },
+                    "version": {
+                        "type": "integer",
+                        "description": "The snapshot format version, which is not a game version."
+                    },
+                    "entities": {
+                        "type": "integer",
+                        "description": "The entities the snapshot declared, and absent when its writer did not count them."
+                    }
+                },
+                "type": "object",
+                "required": ["path", "bytes", "version"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Locates the binary snapshot to restore, as an absolute path such as the one `snapshot save` reports."
+                    }
+                },
+                "required": ["path"],
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": true
+            }
+        },
+        {
+            "description": "Starts the sampler and answers with the settings it is running under. One session runs at a time per process, so a second call answers `already_running`. The `zone` prefix is fixed at start and cannot be widened afterwards. Sampling costs on every tick, so call profile stop once the question is answered.",
+            "name": "profile_start",
+            "outputSchema": {
+                "properties": {
+                    "zone": {
+                        "type": "string",
+                        "description": "The zone prefix the session keeps, and absent when it keeps every zone."
+                    },
+                    "intervalMs": {
+                        "type": "integer",
+                        "description": "The sampler interval the session is running at."
+                    }
+                },
+                "type": "object",
+                "required": ["intervalMs"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "zone": {
+                        "type": "string",
+                        "description": "Keeps only the samples whose zone path starts with this prefix, such as `afterFixed/Render` or `afterFixed/Render:SpriteSync`."
+                    },
+                    "intervalMs": {
+                        "description": "Sets the sampler interval in milliseconds, defaulting to 10. Below 10 the timer starts taking real time from the main thread.",
+                        "type": "number",
+                        "minimum": 1
+                    }
+                },
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Stops the session, writes its collapsed-stack text under the writable root and answers with the path, the byte count and the line count, one line per distinct stack. Open the file in speedscope or feed it to flamegraph. A session that sampled nothing writes an empty file and reports zero lines.",
+            "name": "profile_stop",
+            "outputSchema": {
+                "properties": {
+                    "bytes": {
+                        "type": "integer",
+                        "description": "The size of the written text."
+                    },
+                    "lines": {
+                        "type": "integer",
+                        "description": "The distinct stacks the session recorded, one per line."
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "The absolute path the collapsed-stack text was written to."
+                    }
+                },
+                "type": "object",
+                "required": ["path", "bytes", "lines"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Names the file under the writable root that receives the collapsed-stack text. (default: profile.collapsed)"
+                    }
+                },
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Reports whether the world has a Rapier simulation installed and how many rigid bodies it currently holds. A world without one answers `installed` false rather than failing, because having no physics is an ordinary state. Call it before physics raycast, which needs a simulation.",
+            "name": "physics_info",
+            "outputSchema": {
+                "properties": {
+                    "bodies": {
+                        "type": "integer",
+                        "description": "The rigid bodies the simulation holds, and absent when there is no simulation."
+                    },
+                    "installed": {
+                        "type": "boolean",
+                        "description": "Reports whether the world has a simulation installed."
+                    }
+                },
+                "type": "object",
+                "required": ["installed"]
+            },
+            "inputSchema": {
+                "properties": {},
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Casts the segment from one point to another and reports the first collider it meets, as the entity that owns the shape, the contact point, the outward normal and the fraction along the segment. Points are world pixels, and the cast ignores everything past the end point, so a miss may only mean the segment was too short. Sensors are hit too unless the category filters exclude them.",
+            "name": "physics_raycast",
+            "outputSchema": {
+                "properties": {
+                    "entity": {
+                        "type": "integer",
+                        "description": "The entity owning the shape that was hit. A secondary collider reports itself rather than its body."
+                    },
+                    "hit": {
+                        "type": "boolean",
+                        "description": "Reports whether the segment met a collider. Every field below is absent when it did not."
+                    },
+                    "fraction": {
+                        "type": "number",
+                        "description": "How far along the segment the hit lies, from 0 at the start to 1 at the end."
+                    },
+                    "x": {
+                        "type": "number",
+                        "description": "The contact point's world x, in pixels."
+                    },
+                    "y": {
+                        "type": "number",
+                        "description": "The contact point's world y, in pixels and positive downward."
+                    },
+                    "normalY": {
+                        "type": "number",
+                        "description": "The outward unit normal along y, which is not scaled to pixels."
+                    },
+                    "normalX": {
+                        "type": "number",
+                        "description": "The outward unit normal along x, which is not scaled to pixels."
+                    }
+                },
+                "type": "object",
+                "required": ["hit"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "x1": {
+                        "type": "number",
+                        "description": "Starts the segment at this world x, in pixels."
+                    },
+                    "y1": {
+                        "type": "number",
+                        "description": "Starts the segment at this world y, in pixels and positive downward."
+                    },
+                    "x2": {
+                        "type": "number",
+                        "description": "Ends the segment at this world x, in pixels."
+                    },
+                    "y2": {
+                        "type": "number",
+                        "description": "Ends the segment at this world y, in pixels and positive downward."
+                    },
+                    "maskBits": {
+                        "type": "number",
+                        "description": "Limits the ray to shapes in these categories, defaulting to every category."
+                    },
+                    "categoryBits": {
+                        "type": "number",
+                        "description": "Gives the ray its own collision categories as a bit mask, defaulting to every category. The ray skips a shape whose mask excludes all of them."
+                    }
+                },
+                "required": ["x1", "x2", "y1", "y2"],
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Draws the outline of every collider in the world, solid shapes in one color and sensors in another, and answers with what the overlay is drawing. Call it to see whether a collider sits where its sprite does, which physics raycast answers one segment at a time. Passing no argument switches the overlay to the state it is not in, so an agent that wants a known state passes one. The outlines are drawn on layer 15, under a HUD on 16, and they spawn no entities, so nothing a query sees changes. The world needs a simulation and a bound renderer: without either this fails rather than drawing nothing.",
+            "name": "physics_debug",
+            "outputSchema": {
+                "properties": {
+                    "shapes": {
+                        "type": "integer",
+                        "description": "The colliders the last build drew, which is zero until the first update after the overlay is enabled."
+                    },
+                    "instances": {
+                        "type": "integer",
+                        "description": "The quads those colliders occupy, one per outline segment."
+                    },
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "Reports whether the overlay is drawing after the call."
+                    },
+                    "layer": {
+                        "type": "integer",
+                        "description": "The layer the outlines are drawn on."
+                    }
+                },
+                "type": "object",
+                "required": ["enabled", "shapes", "instances", "layer"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "on": {
+                        "type": "boolean",
+                        "description": "Draws the outlines when true and hides them when false. Omitting it switches the overlay to the state it is not in."
+                    }
+                },
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Lists the systems the world runs, in the order it runs them, each with its phase, its position within that phase, whether it is enabled, and whether it declares a gate of its own. Narrow it with `phase` to one phase, or with `disabled` to the systems something has stopped.",
+            "name": "systems_list",
+            "outputSchema": {
+                "properties": {
+                    "total": {
+                        "type": "integer",
+                        "description": "Systems the answer carries."
+                    },
+                    "registered": {
+                        "type": "integer",
+                        "description": "Systems the world holds, which the filters do not reduce."
+                    },
+                    "systems": {
+                        "description": "The systems the filters admitted, in the order they run.",
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "position": {
+                                    "type": "integer",
+                                    "description": "Reports where the system runs within its phase, counting from one."
+                                },
+                                "enabled": {
+                                    "type": "boolean",
+                                    "description": "Reports whether the system runs at all."
+                                },
+                                "name": {
+                                    "type": "string",
+                                    "description": "Names the system, and is what `stop` and `start` take."
+                                },
+                                "hasRunIf": {
+                                    "type": "boolean",
+                                    "description": "Reports whether the system declares a gate of its own, which can skip a frame even while the system is enabled."
+                                },
+                                "phase": {
+                                    "type": "string",
+                                    "description": "Names the phase the system runs in."
+                                }
+                            },
+                            "type": "object",
+                            "required": ["name", "phase", "position", "enabled", "hasRunIf"]
+                        }
+                    }
+                },
+                "type": "object",
+                "required": ["systems", "total", "registered"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "phase": {
+                        "type": "string",
+                        "description": "Narrows the listing to the systems in this phase, spelled as a row reports it."
+                    },
+                    "disabled": {
+                        "type": "boolean",
+                        "description": "Narrows the listing to the systems that are currently stopped. (default: false)"
+                    }
+                },
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Reports one system's phase, its position within that phase, whether it is enabled, and whether it declares a gate of its own. It fails with `unknown_system` when no system carries that name, so call systems list when you are unsure of the spelling.",
+            "name": "systems_info",
+            "outputSchema": {
+                "properties": {
+                    "position": {
+                        "type": "integer",
+                        "description": "Reports where the system runs within its phase, counting from one."
+                    },
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "Reports whether the system runs at all."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Names the system, and is what `stop` and `start` take."
+                    },
+                    "hasRunIf": {
+                        "type": "boolean",
+                        "description": "Reports whether the system declares a gate of its own, which can skip a frame even while the system is enabled."
+                    },
+                    "phase": {
+                        "type": "string",
+                        "description": "Names the phase the system runs in."
+                    }
+                },
+                "type": "object",
+                "required": ["name", "phase", "position", "enabled", "hasRunIf"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Names the system, as `systems list` reports it."
+                    }
+                },
+                "required": ["name"],
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Stops one system, which stops the part of the game that system performs: movement stops moving, a renderer's extraction stops updating the picture. The system stays registered and keeps its place in the schedule, and it stays stopped until `systems start` starts it again or the process restarts, so start it again once you have what you needed.",
+            "name": "systems_stop",
+            "outputSchema": {
+                "properties": {
+                    "position": {
+                        "type": "integer",
+                        "description": "Reports where the system runs within its phase, counting from one."
+                    },
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "Reports whether the system runs at all."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Names the system, and is what `stop` and `start` take."
+                    },
+                    "hasRunIf": {
+                        "type": "boolean",
+                        "description": "Reports whether the system declares a gate of its own, which can skip a frame even while the system is enabled."
+                    },
+                    "phase": {
+                        "type": "string",
+                        "description": "Names the phase the system runs in."
+                    }
+                },
+                "type": "object",
+                "required": ["name", "phase", "position", "enabled", "hasRunIf"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Names the system, as `systems list` reports it."
+                    }
+                },
+                "required": ["name"],
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Starts one system that `systems stop` stopped, from the next world update onward. The system keeps the gate it declared for itself, so a gated system comes back gated rather than running unconditionally. Starting a system that is already running changes nothing and reports its state.",
+            "name": "systems_start",
+            "outputSchema": {
+                "properties": {
+                    "position": {
+                        "type": "integer",
+                        "description": "Reports where the system runs within its phase, counting from one."
+                    },
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "Reports whether the system runs at all."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Names the system, and is what `stop` and `start` take."
+                    },
+                    "hasRunIf": {
+                        "type": "boolean",
+                        "description": "Reports whether the system declares a gate of its own, which can skip a frame even while the system is enabled."
+                    },
+                    "phase": {
+                        "type": "string",
+                        "description": "Names the phase the system runs in."
+                    }
+                },
+                "type": "object",
+                "required": ["name", "phase", "position", "enabled", "hasRunIf"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Names the system, as `systems list` reports it."
+                    }
+                },
+                "required": ["name"],
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Reports the states on the stack bottom-first, how deep the stack is, and which state is on top. An empty stack answers with no top, which is the world a game that never pushed a state runs in. Call it before push or pop to know what the world will return to.",
+            "name": "states_info",
+            "outputSchema": {
+                "properties": {
+                    "top": {
+                        "type": "string",
+                        "description": "Names the state on top, which is the one a game reads, and is absent on an empty stack."
+                    },
+                    "states": {
+                        "description": "Names the states on the stack, bottom-first.",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "description": "Counts the states on the stack."
+                    }
+                },
+                "type": "object",
+                "required": ["states", "depth"]
+            },
+            "inputSchema": {
+                "properties": {},
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": true,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Pushes one state the game created, which blurs the state under it and fires the new state's enter policy. Entities spawned afterwards carry that state's tag, so a push changes what later spawns belong to. A name the game never created fails with `unknown_state` rather than pushing anything.",
+            "name": "states_push",
+            "outputSchema": {
+                "properties": {
+                    "top": {
+                        "type": "string",
+                        "description": "Names the state on top, which is the one a game reads, and is absent on an empty stack."
+                    },
+                    "states": {
+                        "description": "Names the states on the stack, bottom-first.",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "description": "Counts the states on the stack."
+                    }
+                },
+                "type": "object",
+                "required": ["states", "depth"]
+            },
+            "inputSchema": {
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Names the state, which the game created with `world:createState`."
+                    }
+                },
+                "required": ["name"],
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": false
+            }
+        },
+        {
+            "description": "Pops the top state, which fires its exit policy and then the revealed state's focus policy. The default exit policy despawns every entity that state tagged, so a pop destroys entities the game cannot get back without a snapshot. Popping an empty stack fails with `empty_stack` rather than raising.",
+            "name": "states_pop",
+            "outputSchema": {
+                "properties": {
+                    "top": {
+                        "type": "string",
+                        "description": "Names the state on top, which is the one a game reads, and is absent on an empty stack."
+                    },
+                    "states": {
+                        "description": "Names the states on the stack, bottom-first.",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "description": "Counts the states on the stack."
+                    }
+                },
+                "type": "object",
+                "required": ["states", "depth"]
+            },
+            "inputSchema": {
+                "properties": {},
+                "type": "object",
+                "additionalProperties": false
+            },
+            "annotations": {
+                "whenCrashedHint": false,
+                "readOnlyHint": false,
+                "destructiveHint": true
+            }
+        }
+    ]
+}

@@ -157,6 +157,7 @@ local lighting = require("tecs.gfx.lighting")
 local materials = require("tecs.gpu.materials")
 local passes = require("tecs.gpu.passes")
 local query = require("tecs.internal.query")
+local cameraselection = require("tecs.internal.cameraselection")
 local rendercomponents = require("tecs.internal.rendercomponents")
 local world = require("tecs.internal.world")
 local zone = require("nupp.profile.zone")
@@ -327,25 +328,6 @@ export function new(exclusive value: world.World): Extractor
     )
 end
 
---- Returns the lowest live entity carrying a camera the query matched.
-local function pick(value: query.Query): rendercomponents.Camera2D?
-    local chosen: rendercomponents.Camera2D? = nil
-    local chosenEntity = 0
-    for candidate, count in value:iter() do
-        local active = candidate as archetype.Archetype
-        local cameras: {rendercomponents.Camera2D} = assert(active:get(rendercomponents.Camera2DComponent))
-        for index = 1, count as integer do
-            const entity = active.entities[index]
-            if chosen == nil or entity < chosenEntity then
-                chosen = cameras[index]
-                chosenEntity = entity
-            end
-        end
-    end
-
-    return chosen
-end
-
 --- Returns the view this frame projects through, as center, zoom, and rotation.
 ---
 --- A world with no camera entity draws through a camera centered on the render
@@ -354,9 +336,9 @@ end
 --- @raises when the selected camera's zoom is not greater than zero, or when
 ---     any of its four values is not finite
 local function view(borrows self: Extractor, width: number, height: number): number, number, number, number
-    local camera = pick(self.activeCameras)
+    local camera = cameraselection.pick(self.activeCameras)
     if camera == nil then
-        camera = pick(self.cameras)
+        camera = cameraselection.pick(self.cameras)
     end
     if camera == nil then
         return width * 0.5, height * 0.5, 1.0, 0.0

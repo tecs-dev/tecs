@@ -66,6 +66,23 @@ one: `ping`, `context`, `get_logs`, `send_event` and `clear_crash` remain
 available, and every tool that touches the world reports the stored traceback
 instead of running.
 
+## Retained subsystem tools
+
+Archetypes, resources, materials, camera, layers, render configuration and physics
+have structured inspection tools. `snapshot_save` and `snapshot_load` round-trip
+committed worlds, including binary physics state. `audio` and `reload_sound` use
+the world's installed mixer. `profile_start` and `profile_stop` use Nupp's process
+sampler; stop writes collapsed stacks under the writable root.
+
+`help`, `describe` and `capabilities` enumerate the live registry. They and the
+sampler remain available while parked or crashed. The six deferred tools are
+`screenshot`, `sample_pixels`, `reload_shaders`, `reload_image`, `watch`, and
+`physics_debug`. Their argument schemas and concrete restoration contracts are
+recorded in [MCP migration contracts](docs/mcp-migration.md). The subsystems
+remain; these tools need the host observations and lifecycle ownership named
+there. Snapshot files use TECS framing over Nupp's binary codec and explicitly
+refuse legacy Teal/Box2D files.
+
 ## Compatibility
 
 Tool names, and the argument keys of their schemas, are reached by JSON an
@@ -84,6 +101,7 @@ local sandbox = require("tecs.internal.mcpsandbox")
 local tools = require("tecs.internal.mcptools")
 local transport = require("tecs.internal.mcptransport")
 local worldtools = require("tecs.internal.mcpworld")
+local subsystems = require("tecs.internal.mcpsubsystems")
 
 --- The decoded arguments a tool receives and the structured content it returns.
 export type ToolHandler = registry.ToolHandler
@@ -116,7 +134,7 @@ end
 
 -- Requiring the two tool modules is what registers the built-in tools, and a
 -- server that listened without them would advertise an empty session.
-local builtInsInstalled: boolean = tools.installed() and worldtools.installed()
+local builtInsInstalled: boolean = tools.installed() and worldtools.installed() and subsystems.installed()
 
 --- Registers a tool, replacing any tool already holding its name.
 ---

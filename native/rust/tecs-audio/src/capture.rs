@@ -15,7 +15,7 @@
 //! unbounded allocation driven by a realtime callback is not something to keep.
 
 use std::ffi::{c_char, CString};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, StreamTrait};
@@ -226,6 +226,7 @@ pub struct Capture {
     /// counted inside a lock the callback did not get, and added to the same
     /// total, because a caller asking what it lost does not care which way.
     contended: Arc<AtomicU64>,
+    failed: Arc<AtomicBool>,
     /// Kept because dropping it stops the capture. None for an offline capture,
     /// which is fed by `write` instead of by a device.
     stream: Option<cpal::Stream>,
@@ -271,12 +272,41 @@ impl Capture {
             channels as usize,
         )));
         let contended = Arc::new(AtomicU64::new(0));
+        let failed = Arc::new(AtomicBool::new(false));
         let converter = Converter::new(config.sample_rate, config.channels, frequency, channels);
         let stream = match format {
-            cpal::SampleFormat::F32 => build::<f32>(&device, &config, &ring, &contended, converter),
-            cpal::SampleFormat::I16 => build::<i16>(&device, &config, &ring, &contended, converter),
-            cpal::SampleFormat::U16 => build::<u16>(&device, &config, &ring, &contended, converter),
-            cpal::SampleFormat::I32 => build::<i32>(&device, &config, &ring, &contended, converter),
+            cpal::SampleFormat::F32 => build::<f32>(
+                &device,
+                &config,
+                &ring,
+                &contended,
+                Arc::clone(&failed),
+                converter,
+            ),
+            cpal::SampleFormat::I16 => build::<i16>(
+                &device,
+                &config,
+                &ring,
+                &contended,
+                Arc::clone(&failed),
+                converter,
+            ),
+            cpal::SampleFormat::U16 => build::<u16>(
+                &device,
+                &config,
+                &ring,
+                &contended,
+                Arc::clone(&failed),
+                converter,
+            ),
+            cpal::SampleFormat::I32 => build::<i32>(
+                &device,
+                &config,
+                &ring,
+                &contended,
+                Arc::clone(&failed),
+                converter,
+            ),
             other => Err(format!("unsupported input sample format {other:?}")),
         }?;
         stream
@@ -286,6 +316,7 @@ impl Capture {
         Ok(Capture {
             ring,
             contended,
+            failed,
             stream: Some(stream),
             frequency,
             channels,
@@ -305,6 +336,7 @@ impl Capture {
         Capture {
             ring: Arc::new(Mutex::new(Ring::new(buffer_frames.max(1) as usize, width))),
             contended: Arc::new(AtomicU64::new(0)),
+            failed: Arc::new(AtomicBool::new(false)),
             stream: None,
             frequency,
             channels: width as u16,
@@ -347,7 +379,15 @@ impl Capture {
     pub fn read(&self, out: &mut [f32], max_frames: usize) -> Result<usize, String> {
         match self.ring.lock() {
             Err(_) => Err(self.fail("the capture buffer is poisoned".to_string())),
-            Ok(mut ring) => Ok(ring.read(out, max_frames)),
+            Ok(mut ring) => {
+                let frames = ring.read(out, max_frames);
+                if frames == 0 && max_frames > 0 && self.failed() {
+                    Err(self
+                        .fail("the input stream failed; close and reopen the microphone".into()))
+                } else {
+                    Ok(frames)
+                }
+            }
         }
     }
 
@@ -355,7 +395,7 @@ impl Capture {
     ///
     /// @return the frames accepted, and zero while the capture is paused
     pub fn write(&self, samples: &[f32]) -> usize {
-        if !self.running {
+        if !self.running || self.failed() {
             return 0;
         }
         let width = self.channels.max(1) as usize;
@@ -393,6 +433,10 @@ impl Capture {
     /// @return whether the stream started, with the reason left for
     ///     `last_error`
     pub fn resume(&mut self) -> bool {
+        if self.failed() {
+            self.fail("the input stream failed; close and reopen the microphone".into());
+            return false;
+        }
         if let Some(stream) = self.stream.as_ref() {
             if let Err(error) = stream.play() {
                 self.fail(format!("the input stream did not start: {error}"));
@@ -406,7 +450,12 @@ impl Capture {
 
     /// Reports whether the capture is filling its buffer.
     pub fn running(&self) -> bool {
-        self.running
+        self.running && !self.failed()
+    }
+
+    /// Reports terminal stream failure while allowing buffered frames to drain.
+    pub fn failed(&self) -> bool {
+        self.failed.load(Ordering::Acquire)
     }
 
     /// Stops capture and drops the stream.
@@ -460,12 +509,14 @@ fn build<T>(
     config: &cpal::StreamConfig,
     ring: &Arc<Mutex<Ring>>,
     contended: &Arc<AtomicU64>,
+    failed: Arc<AtomicBool>,
     mut converter: Converter,
 ) -> Result<cpal::Stream, String>
 where
     T: SizedSample,
     f32: FromSample<T>,
 {
+    let failure_callback = Arc::clone(&failed);
     let held = Arc::clone(ring);
     let lost = Arc::clone(contended);
     let channels = config.channels.max(1) as usize;
@@ -474,7 +525,7 @@ where
         .build_input_stream(
             *config,
             move |input: &[T], _info: &cpal::InputCallbackInfo| {
-                if input.is_empty() {
+                if input.is_empty() || failed.load(Ordering::Acquire) {
                     return;
                 }
                 if scratch.len() < input.len() {
@@ -499,10 +550,8 @@ where
                     Ok(mut guard) => converter.feed(span, &mut guard),
                 }
             },
-            move |error| {
-                // There is nowhere to report this that the frame thread reads,
-                // and a panic here would cross a C callback boundary.
-                eprintln!("tecs-audio: input stream error: {error}");
+            move |_error| {
+                failure_callback.store(true, Ordering::Release);
             },
             None,
         )
@@ -511,6 +560,27 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stream_failure_drains_then_refuses_reads_and_resume() {
+        let mut capture = super::Capture::open_offline(48000, 1, 8);
+        assert_eq!(capture.write(&[1.0, 2.0]), 2);
+        capture
+            .failed
+            .store(true, std::sync::atomic::Ordering::Release);
+        assert!(capture.failed());
+        assert!(!capture.running());
+        assert_eq!(capture.write(&[3.0]), 0);
+        let mut output = [0.0; 4];
+        assert_eq!(capture.read(&mut output, 4).unwrap(), 2);
+        assert_eq!(&output[..2], &[1.0, 2.0]);
+        assert!(capture
+            .read(&mut output, 4)
+            .unwrap_err()
+            .contains("input stream failed"));
+        assert!(!capture.resume());
+        assert!(capture.failed());
+    }
+
     use super::*;
 
     #[test]

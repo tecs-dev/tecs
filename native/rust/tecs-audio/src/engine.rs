@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::ffi::{c_char, CString};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::command::{self, Command, Event};
@@ -64,6 +65,7 @@ pub struct Engine {
     sample_rate: u32,
     channels: u16,
     available: bool,
+    failed: Arc<AtomicBool>,
 }
 
 impl Engine {
@@ -105,7 +107,12 @@ impl Engine {
         available: bool,
         reason: String,
     ) -> Engine {
+        let failed = output
+            .as_ref()
+            .map(|output| Arc::clone(&output.failed))
+            .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
         Engine {
+            failed,
             mixer,
             clips: RwLock::new(HashMap::new()),
             feeder: Feeder::start(),
@@ -120,7 +127,12 @@ impl Engine {
 
     /// Reports whether a real output opened.
     pub fn available(&self) -> bool {
-        self.available
+        self.available && !self.failed()
+    }
+
+    /// Reports a terminal output-stream error, distinct from an offline engine.
+    pub fn failed(&self) -> bool {
+        self.failed.load(Ordering::Acquire)
     }
 
     /// Reports the frames per second the output runs at.
@@ -371,6 +383,20 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn output_failure_is_distinct_from_offline_unavailability() {
+        let mut engine = super::Engine::open_offline(48000, 2, 8);
+        assert!(!engine.available());
+        assert!(!engine.failed());
+        engine.available = true;
+        assert!(engine.available());
+        engine
+            .failed
+            .store(true, std::sync::atomic::Ordering::Release);
+        assert!(engine.failed());
+        assert!(!engine.available());
+    }
+
     use super::*;
 
     fn play(handle: u32, clip: u32) -> Command {

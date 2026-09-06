@@ -86,3 +86,20 @@ end
 export function clear(value: Store): nil
     value.values = {}
 end
+
+--- Returns detached metadata for every occupied key, including anonymous keys.
+export function inspect(borrows value: Store): {any}
+    local names: {[integer]: string} = {}
+    for name, key in pairs(namedKeys) do
+        names[key.id] = name
+    end
+    local rows: {any} = {}
+    for id, item in pairs(value.values) do
+        rows[#rows + 1] = {id = id, name = names[id] or ("#" .. tostring(id)), valueType = type(item)}
+    end
+    table.sort(rows, function(a: any, b: any): boolean
+        return a.id < b.id
+    end)
+
+    return rows
+end

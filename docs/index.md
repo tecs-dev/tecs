@@ -65,3 +65,6 @@ rendered from them, so a signature has no second copy to drift from. Start at
 [](tecs.ecs) for worlds, entities, components, queries, systems and states,
 [](tecs.gfx) for what a frame draws, and [](tecs.application) for the lifecycle
 a host drives.
+
+The [MCP migration contracts](mcp-migration.md) record tool compatibility and
+the host contracts for deferred debugging features.

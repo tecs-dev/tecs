@@ -2263,3 +2263,37 @@ function World.getStats(borrows self: World): WorldStats
         fixedStepsDropped = self.fixedStepsDropped
     )
 end
+
+--- Returns detached archetype metadata for internal diagnostics.
+export function inspectArchetypes(borrows value: World): {any}
+    local rows: {any} = {}
+    local function byName(a: any, b: any): boolean
+        return a.name < b.name
+    end
+
+    for index = 1, value.archetypeCount do
+        local current = value.archetypes[index]
+        local names: {string} = {}
+        local columns: {any} = {}
+        for _, kind in ipairs(current.components) do
+            names[#names + 1] = kind.componentName
+            columns[#columns + 1] = {name = kind.componentName, dirty = current:isComponentDirty(kind)}
+        end
+        table.sort(names)
+        table.sort(columns, byName)
+        rows[#rows + 1] = {id = current.id, entities = #current.entities, components = names, columns = columns}
+    end
+
+    return rows
+end
+
+--- Builds an internal diagnostic query over the current committed archetypes.
+--- It is not retained by the world and must not be reused after structural changes.
+export function querySnapshot(borrows value: World, descriptor: query.Descriptor): query.Query
+    local found = query.new(descriptor)
+    for index = 1, value.archetypeCount do
+        query.addArchetype(found, value.archetypes[index])
+    end
+
+    return found
+end

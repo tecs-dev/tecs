@@ -17,10 +17,10 @@ under either is not adopted, however convenient it is.
 **MPL-2.0 is accepted, and it is not permissive.** It is file-level copyleft:
 distributing a Larger Work under other terms is explicitly allowed, and what it
 asks in return is that the source of the covered files stays available to
-whoever receives the binary. That obligation is met by taking those crates
-unmodified from crates.io, where their source is public, and by naming them
-below. It would stop being met the moment one of them was patched in place, so
-do not do that without reading section 3.2 of the licence first.
+whoever receives the binary. The distribution records exact source versions,
+download locations and verified modification status as described below.
+Patched covered sources require their actual source and modification records
+before packaging will accept them.
 
 ## What ships
 
@@ -31,6 +31,8 @@ inventory beside this file is generated rather than written:
 - `cargo-dependencies.txt` names every Rust package in the built graph,
   target- and feature-resolved.
 - `cargo-licenses.txt` gives the SPDX expression for each, one line per entry.
+- `license-sources.json` gives version-specific source URLs, locked archive
+  checksums and verified modification status for covered MPL-2.0 crates.
 
 `check-package` gates that inventory against what an installed tree actually
 links. It reads link tables, so it cannot see inside a static archive and it
@@ -38,33 +40,30 @@ cannot read a licence out of a binary, because nothing can.
 
 ### The Rust graph
 
-151 packages at the revisions `Cargo.lock` pins. By licence expression:
+`cargo-dependencies.txt` records the resolved target/feature graph, including
+build dependencies. Its count changes with the lockfile; `cargo-licenses.txt`
+records the exact version and declared SPDX expression for each entry.
 
-| Expression                                                                              | Packages |
-| --------------------------------------------------------------------------------------- | -------- |
-| MIT OR Apache-2.0, and its spellings                                                    | 90       |
-| MIT                                                                                     | 18       |
-| Zlib OR Apache-2.0 OR MIT                                                               | 12       |
-| MPL-2.0                                                                                 | 12       |
-| Apache-2.0                                                                              | 9        |
-| Others: `MIT OR Apache-2.0 OR Zlib`, `BSD-2-Clause OR Apache-2.0 OR MIT`, `Zlib`, `ISC` | 10       |
+### Symphonia and covered source
 
-Everything outside the MPL-2.0 row is permissive and asks only that its notice
-travel with a distribution, which `cargo-licenses.txt` and this file do.
+Tecs retains Symphonia and accepts MPL-2.0 for its covered files. The project
+repository is <https://github.com/pdeljanov/Symphonia>, but a moving repository
+URL alone does not identify the source used for an installed binary.
 
-### Symphonia, and the only copyleft here
+Each package therefore includes `license-sources.json`, with one entry for each
+MPL-2.0 crate in the resolved inventory. An entry names the exact crate version,
+its version-specific crates.io source download URL, the archive SHA-256 from
+Cargo.lock, and a modification list. The current list is empty because packaging
+verifies that the archive matches Cargo.lock and that every source file used by
+Cargo matches that archive, with no extra source files. Cargo's own extraction
+receipt is excluded from that comparison.
 
-The twelve MPL-2.0 packages are one project: `symphonia` and its bundles,
-codecs, formats and metadata crates, which decode audio for the Rust audio
-service. They are taken unmodified from crates.io. Their source is at
-<https://github.com/pdeljanov/Symphonia>, and that availability is what
-satisfies the licence for a binary distribution of a Larger Work.
-
-The audio service chose Symphonia for decoding after measuring what the engine
-needs; the licence was not part of that comparison and should have been. It is
-recorded here rather than quietly: replacing it is a real option if a
-file-level copyleft obligation is not wanted, and the decision belongs to
-whoever ships.
+A patched, vendored, git or locally modified covered crate cannot inherit an
+unmodified upstream source claim: packaging refuses it. Supporting one requires
+shipping its actual modified source and an explicit modification record first.
+`check-package` requires this manifest and cross-checks its covered package
+versions against the shipped license inventory. Recipients obtain the matching
+covered source through the recorded version-specific download links.
 
 ### The Nupp runtime
 
@@ -81,11 +80,10 @@ them here, where they would go stale against the compiler this tree pins.
 Open Font License 1.1. The tests read it. It is not installed by a package
 today; a package that starts shipping a font has to carry the OFL text with it.
 
-## What this file is not
+## Scope of the checks
 
-It is not a legal review, and the enforcement it once described is gone: the
-spec that held the native build's decoder options to their values went with the
-Teal engine, along with the options it was holding. What remains is the
-generated inventory and `check-package`. A dependency added under an
-unacceptable licence would not be caught by anything here, which is worth
-knowing before adding one.
+The generated inventory and source manifest make shipped dependency names,
+versions, notices and covered-source provenance reviewable. Link-table inspection
+cannot identify every crate embedded in a static archive or infer a license from
+a binary. Dependency adoption still follows the license policy above; the gate
+checks complete records rather than making legal decisions from an SPDX string.

@@ -854,4 +854,30 @@ function suite.answersTheMixerInstalledIntoAWorld(): nil
     test.equal(audio.of(world), nil)
 end
 
+function suite.outputLossClearsVoicesAndDoesNotReplay(): nil
+    local recorder = newRecorder()
+    local failure: {string} = {""}
+    recorder.backend.failure = function(): string?
+        return failure[1] ~= "" and failure[1] or nil
+    end
+    local mixer = audio.newAudio({backend = recorder.backend})
+    local path = freshPath()
+    recorder.durations[path] = 2
+    local clip = assert(mixer:load(path))
+    local handle = mixer:play(clip)
+    test.assert(handle > 0)
+    failure[1] = "output disconnected"
+    test.equal(mixer:update(), 0)
+    test.equal(mixer.available, false)
+    test.equal(mixer.failureReason, "output disconnected")
+    test.equal(mixer:play(clip), 0)
+    test.equal(recorder.log[#recorder.log].kind, audiobackend.STOP)
+    failure[1] = ""
+    test.equal(mixer:update(), 0)
+    test.equal(mixer.available, false)
+    mixer:destroy()
+    mixer:destroy()
+    test.equal(mixer:update(), 0)
+end
+
 return suite

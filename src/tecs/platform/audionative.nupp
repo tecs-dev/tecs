@@ -97,6 +97,8 @@ cdef function tecs_audio_open_offline(frequency: uint32, channels: uint32, maxVo
 cdef function tecs_audio_close(borrows device: voidptr?)
 
 cdef function tecs_audio_available(borrows device: voidptr?): int32
+cdef function tecs_audio_failed(borrows device: voidptr?): int32
+cdef function tecs_audio_microphone_failed(borrows microphone: voidptr?): int32
 
 cdef function tecs_audio_frequency(borrows device: voidptr?): uint32
 
@@ -259,6 +261,7 @@ end
 
 --- Wraps an open library device in the backend contract.
 local function wrap(device: voidptr?): audiobackend.Backend
+    local closed = {false}
     local commands = carray(tecsAudioCommand, CAPACITY)
     local events = carray(tecsAudioEvent, CAPACITY)
     local info = ffi.new<tecsAudioClipInfo>()
@@ -352,6 +355,12 @@ local function wrap(device: voidptr?): audiobackend.Backend
     end
 
     return new audiobackend.Backend(
+        failure = function(): string?
+            if not closed[1] and tecs_audio_failed(device) ~= 0 then
+                return "the output stream failed; destroy and recreate the audio mixer"
+            end
+            return nil
+        end,
         available = tecs_audio_available(device) ~= 0,
         frequency = tecs_audio_frequency(device) as integer,
         channels = tecs_audio_channels(device) as integer,
@@ -385,6 +394,10 @@ local function wrap(device: voidptr?): audiobackend.Backend
             return names
         end,
         close = function(): nil
+            if closed[1] then
+                return
+            end
+            closed[1] = true
             tecs_audio_close(device)
         end
     )
@@ -614,6 +627,12 @@ local function wrapCapture(
     end
 
     return new audiobackend.Capture(
+        failure = function(): string?
+            if not closed[1] and tecs_audio_microphone_failed(microphone) ~= 0 then
+                return "the input stream failed; close and reopen the microphone"
+            end
+            return nil
+        end,
         frequency = frequency,
         channels = width,
         availableFrames = function(): integer

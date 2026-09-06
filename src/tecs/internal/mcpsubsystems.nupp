@@ -1,0 +1,522 @@
+module tecs.internal.mcpsubsystems
+
+-- Retained subsystem tools. Input schemas and names are historical contracts
+-- GPU readback and reload contracts are recorded in docs/mcp-migration.md.
+local registry = require("tecs.internal.mcpregistry")
+local bindings = require("tecs.internal.mcpbindings")
+local schemas = require("tecs.internal.mcpschemas")
+local entityworld = require("tecs.internal.world")
+local store = require("tecs.internal.store")
+local cameraselection = require("tecs.internal.cameraselection")
+local rendercomponents = require("tecs.internal.rendercomponents")
+local snapshotvalue = require("tecs.internal.snapshotvalue")
+local ecs = require("tecs.ecs")
+local materials = require("tecs.gpu.materials")
+local layers = require("tecs.gfx.layers")
+local physics = require("tecs.physics")
+local audio = require("tecs.audio")
+local paths = require("tecs.files")
+local files = require("nupp.io.files")
+local path = require("nupp.io.path")
+local binary = require("nupp.data.binary")
+local json = require("nupp.data.json")
+local profile = require("nupp.profile")
+
+local function register(
+    name: string,
+    description: string,
+    handler: registry.ToolHandler,
+    mutates: boolean?,
+    independent: boolean?
+): nil
+    local schema = schemas.inputs[name]
+    registry.register({
+        name = name,
+        description = description,
+        inputSchema = schema,
+        readOnly = not mutates,
+        destructive = mutates == true,
+        whenCrashed = independent,
+        whenParked = independent,
+        handler = function(arguments: {[string]: any}): {[string]: any}?
+            for _, key in ipairs(schema.required or {}) do
+                assert(arguments[key] ~= nil, "missing argument: " .. key)
+            end
+            for key, value in pairs(arguments) do
+                local rule = schema.properties[key]
+                assert(rule ~= nil, "unknown argument: " .. key)
+                local kind = type(value)
+                assert(kind == rule.type, "invalid argument type: " .. key)
+                if kind == "number" then
+                    assert(
+                        value == value and value ~= math.huge and value ~= -math.huge,
+                        "non-finite argument: " .. key
+                    )
+                    assert(rule.minimum == nil or value >= rule.minimum, "argument below minimum: " .. key)
+                    assert(rule.maximum == nil or value <= rule.maximum, "argument above maximum: " .. key)
+                end
+            end
+            local values: {[string]: any} = {}
+            for key, rule in pairs(schema.properties) do
+                values[key] = arguments[key] ?? rule.default
+            end
+
+            return handler(values)
+        end
+    })
+end
+
+local function integer(value: number): integer
+    assert(value == math.floor(value), "argument must be an integer")
+    return value as integer
+end
+
+register("archetypes_list", "List committed archetypes, including empty ones when requested.", function(
+    args: {[string]: any}
+): {[string]: any}
+    local rows: {any} = {}
+    local total = 0
+    local limit = args.limit or 50
+    for _, row in ipairs(entityworld.inspectArchetypes(bindings.requireWorld())) do
+        if args.empty == true or row.entities > 0 then
+            total = total + 1
+            if #rows < limit then
+                rows[#rows + 1] = {id = row.id, entities = row.entities, components = json.asArray(row.components)}
+            end
+        end
+    end
+
+    return {archetypes = json.asArray(rows), total = total, returned = #rows}
+end)
+register("archetypes_info", "Report one archetype's components and dirty columns.", function(
+    args: {[string]: any}
+): {[string]: any}
+    for _, row in ipairs(entityworld.inspectArchetypes(bindings.requireWorld())) do
+        if row.id == args.id then
+            return {id = row.id, entities = row.entities, components = json.asArray(row.columns)}
+        end
+    end
+    error("unknown archetype: " .. tostring(args.id))
+end)
+register("resources_list", "List occupied world resource keys without serializing live values.", function(
+    _args: {[string]: any}
+): {[string]: any}
+    local rows = store.inspect(bindings.requireWorld().resources)
+    return {resources = json.asArray(rows), total = #rows}
+end)
+register("resources_info", "Report whether a named world resource is present.", function(
+    args: {[string]: any}
+): {[string]: any}
+    for _, row in ipairs(store.inspect(bindings.requireWorld().resources)) do
+        if row.name == args.name then
+            return {name = row.name, present = true, valueType = row.valueType}
+        end
+    end
+
+    return {name = args.name, present = false}
+end)
+register("materials_list", "List the registered material dispatch names and IDs.", function(
+    _args: {[string]: any}
+): {[string]: any}
+    local rows: {any} = {}
+    for _, name in ipairs(materials.names()) do
+        rows[#rows + 1] = {name = name, id = materials.id(name)}
+    end
+
+    return {materials = json.asArray(rows), total = #rows}
+end)
+register("materials_info", "Resolve one material name to its dispatch ID.", function(
+    args: {[string]: any}
+): {[string]: any}
+    local id = materials.find(args.name)
+    assert(id ~= nil, "unknown material: " .. args.name)
+    return {name = args.name, id = id}
+end)
+
+local function camera(exclusive world: ecs.World): rendercomponents.Camera2D?, integer?
+    local active, entity = cameraselection.pick(
+        entityworld.querySnapshot(world, {
+            include = {rendercomponents.Camera2DComponent, rendercomponents.ActiveCamera}
+        })
+    )
+    if active ~= nil then
+        return active, entity
+    end
+
+    return cameraselection.pick(entityworld.querySnapshot(world, {include = {rendercomponents.Camera2DComponent}}))
+end
+
+local function cameraInfo(): {[string]: any}
+    local current, entity = camera(bindings.requireWorld())
+    local app = bindings.app()
+    local width, height = 0, 0
+    if app ~= nil then
+        width, height = app.window:getPixelSize()
+    end
+    local result: {
+        [string]: any
+    } = current ~= nil and {
+        x = current.x,
+        y = current.y,
+        zoom = current.zoom,
+        rotation = current.rotation,
+        entity = entity
+    } or {x = width * 0.5, y = height * 0.5, zoom = 1, rotation = 0, implicit = true}
+    if app ~= nil then
+        result.viewport = {width = width, height = height}
+    end
+
+    return result
+end
+
+register("camera_info", "Report the camera selected by frame extraction.", function(
+    _args: {[string]: any}
+): {[string]: any}
+    return cameraInfo()
+end)
+register(
+    "camera_move",
+    "Change the selected camera's center, zoom or rotation.",
+    function(args: {[string]: any}): {[string]: any}
+        local world = bindings.requireWorld()
+        local current, entity = camera(world)
+        assert(current ~= nil and entity ~= nil, "no camera entity; create Camera2D before moving the view")
+        local changed = assert(world:getMut(entity, rendercomponents.Camera2DComponent))
+        if args.x ~= nil then
+            changed.x = args.x
+        end
+        if args.y ~= nil then
+            changed.y = args.y
+        end
+        if args.zoom ~= nil then
+            changed.zoom = args.zoom
+        end
+        if args.rotation ~= nil then
+            changed.rotation = args.rotation
+        end
+
+        return cameraInfo()
+    end,
+    true
+)
+local function layerInfo(index: integer): {[string]: any}
+    local mode, parallax, ignoreZoom, lit = layers.entryOf(index)
+    local sort = layers.sortOf(index)
+    return {
+        layer = index,
+        sort = ({"topdown", "z", "isometric"})[sort + 1],
+        space = ({"world", "screen", "virtual"})[integer(mode) + 1],
+        parallax = parallax,
+        ignoreZoom = ignoreZoom ~= 0,
+        unlit = lit == 0,
+        overlay = layers.isOverlay(index),
+        viewCulled = layers.viewCulled(index)
+    }
+end
+
+register("layers_list", "Report all configured layer bands.", function(_args: {[string]: any}): {[string]: any}
+    local rows: {any} = {}
+    for index = 1, layers.MAX do
+        rows[#rows + 1] = layerInfo(index)
+    end
+
+    return {layers = json.asArray(rows), total = #rows}
+end)
+register("layers_info", "Report one layer's placement and sorting.", function(args: {[string]: any}): {[string]: any}
+    return layerInfo(integer(args.layer))
+end)
+register(
+    "render_info",
+    "Report CPU render configuration; GPU frame counters are unavailable through this bridge.",
+    function(_args: {[string]: any}): {[string]: any}
+        local app = bindings.app()
+        return {
+            backend = "wgpu",
+            materials = materials.count(),
+            layers = layers.MAX,
+            camera = cameraInfo(),
+            frame = app ~= nil and app.frame or 0,
+            observations = {gpuCounters = false, readback = false},
+            unavailable = json.asArray({
+                "presented frame ID",
+                "GPU timings",
+                "visible instance count",
+                "pixel readback"
+            })
+        }
+    end
+)
+register("physics_info", "Report the installed solver and committed body population.", function(
+    _args: {[string]: any}
+): {[string]: any}
+    local world = bindings.requireWorld()
+    local simulation = physics.of(world)
+    if simulation == nil then
+        return {installed = false}
+    end
+    local count = 0
+    for _, length in entityworld.querySnapshot(world, {include = {physics.Body}}):iter() do
+        count = count + (length as integer)
+    end
+
+    return {
+        installed = true,
+        bodies = count,
+        subStepCount = simulation.subStepCount,
+        workerCount = simulation.workerCount
+    }
+end)
+register("physics_raycast", "Find the nearest collider along a world-pixel segment.", function(
+    args: {[string]: any}
+): {[string]: any}
+    local world = bindings.requireWorld()
+    assert(physics.of(world) ~= nil, "no physics simulation installed")
+    local category = integer(args.categoryBits or 4294967295)
+    local mask = integer(args.maskBits or 4294967295)
+    assert(
+        category >= 0 and category <= 4294967295 and mask >= 0 and mask <= 4294967295,
+        "collision mask is outside uint32"
+    )
+    local hit = physics.raycast(world, args.x1, args.y1, args.x2, args.y2, {categoryBits = category, maskBits = mask})
+    if hit == nil then
+        return {hit = false}
+    end
+
+    return {
+        hit = true,
+        entity = hit.entity,
+        x = hit.x,
+        y = hit.y,
+        normalX = hit.normalX,
+        normalY = hit.normalY,
+        fraction = hit.fraction
+    }
+end)
+register("audio", "Report the world's audio output, mixer and decoder state.", function(
+    _args: {[string]: any}
+): {[string]: any}
+    local mixer = audio.of(bindings.requireWorld())
+    if mixer == nil then
+        return {installed = false, available = false}
+    end
+
+    return {
+        installed = true,
+        available = mixer.available,
+        failure = mixer.failureReason,
+        voices = mixer:sounding(),
+        maxVoices = mixer:maxVoices(),
+        gain = mixer:masterGain(),
+        muted = mixer:muted(),
+        decoders = json.asArray(mixer:decoders())
+    }
+end)
+register(
+    "reload_sound",
+    "Reload an already cached sound through the world's audio owner.",
+    function(args: {[string]: any}): {[string]: any}
+        local mixer = audio.of(bindings.requireWorld())
+        assert(mixer ~= nil, "no audio mixer installed")
+        local ok, reason = mixer:reload(args.path)
+        assert(ok, reason)
+
+        return {path = args.path, reloaded = true}
+    end,
+    true
+)
+
+local function artifact(name: string): string
+    assert(name ~= "" and not path.newPath(name):isAbsolute(), "artifact name must be relative to the writable root")
+    for segment in name:gmatch("[^/\\\\]+") do
+        assert(segment ~= "..", "artifact name must stay within the writable root")
+    end
+
+    return paths.writablePath(name)
+end
+
+register(
+    "snapshot_save",
+    "Write the committed world as a versioned binary snapshot.",
+    function(args: {[string]: any}): {[string]: any}
+        local destination = artifact(args.name or "snapshot.bin")
+        local world = bindings.requireWorld()
+        local snapshot = world:saveSnapshot()
+        local bytes = "TECS-SNAPSHOT\1" .. binary.encode(snapshotvalue.clone(snapshot))
+        local ok, reason = files.writeAtomic(destination, bytes)
+        assert(ok, reason)
+
+        return {path = destination, format = "binary", bytes = #bytes}
+    end,
+    true
+)
+register(
+    "snapshot_load",
+    "Replace the world from a TECS NVB snapshot; legacy Teal files require conversion.",
+    function(args: {[string]: any}): {[string]: any}
+        assert(path.newPath(args.path):isAbsolute(), "snapshot path must be absolute")
+        local bytes: string
+        do
+            local input, reason = files.open(args.path, "r")
+            assert(input ~= nil, reason)
+            local size, sizeReason = input:size()
+            assert(size ~= nil, sizeReason)
+            assert(size <= 67108878, "snapshot exceeds the binary codec byte limit")
+            local reader = input:newReader()
+            local chunk, failure = reader:read(size + 1)
+            assert(chunk ~= nil, failure)
+            assert(#chunk == size, "snapshot changed during the read")
+            bytes = chunk
+        end
+        local magic = "TECS-SNAPSHOT\1"
+        assert(bytes:sub(1, #magic) == magic, "unsupported snapshot framing; legacy Teal snapshots require conversion")
+        local snapshot = binary.decode(bytes:sub(#magic + 1))
+        assert(type(snapshot) == "table", "snapshot must contain a world record")
+        local world = bindings.requireWorld()
+        local prelude = world:loadSnapshot(snapshot as ecs.Snapshot)
+
+        return {
+            path = args.path,
+            bytes = #bytes,
+            version = prelude.version,
+            entities = prelude.entityCount,
+            archetypes = prelude.archetypeCount
+        }
+    end,
+    true
+)
+
+local session: profile.SampleSession? = nil
+register(
+    "profile_start",
+    "Start the Nupp process sampler with an optional zone filter.",
+    function(args: {[string]: any}): {[string]: any}
+        assert(session == nil, "a tool sampling session is already running")
+        local interval = math.floor(args.intervalMs or 10) as integer
+        session = profile.sample({intervalMs = interval, zone = args.zone})
+        return {running = true, intervalMs = interval, zone = args.zone}
+    end,
+    true,
+    true
+)
+register(
+    "profile_stop",
+    "Stop the tool sampler and write collapsed stacks.",
+    function(args: {[string]: any}): {[string]: any}
+        local running = session
+        assert(running ~= nil, "no tool sampling session is running")
+        local destination = artifact(args.name or "profile.collapsed")
+        local report = running:stop()
+        session = nil
+        local ok, reason = files.writeAtomic(destination, report.text)
+        assert(ok, reason)
+
+        return {path = destination, samples = report.samples, stacks = report.stacks, bytes = #report.text}
+    end,
+    true,
+    true
+)
+
+local families: {
+    [string]: boolean
+} = {
+    archetypes = true,
+    resources = true,
+    materials = true,
+    camera = true,
+    render = true,
+    layers = true,
+    physics = true,
+    snapshot = true,
+    profile = true,
+    systems = true,
+    states = true
+}
+local function groupOf(name: string): string
+    local prefix = name:match("^([^_]+)_")
+    return prefix ~= nil and families[prefix] and prefix or name
+end
+
+local function contract(tool: registry.Tool): {[string]: any}
+    return {
+        tool = tool.name,
+        name = tool.name,
+        description = tool.description,
+        inputSchema = tool.inputSchema,
+        outputSchema = tool.outputSchema,
+        readOnly = tool.readOnly == true,
+        destructive = tool.destructive == true
+    }
+end
+
+local function describe(name: string): {[string]: any}
+    local result: {[string]: any} = {name = name, section = "Tools", verbs = json.asArray({})}
+    local verbs: {any} = {}
+    for _, tool in ipairs(registry.listTools()) do
+        if tool.name == name then
+            result.action = contract(tool)
+        elseif groupOf(tool.name) == name then
+            verbs[#verbs + 1] = contract(tool)
+        end
+    end
+    assert(result.action ~= nil or #verbs > 0, "unknown command: " .. name)
+    result.verbs = json.asArray(verbs)
+
+    return result
+end
+
+register(
+    "describe",
+    "Describe a command family or tool using the live registry.",
+    function(args: {[string]: any}): {[string]: any}
+        return describe(args.command)
+    end,
+    false,
+    true
+)
+register(
+    "help",
+    "List available commands or describe one command family.",
+    function(args: {[string]: any}): {[string]: any}
+        if args.command ~= nil then
+            return {command = describe(args.command)}
+        end
+        local seen: {[string]: boolean} = {}
+        local commands: {any} = {}
+        for _, tool in ipairs(registry.listTools()) do
+            local name = groupOf(tool.name)
+            if not seen[name] then
+                commands[#commands + 1] = {name = name, signature = name, shortHelp = tool.description}
+                seen[name] = true
+            end
+        end
+
+        return {sections = json.asArray({{name = "Tools", commands = json.asArray(commands)}})}
+    end,
+    false,
+    true
+)
+register(
+    "capabilities",
+    "Count available commands and tools from the live registry.",
+    function(_args: {[string]: any}): {[string]: any}
+        local groups: {[string]: boolean} = {}
+        local count = 0
+        local tools = registry.listTools()
+        for _, tool in ipairs(tools) do
+            local name = groupOf(tool.name)
+            if not groups[name] then
+                groups[name] = true
+                count = count + 1
+            end
+        end
+
+        return {commands = count, tools = #tools, sections = json.asArray({{name = "Tools", commands = count}})}
+    end,
+    false,
+    true
+)
+
+--- Reports that the retained subsystem tools registered.
+export function installed(): boolean
+    return true
+end

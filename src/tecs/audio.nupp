@@ -89,6 +89,21 @@ no mixer, so a game that only wants to name devices pays for nothing else.
 `update` is not a world system, and `install` deliberately does not add one.
 Reaping voices has to continue while a world is paused, so an application
 drives it from the iteration instead.
+
+A native stream error permanently fails that output. The callback publishes a
+flag; the next `update` sets `available` false, records `failureReason`, discards
+queued starts and releases every active voice without replay. Destroy the mixer
+and create a new one to reopen an output. Starting without an output remains a
+separate silent fallback, not a device-loss event.
+
+A failed microphone keeps already buffered frames. Once drained, `read` returns
+nil and the failure reason, while the value-only `readInto` raises that reason.
+`failure` reports loss even before the buffer drains. `resume` refuses a failed
+stream; destroy it and open a new microphone. Native capture supports one to
+eight channels. The public argument range remains one to 32 for compatibility;
+a valid request above eight returns an operational refusal from the native
+opener. Full device-enumeration change notifications remain deferred. Listing
+current devices and observing failure of an active stream do not depend on them.
 ]]
 
 local audiobackend = require("tecs.platform.audiobackend")
@@ -711,6 +726,12 @@ export record Microphone
 
     private capture: audiobackend.Capture?
 
+    --- Read-only. Reports terminal capture failure, or nil while the stream is
+    --- healthy. Frames already buffered remain readable; after draining, `read`
+    --- returns nil and this reason, and `readInto` raises it. A zero-frame read
+    --- remains a no-op. Recovery requires closing and reopening the microphone.
+    failure: function(borrows self: Microphone): string?
+
     --- Read-only. Reports the complete sample frames ready to read without
     --- waiting, so a partly arrived frame is not counted. Zero once destroyed,
     --- rather than an error.
@@ -756,8 +777,15 @@ end
 --- on the thread that calls it, and the backend's own audio thread reaches
 --- Nupp only by leaving finished handles where `update` collects them.
 export record Audio
-    --- Read-only. Reports whether an output opened. False identifies a machine
-    --- with no sound, where every call still succeeds and nothing is heard.
+    --- Read-only. Reports terminal output loss observed by `update`. Nil until
+    --- a device fails. Loss clears voices, prevents playback and requires a new
+    --- mixer; there is no automatic reopen or replay on the default device.
+    failureReason: string?
+
+    private closed: boolean
+
+    --- Read-only. Reports whether an output opened and remains usable as of
+    --- the last `update`. False also describes a device-free mixer.
     available: boolean
 
     private backend: audiobackend.Backend
@@ -1203,6 +1231,7 @@ export function newAudio(config: Config?): Audio
     end
 
     local self = new Audio(
+        closed = false,
         available = backend.available,
         backend = backend,
         streamSeconds = (config and config.streamSeconds) or DEFAULT_STREAM_SECONDS,
@@ -1254,6 +1283,10 @@ end
 ---
 --- @param self the mixer to close
 function Audio.destroy(exclusive self: Audio): nil
+    if self.closed then
+        return
+    end
+    self.closed = true
     for slot = 1, #self.voices do
         if self.voices[slot].sounding then
             queue(self, audiobackend.STOP, handleOf(self, slot))
@@ -2072,6 +2105,25 @@ end
 --- @return voices still sounding after the reap, the same number `sounding`
 ---     answers
 function Audio.update(exclusive self: Audio, dt: number?): integer
+    if self.closed then
+        return 0
+    end
+    local observe = self.backend.failure
+    if self.failureReason == nil and observe ~= nil then
+        local failure = observe()
+        if failure ~= nil then
+            self.failureReason = failure
+            self.available = false
+            -- Discard pending starts before issuing stops for every live handle.
+            self.pendingCount = 0
+            for slot = 1, #self.voices do
+                if self.voices[slot].sounding then
+                    queue(self, audiobackend.STOP, handleOf(self, slot))
+                    release(self, slot)
+                end
+            end
+        end
+    end
     self.now = self.now + (dt or 0)
     self:flush()
 
@@ -2469,6 +2521,16 @@ export function openMicrophone(config: MicrophoneConfig?): (Microphone?, string?
     return new Microphone(frequency = capture.frequency, channels = capture.channels, capture = capture)
 end
 
+function Microphone.failure(borrows self: Microphone): string?
+    local capture = self.capture
+    if capture == nil then
+        return "microphone is destroyed"
+    end
+    local observe = capture.failure
+
+    return observe ~= nil and observe() or nil
+end
+
 function Microphone.availableFrames(borrows self: Microphone): integer
     local capture = self.capture
     if capture == nil then
@@ -2520,6 +2582,10 @@ function Microphone.read(exclusive self: Microphone, maxFrames: integer?): (stri
     end
     local frames = capped(capture.availableFrames(), maxFrames)
     if frames == 0 then
+        local failure = self:failure()
+        if maxFrames ~= 0 and failure ~= nil then
+            return nil, failure
+        end
         return ""
     end
 
@@ -2533,6 +2599,10 @@ function Microphone.readInto(exclusive self: Microphone, out: {number}, maxFrame
     end
     local frames = capped(capture.availableFrames(), maxFrames)
     if frames == 0 then
+        local failure = self:failure()
+        if maxFrames ~= 0 and failure ~= nil then
+            error(failure, 2)
+        end
         return 0
     end
 
@@ -2552,6 +2622,11 @@ function Microphone.resume(exclusive self: Microphone): (boolean, string?)
     local capture = self.capture
     if capture == nil then
         return false, "microphone is destroyed"
+    end
+
+    local failure = self:failure()
+    if failure ~= nil then
+        return false, failure
     end
 
     return capture.resume()

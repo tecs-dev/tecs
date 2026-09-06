@@ -46,9 +46,9 @@ jobs:
                 os: [macos-15, ubuntu-latest]
         runs-on: ${{ matrix.os }}
         env:
-            # This revision fixes borrowed file readers in cold component
-            # builds. Nupp 0.0.2 predates that fix; a warmed check can hide it.
-            NUPP_REF: ccf08ab394ed227bf45fdf00cca8fd3940697671
+            # This revision includes the cold file-reader repair and the bounded
+            # binary codec used by snapshot_save and snapshot_load.
+            NUPP_REF: e90e8d42d08a517ac12b70f1d50dd9c30d705d05
         steps:
             - uses: actions/checkout@v4
               with:
@@ -106,7 +106,7 @@ jobs:
     host:
         runs-on: macos-15
         env:
-            NUPP_REF: ccf08ab394ed227bf45fdf00cca8fd3940697671
+            NUPP_REF: e90e8d42d08a517ac12b70f1d50dd9c30d705d05
         steps:
             # Two checkouts side by side. The Nupp compiler release installed by
             # Homebrew ships no `libnupp.a`, so it cannot satisfy
@@ -186,7 +186,7 @@ jobs:
                       preset: linux-x64
         runs-on: ${{ matrix.os }}
         env:
-            NUPP_REF: ccf08ab394ed227bf45fdf00cca8fd3940697671
+            NUPP_REF: e90e8d42d08a517ac12b70f1d50dd9c30d705d05
         steps:
             - uses: actions/checkout@v4
               with:
@@ -243,7 +243,7 @@ jobs:
             pages: write
             id-token: write
         env:
-            NUPP_REF: ccf08ab394ed227bf45fdf00cca8fd3940697671
+            NUPP_REF: e90e8d42d08a517ac12b70f1d50dd9c30d705d05
         steps:
             - uses: actions/checkout@v4
               with:

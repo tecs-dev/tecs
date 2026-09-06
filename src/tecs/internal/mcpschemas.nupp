@@ -1,0 +1,280 @@
+module tecs.internal.mcpschemas
+
+-- Input schemas recovered from tools/list at historical commit 70549c8e.
+-- Names and argument schemas are external compatibility contracts.
+local json = require("nupp.data.json")
+export const inputs: {
+    [string]: any
+} = {
+    ["audio"] = {["type"] = "object", ["properties"] = json.EMPTY_ARRAY},
+    [
+        "reload_sound"
+    ] = {
+        ["properties"] = {["path"] = {["type"] = "string", ["description"] = "The path the clip was loaded from."}},
+        ["type"] = "object",
+        ["required"] = {"path"}
+    },
+    [
+        "help"
+    ] = {
+        [
+            "properties"
+        ] = {["command"] = {["type"] = "string", ["description"] = "command name; omitted lists every command"}},
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    [
+        "describe"
+    ] = {
+        ["properties"] = {["command"] = {["type"] = "string", ["description"] = "command name"}},
+        ["required"] = {"command"},
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    ["capabilities"] = {["properties"] = json.EMPTY_OBJECT, ["type"] = "object", ["additionalProperties"] = false},
+    ["camera_info"] = {["properties"] = json.EMPTY_OBJECT, ["type"] = "object", ["additionalProperties"] = false},
+    [
+        "camera_move"
+    ] = {
+        [
+            "properties"
+        ] = {
+            ["x"] = {["type"] = "number", ["description"] = "Sets the horizontal center of the view in world pixels."},
+            [
+                "y"
+            ] = {
+                ["type"] = "number",
+                ["description"] = "Sets the vertical center of the view in world pixels, increasing downward."
+            },
+            [
+                "rotation"
+            ] = {
+                ["type"] = "number",
+                ["description"] = "Sets the rotation in radians, turning the scene counter-clockwise on screen."
+            },
+            [
+                "zoom"
+            ] = {
+                [
+                    "description"
+                ] = "Sets the magnification, where two shows half as much world at twice the size. Must be greater than zero.",
+                ["type"] = "number",
+                ["minimum"] = 1e-06
+            }
+        },
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    ["render_info"] = {["properties"] = json.EMPTY_OBJECT, ["type"] = "object", ["additionalProperties"] = false},
+    ["layers_list"] = {["properties"] = json.EMPTY_OBJECT, ["type"] = "object", ["additionalProperties"] = false},
+    [
+        "layers_info"
+    ] = {
+        [
+            "properties"
+        ] = {
+            [
+                "layer"
+            ] = {
+                ["maximum"] = 16,
+                ["description"] = "Selects the layer, which is the fourth argument of a Transform2D.",
+                ["type"] = "number",
+                ["minimum"] = 1
+            }
+        },
+        ["required"] = {"layer"},
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    [
+        "archetypes_list"
+    ] = {
+        [
+            "properties"
+        ] = {
+            [
+                "limit"
+            ] = {
+                ["description"] = "Caps how many archetypes the answer carries. (default: 50)",
+                ["type"] = "number",
+                ["minimum"] = 1
+            },
+            [
+                "empty"
+            ] = {["type"] = "boolean", ["description"] = "Includes archetypes holding no entities. (default: false)"}
+        },
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    [
+        "archetypes_info"
+    ] = {
+        [
+            "properties"
+        ] = {
+            [
+                "id"
+            ] = {
+                ["description"] = "Identifies the archetype by the id `archetypes list` reports.",
+                ["type"] = "number",
+                ["minimum"] = 0
+            }
+        },
+        ["required"] = {"id"},
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    ["resources_list"] = {["properties"] = json.EMPTY_OBJECT, ["type"] = "object", ["additionalProperties"] = false},
+    [
+        "resources_info"
+    ] = {
+        [
+            "properties"
+        ] = {
+            ["name"] = {["type"] = "string", ["description"] = "Names the store key, as `resources list` reports it."}
+        },
+        ["required"] = {"name"},
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    ["materials_list"] = {["properties"] = json.EMPTY_OBJECT, ["type"] = "object", ["additionalProperties"] = false},
+    [
+        "materials_info"
+    ] = {
+        [
+            "properties"
+        ] = {
+            [
+                "name"
+            ] = {
+                ["type"] = "string",
+                ["description"] = "Names the material, which is its file name without the extension."
+            }
+        },
+        ["required"] = {"name"},
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    [
+        "snapshot_save"
+    ] = {
+        [
+            "properties"
+        ] = {
+            [
+                "name"
+            ] = {
+                ["type"] = "string",
+                [
+                    "description"
+                ] = "Names the file under the writable root that receives the snapshot. (default: snapshot.bin)"
+            }
+        },
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    [
+        "snapshot_load"
+    ] = {
+        [
+            "properties"
+        ] = {
+            [
+                "path"
+            ] = {
+                ["type"] = "string",
+                [
+                    "description"
+                ] = "Locates the binary snapshot to restore, as an absolute path such as the one `snapshot save` reports."
+            }
+        },
+        ["required"] = {"path"},
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    [
+        "profile_start"
+    ] = {
+        [
+            "properties"
+        ] = {
+            [
+                "zone"
+            ] = {
+                ["type"] = "string",
+                [
+                    "description"
+                ] = "Keeps only the samples whose zone path starts with this prefix, such as `afterFixed/Render` or `afterFixed/Render:SpriteSync`."
+            },
+            [
+                "intervalMs"
+            ] = {
+                [
+                    "description"
+                ] = "Sets the sampler interval in milliseconds, defaulting to 10. Below 10 the timer starts taking real time from the main thread.",
+                ["type"] = "number",
+                ["minimum"] = 1
+            }
+        },
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    [
+        "profile_stop"
+    ] = {
+        [
+            "properties"
+        ] = {
+            [
+                "name"
+            ] = {
+                ["type"] = "string",
+                [
+                    "description"
+                ] = "Names the file under the writable root that receives the collapsed-stack text. (default: profile.collapsed)"
+            }
+        },
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    ["physics_info"] = {["properties"] = json.EMPTY_OBJECT, ["type"] = "object", ["additionalProperties"] = false},
+    [
+        "physics_raycast"
+    ] = {
+        [
+            "properties"
+        ] = {
+            ["x1"] = {["type"] = "number", ["description"] = "Starts the segment at this world x, in pixels."},
+            [
+                "y1"
+            ] = {
+                ["type"] = "number",
+                ["description"] = "Starts the segment at this world y, in pixels and positive downward."
+            },
+            ["x2"] = {["type"] = "number", ["description"] = "Ends the segment at this world x, in pixels."},
+            [
+                "y2"
+            ] = {
+                ["type"] = "number",
+                ["description"] = "Ends the segment at this world y, in pixels and positive downward."
+            },
+            [
+                "maskBits"
+            ] = {
+                ["type"] = "number",
+                ["description"] = "Limits the ray to shapes in these categories, defaulting to every category."
+            },
+            [
+                "categoryBits"
+            ] = {
+                ["type"] = "number",
+                [
+                    "description"
+                ] = "Gives the ray its own collision categories as a bit mask, defaulting to every category. The ray skips a shape whose mask excludes all of them."
+            }
+        },
+        ["required"] = {"x1", "x2", "y1", "y2"},
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    }
+}

@@ -6,6 +6,7 @@
 //! machine, allocate, or open a file, which is why the callback does one thing:
 //! lock the mixer and ask it to fill the buffer it was handed.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -22,6 +23,7 @@ pub struct Output {
     pub sample_rate: u32,
     /// The channels the device actually opened with.
     pub channels: u16,
+    pub failed: Arc<AtomicBool>,
 }
 
 /// Opens the default output and starts it.
@@ -60,11 +62,20 @@ pub fn open(
         config.channels,
         max_voices,
     )));
+    let failed = Arc::new(AtomicBool::new(false));
     let stream = match format {
-        cpal::SampleFormat::F32 => build::<f32>(&device, &config, Arc::clone(&mixer)),
-        cpal::SampleFormat::I16 => build::<i16>(&device, &config, Arc::clone(&mixer)),
-        cpal::SampleFormat::U16 => build::<u16>(&device, &config, Arc::clone(&mixer)),
-        cpal::SampleFormat::I32 => build::<i32>(&device, &config, Arc::clone(&mixer)),
+        cpal::SampleFormat::F32 => {
+            build::<f32>(&device, &config, Arc::clone(&mixer), Arc::clone(&failed))
+        }
+        cpal::SampleFormat::I16 => {
+            build::<i16>(&device, &config, Arc::clone(&mixer), Arc::clone(&failed))
+        }
+        cpal::SampleFormat::U16 => {
+            build::<u16>(&device, &config, Arc::clone(&mixer), Arc::clone(&failed))
+        }
+        cpal::SampleFormat::I32 => {
+            build::<i32>(&device, &config, Arc::clone(&mixer), Arc::clone(&failed))
+        }
         other => Err(format!("unsupported output sample format {other:?}")),
     }?;
     stream
@@ -76,6 +87,7 @@ pub fn open(
             _stream: stream,
             sample_rate: config.sample_rate,
             channels: config.channels,
+            failed,
         },
         mixer,
     ))
@@ -100,10 +112,12 @@ fn build<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     mixer: Arc<Mutex<Mixer>>,
+    failed: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, String>
 where
     T: SizedSample + FromSample<f32>,
 {
+    let failure_callback = Arc::clone(&failed);
     let channels = config.channels as usize;
     let mut scratch: Vec<f32> = Vec::new();
     device
@@ -113,6 +127,10 @@ where
                 // The buffer arrives filled with silence, so leaving it alone
                 // when the mixer is busy produces a gap rather than whatever
                 // was there before.
+                if failed.load(Ordering::Acquire) {
+                    output.fill(T::EQUILIBRIUM);
+                    return;
+                }
                 if channels == 0 {
                     return;
                 }
@@ -131,10 +149,10 @@ where
                     *target = T::from_sample(*source);
                 }
             },
-            move |error| {
-                // There is nowhere to report this that the frame thread reads,
-                // and a panic here would cross a C callback boundary.
-                eprintln!("tecs-audio: output stream error: {error}");
+            move |_error| {
+                // A sticky observation, polled on the frame thread. No callback
+                // enters Nupp, allocates a message or attempts to reopen a device.
+                failure_callback.store(true, Ordering::Release);
             },
             None,
         )

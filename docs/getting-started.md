@@ -12,7 +12,9 @@ Three things, and only one of them is installed for you:
 - **The Nupp compiler.** `cargo xtask` looks for `NUPP`, then a `nupp` checkout
   beside this one, then a `nupp` on `PATH`, in that order. The sibling checkout
   wins over an installed release because this tree is developed against a
-  compiler newer than the published one.
+  compiler newer than the published one. This revision needs the binary codec
+  at Nupp commit `e90e8d42d08a517ac12b70f1d50dd9c30d705d05` or a descendant;
+  Nupp 0.0.3 does not contain it. The exact pin also appears in the CI workflow.
 - **The Rust toolchain** `rust-toolchain.toml` pins. `rustup` fetches it on the
   first build.
 - **`stylua` and `prettier`**, which format the Lua manifest and the Markdown.

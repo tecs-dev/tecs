@@ -110,6 +110,7 @@ const REQUIRED_NOTICES: &[&str] = &[
     "share/tecs/LICENSE-APACHE",
     "share/tecs/cargo-dependencies.txt",
     "share/tecs/cargo-licenses.txt",
+    "share/tecs/license-sources.json",
 ];
 
 /// The license the tree's own crates carry, which their manifests do not spell
@@ -833,6 +834,7 @@ fn write_inventory(root: &Path, preset: Preset, prefix: &Path) -> Result<()> {
         );
     }
     fs::write(prefix.join("share/tecs/cargo-licenses.txt"), recorded)?;
+    crate::licensesources::write(root, prefix, &packages)?;
     Ok(())
 }
 
@@ -1094,6 +1096,7 @@ fn check_license_position(prefix: &Path, problems: &mut Vec<String>) -> Result<(
             ));
         }
     }
+    crate::licensesources::check(prefix, problems)?;
     let inventory = prefix.join("share/tecs/cargo-dependencies.txt");
     let recorded = prefix.join("share/tecs/cargo-licenses.txt");
     if !inventory.is_file() || !recorded.is_file() {

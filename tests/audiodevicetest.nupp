@@ -510,4 +510,32 @@ function suite.drivesAMicrophoneOverTheOfflineProvider(): nil
     opened:destroy()
 end
 
+function suite.captureLossDrainsBeforeReportingAndRefusesResume(): nil
+    local stub = newStub({}, 8)
+    local failed = {false}
+    stub.capture.failure = function(): string?
+        return failed[1] and "input disconnected" or nil
+    end
+    local microphone = assert(audio.openMicrophone({devices = stub.devices}))
+    test.equal(stub.capture.write({1, 2}, 2), 2)
+    failed[1] = true
+    test.equal(microphone:failure(), "input disconnected")
+    test.equal(#assert(microphone:read()), 8)
+    local bytes, reason = microphone:read()
+    test.equal(bytes, nil)
+    test.equal(reason, "input disconnected")
+    test.raises(
+        function(): nil
+            microphone:readInto({0, 0})
+        end,
+        "input disconnected"
+    )
+    test.equal(assert(microphone:read(0)), "")
+    test.equal(microphone:readInto({0}, 0), 0)
+    local resumed, failure = microphone:resume()
+    test.equal(resumed, false)
+    test.equal(failure, "input disconnected")
+    microphone:destroy()
+end
+
 return suite

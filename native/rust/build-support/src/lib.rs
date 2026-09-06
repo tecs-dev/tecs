@@ -35,3 +35,5 @@ pub fn required(root: &Path, relative: impl AsRef<Path>) -> Result<PathBuf> {
         .with_context(|| format!("repository root is {}", root.display()))
     }
 }
+
+mod licensesources;

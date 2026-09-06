@@ -105,6 +105,10 @@ export type LoadMode = "auto" | "resident" | "stream"
 --- record of closures and nothing has to be subclassed to observe the command
 --- stream Tecs produces.
 export record Backend
+    --- Read-only. Reports terminal stream failure, or nil while healthy. Omitted
+    --- by backends without a device. The frame thread polls; no callback enters Nupp.
+    failure: (function(): string?)?
+
     --- Read-only. Reports whether a real output opened. A false here still
     --- takes every command and answers every query; nothing is heard.
     available: boolean
@@ -188,6 +192,10 @@ end
 --- Every field is a plain function rather than a method, so a device-free test
 --- is a record of closures.
 export record Capture
+    --- Read-only. Reports terminal stream failure. Buffered frames may still drain;
+    --- resume must fail until the caller closes and reopens the capture.
+    failure: (function(): string?)?
+
     --- Read-only. Reports the frames per second a read answers in, which is
     --- what the caller asked for rather than what the hardware runs at.
     frequency: integer

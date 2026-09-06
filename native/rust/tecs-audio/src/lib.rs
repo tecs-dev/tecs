@@ -149,6 +149,28 @@ pub unsafe extern "C" fn tecs_audio_available(device: *mut Engine) -> i32 {
     }
 }
 
+/// Reports terminal output loss, separately from an intentionally offline engine.
+/// # Safety
+/// The pointer must be null or name a live engine.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_failed(device: *mut Engine) -> i32 {
+    match unsafe { engine(device) } {
+        None => 0,
+        Some(value) => i32::from(value.failed()),
+    }
+}
+
+/// Reports terminal capture loss; queued frames remain readable.
+/// # Safety
+/// The pointer must be null or name a live microphone.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_microphone_failed(microphone: *mut Capture) -> i32 {
+    match unsafe { capture(microphone) } {
+        None => 0,
+        Some(value) => i32::from(value.failed()),
+    }
+}
+
 /// Reports the frames per second the output runs at.
 ///
 /// # Safety

@@ -319,7 +319,11 @@ installs `cargo-licenses.txt` beside `cargo-dependencies.txt`, carrying the
 SPDX expression Cargo metadata records for every package in the inventory, and
 `check-package` refuses an install where an entry has no answer. Curated prose
 says why a dependency is there; this says what it is licensed under, which is
-the part that must be complete.
+the part that must be complete. MPL-2.0 remains accepted for Symphonia. A package
+also carries version-specific covered-source URLs and checksums in
+`license-sources.json`; packaging compares covered sources with the locked crate
+archives before recording them as unmodified. Patched covered sources need an
+actual source package and modification record before they can ship.
 
 A package ships a prebuilt `shaders.tecspack` and no material directory, so a
 run that loses the pack cannot fall back, and packaging holds the packed
