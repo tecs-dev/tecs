@@ -1,18 +1,58 @@
 ---
 description: "Tecs is a typed entity component system and the GPU-driven 2D game engine built around it, written in Nupp against Rust services"
 order: 10
+layout: home
 ---
 
-# Tecs
+<!-- nupp:hero -->
 
-Tecs is a typed entity component system and the game engine built around it.
-Game code is Nupp. The window, the GPU, audio, physics and gamepads are Rust
-services behind Tecs-owned contracts. The two were separate projects and are
-now one: the ECS knows what the GPU reads, and the engine is not a layer bolted
-on top of a renderer-agnostic core.
+# Build 2D games with Tecs + Nupp
 
-Entities are the interface. Anything that renders or updates per frame is an
-entity in a world.
+Typed. GPU-driven. Built for humans and AI.
+
+An entity component system and the game engine built around it.
+Write your game in Nupp. Let Rust run the window, GPU, audio and physics.
+
+[Get started](getting-started.md)
+[Explore the API](modules/tecs/ecs/index.html)
+
+![A vintage television displaying the glowing Tecs wordmark](images/tecs.png)
+
+<!-- /nupp:hero -->
+
+<div class="tecs-features" aria-label="Tecs features">
+  <section class="tecs-feature">
+    <span class="tecs-feature-icon" aria-hidden="true">🤖</span>
+    <h2>Build with AI</h2>
+    <p>A built-in MCP server lets humans and agents inspect and edit a running game.</p>
+  </section>
+  <section class="tecs-feature">
+    <span class="tecs-feature-icon" aria-hidden="true">⚡</span>
+    <h2>Entities all the way down</h2>
+    <p>An archetype-based ECS with contiguous columns and a dirty model the GPU reads.</p>
+  </section>
+  <section class="tecs-feature">
+    <span class="tecs-feature-icon" aria-hidden="true">🔋</span>
+    <h2>Batteries included</h2>
+    <p>Physics, audio, lighting, text, sequences and animated sprites share the same world.</p>
+  </section>
+  <section class="tecs-feature">
+    <span class="tecs-feature-icon" aria-hidden="true">✓</span>
+    <h2>Static typing</h2>
+    <p>Nupp checks component, query, system and engine contracts before your game runs.</p>
+  </section>
+  <section class="tecs-feature">
+    <span class="tecs-feature-icon" aria-hidden="true">↕</span>
+    <h2>Wait without frozen frames</h2>
+    <p>Cooperative I/O parks work that must wait while the Rust host keeps the application alive.</p>
+  </section>
+</div>
+
+## Entities are the interface
+
+A drawn quad, a light, a sound, a physics body: each is an entity carrying
+components. The subsystem that cares for it finds it by query. Snapshots save
+world state, and the debug server inspects and edits it while the game runs.
 
 ```nupp
 local ecs = require("tecs.ecs")
