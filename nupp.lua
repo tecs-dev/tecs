@@ -25,6 +25,7 @@ for _, name in ipairs({ "host", "flatcolor", "sprites", "lighting", "nativesmoke
         argv = { "nupp", "run", "tools/run.nupp", "host", name },
     }
 end
+developmentTasks["ex-nativesmoke"].description = "Run the native library loading smoke test"
 developmentTasks["ex-uistandalone"].argv = {
     "nupp",
     "run",
