@@ -1,7 +1,6 @@
 module tecs.internal.mcpsubsystems
 
--- Retained subsystem tools. Input schemas and names are historical contracts
--- GPU readback and reload contracts are recorded in docs/mcp-migration.md.
+-- Subsystem tools. Input schemas and tool names are compatibility surfaces.
 local registry = require("tecs.internal.mcpregistry")
 local bindings = require("tecs.internal.mcpbindings")
 local schemas = require("tecs.internal.mcpschemas")

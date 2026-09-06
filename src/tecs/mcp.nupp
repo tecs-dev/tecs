@@ -66,7 +66,7 @@ one: `ping`, `context`, `get_logs`, `send_event` and `clear_crash` remain
 available, and every tool that touches the world reports the stored traceback
 instead of running.
 
-## Retained subsystem tools
+## Subsystem tools
 
 Archetypes, resources, materials, camera, layers, render configuration and physics
 have structured inspection tools. `snapshot_save` and `snapshot_load` round-trip
@@ -75,22 +75,10 @@ the world's installed mixer. `profile_start` and `profile_stop` use Nupp's proce
 sampler; stop writes collapsed stacks under the writable root.
 
 `help`, `describe` and `capabilities` enumerate the live registry. They and the
-sampler remain available while parked or crashed. The six deferred tools are
-`screenshot`, `sample_pixels`, `reload_shaders`, `reload_image`, `watch`, and
-`physics_debug`. Their argument schemas and concrete restoration contracts are
-recorded in [MCP migration contracts](docs/mcp-migration.md). The subsystems
-remain; these tools need the host observations and lifecycle ownership named
-there. Snapshot files use TECS framing over Nupp's binary codec and explicitly
-refuse legacy Teal/Box2D files.
-
-## Compatibility
-
-Tool names, and the argument keys of their schemas, are reached by JSON an
-agent sends and this tree cannot see. They keep the spelling the Teal engine
-published, including the snake_case names `run_lua`, `send_event`,
-`components_info`, `get_logs`, `clear_crash`, `systems_list`, `systems_info`,
-`systems_stop`, `systems_start`, `states_info`, `states_push` and `states_pop`.
-Do not rename one.
+sampler remain available while parked or crashed. The server does not provide
+GPU readback, shader or image reload, watcher orchestration, or physics debug
+overlay tools. Snapshot files use TECS framing over Nupp's binary codec and
+explicitly refuse legacy Teal/Box2D files.
 ]]
 
 local ecs = require("tecs.ecs")
