@@ -25,14 +25,56 @@ local function textEntity(world: tecs.ecs.World, value: string): integer
     error("missing demo label: " .. value)
 end
 
+local function controlBox(world: tecs.ecs.World, label: string): tecs.ui.Layout
+    const entity = textEntity(world, label)
+    const control = assert(world:get(entity, tecs.ecs.ChildOf)).target
+    return assert(world:get(control, tecs.ui.Layout))
+end
+
+local function checkSceneGeometry(world: tecs.ecs.World, scene: string): nil
+    if scene == "Flex" then
+        const fixed = controlBox(world, "88px")
+        nupp.test.equal(fixed.width, 88)
+        nupp.test.equal(fixed.height, 104)
+        const first = controlBox(world, "grow 1")
+        const second = controlBox(world, "grow 2")
+        nupp.test.equal(first.x, 96)
+        nupp.test.assert(first.width > 0)
+        nupp.test.assert(math.abs(second.width - first.width * 2) <= 1)
+        for index = 1, 8 do
+            const chip = controlBox(world, ("item %d"):format(index))
+            nupp.test.equal(chip.width, index % 3 == 0 and 128 or 96)
+            nupp.test.equal(chip.height, 54)
+            nupp.test.equal(chip.y, math.floor((index - 1) / 3) * 62)
+        end
+    elseif scene == "Overlay" then
+        const area = controlBox(world, "absolute + z")
+        for index, label in ipairs({"top-left", "top-right", "bottom-left", "bottom-right"}) do
+            const card = controlBox(world, label)
+            nupp.test.equal(card.width, 142)
+            nupp.test.equal(card.height, 54)
+            nupp.test.equal(card.x, index % 2 == 1 and 14 or area.width - 156)
+            nupp.test.equal(card.y, index <= 2 and 14 or area.height - 68)
+        end
+    end
+end
+
 function suite.switchesEveryOriginalSceneThroughPointerInput(): nil
     tecs.files.setAssetRoot("assets")
     local session = showcase.create(nil, 1280, 720, false, nil)
     tecs.host.init(session)
     frame(session)
     local world = session.app.world
-    local scenes = {"Compose", "Flex", "Overlay", "Scroll", "Compose"}
-    local labels = {"Image leaf", "Fixed width + flexGrow", "absolute + z", "01  Viewport stays fixed", "Image leaf"}
+    local scenes = {"Compose", "Flex", "Overlay", "Scroll", "Compose", "Overlay", "Flex"}
+    local labels = {
+        "Image leaf",
+        "Fixed width + flexGrow",
+        "absolute + z",
+        "01  Viewport stays fixed",
+        "Image leaf",
+        "absolute + z",
+        "Fixed width + flexGrow"
+    }
     for index = 1, #scenes do
         local label = textEntity(world, scenes[index])
         local control = assert(world:get(label, tecs.ecs.ChildOf)).target
@@ -42,7 +84,9 @@ function suite.switchesEveryOriginalSceneThroughPointerInput(): nil
         tecs.host.pushPointerButton(session, true, 1, x, y, index, index * 2 as integer)
         tecs.host.pushPointerButton(session, false, 1, x, y, index, (index * 2 + 1) as integer)
         frame(session)
+        checkSceneGeometry(world, scenes[index])
         frame(session)
+        checkSceneGeometry(world, scenes[index])
         nupp.test.equal(tecs.host.crashed(session), nil)
         local shown = textEntity(world, labels[index])
         nupp.test.assert(not world:has(shown, tecs.ecs.Disabled))

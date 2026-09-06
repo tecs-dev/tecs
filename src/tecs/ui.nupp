@@ -1596,6 +1596,9 @@ export function update(exclusive world: tecs.ecs.World): nil
         end
     end
     inputs(world, state)
+    -- Input observers can reveal a subtree or change its style. Resolve those
+    -- writes before drawing; the frame clears their dirty marks afterward.
+    layout(world, state, ids)
     apply(world, state, ids)
     scrollbars(world, ids)
     apply(world, state, ids)

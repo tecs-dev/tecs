@@ -321,6 +321,8 @@ visible.style.display = "flex"
 It also hides drawing leaves and disables interaction for that subtree. The
 showcase changes this one style field when switching scenes; showing a scene
 restores its retained drawing and interaction state.
+Style changes made by an input observer take effect before that frame draws,
+so a newly revealed scene immediately receives its computed sizes and positions.
 
 ## Compose visuals from ordinary entities
 
