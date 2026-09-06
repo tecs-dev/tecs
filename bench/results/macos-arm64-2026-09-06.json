@@ -1,0 +1,1438 @@
+{
+    "architecture": "aarch64",
+    "compiler": "/Users/dowling/projects/nupp/bin/nupp",
+    "compilerVersion": "nupp 0.0.3-dev",
+    "dirty": false,
+    "effectiveWorkers": 1,
+    "frames": 900,
+    "nativeLibraries": [
+        ["TECS_AUDIO_LIBRARY", "/private/tmp/tecs-performance/target/release/libtecsaudio.dylib"],
+        ["TECS_GAMEPAD_LIBRARY", "/private/tmp/tecs-performance/target/release/libtecsgamepad.dylib"],
+        ["TECS_PHYSICS_LIBRARY", "/private/tmp/tecs-performance/target/release/libtecs_physics.dylib"]
+    ],
+    "nativeProfile": "release",
+    "optimization": "O2",
+    "os": "macos",
+    "passed": true,
+    "requestedWorkers": 0,
+    "results": [
+        {
+            "p95BudgetsMs": [
+                ["update", 1.0],
+                ["extract", 3.0],
+                ["frame", 4.0]
+            ],
+            "repetition": 1,
+            "report": {
+                "metadata": {
+                    "bytes": 321352,
+                    "height": 720,
+                    "instances": 4000,
+                    "width": 1280
+                },
+                "stages": [
+                    {
+                        "max": 3.3953749537467957,
+                        "mean": 0.10610582404666476,
+                        "name": "update",
+                        "p50": 0.027958989143371586,
+                        "p95": 0.1570839881896973,
+                        "p99": 1.9099580049514773,
+                        "samples": 900
+                    },
+                    {
+                        "max": 2.7985830307006836,
+                        "mean": 0.35311675873067644,
+                        "name": "extract",
+                        "p50": 0.2887499928474426,
+                        "p95": 0.426917016506195,
+                        "p99": 1.99337500333786,
+                        "samples": 900
+                    },
+                    {
+                        "max": 5.3215829730033875,
+                        "mean": 0.4592225827773412,
+                        "name": "frame",
+                        "p50": 0.31916701793670654,
+                        "p95": 0.5835000276565552,
+                        "p99": 3.993458032608032,
+                        "samples": 900
+                    }
+                ]
+            },
+            "violations": [],
+            "workload": "shapes-4000"
+        },
+        {
+            "p95BudgetsMs": [
+                ["update", 1.0],
+                ["extract", 3.0],
+                ["frame", 4.0]
+            ],
+            "repetition": 2,
+            "report": {
+                "metadata": {
+                    "bytes": 321352,
+                    "height": 720,
+                    "instances": 4000,
+                    "width": 1280
+                },
+                "stages": [
+                    {
+                        "max": 2.768042027950287,
+                        "mean": 0.08843552854326037,
+                        "name": "update",
+                        "p50": 0.02770900726318359,
+                        "p95": 0.1440420150756836,
+                        "p99": 1.8301659822463987,
+                        "samples": 900
+                    },
+                    {
+                        "max": 2.7437090277671814,
+                        "mean": 0.29964989337656234,
+                        "name": "extract",
+                        "p50": 0.2513750195503235,
+                        "p95": 0.3576659560203552,
+                        "p99": 1.8666250109672544,
+                        "samples": 900
+                    },
+                    {
+                        "max": 4.446709036827087,
+                        "mean": 0.3880854219198227,
+                        "name": "frame",
+                        "p50": 0.2801670432090759,
+                        "p95": 0.4942499995231629,
+                        "p99": 3.996209025382995,
+                        "samples": 900
+                    }
+                ]
+            },
+            "violations": [],
+            "workload": "shapes-4000"
+        },
+        {
+            "p95BudgetsMs": [
+                ["update", 1.0],
+                ["extract", 3.0],
+                ["frame", 4.0]
+            ],
+            "repetition": 3,
+            "report": {
+                "metadata": {
+                    "bytes": 321352,
+                    "height": 720,
+                    "instances": 4000,
+                    "width": 1280
+                },
+                "stages": [
+                    {
+                        "max": 3.0174999833106995,
+                        "mean": 0.15763014137744905,
+                        "name": "update",
+                        "p50": 0.09670799970626831,
+                        "p95": 0.2278749942779541,
+                        "p99": 2.0764580368995667,
+                        "samples": 900
+                    },
+                    {
+                        "max": 3.564792037010193,
+                        "mean": 0.5470499596330854,
+                        "name": "extract",
+                        "p50": 0.48170900344848633,
+                        "p95": 0.8149999976158142,
+                        "p99": 2.455208957195282,
+                        "samples": 900
+                    },
+                    {
+                        "max": 5.465542018413544,
+                        "mean": 0.7046801010105345,
+                        "name": "frame",
+                        "p50": 0.5857909917831421,
+                        "p95": 0.9690840244293213,
+                        "p99": 4.963249981403351,
+                        "samples": 900
+                    }
+                ]
+            },
+            "violations": [],
+            "workload": "shapes-4000"
+        },
+        {
+            "p95BudgetsMs": [
+                ["commands+ecs", 2.0],
+                ["native batch", 3.0],
+                ["sync", 0.5],
+                ["update", 5.0]
+            ],
+            "repetition": 1,
+            "report": {
+                "metadata": {
+                    "bodies": 1000,
+                    "effectiveWorkers": 1,
+                    "requestedWorkers": 0,
+                    "substeps": 4,
+                    "timestep": 0.016666666666666666
+                },
+                "stages": [
+                    {
+                        "max": 3.8564580082893376,
+                        "mean": 0.32098855720625985,
+                        "name": "commands+ecs",
+                        "p50": 0.1990010142326355,
+                        "p95": 1.0217490196228027,
+                        "p99": 2.785915970802307,
+                        "samples": 900
+                    },
+                    {
+                        "max": 1.582707941532135,
+                        "mean": 1.2173399111297396,
+                        "name": "native batch",
+                        "p50": 1.2085000276565552,
+                        "p95": 1.3882920145988464,
+                        "p99": 1.4803330302238464,
+                        "samples": 900
+                    },
+                    {
+                        "max": 0.08933299779891968,
+                        "mean": 0.03879393173588647,
+                        "name": "sync",
+                        "p50": 0.03741598129272461,
+                        "p95": 0.04966700077056885,
+                        "p99": 0.060874998569488525,
+                        "samples": 900
+                    },
+                    {
+                        "max": 5.333000004291534,
+                        "mean": 1.5771224000718858,
+                        "name": "update",
+                        "p50": 1.468791961669922,
+                        "p95": 2.303125023841858,
+                        "p99": 4.199707984924316,
+                        "samples": 900
+                    }
+                ]
+            },
+            "violations": [],
+            "workload": "physics-1000"
+        },
+        {
+            "p95BudgetsMs": [
+                ["commands+ecs", 2.0],
+                ["native batch", 3.0],
+                ["sync", 0.5],
+                ["update", 5.0]
+            ],
+            "repetition": 2,
+            "report": {
+                "metadata": {
+                    "bodies": 1000,
+                    "effectiveWorkers": 1,
+                    "requestedWorkers": 0,
+                    "substeps": 4,
+                    "timestep": 0.016666666666666666
+                },
+                "stages": [
+                    {
+                        "max": 3.6315000653266902,
+                        "mean": 0.31051249735885195,
+                        "name": "commands+ecs",
+                        "p50": 0.1871659159660339,
+                        "p95": 1.0281240344047546,
+                        "p99": 2.614875018596649,
+                        "samples": 900
+                    },
+                    {
+                        "max": 2.162292003631592,
+                        "mean": 1.2105883316198984,
+                        "name": "native batch",
+                        "p50": 1.1982499957084656,
+                        "p95": 1.366124987602234,
+                        "p99": 1.5047499537467957,
+                        "samples": 900
+                    },
+                    {
+                        "max": 0.08270800113677979,
+                        "mean": 0.03605019595887926,
+                        "name": "sync",
+                        "p50": 0.03462499380111694,
+                        "p95": 0.04487502574920654,
+                        "p99": 0.058667004108428955,
+                        "samples": 900
+                    },
+                    {
+                        "max": 5.126958966255188,
+                        "mean": 1.5571510249376297,
+                        "name": "update",
+                        "p50": 1.4496250152587893,
+                        "p95": 2.364041030406952,
+                        "p99": 3.859082996845246,
+                        "samples": 900
+                    }
+                ]
+            },
+            "violations": [],
+            "workload": "physics-1000"
+        },
+        {
+            "p95BudgetsMs": [
+                ["commands+ecs", 2.0],
+                ["native batch", 3.0],
+                ["sync", 0.5],
+                ["update", 5.0]
+            ],
+            "repetition": 3,
+            "report": {
+                "metadata": {
+                    "bodies": 1000,
+                    "effectiveWorkers": 1,
+                    "requestedWorkers": 0,
+                    "substeps": 4,
+                    "timestep": 0.016666666666666666
+                },
+                "stages": [
+                    {
+                        "max": 3.704999029636383,
+                        "mean": 0.36172492921352384,
+                        "name": "commands+ecs",
+                        "p50": 0.2409999966621399,
+                        "p95": 1.0669999718666077,
+                        "p99": 2.855041980743408,
+                        "samples": 900
+                    },
+                    {
+                        "max": 2.38570898771286,
+                        "mean": 1.2247781016429264,
+                        "name": "native batch",
+                        "p50": 1.2151249647140503,
+                        "p95": 1.3940419554710388,
+                        "p99": 1.491124987602234,
+                        "samples": 900
+                    },
+                    {
+                        "max": 0.7724580168724061,
+                        "mean": 0.04369952837626139,
+                        "name": "sync",
+                        "p50": 0.03591698408126831,
+                        "p95": 0.06216698884963989,
+                        "p99": 0.1853339672088623,
+                        "samples": 900
+                    },
+                    {
+                        "max": 5.169041991233826,
+                        "mean": 1.6302025592327118,
+                        "name": "update",
+                        "p50": 1.5038340091705322,
+                        "p95": 2.4207499623298645,
+                        "p99": 4.214915990829468,
+                        "samples": 900
+                    }
+                ]
+            },
+            "violations": [],
+            "workload": "physics-1000"
+        },
+        {
+            "p95BudgetsMs": [
+                ["commands+ecs", 8.0],
+                ["native batch", 20.0],
+                ["sync", 1.0],
+                ["update", 25.0]
+            ],
+            "repetition": 1,
+            "report": {
+                "metadata": {
+                    "bodies": 4000,
+                    "effectiveWorkers": 1,
+                    "requestedWorkers": 0,
+                    "substeps": 4,
+                    "timestep": 0.016666666666666666
+                },
+                "stages": [
+                    {
+                        "max": 14.180250942707062,
+                        "mean": 2.0793606591886946,
+                        "name": "commands+ecs",
+                        "p50": 1.4771659970283508,
+                        "p95": 5.30979198217392,
+                        "p99": 13.148584008216858,
+                        "samples": 900
+                    },
+                    {
+                        "max": 17.18958294391632,
+                        "mean": 13.908290145198505,
+                        "name": "native batch",
+                        "p50": 13.898458003997805,
+                        "p95": 14.747874975204468,
+                        "p99": 15.139500021934508,
+                        "samples": 900
+                    },
+                    {
+                        "max": 0.4658330082893371,
+                        "mean": 0.28066215289963614,
+                        "name": "sync",
+                        "p50": 0.27670902013778687,
+                        "p95": 0.3263329863548279,
+                        "p99": 0.3625420331954956,
+                        "samples": 900
+                    },
+                    {
+                        "max": 29.22970801591873,
+                        "mean": 16.268312957286835,
+                        "name": "update",
+                        "p50": 15.81491595506668,
+                        "p95": 19.71050000190735,
+                        "p99": 27.40558296442032,
+                        "samples": 900
+                    }
+                ]
+            },
+            "violations": [],
+            "workload": "physics-4000-stress"
+        },
+        {
+            "p95BudgetsMs": [
+                ["commands+ecs", 8.0],
+                ["native batch", 20.0],
+                ["sync", 1.0],
+                ["update", 25.0]
+            ],
+            "repetition": 2,
+            "report": {
+                "metadata": {
+                    "bodies": 4000,
+                    "effectiveWorkers": 1,
+                    "requestedWorkers": 0,
+                    "substeps": 4,
+                    "timestep": 0.016666666666666666
+                },
+                "stages": [
+                    {
+                        "max": 14.24545794725418,
+                        "mean": 2.1067606029907866,
+                        "name": "commands+ecs",
+                        "p50": 1.5302070379257202,
+                        "p95": 5.142458021640778,
+                        "p99": 12.388375997543337,
+                        "samples": 900
+                    },
+                    {
+                        "max": 16.017624974250793,
+                        "mean": 13.893929858605066,
+                        "name": "native batch",
+                        "p50": 13.888625025749208,
+                        "p95": 14.780624985694883,
+                        "p99": 15.275833010673525,
+                        "samples": 900
+                    },
+                    {
+                        "max": 0.37995898723602295,
+                        "mean": 0.26112939364380305,
+                        "name": "sync",
+                        "p50": 0.2579590082168579,
+                        "p95": 0.2914999723434448,
+                        "p99": 0.33058297634124756,
+                        "samples": 900
+                    },
+                    {
+                        "max": 29.147916972637177,
+                        "mean": 16.261819855239658,
+                        "name": "update",
+                        "p50": 15.77558296918869,
+                        "p95": 19.525333046913147,
+                        "p99": 26.49587500095367,
+                        "samples": 900
+                    }
+                ]
+            },
+            "violations": [],
+            "workload": "physics-4000-stress"
+        },
+        {
+            "p95BudgetsMs": [
+                ["commands+ecs", 8.0],
+                ["native batch", 20.0],
+                ["sync", 1.0],
+                ["update", 25.0]
+            ],
+            "repetition": 3,
+            "report": {
+                "metadata": {
+                    "bodies": 4000,
+                    "effectiveWorkers": 1,
+                    "requestedWorkers": 0,
+                    "substeps": 4,
+                    "timestep": 0.016666666666666666
+                },
+                "stages": [
+                    {
+                        "max": 14.857957005500792,
+                        "mean": 2.1712773087289596,
+                        "name": "commands+ecs",
+                        "p50": 1.60145902633667,
+                        "p95": 5.388666987419128,
+                        "p99": 12.483083009719849,
+                        "samples": 900
+                    },
+                    {
+                        "max": 15.528167009353638,
+                        "mean": 13.956261544293827,
+                        "name": "native batch",
+                        "p50": 13.945249974727632,
+                        "p95": 14.792709052562714,
+                        "p99": 15.213500022888184,
+                        "samples": 900
+                    },
+                    {
+                        "max": 1.1374160051345823,
+                        "mean": 0.2509598457150989,
+                        "name": "sync",
+                        "p50": 0.24479198455810547,
+                        "p95": 0.2948330044746399,
+                        "p99": 0.329708993434906,
+                        "samples": 900
+                    },
+                    {
+                        "max": 29.80791598558426,
+                        "mean": 16.378498698737886,
+                        "name": "update",
+                        "p50": 15.934834003448486,
+                        "p95": 19.703125,
+                        "p99": 26.68008303642273,
+                        "samples": 900
+                    }
+                ]
+            },
+            "violations": [],
+            "workload": "physics-4000-stress"
+        }
+    ],
+    "revision": "1d25f64fe1264167875bed2258bef30755756e60",
+    "schemaVersion": 1,
+    "machine": {
+        "cpu": "Apple M5 Pro",
+        "memoryGiB": 48,
+        "osVersion": "26.6",
+        "power": "AC reported during final repetitions; low-power mode 0",
+        "conditions": "Sequential local runs; no other builds launched by this task during sample windows. Not an isolated laboratory machine."
+    },
+    "compilerRevision": "53536175a8c6f66dba916103adf2a51cf29300ae",
+    "nativeSha256": {
+        "TECS_AUDIO_LIBRARY": "4e4067de2436af6c650b3a96b21f96290ca3fda83bb588ac46ce6b18a5eaad5e",
+        "TECS_GAMEPAD_LIBRARY": "f6967ebc567e175303a20a46fe62892328bc6066a2788e338e5aa14d76084c90",
+        "TECS_PHYSICS_LIBRARY": "261f42c7134ea6d1a926f3805f49e9871aef45a039b4e44f144a6067c0243c0e"
+    },
+    "historical": {
+        "revision": "70549c8ea5b29751b27be3d190373173b2facc5f",
+        "preset": "macos-arm64",
+        "buildAdjustment": "Enable ShaderMode::Runtime in this temporary preset; use pinned dependency prefix in DYLD_LIBRARY_PATH. Original benchmark and engine sources unchanged.",
+        "rust": "1.97.1",
+        "requestedWorkers": 0,
+        "effectiveWorkers": 1,
+        "results": [
+            {
+                "run": "historical-physics-1000-1",
+                "stages": [
+                    {
+                        "name": "delta",
+                        "p50": 8.327,
+                        "p95": 8.727,
+                        "p99": 8.812,
+                        "mean": 8.333,
+                        "max": 9.328,
+                        "samples": 899
+                    },
+                    {
+                        "name": "extract",
+                        "p50": 0.028,
+                        "p95": 0.041,
+                        "p99": 0.052,
+                        "mean": 0.027,
+                        "max": 0.14,
+                        "samples": 900
+                    },
+                    {
+                        "name": "extractSprites",
+                        "p50": 0.028,
+                        "p95": 0.041,
+                        "p99": 0.052,
+                        "mean": 0.027,
+                        "max": 0.14,
+                        "samples": 900
+                    },
+                    {
+                        "name": "frame",
+                        "p50": 8.309,
+                        "p95": 8.701,
+                        "p99": 8.776,
+                        "mean": 8.311,
+                        "max": 9.258,
+                        "samples": 900
+                    },
+                    {
+                        "name": "simulate",
+                        "p50": 2.368,
+                        "p95": 3.329,
+                        "p99": 3.634,
+                        "mean": 2.311,
+                        "max": 4.069,
+                        "samples": 900
+                    },
+                    {
+                        "name": "acquire",
+                        "p50": 5.741,
+                        "p95": 6.84,
+                        "p99": 7.029,
+                        "mean": 5.815,
+                        "max": 7.099,
+                        "samples": 900
+                    },
+                    {
+                        "name": "record",
+                        "p50": 0.123,
+                        "p95": 0.238,
+                        "p99": 0.304,
+                        "mean": 0.135,
+                        "max": 0.624,
+                        "samples": 900
+                    },
+                    {
+                        "name": "submit",
+                        "p50": 0.012,
+                        "p95": 0.02,
+                        "p99": 0.024,
+                        "mean": 0.012,
+                        "max": 0.036,
+                        "samples": 900
+                    },
+                    {
+                        "name": "physics.step",
+                        "p50": 2.065,
+                        "p95": 2.945,
+                        "p99": 3.164,
+                        "mean": 2.027,
+                        "max": 3.563,
+                        "samples": 900
+                    },
+                    {
+                        "name": "physics.sync",
+                        "p50": 0.041,
+                        "p95": 0.058,
+                        "p99": 0.065,
+                        "mean": 0.041,
+                        "max": 0.116,
+                        "samples": 900
+                    }
+                ]
+            },
+            {
+                "run": "historical-physics-1000-2",
+                "stages": [
+                    {
+                        "name": "delta",
+                        "p50": 8.32,
+                        "p95": 8.72,
+                        "p99": 8.817,
+                        "mean": 8.334,
+                        "max": 9.163,
+                        "samples": 899
+                    },
+                    {
+                        "name": "extract",
+                        "p50": 0.029,
+                        "p95": 0.045,
+                        "p99": 0.062,
+                        "mean": 0.03,
+                        "max": 0.171,
+                        "samples": 900
+                    },
+                    {
+                        "name": "extractSprites",
+                        "p50": 0.029,
+                        "p95": 0.045,
+                        "p99": 0.062,
+                        "mean": 0.03,
+                        "max": 0.171,
+                        "samples": 900
+                    },
+                    {
+                        "name": "frame",
+                        "p50": 8.305,
+                        "p95": 8.696,
+                        "p99": 8.782,
+                        "mean": 8.313,
+                        "max": 9.084,
+                        "samples": 900
+                    },
+                    {
+                        "name": "simulate",
+                        "p50": 2.383,
+                        "p95": 3.409,
+                        "p99": 3.588,
+                        "mean": 2.355,
+                        "max": 3.909,
+                        "samples": 900
+                    },
+                    {
+                        "name": "acquire",
+                        "p50": 5.674,
+                        "p95": 6.834,
+                        "p99": 7.003,
+                        "mean": 5.772,
+                        "max": 7.144,
+                        "samples": 900
+                    },
+                    {
+                        "name": "record",
+                        "p50": 0.122,
+                        "p95": 0.234,
+                        "p99": 0.302,
+                        "mean": 0.133,
+                        "max": 0.516,
+                        "samples": 900
+                    },
+                    {
+                        "name": "submit",
+                        "p50": 0.012,
+                        "p95": 0.02,
+                        "p99": 0.026,
+                        "mean": 0.013,
+                        "max": 0.039,
+                        "samples": 900
+                    },
+                    {
+                        "name": "physics.step",
+                        "p50": 2.101,
+                        "p95": 3.03,
+                        "p99": 3.249,
+                        "mean": 2.076,
+                        "max": 3.563,
+                        "samples": 900
+                    },
+                    {
+                        "name": "physics.sync",
+                        "p50": 0.041,
+                        "p95": 0.058,
+                        "p99": 0.067,
+                        "mean": 0.041,
+                        "max": 0.117,
+                        "samples": 900
+                    }
+                ]
+            },
+            {
+                "run": "historical-physics-1000-3",
+                "stages": [
+                    {
+                        "name": "delta",
+                        "p50": 8.328,
+                        "p95": 8.727,
+                        "p99": 8.795,
+                        "mean": 8.333,
+                        "max": 9.247,
+                        "samples": 899
+                    },
+                    {
+                        "name": "extract",
+                        "p50": 0.026,
+                        "p95": 0.04,
+                        "p99": 0.051,
+                        "mean": 0.027,
+                        "max": 0.135,
+                        "samples": 900
+                    },
+                    {
+                        "name": "extractSprites",
+                        "p50": 0.026,
+                        "p95": 0.04,
+                        "p99": 0.051,
+                        "mean": 0.027,
+                        "max": 0.135,
+                        "samples": 900
+                    },
+                    {
+                        "name": "frame",
+                        "p50": 8.31,
+                        "p95": 8.689,
+                        "p99": 8.76,
+                        "mean": 8.312,
+                        "max": 9.165,
+                        "samples": 900
+                    },
+                    {
+                        "name": "simulate",
+                        "p50": 2.4,
+                        "p95": 3.389,
+                        "p99": 3.664,
+                        "mean": 2.376,
+                        "max": 4.819,
+                        "samples": 900
+                    },
+                    {
+                        "name": "acquire",
+                        "p50": 5.67,
+                        "p95": 6.796,
+                        "p99": 6.897,
+                        "mean": 5.75,
+                        "max": 7.097,
+                        "samples": 900
+                    },
+                    {
+                        "name": "record",
+                        "p50": 0.119,
+                        "p95": 0.237,
+                        "p99": 0.306,
+                        "mean": 0.136,
+                        "max": 0.664,
+                        "samples": 900
+                    },
+                    {
+                        "name": "submit",
+                        "p50": 0.012,
+                        "p95": 0.019,
+                        "p99": 0.023,
+                        "mean": 0.012,
+                        "max": 0.052,
+                        "samples": 900
+                    },
+                    {
+                        "name": "physics.step",
+                        "p50": 2.096,
+                        "p95": 3.044,
+                        "p99": 3.245,
+                        "mean": 2.089,
+                        "max": 4.538,
+                        "samples": 900
+                    },
+                    {
+                        "name": "physics.sync",
+                        "p50": 0.039,
+                        "p95": 0.058,
+                        "p99": 0.063,
+                        "mean": 0.041,
+                        "max": 0.148,
+                        "samples": 900
+                    }
+                ]
+            },
+            {
+                "run": "historical-physics-4000-1",
+                "stages": [
+                    {
+                        "name": "delta",
+                        "p50": 13.902,
+                        "p95": 15.302,
+                        "p99": 16.261,
+                        "mean": 14.017,
+                        "max": 18.003,
+                        "samples": 899
+                    },
+                    {
+                        "name": "extract",
+                        "p50": 0.059,
+                        "p95": 0.067,
+                        "p99": 0.073,
+                        "mean": 0.06,
+                        "max": 0.141,
+                        "samples": 900
+                    },
+                    {
+                        "name": "extractSprites",
+                        "p50": 0.059,
+                        "p95": 0.067,
+                        "p99": 0.073,
+                        "mean": 0.06,
+                        "max": 0.141,
+                        "samples": 900
+                    },
+                    {
+                        "name": "frame",
+                        "p50": 13.878,
+                        "p95": 15.283,
+                        "p99": 16.242,
+                        "mean": 13.992,
+                        "max": 17.981,
+                        "samples": 900
+                    },
+                    {
+                        "name": "simulate",
+                        "p50": 13.671,
+                        "p95": 15.073,
+                        "p99": 16.058,
+                        "mean": 13.78,
+                        "max": 17.794,
+                        "samples": 900
+                    },
+                    {
+                        "name": "acquire",
+                        "p50": 0.028,
+                        "p95": 0.038,
+                        "p99": 0.044,
+                        "mean": 0.029,
+                        "max": 0.052,
+                        "samples": 900
+                    },
+                    {
+                        "name": "record",
+                        "p50": 0.101,
+                        "p95": 0.125,
+                        "p99": 0.136,
+                        "mean": 0.102,
+                        "max": 0.154,
+                        "samples": 900
+                    },
+                    {
+                        "name": "submit",
+                        "p50": 0.011,
+                        "p95": 0.015,
+                        "p99": 0.018,
+                        "mean": 0.011,
+                        "max": 0.028,
+                        "samples": 900
+                    },
+                    {
+                        "name": "physics.step",
+                        "p50": 13.008,
+                        "p95": 13.877,
+                        "p99": 14.382,
+                        "mean": 13.027,
+                        "max": 15.211,
+                        "samples": 900
+                    },
+                    {
+                        "name": "physics.sync",
+                        "p50": 0.101,
+                        "p95": 0.111,
+                        "p99": 0.117,
+                        "mean": 0.102,
+                        "max": 0.138,
+                        "samples": 900
+                    }
+                ]
+            },
+            {
+                "run": "historical-physics-4000-2",
+                "stages": [
+                    {
+                        "name": "delta",
+                        "p50": 13.964,
+                        "p95": 15.025,
+                        "p99": 16.272,
+                        "mean": 14.039,
+                        "max": 20.539,
+                        "samples": 899
+                    },
+                    {
+                        "name": "extract",
+                        "p50": 0.059,
+                        "p95": 0.067,
+                        "p99": 0.072,
+                        "mean": 0.06,
+                        "max": 0.141,
+                        "samples": 900
+                    },
+                    {
+                        "name": "extractSprites",
+                        "p50": 0.059,
+                        "p95": 0.067,
+                        "p99": 0.072,
+                        "mean": 0.06,
+                        "max": 0.141,
+                        "samples": 900
+                    },
+                    {
+                        "name": "frame",
+                        "p50": 13.942,
+                        "p95": 15.001,
+                        "p99": 16.252,
+                        "mean": 14.016,
+                        "max": 20.511,
+                        "samples": 900
+                    },
+                    {
+                        "name": "simulate",
+                        "p50": 13.741,
+                        "p95": 14.792,
+                        "p99": 16.028,
+                        "mean": 13.809,
+                        "max": 20.277,
+                        "samples": 900
+                    },
+                    {
+                        "name": "acquire",
+                        "p50": 0.026,
+                        "p95": 0.035,
+                        "p99": 0.04,
+                        "mean": 0.026,
+                        "max": 0.053,
+                        "samples": 900
+                    },
+                    {
+                        "name": "record",
+                        "p50": 0.099,
+                        "p95": 0.121,
+                        "p99": 0.134,
+                        "mean": 0.1,
+                        "max": 0.157,
+                        "samples": 900
+                    },
+                    {
+                        "name": "submit",
+                        "p50": 0.011,
+                        "p95": 0.015,
+                        "p99": 0.018,
+                        "mean": 0.011,
+                        "max": 0.02,
+                        "samples": 900
+                    },
+                    {
+                        "name": "physics.step",
+                        "p50": 13.056,
+                        "p95": 13.78,
+                        "p99": 14.236,
+                        "mean": 13.062,
+                        "max": 19.638,
+                        "samples": 900
+                    },
+                    {
+                        "name": "physics.sync",
+                        "p50": 0.102,
+                        "p95": 0.113,
+                        "p99": 0.121,
+                        "mean": 0.103,
+                        "max": 0.134,
+                        "samples": 900
+                    }
+                ]
+            },
+            {
+                "run": "historical-physics-4000-3",
+                "stages": [
+                    {
+                        "name": "delta",
+                        "p50": 13.951,
+                        "p95": 15.144,
+                        "p99": 16.417,
+                        "mean": 14.06,
+                        "max": 23.135,
+                        "samples": 899
+                    },
+                    {
+                        "name": "extract",
+                        "p50": 0.059,
+                        "p95": 0.067,
+                        "p99": 0.075,
+                        "mean": 0.06,
+                        "max": 0.145,
+                        "samples": 900
+                    },
+                    {
+                        "name": "extractSprites",
+                        "p50": 0.059,
+                        "p95": 0.067,
+                        "p99": 0.075,
+                        "mean": 0.06,
+                        "max": 0.145,
+                        "samples": 900
+                    },
+                    {
+                        "name": "frame",
+                        "p50": 13.927,
+                        "p95": 15.117,
+                        "p99": 16.392,
+                        "mean": 14.037,
+                        "max": 23.104,
+                        "samples": 900
+                    },
+                    {
+                        "name": "simulate",
+                        "p50": 13.711,
+                        "p95": 14.9,
+                        "p99": 16.13,
+                        "mean": 13.821,
+                        "max": 22.838,
+                        "samples": 900
+                    },
+                    {
+                        "name": "acquire",
+                        "p50": 0.025,
+                        "p95": 0.035,
+                        "p99": 0.039,
+                        "mean": 0.026,
+                        "max": 0.045,
+                        "samples": 900
+                    },
+                    {
+                        "name": "record",
+                        "p50": 0.108,
+                        "p95": 0.134,
+                        "p99": 0.154,
+                        "mean": 0.11,
+                        "max": 0.34,
+                        "samples": 900
+                    },
+                    {
+                        "name": "submit",
+                        "p50": 0.011,
+                        "p95": 0.014,
+                        "p99": 0.018,
+                        "mean": 0.011,
+                        "max": 0.044,
+                        "samples": 900
+                    },
+                    {
+                        "name": "physics.step",
+                        "p50": 13.05,
+                        "p95": 13.829,
+                        "p99": 14.306,
+                        "mean": 13.078,
+                        "max": 22.245,
+                        "samples": 900
+                    },
+                    {
+                        "name": "physics.sync",
+                        "p50": 0.101,
+                        "p95": 0.111,
+                        "p99": 0.118,
+                        "mean": 0.102,
+                        "max": 0.132,
+                        "samples": 900
+                    }
+                ]
+            },
+            {
+                "run": "historical-shapes-2000-1",
+                "stages": [
+                    {
+                        "name": "delta",
+                        "p50": 8.343,
+                        "p95": 8.738,
+                        "p99": 8.84,
+                        "mean": 8.333,
+                        "max": 9.01,
+                        "samples": 900
+                    },
+                    {
+                        "name": "extract",
+                        "p50": 0.013,
+                        "p95": 0.018,
+                        "p99": 0.025,
+                        "mean": 0.014,
+                        "max": 0.079,
+                        "samples": 900
+                    },
+                    {
+                        "name": "extractSprites",
+                        "p50": 0.013,
+                        "p95": 0.018,
+                        "p99": 0.025,
+                        "mean": 0.014,
+                        "max": 0.079,
+                        "samples": 900
+                    },
+                    {
+                        "name": "frame",
+                        "p50": 8.332,
+                        "p95": 8.719,
+                        "p99": 8.829,
+                        "mean": 8.32,
+                        "max": 8.988,
+                        "samples": 900
+                    },
+                    {
+                        "name": "simulate",
+                        "p50": 0.006,
+                        "p95": 0.012,
+                        "p99": 0.02,
+                        "mean": 0.007,
+                        "max": 0.087,
+                        "samples": 900
+                    },
+                    {
+                        "name": "acquire",
+                        "p50": 8.24,
+                        "p95": 8.613,
+                        "p99": 8.721,
+                        "mean": 8.225,
+                        "max": 8.87,
+                        "samples": 900
+                    },
+                    {
+                        "name": "record",
+                        "p50": 0.06,
+                        "p95": 0.089,
+                        "p99": 0.111,
+                        "mean": 0.063,
+                        "max": 0.142,
+                        "samples": 900
+                    },
+                    {
+                        "name": "submit",
+                        "p50": 0.006,
+                        "p95": 0.01,
+                        "p99": 0.013,
+                        "mean": 0.007,
+                        "max": 0.018,
+                        "samples": 900
+                    }
+                ]
+            },
+            {
+                "run": "historical-shapes-2000-2",
+                "stages": [
+                    {
+                        "name": "delta",
+                        "p50": 8.345,
+                        "p95": 8.729,
+                        "p99": 8.871,
+                        "mean": 8.334,
+                        "max": 9.041,
+                        "samples": 900
+                    },
+                    {
+                        "name": "extract",
+                        "p50": 0.013,
+                        "p95": 0.017,
+                        "p99": 0.023,
+                        "mean": 0.014,
+                        "max": 0.071,
+                        "samples": 900
+                    },
+                    {
+                        "name": "extractSprites",
+                        "p50": 0.013,
+                        "p95": 0.017,
+                        "p99": 0.023,
+                        "mean": 0.014,
+                        "max": 0.071,
+                        "samples": 900
+                    },
+                    {
+                        "name": "frame",
+                        "p50": 8.332,
+                        "p95": 8.714,
+                        "p99": 8.852,
+                        "mean": 8.32,
+                        "max": 9.03,
+                        "samples": 900
+                    },
+                    {
+                        "name": "simulate",
+                        "p50": 0.008,
+                        "p95": 0.017,
+                        "p99": 0.114,
+                        "mean": 0.011,
+                        "max": 0.324,
+                        "samples": 900
+                    },
+                    {
+                        "name": "acquire",
+                        "p50": 8.237,
+                        "p95": 8.604,
+                        "p99": 8.742,
+                        "mean": 8.222,
+                        "max": 8.908,
+                        "samples": 900
+                    },
+                    {
+                        "name": "record",
+                        "p50": 0.059,
+                        "p95": 0.086,
+                        "p99": 0.106,
+                        "mean": 0.062,
+                        "max": 0.232,
+                        "samples": 900
+                    },
+                    {
+                        "name": "submit",
+                        "p50": 0.006,
+                        "p95": 0.01,
+                        "p99": 0.013,
+                        "mean": 0.007,
+                        "max": 0.026,
+                        "samples": 900
+                    }
+                ]
+            },
+            {
+                "run": "historical-shapes-2000-3",
+                "stages": [
+                    {
+                        "name": "delta",
+                        "p50": 8.341,
+                        "p95": 8.701,
+                        "p99": 8.879,
+                        "mean": 8.333,
+                        "max": 9.051,
+                        "samples": 900
+                    },
+                    {
+                        "name": "extract",
+                        "p50": 0.013,
+                        "p95": 0.017,
+                        "p99": 0.033,
+                        "mean": 0.015,
+                        "max": 0.067,
+                        "samples": 900
+                    },
+                    {
+                        "name": "extractSprites",
+                        "p50": 0.013,
+                        "p95": 0.017,
+                        "p99": 0.033,
+                        "mean": 0.015,
+                        "max": 0.067,
+                        "samples": 900
+                    },
+                    {
+                        "name": "frame",
+                        "p50": 8.328,
+                        "p95": 8.68,
+                        "p99": 8.867,
+                        "mean": 8.319,
+                        "max": 9.041,
+                        "samples": 900
+                    },
+                    {
+                        "name": "simulate",
+                        "p50": 0.007,
+                        "p95": 0.016,
+                        "p99": 0.087,
+                        "mean": 0.01,
+                        "max": 0.315,
+                        "samples": 900
+                    },
+                    {
+                        "name": "acquire",
+                        "p50": 8.231,
+                        "p95": 8.551,
+                        "p99": 8.762,
+                        "mean": 8.216,
+                        "max": 8.941,
+                        "samples": 900
+                    },
+                    {
+                        "name": "record",
+                        "p50": 0.061,
+                        "p95": 0.097,
+                        "p99": 0.146,
+                        "mean": 0.066,
+                        "max": 0.431,
+                        "samples": 900
+                    },
+                    {
+                        "name": "submit",
+                        "p50": 0.007,
+                        "p95": 0.01,
+                        "p99": 0.014,
+                        "mean": 0.007,
+                        "max": 0.018,
+                        "samples": 900
+                    }
+                ]
+            }
+        ]
+    },
+    "scalarEncoder": {
+        "revision": "ed2e07d3ba30e954503dc981644ba3d923922e72",
+        "fixtureRevision": "966007aa18fd46c7663864b405aca7a44a9c469b",
+        "results": [
+            {
+                "run": "scalar-1",
+                "stages": [
+                    {
+                        "samples": 900,
+                        "p99": 2.1536670327186584,
+                        "p50": 0.07608300447463989,
+                        "name": "update",
+                        "p95": 1.3333749771118164,
+                        "mean": 0.2747168511814541,
+                        "max": 2.5108750462532043
+                    },
+                    {
+                        "samples": 900,
+                        "p99": 37.51729100942612,
+                        "p50": 10.855916976928711,
+                        "name": "extract",
+                        "p95": 34.10445898771286,
+                        "mean": 14.766399484276771,
+                        "max": 40.28716695308685
+                    },
+                    {
+                        "samples": 900,
+                        "p99": 39.57887500524521,
+                        "p50": 10.924000024795532,
+                        "name": "frame",
+                        "p95": 34.99199998378754,
+                        "mean": 15.041116335458225,
+                        "max": 42.47649997472763
+                    }
+                ]
+            },
+            {
+                "run": "scalar-2",
+                "stages": [
+                    {
+                        "p50": 0.18691599369049072,
+                        "p99": 2.8190410137176514,
+                        "mean": 0.37241591539647845,
+                        "name": "update",
+                        "p95": 1.418624997138977,
+                        "max": 3.861790955066681,
+                        "samples": 900
+                    },
+                    {
+                        "p50": 19.905084013938904,
+                        "p99": 61.57050001621246,
+                        "mean": 23.065092470977042,
+                        "name": "extract",
+                        "p95": 42.90600001811981,
+                        "max": 97.32837504148483,
+                        "samples": 900
+                    },
+                    {
+                        "p50": 20.17033302783966,
+                        "p99": 62.937041997909546,
+                        "mean": 23.43750838637352,
+                        "name": "frame",
+                        "p95": 43.87975001335144,
+                        "max": 98.33583301305771,
+                        "samples": 900
+                    }
+                ]
+            },
+            {
+                "run": "scalar-3",
+                "stages": [
+                    {
+                        "max": 1.9636669754981995,
+                        "name": "update",
+                        "p50": 0.07912498712539673,
+                        "p95": 1.3080419898033142,
+                        "mean": 0.26164792557557426,
+                        "p99": 1.4741250276565552,
+                        "samples": 900
+                    },
+                    {
+                        "max": 37.41212499141693,
+                        "name": "extract",
+                        "p50": 11.063499987125397,
+                        "p95": 33.91383397579193,
+                        "mean": 14.846242081655395,
+                        "p99": 36.175165951251984,
+                        "samples": 900
+                    },
+                    {
+                        "max": 39.37579196691513,
+                        "name": "frame",
+                        "p50": 11.126083016395569,
+                        "p95": 34.82062500715256,
+                        "mean": 15.10789000723097,
+                        "p99": 37.54229199886322,
+                        "samples": 900
+                    }
+                ]
+            }
+        ]
+    },
+    "compilerRevisionNote": "Recorded after the final run. The two Nupp commits during this task change stage-zero/Windows launch scripts; compiler and relevant runtime sources match the starting 5cc5e12c checkout."
+}

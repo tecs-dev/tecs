@@ -16,11 +16,11 @@ and stderr for each run. Compiler identity, revision, dirty state, architecture
 and native artifact paths are recorded. Build and load time are outside the
 sample window. Do not run another benchmark or build alongside acceptance.
 
-| Workload | Warmup | Stage | p95 budget (ms) |
-| --- | ---: | --- | ---: |
-| 4,000 shapes | 120 | update / extract / combined CPU frame | 1 / 3 / 4 |
-| 1,000 bodies | 600 | commands + ECS / native batch / sync / update | 2 / 3 / 0.5 / 5 |
-| 4,000 bodies, stress | 600 | commands + ECS / native batch / sync / update | 8 / 20 / 1 / 25 |
+| Workload             | Warmup | Stage                                         | p95 budget (ms) |
+| -------------------- | -----: | --------------------------------------------- | --------------: |
+| 4,000 shapes         |    120 | update / extract / combined CPU frame         |       1 / 3 / 4 |
+| 1,000 bodies         |    600 | commands + ECS / native batch / sync / update | 2 / 3 / 0.5 / 5 |
+| 4,000 bodies, stress |    600 | commands + ECS / native batch / sync / update | 8 / 20 / 1 / 25 |
 
 The normal allocations reserve 4 ms for shape update/extraction and 5 ms for
 physics out of a 16.67 ms frame, leaving 7.67 ms for other game work and GPU/
@@ -55,3 +55,39 @@ Compare `simulate`, `extract`, `physics.step` and `physics.sync` as appropriate.
 Its `frame` includes a real presented window; Nupp's shapes `frame` includes
 only update and extraction. Physics solver versions and ECS/API boundaries
 also differ; the comparison measures the migration, not language speed alone.
+
+## Initial result, 2026-09-06 UTC
+
+[Recorded summaries](results/macos-arm64-2026-09-06.json) cover clean TECS
+`1d25f64f`, Nupp `53536175` (`0.0.3-dev`), and the historical release. All nine
+acceptance runs passed. Ranges below span the three separate repetitions;
+they are not pooled percentiles. All values are milliseconds.
+
+| Workload / stage                           |      Nupp p50 |      Nupp p95 | Historical p50 | Historical p95 |
+| ------------------------------------------ | ------------: | ------------: | -------------: | -------------: |
+| 4,000 shapes / extraction                  |   0.251–0.482 |   0.358–0.815 |          0.013 |    0.017–0.018 |
+| 4,000 shapes / combined CPU                |   0.280–0.586 |   0.494–0.969 |              — |              — |
+| 1,000 bodies / update (`simulate` in Teal) |   1.450–1.504 |   2.303–2.421 |    2.368–2.400 |    3.329–3.409 |
+| 4,000 bodies / update (`simulate` in Teal) | 15.776–15.935 | 19.525–19.711 |  13.671–13.741 |  14.792–15.073 |
+
+The scalar Nupp encoder, run against the same corrected shape fixture,
+measured 10.856–19.905 ms p50 and 33.914–42.906 ms p95. Reusable Nupp arrays,
+bulk instance writes and retaining draw order when its inputs are unchanged
+remove that bottleneck. Returned packet strings remain independent snapshots.
+The historical extractor is still substantially cheaper. Nupp also has more
+CPU overhead in the 4,000-body update; passing the budgets does not claim
+performance parity or a 60 Hz result for the stress case.
+
+Physics p95 in the final stress runs splits into 5.142–5.389 ms for commands
+plus ECS work, 14.748–14.793 ms for the native batch, and 0.291–0.326 ms for
+synchronization. These percentile ranges are not additive. A requested solver
+width of zero resolves to one worker on both implementations, and the runner
+now verifies the effective width and four native substeps.
+
+The historical build required temporary CMake/Ninja and its pinned Teal rocks,
+a runtime-shader-compiler build switch, and the pinned dependency library path.
+No historical engine or benchmark source was changed. The original shape
+window still pays presentation time, so its full frame is deliberately absent
+from the comparison. Both physics fixtures now share the spawn geometry,
+random-number consumption and wave timing; ECS representations, public call
+boundaries and compiler builds remain different.
