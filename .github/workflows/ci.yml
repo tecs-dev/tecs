@@ -101,8 +101,9 @@ jobs:
             - working-directory: tecs
               run: nupp build --target flatcolor
 
+    # Independent checkouts: start execution gates alongside the source tests.
+    # The workflow still requires every job; no artifacts flow between them.
     host:
-        needs: nupp
         runs-on: macos-15
         env:
             NUPP_REF: ccf08ab394ed227bf45fdf00cca8fd3940697671
@@ -175,7 +176,6 @@ jobs:
     # Windows is not here: no runner in this workflow stages a Nupp SDK for
     # MSVC yet, so `windows-x64` is configured and unproven.
     package:
-        needs: nupp
         strategy:
             fail-fast: false
             matrix:

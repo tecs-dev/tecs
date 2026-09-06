@@ -21,6 +21,11 @@ fn main() {
     // The SDK's cdylib exports the same C API and already ships in lib/.
     let linkage = if linux { "dylib" } else { "static" };
     println!("cargo:rustc-link-lib={linkage}=nupp");
+    if linux {
+        // dlopen now runs inside libnupp.so. DT_RUNPATH only covers direct
+        // dependencies; DT_RPATH also reaches services loaded by that SDK.
+        println!("cargo:rustc-link-arg=-Wl,--disable-new-dtags");
+    }
     // The static library carries a reference to the embedding library beside
     // it, so a binary that links cleanly still aborts at startup unless the
     // loader can find that. Recording a run path is what makes the binary
