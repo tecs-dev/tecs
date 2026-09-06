@@ -40,14 +40,14 @@ cannot read a licence out of a binary, because nothing can.
 
 151 packages at the revisions `Cargo.lock` pins. By licence expression:
 
-| Expression | Packages |
-| --- | --- |
-| MIT OR Apache-2.0, and its spellings | 90 |
-| MIT | 18 |
-| Zlib OR Apache-2.0 OR MIT | 12 |
-| MPL-2.0 | 12 |
-| Apache-2.0 | 9 |
-| Others: `MIT OR Apache-2.0 OR Zlib`, `BSD-2-Clause OR Apache-2.0 OR MIT`, `Zlib`, `ISC` | 10 |
+| Expression                                                                              | Packages |
+| --------------------------------------------------------------------------------------- | -------- |
+| MIT OR Apache-2.0, and its spellings                                                    | 90       |
+| MIT                                                                                     | 18       |
+| Zlib OR Apache-2.0 OR MIT                                                               | 12       |
+| MPL-2.0                                                                                 | 12       |
+| Apache-2.0                                                                              | 9        |
+| Others: `MIT OR Apache-2.0 OR Zlib`, `BSD-2-Clause OR Apache-2.0 OR MIT`, `Zlib`, `ISC` | 10       |
 
 Everything outside the MPL-2.0 row is permissive and asks only that its notice
 travel with a distribution, which `cargo-licenses.txt` and this file do.

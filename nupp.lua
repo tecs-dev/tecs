@@ -56,7 +56,7 @@ return {
     -- checker was never pointed at them, and the test runner's build cache
     -- kept serving artifacts compiled before the calls were wrong. `bench/nupp`
     -- is included for the same reason: the Teal tree checks `bench/` too.
-    include = {"src", "examples/nupp", "tests", "bench/nupp"},
+    include = { "src", "examples/nupp", "tests", "bench/nupp" },
 
     build = {
         outDir = "out/nupp",
@@ -136,25 +136,25 @@ return {
             host = {
                 kind = "component",
                 description = "Build the Tecs component for the Rust winit host",
-                entries = {"tecs.host"},
+                entries = { "tecs.host" },
                 exports = hostExports,
             },
             flatcolor = {
                 kind = "component",
                 description = "Build the animated flat-color Nupp example",
-                entries = {"tecs.host", "flatcolor"},
+                entries = { "tecs.host", "flatcolor" },
                 exports = flatcolorExports,
             },
             sprites = {
                 kind = "component",
                 description = "Build the camera and textured sprite Nupp example",
-                entries = {"tecs.host", "sprites"},
+                entries = { "tecs.host", "sprites" },
                 exports = spritesExports,
             },
             lighting = {
                 kind = "component",
                 description = "Build the deferred lighting, shadow and bloom Nupp example",
-                entries = {"tecs.host", "lighting"},
+                entries = { "tecs.host", "lighting" },
                 exports = lightingExports,
             },
             -- The component `cargo xtask test-package` runs against an
@@ -164,7 +164,7 @@ return {
             nativesmoke = {
                 kind = "component",
                 description = "Build the packaged native-service smoke component",
-                entries = {"tecs.host", "nativesmoke"},
+                entries = { "tecs.host", "nativesmoke" },
                 exports = nativesmokeExports,
             },
             -- The documentation site: the handwritten pages under `docs/`
@@ -177,7 +177,7 @@ return {
             -- render.
             docs = {
                 kind = "docs",
-                sources = {"src"},
+                sources = { "src" },
                 format = "site",
                 outDir = "out/docs",
                 title = "Tecs",
@@ -187,13 +187,13 @@ return {
                 logo = "images/logo.svg",
                 favicon = "images/favicon.svg",
                 public = "docs/public",
-                pages = {{glob = "docs/**.md"}},
+                pages = { { glob = "docs/**.md" } },
             },
         },
     },
 
     test = {
         build = "headless",
-        argv = {"nupp", "test-runner"},
+        argv = { "nupp", "test-runner" },
     },
 }

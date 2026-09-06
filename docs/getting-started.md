@@ -30,7 +30,7 @@ load failure in a host that built cleanly.
 
 ```bash
 cargo xtask check              # Type-check every Nupp source, strictly
-cargo xtask test               # Build and run the test suites
+cargo xtask test               # Build native services; require every test to pass
 cargo xtask run flatcolor      # Open a window and render the example
 cargo xtask run lighting -- --frames 120
 ```
@@ -43,8 +43,16 @@ opens a window and runs an empty world.
 graphical example usable as a smoke test. It needs at least two: the first
 completed frame renders, and the following turn observes the limit.
 
-`cargo xtask verify` runs the whole gate in the order that fails cheapest
-first, and is what to run before pushing.
+`cargo xtask test` builds the three native services, selects their exact Cargo
+artifact paths, and requires every discovered test to pass with zero skips.
+The JSON report is saved to `out/validation/nupp-tests.json`. Direct `nupp test`
+is still available for focused development where native libraries are optional.
+
+`cargo xtask verify` requires an embedding SDK. It runs strict checking,
+whole-tree formatting, the mandatory test gate, documentation checks, workspace
+Rust formatting/Clippy/tests, and five headless component smokes. Benchmarks
+and relocated release-package checks remain separate commands; `verify` does
+not claim performance or platform acceptance.
 
 ## A world without a host
 

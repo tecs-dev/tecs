@@ -277,19 +277,20 @@ the two formatters and reports where the compiler resolved.
 
 ```bash
 cargo xtask check              # Type-check every Nupp source, strictly
-cargo xtask test               # Build and run the test suites
+cargo xtask test               # Build native services; require every test to pass
 cargo xtask run flatcolor      # Open a window and render the example
 cargo xtask run lighting -- --frames 120
 cargo xtask bench shapes       # Run a benchmark from bench/nupp
 cargo xtask format             # Format every supported source language
 cargo xtask docs-check         # Validate the documentation site
-cargo xtask verify             # Every gate above, plus the Rust host
+cargo xtask verify             # Checks, tests, docs, Rust and headless smokes
 cargo xtask package --preset macos-arm64
 cargo xtask check-package
 ```
 
 `cargo xtask presets` lists the release matrix: macOS arm64, Linux x64 and
-Windows x64, each with a development preset and a release preset.
+Windows x64, each with a development preset and a release preset. Windows is
+experimental until its Nupp, host and relocated-package gates execute.
 
 ### Packaging
 

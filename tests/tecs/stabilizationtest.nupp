@@ -112,16 +112,33 @@ local function callOverHTTP(session: host.Session, name: string): {[string]: any
     return assert(response)
 end
 
-function suite.servesDebuggingWhileSuspendedAndReleasesItsPortOnShutdown(): nil
+function suite.servesDebuggingWhileSuspendedAndShutsDown(): nil
     withSession({mcpPort = 0, debug = true}, function(session: host.Session): nil
         host.setSuspended(session, true)
         const reply = callOverHTTP(session, "stats")
         test.assert(reply.isError ~= true)
-        const port = assert(session.app.debugServer).port
         host.shutdown(session)
         test.equal(session.app.debugServer, nil)
-        const replacement = assert(mcp.listen(port))
-        mcp.destroy(replacement)
+    end)
+end
+
+function suite.releasesAnUnusedListenerOnShutdown(): nil
+    -- With no accepted connection, port reuse tests listener cleanup without
+    -- TCP TIME_WAIT. Nupp closes by cancelling its native accept task, so the
+    -- descriptor is released when that task next runs, not synchronously.
+    withSession({mcpPort = 0}, function(session: host.Session): nil
+        const port = assert(session.app.debugServer).port
+        host.shutdown(session)
+        local replacement, reason = mcp.listen(port)
+        for _ = 1, 1000 do
+            if replacement ~= nil then
+                break
+            end
+            time.sleep(1)
+            replacement, reason = mcp.listen(port)
+        end
+        test.assert(replacement ~= nil, reason)
+        mcp.destroy(assert(replacement))
     end)
 end
 

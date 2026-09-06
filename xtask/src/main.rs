@@ -27,7 +27,7 @@ enum Task {
     Targets,
     /// Type-check every Nupp source under the manifest's include roots.
     Check,
-    /// Build and run the test suites.
+    /// Build native services and require all Nupp tests to pass without skips.
     Test,
     /// Build one configured target.
     Build {
@@ -58,7 +58,7 @@ enum Task {
     Format { paths: Vec<String> },
     /// Report sources that are not formatted.
     FormatCheck { paths: Vec<String> },
-    /// Check, format-check, test, and build everything, plus the Rust host.
+    /// Check, format, test, validate docs/Rust, and run headless smokes (SDK required).
     Verify,
     /// List the packaging presets and what each one produces.
     Presets,

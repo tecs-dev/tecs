@@ -18,6 +18,12 @@ jobs:
         runs-on: ${{ matrix.os }}
         steps:
             - uses: actions/checkout@v4
+            - if: runner.os == 'Linux'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y \
+                    libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev \
+                    libx11-dev libxcursor-dev libxi-dev libxrandr-dev
             - run: cargo fmt --all -- --check
             # `tecs-winit-host` is excluded from everything that builds it here.
             # Its build script links `libnupp.a` out of a Nupp embedding SDK,
@@ -44,7 +50,7 @@ jobs:
             # is still the only tag and predates both, so a released compiler
             # cannot check this tree or load a component it builds. Move this to
             # a tag once one carries them.
-            NUPP_REF: b13848d0a8b9d363b7f35f43a8a4c21674ff7025
+            NUPP_REF: 47fa30884900c174f64f9e6b2221ce5212349369
         steps:
             - uses: actions/checkout@v4
               with:
@@ -73,14 +79,22 @@ jobs:
               run: cargo xtask format-check
             - working-directory: tecs
               run: nupp check --strict
-            # The native service tests skip when their library is absent, so
-            # building them is what makes the three Nupp-to-Rust bindings
-            # covered rather than reported as skipped. The loader finds the
-            # Cargo target directory itself; nothing has to be staged.
+            - if: runner.os == 'Linux'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y \
+                    libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev \
+                    libx11-dev libxcursor-dev libxi-dev libxrandr-dev
+            # Build the native libraries, then require every suite and case to
+            # execute successfully. Missing bindings and offline-open failures
+            # cannot turn this integration gate green through skipped tests.
             - working-directory: tecs
-              run: cargo build -p tecs-audio -p tecs-physics -p tecs-gamepad
-            - working-directory: tecs
-              run: nupp test
+              run: cargo xtask test
+            - uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: nupp-tests-${{ matrix.os }}
+                  path: tecs/out/validation/nupp-tests.json
             - working-directory: tecs
               run: nupp build --target headless
             - working-directory: tecs
@@ -92,7 +106,7 @@ jobs:
         needs: nupp
         runs-on: macos-15
         env:
-            NUPP_REF: b13848d0a8b9d363b7f35f43a8a4c21674ff7025
+            NUPP_REF: 47fa30884900c174f64f9e6b2221ce5212349369
         steps:
             # Two checkouts side by side. The Nupp compiler release installed by
             # Homebrew ships no `libnupp.a`, so it cannot satisfy
@@ -169,7 +183,7 @@ jobs:
                       preset: linux-x64
         runs-on: ${{ matrix.os }}
         env:
-            NUPP_REF: b13848d0a8b9d363b7f35f43a8a4c21674ff7025
+            NUPP_REF: 47fa30884900c174f64f9e6b2221ce5212349369
         steps:
             - uses: actions/checkout@v4
               with:
@@ -225,7 +239,7 @@ jobs:
             pages: write
             id-token: write
         env:
-            NUPP_REF: b13848d0a8b9d363b7f35f43a8a4c21674ff7025
+            NUPP_REF: 47fa30884900c174f64f9e6b2221ce5212349369
         steps:
             - uses: actions/checkout@v4
               with:

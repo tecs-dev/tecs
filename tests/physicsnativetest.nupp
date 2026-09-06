@@ -1,0 +1,31 @@
+local ecs = require("tecs.ecs")
+local physics = require("tecs.physics")
+local test = require("nupp.test")
+
+local suite = {}
+
+function suite.stepsTheNativeSolverAndReleasesItAtShutdown(): nil
+    -- Resolve inside the case so a missing library is a reported failure.
+    local rapier = require("tecs.physics.rapier")
+    local world = ecs.newWorld()
+    physics.install(world, {simulation = rapier.create({gravityY = 9.81, workerCount = 1})})
+    local entity = world:spawn(ecs.Transform2D(64, 32))
+    physics.attach(world, entity)
+    world:update(1 / 60)
+    test.assert(physics.hasBody(world, entity))
+    physics.setVelocity(world, entity, 320, 0)
+    world:update(1 / 60)
+    local transform = assert(world:get(entity, ecs.Transform2D))
+    test.assert(transform.x > 64)
+    test.assert(transform.y > 32)
+    local vx, vy = physics.velocity(world, entity)
+    test.assert(math.abs(vx - 320) < 0.01)
+    test.assert(vy > 0)
+    physics.detach(world, entity)
+    world:update(1 / 60)
+    test.assert(not physics.hasBody(world, entity))
+    world:shutdown()
+    test.equal(physics.of(world), nil)
+end
+
+return suite

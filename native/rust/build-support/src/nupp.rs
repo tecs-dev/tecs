@@ -9,7 +9,7 @@
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 
@@ -134,9 +134,136 @@ pub fn format(root: &Path, verify: bool) -> Result<()> {
     nupp(root, ["fmt", if verify { "--check" } else { "--write" }])
 }
 
-/// Builds and runs the Nupp test suites.
+/// Builds all native services and requires every discovered Nupp test to pass.
+///
+/// The raw report is retained at `out/validation/nupp-tests.json`. Direct
+/// `nupp test` remains useful for focused development with optional bindings;
+/// this integration gate refuses skips and missing suite discovery.
 pub fn test(root: &Path) -> Result<()> {
-    nupp(root, ["test"])
+    let libraries = native_libraries(root)?;
+    let expected = std::fs::read_dir(root.join("tests"))?
+        .map(|entry| entry.map(|entry| entry.file_name().to_string_lossy().into_owned()))
+        .collect::<std::io::Result<Vec<_>>>()?
+        .into_iter()
+        .filter_map(|name| name.strip_suffix(".nupp").map(str::to_owned))
+        .filter(|name| name.ends_with("test"))
+        .collect::<BTreeSet<_>>();
+    let output = Command::new(compiler(root)?)
+        .args(["test", "--json"])
+        .envs(libraries)
+        .current_dir(root)
+        .stderr(Stdio::inherit())
+        .output()
+        .context("running the mandatory Nupp integration tests")?;
+    let directory = root.join("out/validation");
+    std::fs::create_dir_all(&directory)?;
+    let report = directory.join("nupp-tests.json");
+    std::fs::write(&report, &output.stdout)?;
+    let result = validate_test_report(&output.stdout, &expected);
+    if !output.status.success() {
+        anyhow::bail!(
+            "Nupp tests exited with {}; report: {}",
+            output.status,
+            report.display()
+        );
+    }
+    result.with_context(|| format!("mandatory test gate; report: {}", report.display()))?;
+    Ok(())
+}
+
+/// Uses Cargo's artifact paths so an alternate target directory cannot make
+/// the tests accidentally load a library left over in the checkout.
+fn native_libraries(root: &Path) -> Result<Vec<(&'static str, PathBuf)>> {
+    let output = Command::new("cargo")
+        .args([
+            "build",
+            "--locked",
+            "-p",
+            "tecs-audio",
+            "-p",
+            "tecs-gamepad",
+            "-p",
+            "tecs-physics",
+            "--message-format=json-render-diagnostics",
+        ])
+        .current_dir(root)
+        .stderr(Stdio::inherit())
+        .output()
+        .context("building native integration libraries")?;
+    if !output.status.success() {
+        anyhow::bail!("native service build exited with {}", output.status);
+    }
+    let artifacts = String::from_utf8(output.stdout)?
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let mut libraries = Vec::new();
+    for (name, variable) in [
+        ("tecsaudio", "TECS_AUDIO_LIBRARY"),
+        ("tecsgamepad", "TECS_GAMEPAD_LIBRARY"),
+        ("tecs_physics", "TECS_PHYSICS_LIBRARY"),
+    ] {
+        let path = artifacts
+            .iter()
+            .filter(|value| {
+                value["reason"] == "compiler-artifact" && value["target"]["name"] == name
+            })
+            .filter_map(|value| value["filenames"].as_array())
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .map(PathBuf::from)
+            .find(|path| {
+                path.extension()
+                    .is_some_and(|ext| ext == std::env::consts::DLL_EXTENSION)
+            })
+            .with_context(|| format!("Cargo produced no native library for {name}"))?;
+        libraries.push((variable, path));
+    }
+    Ok(libraries)
+}
+
+fn validate_test_report(bytes: &[u8], expected: &BTreeSet<String>) -> Result<()> {
+    let report: serde_json::Value =
+        serde_json::from_slice(bytes).context("test report is not JSON")?;
+    let tests = report["tests"]
+        .as_array()
+        .context("test report has no cases")?;
+    let mut discovered = BTreeSet::new();
+    let mut cases = BTreeSet::new();
+    for case in tests {
+        let suite = case["suite"].as_str().context("test case has no suite")?;
+        let name = case["name"].as_str().context("test case has no name")?;
+        discovered.insert(suite.to_owned());
+        anyhow::ensure!(
+            cases.insert((suite, name)),
+            "duplicate test case {suite}.{name}"
+        );
+        anyhow::ensure!(case["status"] == "passed", "test did not pass: {case}");
+    }
+    anyhow::ensure!(
+        !expected.is_empty() && !tests.is_empty(),
+        "no tests were discovered"
+    );
+    anyhow::ensure!(
+        &discovered == expected,
+        "suite discovery mismatch: missing {:?}; unexpected {:?}",
+        expected.difference(&discovered).collect::<Vec<_>>(),
+        discovered.difference(expected).collect::<Vec<_>>()
+    );
+    anyhow::ensure!(
+        report["ok"] == true
+            && report["total"].as_u64() == Some(tests.len() as u64)
+            && report["passed"].as_u64() == Some(tests.len() as u64)
+            && report["failed"] == 0
+            && report["skipped"] == 0,
+        "test summary does not report every discovered case as passed"
+    );
+    println!(
+        "{} tests passed in {} suites; zero skipped",
+        tests.len(),
+        discovered.len()
+    );
+    Ok(())
 }
 
 /// Builds one configured manifest target.
@@ -294,52 +421,78 @@ pub fn apply_sdk(command: &mut Command, root: &Path) {
     }
 }
 
-/// Checks, formats, tests, and builds the Rust host against a Nupp component.
+/// Runs strict checking, formatting, mandatory integration tests, documentation,
+/// workspace Rust checks, and five headless component smokes.
 ///
-/// This is what `cargo xtask test` runs before it is worth pushing: every gate
-/// in one command, in the order that fails cheapest first.
+/// An embedding SDK is required. Performance measurements and relocated
+/// release-package validation are separate commands with separate budgets.
 pub fn verify(root: &Path) -> Result<()> {
+    let sdk = sdk(root).filter(|path| path.join("libnupp.a").is_file()).context(
+        "verify requires a Nupp embedding SDK; set NUPP_SDK or stage one from a sibling Nupp checkout"
+    )?;
     check(root)?;
-    // The whole-tree format check rather than this module's `format`, because
-    // the manifest, the workflow and every page are part of the gate too, and
-    // a command called `verify` that checked one language would be the reason
-    // somebody stopped trusting it.
     crate::formatting::apply(root, &[], true)?;
     test(root)?;
     crate::docs::check(root)?;
-    for target in [DEFAULT_TARGET, DEFAULT_COMPONENT] {
-        build(root, target)?;
-    }
-    if sdk(root).is_none() {
-        println!(
-            "skipping the Rust host: no Nupp embedding SDK. Set NUPP_SDK, or \
-             check the Nupp compiler out beside this tree so its toolchain can \
-             stage one."
-        );
-        return Ok(());
-    }
+    build(root, DEFAULT_TARGET)?;
     for arguments in [
-        vec!["fmt", "-p", "tecs-winit-host", "--", "--check"],
+        vec!["fmt", "--all", "--", "--check"],
         vec![
             "clippy",
-            "-p",
-            "tecs-winit-host",
+            "--locked",
+            "--workspace",
             "--all-targets",
             "--",
             "-D",
             "warnings",
         ],
-        vec!["test", "-p", "tecs-winit-host"],
+        vec!["test", "--locked", "--workspace", "--all-targets"],
     ] {
-        let mut command = Command::new("cargo");
-        command.args(&arguments).current_dir(root);
-        apply_sdk(&mut command, root);
-        let status = command
+        let status = Command::new("cargo")
+            .args(&arguments)
+            .env("NUPP_SDK", &sdk)
+            .current_dir(root)
             .status()
-            .context("failed to start Cargo for the Tecs winit host")?;
+            .context("running workspace Rust validation")?;
         if !status.success() {
             anyhow::bail!("cargo {} exited with {status}", arguments[0]);
         }
+    }
+    let libraries = native_libraries(root)?;
+    for target in [
+        DEFAULT_COMPONENT,
+        "flatcolor",
+        "sprites",
+        "lighting",
+        "nativesmoke",
+    ] {
+        build(root, target)?;
+        let status = Command::new("cargo")
+            .args([
+                "run",
+                "--locked",
+                "-p",
+                "tecs-winit-host",
+                "--",
+                "--component",
+            ])
+            .arg(root.join(OUTPUT).join(format!("{target}.nuppc")))
+            .args([
+                "--entry",
+                &default_entry(target),
+                "--headless",
+                "--frames",
+                "5",
+            ])
+            .env("NUPP_SDK", &sdk)
+            .envs(libraries.iter().map(|(name, path)| (*name, path)))
+            .current_dir(root)
+            .status()
+            .with_context(|| format!("running the {target} component smoke"))?;
+        anyhow::ensure!(
+            status.success(),
+            "the {target} component smoke exited with {status}"
+        );
     }
     Ok(())
 }
@@ -363,4 +516,54 @@ fn which(program: &str) -> bool {
         return false;
     };
     std::env::split_paths(&paths).any(|directory| directory.join(program).is_file())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn report() -> serde_json::Value {
+        json!({"ok": true, "total": 1, "passed": 1, "failed": 0, "skipped": 0,
+            "tests": [{"suite": "audionativetest", "name": "opensOffline", "status": "passed"}]})
+    }
+
+    fn validate(report: serde_json::Value, suites: &[&str]) -> Result<()> {
+        validate_test_report(
+            &serde_json::to_vec(&report)?,
+            &suites.iter().map(|suite| (*suite).to_owned()).collect(),
+        )
+    }
+
+    #[test]
+    fn requires_discovery_and_consistent_pass_counts() {
+        assert!(validate(report(), &["audionativetest"]).is_ok());
+        assert!(validate(report(), &["audionativetest", "gamepadnativetest"]).is_err());
+        let mut wrong_total = report();
+        wrong_total["total"] = json!(2);
+        assert!(validate(wrong_total, &["audionativetest"]).is_err());
+        let mut empty = report();
+        empty["tests"] = json!([]);
+        assert!(validate(empty, &[]).is_err());
+    }
+
+    #[test]
+    fn refuses_skips_even_when_the_runner_reports_success() {
+        let mut skipped = report();
+        skipped["tests"][0]["status"] = json!("skipped");
+        skipped["tests"][0]["skip"] = json!({"reason": "native opener refused"});
+        skipped["passed"] = json!(0);
+        skipped["skipped"] = json!(1);
+        assert!(validate(skipped, &["audionativetest"]).is_err());
+    }
+
+    #[test]
+    fn refuses_duplicate_cases_and_invalid_reports() {
+        let mut duplicate = report();
+        duplicate["tests"] = json!([duplicate["tests"][0], duplicate["tests"][0]]);
+        duplicate["passed"] = json!(2);
+        duplicate["total"] = json!(2);
+        assert!(validate(duplicate, &["audionativetest"]).is_err());
+        assert!(validate_test_report(b"not JSON", &BTreeSet::new()).is_err());
+    }
 }
