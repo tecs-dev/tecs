@@ -1,0 +1,1801 @@
+module tecs.ui
+
+--[[
+Retained interfaces made from Tecs entities, with layout computed by Taffy.
+
+`Style` and `ChildOf` describe a tree. `Root` supplies its available size;
+`Paint(true)` stretches a drawing leaf to its computed box. Shapes, sprites and
+text draw through the ordinary graphics pipeline. Keep containers at unit
+scale and put stretched paint on leaves. Write component fields through
+`world:getMut` so layout and rendering observe the edit.
+
+```nupp
+tecs.ui.install(world, {width = 800, height = 450})
+const root = world:spawn(tecs.ui.Root(), tecs.ui.Style({padding = 16, gap = 12}))
+world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 120, height = 40}),
+    tecs.ui.Paint(true), tecs.gfx.Tint(0.3, 0.6, 1, 1), tecs.gfx.Renderable2D,
+    tecs.ui.Interaction())
+```
+
+Layout retains its native tree, measures intrinsic text and images without
+foreign callbacks, and returns changed boxes. Scrolling clips descendants;
+interaction supports pointer capture, dragging, focus scopes and activation.
+Screen roots follow `resize`, and `plugin(app)` connects window size and input.
+]]
+
+--- A logical length: pixels, a percent string, or "auto".
+export type Dimension = number | string
+
+--- Per-edge logical lengths; missing edges are automatic.
+export type Edges = {
+    left: Dimension?,
+    right: Dimension?,
+    top: Dimension?,
+    bottom: Dimension?
+}
+
+--- Taffy layout properties. Omitted values use Taffy's flex defaults.
+export type StyleOptions = {
+    display: ("flex" | "none" | "grid" | "block")?,
+    position: ("relative" | "absolute")?,
+    flexDirection: ("row" | "rowReverse" | "column" | "columnReverse")?,
+    flexWrap: ("nowrap" | "wrap")?,
+    justifyContent: ("start" | "center" | "end" | "spaceBetween" | "spaceAround" | "spaceEvenly")?,
+    alignItems: ("stretch" | "center" | "end" | "baseline")?,
+    alignContent: ("stretch" | "center" | "end" | "spaceBetween" | "spaceAround" | "spaceEvenly")?,
+    flexGrow: number?,
+    flexShrink: number?,
+    flexBasis: Dimension?,
+    width: Dimension?,
+    height: Dimension?,
+    minWidth: Dimension?,
+    minHeight: Dimension?,
+    maxWidth: Dimension?,
+    maxHeight: Dimension?,
+    margin: (Dimension | Edges)?,
+    padding: (Dimension | Edges)?,
+    border: (Dimension | Edges)?,
+    gap: Dimension?,
+    rowGap: Dimension?,
+    inset: (Dimension | Edges)?,
+    order: integer?
+}
+
+--- Marks a retained UI node. The persisted name is UiNode.
+export const Node = tecs.ecs.newTagComponent({name = "UiNode"})
+
+local record LayoutValue
+    --- Read-only. Reports the x value.
+    x: number
+
+    --- Read-only. Reports the y value.
+    y: number
+
+    --- Read-only. Reports the width value.
+    width: number
+
+    --- Read-only. Reports the height value.
+    height: number
+
+    --- Read-only. Reports the contentWidth value.
+    contentWidth: number
+
+    --- Read-only. Reports the contentHeight value.
+    contentHeight: number
+end
+
+--- The value stored by Layout.
+export type Layout = LayoutValue
+
+--- Constructor options for Layout.
+export type LayoutOptions = {
+    x: (number)?,
+    y: (number)?,
+    width: (number)?,
+    height: (number)?,
+    contentWidth: (number)?,
+    contentHeight: (number)?
+}
+
+--- Constructs Layout with its default values for omitted fields.
+export const Layout: tecs.ecs.TableComponent<LayoutValue> = tecs.ecs.newComponent({
+    name = "UiLayout",
+    transient = true,
+    construct = function(options: LayoutOptions?): LayoutValue
+        local values = options or {}
+        return new LayoutValue(
+            x = values.x ?? 0,
+            y = values.y ?? 0,
+            width = values.width ?? 0,
+            height = values.height ?? 0,
+            contentWidth = values.contentWidth ?? 0,
+            contentHeight = values.contentHeight ?? 0
+        )
+    end,
+    default = function(): LayoutValue
+        return new LayoutValue(x = 0, y = 0, width = 0, height = 0, contentWidth = 0, contentHeight = 0)
+    end,
+})
+
+local record StyleValue
+    --- Caller-writable. Sets the style value.
+    style: StyleOptions
+end
+
+--- The value stored by Style.
+export type Style = StyleValue
+
+--- Constructs Style with its default values for omitted fields.
+export const Style: tecs.ecs.TableComponent<StyleValue> = tecs.ecs.newComponent({
+    name = "UiStyle",
+    requires = {Node, Layout, tecs.gfx.Clip, tecs.ecs.Transform2D, tecs.ecs.RelativeTransform2D},
+    construct = function(style: StyleOptions?): StyleValue
+        return new StyleValue(style = style or {})
+    end,
+    default = function(): StyleValue
+        return new StyleValue(style = {})
+    end,
+})
+
+local record RootValue
+    --- Caller-writable. Sets the space value.
+    space: "screen" | "world"
+
+    --- Caller-writable. Sets the width value.
+    width: number
+
+    --- Caller-writable. Sets the height value.
+    height: number
+
+    --- Caller-writable. Sets the pixelDensity value.
+    pixelDensity: number
+
+    --- Caller-writable. Sets the sizing value.
+    sizing: "auto" | "manual" | "camera"
+end
+
+--- The value stored by Root.
+export type Root = RootValue
+
+--- Constructor options for Root.
+export type RootOptions = {
+    space: ("screen" | "world")?,
+    width: (number)?,
+    height: (number)?,
+    pixelDensity: (number)?,
+    sizing: ("auto" | "manual" | "camera")?
+}
+
+--- Constructs Root with its default values for omitted fields.
+export const Root: tecs.ecs.TableComponent<RootValue> = tecs.ecs.newComponent({
+    name = "UiRoot",
+    requires = {Style},
+    construct = function(options: RootOptions?): RootValue
+        local values = options or {}
+        return new RootValue(
+            space = values.space ?? "screen",
+            width = values.width ?? 0,
+            height = values.height ?? 0,
+            pixelDensity = values.pixelDensity ?? 1,
+            sizing = values.sizing ?? "auto"
+        )
+    end,
+    default = function(): RootValue
+        return new RootValue(space = "screen", width = 0, height = 0, pixelDensity = 1, sizing = "auto")
+    end,
+})
+
+local record PaintValue
+    --- Caller-writable. Sets the stretch value.
+    stretch: boolean
+end
+
+--- The value stored by Paint.
+export type Paint = PaintValue
+
+--- Constructs Paint with its default values for omitted fields.
+export const Paint: tecs.ecs.TableComponent<PaintValue> = tecs.ecs.newComponent({
+    name = "UiPaint",
+    construct = function(stretch: boolean?): PaintValue
+        return new PaintValue(stretch = stretch == true)
+    end,
+    default = function(): PaintValue
+        return new PaintValue(stretch = false)
+    end,
+})
+
+local record IntrinsicValue
+    --- Caller-writable. Sets the source value.
+    source: "custom" | "text" | "image"
+
+    --- Caller-writable. Sets the width value.
+    width: number
+
+    --- Caller-writable. Sets the height value.
+    height: number
+
+    --- Caller-writable. Sets the minWidth value.
+    minWidth: number
+
+    --- Caller-writable. Sets the scale value.
+    scale: number
+
+    --- Caller-writable. Sets the wrap value.
+    wrap: boolean
+end
+
+--- The value stored by Intrinsic.
+export type Intrinsic = IntrinsicValue
+
+--- Constructor options for Intrinsic.
+export type IntrinsicOptions = {
+    source: ("custom" | "text" | "image")?,
+    width: (number)?,
+    height: (number)?,
+    minWidth: (number)?,
+    scale: (number)?,
+    wrap: (boolean)?
+}
+
+--- Constructs Intrinsic with its default values for omitted fields.
+export const Intrinsic: tecs.ecs.TableComponent<IntrinsicValue> = tecs.ecs.newComponent({
+    name = "UiIntrinsic",
+    requires = {Style},
+    construct = function(options: IntrinsicOptions?): IntrinsicValue
+        local values = options or {}
+        return new IntrinsicValue(
+            source = values.source ?? "custom",
+            width = values.width ?? 0,
+            height = values.height ?? 0,
+            minWidth = values.minWidth ?? 0,
+            scale = values.scale ?? 1,
+            wrap = values.wrap ?? false
+        )
+    end,
+    default = function(): IntrinsicValue
+        return new IntrinsicValue(source = "custom", width = 0, height = 0, minWidth = 0, scale = 1, wrap = false)
+    end,
+})
+
+local record ScrollValue
+    --- Caller-writable. Sets the x value.
+    x: number
+
+    --- Caller-writable. Sets the y value.
+    y: number
+
+    --- Caller-writable. Sets the contentWidth value.
+    contentWidth: number
+
+    --- Caller-writable. Sets the contentHeight value.
+    contentHeight: number
+end
+
+--- The value stored by Scroll.
+export type Scroll = ScrollValue
+
+--- Constructor options for Scroll.
+export type ScrollOptions = {
+    x: (number)?,
+    y: (number)?,
+    contentWidth: (number)?,
+    contentHeight: (number)?
+}
+
+--- Constructs Scroll with its default values for omitted fields.
+export const Scroll: tecs.ecs.TableComponent<ScrollValue> = tecs.ecs.newComponent({
+    name = "UiScroll",
+    requires = {Style},
+    construct = function(options: ScrollOptions?): ScrollValue
+        local values = options or {}
+        return new ScrollValue(
+            x = values.x ?? 0,
+            y = values.y ?? 0,
+            contentWidth = values.contentWidth ?? 0,
+            contentHeight = values.contentHeight ?? 0
+        )
+    end,
+    default = function(): ScrollValue
+        return new ScrollValue(x = 0, y = 0, contentWidth = 0, contentHeight = 0)
+    end,
+})
+
+local record ScrollbarValue
+    --- Caller-writable. Sets the axis value.
+    axis: "horizontal" | "vertical"
+
+    --- Caller-writable. Sets the thickness value.
+    thickness: number
+
+    --- Caller-writable. Sets the inset value.
+    inset: number
+
+    --- Caller-writable. Sets the minLength value.
+    minLength: number
+end
+
+--- The value stored by Scrollbar.
+export type Scrollbar = ScrollbarValue
+
+--- Constructor options for Scrollbar.
+export type ScrollbarOptions = {
+    axis: ("horizontal" | "vertical")?,
+    thickness: (number)?,
+    inset: (number)?,
+    minLength: (number)?
+}
+
+local record InteractionStateValue
+    --- Read-only. Reports the hovered value.
+    hovered: boolean
+
+    --- Read-only. Reports the pressed value.
+    pressed: boolean
+
+    --- Read-only. Reports the focused value.
+    focused: boolean
+
+    --- Read-only. Reports the dragging value.
+    dragging: boolean
+end
+
+--- The value stored by InteractionState.
+export type InteractionState = InteractionStateValue
+
+--- Constructor options for InteractionState.
+export type InteractionStateOptions = {
+    hovered: (boolean)?,
+    pressed: (boolean)?,
+    focused: (boolean)?,
+    dragging: (boolean)?
+}
+
+--- Constructs InteractionState with its default values for omitted fields.
+export const InteractionState: tecs.ecs.TableComponent<InteractionStateValue> = tecs.ecs.newComponent({
+    name = "UiInteractionState",
+    transient = true,
+    construct = function(options: InteractionStateOptions?): InteractionStateValue
+        local values = options or {}
+        return new InteractionStateValue(
+            hovered = values.hovered ?? false,
+            pressed = values.pressed ?? false,
+            focused = values.focused ?? false,
+            dragging = values.dragging ?? false
+        )
+    end,
+    default = function(): InteractionStateValue
+        return new InteractionStateValue(hovered = false, pressed = false, focused = false, dragging = false)
+    end,
+})
+
+local record InteractionValue
+    --- Caller-writable. Sets the enabled value.
+    enabled: boolean
+
+    --- Caller-writable. Sets the focusable value.
+    focusable: boolean
+
+    --- Caller-writable. Sets the tabIndex value.
+    tabIndex: integer
+
+    --- Caller-writable. Sets the order value.
+    order: integer
+
+    --- Caller-writable. Sets the draggable value.
+    draggable: boolean
+end
+
+--- The value stored by Interaction.
+export type Interaction = InteractionValue
+
+--- Constructor options for Interaction.
+export type InteractionOptions = {
+    enabled: (boolean)?,
+    focusable: (boolean)?,
+    tabIndex: (integer)?,
+    order: (integer)?,
+    draggable: (boolean)?
+}
+
+--- Constructs Interaction with its default values for omitted fields.
+export const Interaction: tecs.ecs.TableComponent<InteractionValue> = tecs.ecs.newComponent({
+    name = "UiInteraction",
+    requires = {Style, InteractionState},
+    construct = function(options: InteractionOptions?): InteractionValue
+        local values = options or {}
+        return new InteractionValue(
+            enabled = values.enabled ?? true,
+            focusable = values.focusable ?? true,
+            tabIndex = values.tabIndex ?? 0,
+            order = values.order ?? 0,
+            draggable = values.draggable ?? false
+        )
+    end,
+    default = function(): InteractionValue
+        return new InteractionValue(enabled = true, focusable = true, tabIndex = 0, order = 0, draggable = false)
+    end,
+})
+
+--- Constructs Scrollbar with its default values for omitted fields.
+export const Scrollbar: tecs.ecs.TableComponent<ScrollbarValue> = tecs.ecs.newComponent({
+    name = "UiScrollbar",
+    requires = {Style, Paint, Interaction},
+    construct = function(options: ScrollbarOptions?): ScrollbarValue
+        local values = options or {}
+        return new ScrollbarValue(
+            axis = values.axis ?? "vertical",
+            thickness = values.thickness ?? 6,
+            inset = values.inset ?? 2,
+            minLength = values.minLength ?? 18
+        )
+    end,
+    default = function(): ScrollbarValue
+        return new ScrollbarValue(axis = "vertical", thickness = 6, inset = 2, minLength = 18)
+    end,
+})
+
+--- Marks a subtree that can own a modal focus scope.
+export const FocusScope = tecs.ecs.newTagComponent({name = "UiFocusScope"})
+
+--- A semantic interaction delivered first to its target, then its ancestors.
+export record EventValue
+    --- Read-only. Identifies the interaction.
+    kind: string
+
+    --- Read-only. Identifies the original target.
+    target: integer
+
+    --- Read-only. Identifies the current bubbling recipient.
+    currentTarget: integer
+
+    --- Read-only. Reports the pointer position in target pixels.
+    x: number
+
+    --- Read-only. Reports the pointer position in target pixels.
+    y: number
+
+    --- Read-only. Reports the pointer button.
+    button: integer
+
+    --- Read-only. Identifies the pointer, including a touch contact.
+    pointerId: string
+
+    --- Read-only. Identifies mouse, touch, or none.
+    pointerType: string
+
+    --- Read-only. Reports horizontal movement or wheel delta.
+    deltaX: number
+
+    --- Read-only. Reports vertical movement or wheel delta.
+    deltaY: number
+
+    --- Read-only. Identifies pointer, keyboard, controller, or programmatic input.
+    source: string
+
+    --- Caller-writable. Stops bubbling when true.
+    consumed: boolean
+end
+
+--- The semantic event payload.
+export type Event = EventValue
+
+--- Observes UI events at an entity address, or address zero after bubbling.
+export const Event = tecs.events.newEvent({
+    name = "tecs.ui.Event",
+    construct = function(value: EventValue): EventValue
+        return value
+    end
+})
+
+--- Settings for layout, clipping and interaction.
+export type Options = {
+    width: number?,
+    height: number?,
+    pixelDensity: number?,
+    firstClip: integer?,
+    lastClip: integer?,
+    layer: integer?,
+    wheelStep: number?,
+    dragThreshold: number?,
+    input: tecs.input.Input?,
+    inputLayer: tecs.input.Layer?
+}
+
+local record Hit
+    entity: integer
+    left: number
+    top: number
+    right: number
+    bottom: number
+    order: number
+end
+local record Pointer
+    id: string
+    kind: string
+    x: number
+    y: number
+    startX: number
+    startY: number
+    startScroll: number
+    hovered: integer
+    captured: integer
+    dragging: boolean
+end
+local record State
+    tree: voidptr
+    cameras: tecs.ecs.Query
+    nodes: tecs.ecs.Query
+    width: number
+    height: number
+    density: number
+    layer: integer
+    firstClip: integer
+    lastClip: integer
+    clipIds: {[integer]: integer}
+    clipKeys: {[string]: integer}
+    hidden: {[integer]: boolean}
+    clips: {[integer]: boolean}
+    membership: string
+    previous: string
+    focused: integer
+    scopes: {integer}
+    restore: {integer}
+    hits: {Hit}
+    pointers: {[string]: Pointer}
+    pending: {tecs.platform.events.Event}
+    wheelStep: number
+    dragThreshold: number
+    input: tecs.input.Input?
+    inputLayer: tecs.input.Layer?
+    updates: integer
+end
+local stateKey: tecs.data.Key<State> = tecs.data.newKey("tecs.ui.state", nil)
+
+local function parentOf(borrows world: tecs.ecs.World, entity: integer): integer
+    local link = world:get(entity, tecs.ecs.ChildOf)
+    return link and link.target or 0
+end
+
+local function contains(borrows world: tecs.ecs.World, ancestor: integer, entity: integer): boolean
+    local seen: {[integer]: boolean} = {}
+    while entity ~= 0 and not seen[entity] do
+        if entity == ancestor then
+            return true
+        end
+        seen[entity] = true
+        entity = parentOf(world, entity)
+    end
+
+    return false
+end
+
+local function emit(
+    exclusive world: tecs.ecs.World,
+    kind: string,
+    entity: integer,
+    pointer: Pointer?,
+    source: string?,
+    dx: number?,
+    dy: number?
+): nil
+    if entity == 0 then
+        return
+    end
+    local value = new EventValue(
+        kind = kind,
+        target = entity,
+        currentTarget = entity,
+        x = pointer and pointer.x or 0,
+        y = pointer and pointer.y or 0,
+        button = 1,
+        pointerId = pointer and pointer.id or "",
+        pointerType = pointer and pointer.kind or "none",
+        deltaX = dx or 0,
+        deltaY = dy or 0,
+        source = source or "pointer",
+        consumed = false
+    )
+    local seen: {[integer]: boolean} = {}
+    while entity ~= 0 and not seen[entity] do
+        seen[entity] = true
+        value.currentTarget = entity
+        world:emit(entity, Event(value))
+        if value.consumed then
+            return
+        end
+        entity = parentOf(world, entity)
+    end
+    value.currentTarget = 0
+    world:emit(0, Event(value))
+end
+
+local function inScope(borrows world: tecs.ecs.World, state: State, entity: integer): boolean
+    local scope = state.scopes[#state.scopes]
+    return scope == nil or contains(world, scope, entity)
+end
+
+--- Reveals a descendant by scrolling every ancestor viewport.
+--- @param world the installed world
+--- @param entity the descendant to reveal
+--- @param align nearest, start, center, or end; omitted means nearest
+--- @return whether an ancestor scrolled
+export function reveal(exclusive world: tecs.ecs.World, entity: integer, align: string?): boolean
+    local changed = false
+    local box = world:get(entity, Layout)
+    if box == nil then
+        return false
+    end
+    local x, y, width, height = box.x, box.y, box.width, box.height
+    local parent = parentOf(world, entity)
+    while parent ~= 0 do
+        local parentBox = world:get(parent, Layout)
+        if parentBox == nil then
+            break
+        end
+        local scroll = world:get(parent, Scroll)
+        if scroll then
+            local sx, sy = scroll.x, scroll.y
+            if align == "start" then
+                sx, sy = x, y
+            elseif align == "center" then
+                sx, sy = x + (width - parentBox.width) * 0.5, y + (height - parentBox.height) * 0.5
+            elseif align == "end" then
+                sx, sy = x + width - parentBox.width, y + height - parentBox.height
+            else
+                if x < sx then
+                    sx = x
+                elseif x + width > sx + parentBox.width then
+                    sx = x + width - parentBox.width
+                end
+                if y < sy then
+                    sy = y
+                elseif y + height > sy + parentBox.height then
+                    sy = y + height - parentBox.height
+                end
+            end
+            if sx ~= scroll.x or sy ~= scroll.y then
+                local value = assert(world:getMut(parent, Scroll));
+                value.x, value.y = sx, sy;
+                changed = true
+            end
+            x, y = x - sx, y - sy
+        end
+        x, y = x + parentBox.x, y + parentBox.y
+        parent = parentOf(world, parent)
+    end
+
+    return changed
+end
+
+--- Focuses an enabled, focusable entity in the active scope.
+--- @param world the installed world
+--- @param entity the requested entity
+--- @return whether focus moved
+export function focus(exclusive world: tecs.ecs.World, entity: integer): boolean
+    local state = world.resources[stateKey]
+    if state == nil then
+        return false
+    end
+    local value = world:get(entity, Interaction)
+    if value == nil or not value.enabled or not value.focusable or world:has(
+        entity,
+        tecs.ecs.Disabled
+    ) or state.hidden[entity] or not inScope(world, state, entity) then
+        return false
+    end
+    if state.focused == entity then
+        return false
+    end
+    if state.focused ~= 0 then
+        local old = world:getMut(state.focused, InteractionState)
+        if old then
+            old.focused = false
+        end
+        emit(world, "blur", state.focused, nil, "programmatic")
+    end
+    state.focused = entity
+    assert(world:getMut(entity, InteractionState)).focused = true
+    emit(world, "focus", entity, nil, "programmatic")
+    reveal(world, entity)
+
+    return true
+end
+
+--- Clears focus and reports whether an entity was focused.
+--- @param world the installed world
+--- @return whether focus changed
+export function blur(exclusive world: tecs.ecs.World): boolean
+    local state = world.resources[stateKey]
+    if state == nil or state.focused == 0 then
+        return false
+    end
+    local old = state.focused
+    state.focused = 0
+    local value = world:getMut(old, InteractionState)
+    if value then
+        value.focused = false
+    end
+    emit(world, "blur", old, nil, "programmatic")
+
+    return true
+end
+
+--- Returns the focused entity, or zero.
+--- @param world the installed world
+--- @return the focused entity
+export function focused(borrows world: tecs.ecs.World): integer
+    local state = world.resources[stateKey]
+    return state and state.focused or 0
+end
+
+--- Restricts focus and hit testing to a subtree until popped.
+--- @param world the installed world
+--- @param entity an entity carrying FocusScope
+--- @return whether the scope was pushed
+export function pushFocusScope(exclusive world: tecs.ecs.World, entity: integer): boolean
+    local state = world.resources[stateKey]
+    if state == nil or not world:has(entity, FocusScope) then
+        return false
+    end
+    state.restore[#state.restore + 1] = state.focused
+    state.scopes[#state.scopes + 1] = entity
+    blur(world)
+
+    return true
+end
+
+--- Pops the top scope and restores its previous focus when still valid.
+--- @param world the installed world
+--- @param entity the expected scope, or nil
+--- @return whether a scope was popped
+export function popFocusScope(exclusive world: tecs.ecs.World, entity: integer?): boolean
+    local state = world.resources[stateKey]
+    if state == nil or #state.scopes == 0 then
+        return false
+    end
+    if entity ~= nil and state.scopes[#state.scopes] ~= entity then
+        return false
+    end
+    local restore = state.restore[#state.restore]
+    state.restore[#state.restore] = nil
+    state.scopes[#state.scopes] = nil
+    blur(world)
+    if restore and restore ~= 0 then
+        focus(world, restore)
+    end
+
+    return true
+end
+
+local type Measure = {
+    kind: integer,
+    width: number,
+    height: number,
+    minWidth: number,
+    measuredWidth: number,
+    measuredHeight: number
+}
+local type NodeDescription = {
+    id: integer,
+    style: StyleOptions,
+    children: {integer},
+    measure: Measure?,
+    root: boolean,
+    width: number,
+    height: number
+}
+local function measure(borrows world: tecs.ecs.World, entity: integer): Measure?
+    local intrinsic = world:get(entity, Intrinsic)
+    if intrinsic == nil then
+        return nil
+    end
+    if intrinsic.scale < 0 then
+        error("ui: intrinsic scale cannot be negative", 2)
+    end
+    local width, height, minimum = intrinsic.width, intrinsic.height, intrinsic.minWidth
+    local measuredWidth, measuredHeight = width, height
+    local kind: integer = 1
+    if intrinsic.source == "text" then
+        local item = assert(world:get(entity, tecs.gfx.Text), "ui: text intrinsic needs Text")
+        width, height, minimum = tecs.gfx.text.measureIntrinsic(item)
+        measuredWidth = item.wrapWidth > 0 and item.wrapWidth or width
+        local ignored: number
+        ignored, measuredHeight = tecs.gfx.text.measureText(item)
+        kind = 3
+    elseif intrinsic.source == "image" then
+        local sprite = assert(world:get(entity, tecs.gfx.Sprite), "ui: image intrinsic needs Sprite")
+        local imageWidth, imageHeight = tecs.gfx.images.sizeOf(sprite.image)
+        width, height = imageWidth * math.abs(sprite.u1 - sprite.u0), imageHeight * math.abs(sprite.v1 - sprite.v0)
+        measuredWidth, measuredHeight, minimum = width, height, width
+        kind = 2
+    end
+    local scale = intrinsic.scale
+
+    return {
+        kind = kind,
+        width = width * scale,
+        height = height * scale,
+        minWidth = (minimum > 0 and minimum or width) * scale,
+        measuredWidth = measuredWidth * scale,
+        measuredHeight = measuredHeight * scale
+    }
+end
+
+local function collect(borrows world: tecs.ecs.World, state: State): {integer}
+    local ids: {integer} = {}
+    for candidate, count in state.nodes:iter() do
+        for row = 1, count as integer do
+            ids[#ids + 1] = assert(candidate).entities[row]
+        end
+    end
+    table.sort(ids)
+
+    return ids
+end
+
+local function layout(exclusive world: tecs.ecs.World, state: State, ids: {integer}): nil
+    local membership = table.concat(ids, ",")
+    if state.previous ~= "" and membership == state.membership and not tecs.internal.world.anyDirty(world, {
+        Style,
+        Root,
+        Intrinsic,
+        tecs.gfx.Text,
+        tecs.gfx.Sprite,
+        tecs.ecs.ChildOf,
+        tecs.gfx.Camera2D,
+        tecs.gfx.ActiveCamera
+    }) then
+        return
+    end
+    state.membership = membership
+    local orders: {[integer]: integer} = {}
+    for _, entity in ipairs(ids) do
+        orders[entity] = assert(world:get(entity, Style)).style.order or 0
+    end
+    local function sortChildren(a: integer, b: integer): boolean
+        local av, bv = orders[a], orders[b]
+        return av < bv or (av == bv and a < b)
+    end
+
+    local live: {[integer]: boolean} = {}
+    for _, entity in ipairs(ids) do
+        live[entity] = true
+    end
+    for pass = 1, 4 do
+        local batch: {NodeDescription} = nupp.data.json.asArray({})
+        for _, entity in ipairs(ids) do
+            local style = assert(world:get(entity, Style))
+            local children: {integer} = {}
+            for _, child in ipairs(world:relationshipSources(tecs.ecs.ChildOf, entity)) do
+                if live[child] then
+                    children[#children + 1] = child
+                end
+            end
+            table.sort(children, sortChildren)
+            local root = world:get(entity, Root)
+            local width, height = 0.0, 0.0
+            if root then
+                width, height = root.width, root.height
+                if root.space == "screen" and root.sizing == "auto" then
+                    width, height = state.width, state.height
+                end
+                if root.sizing == "camera" then
+                    local selected = tecs.internal.cameraselection.pick(state.cameras)
+                    local zoom = selected and selected.zoom or 1
+                    width, height = state.width * state.density / zoom, state.height * state.density / zoom
+                end
+            end
+            local chosenStyle = style.style
+            if world:has(entity, Scrollbar) then
+                chosenStyle = {position = "absolute", width = 0, height = 0}
+            end
+            batch[
+                #batch + 1
+            ] = {
+                id = entity,
+                style = chosenStyle,
+                children = children,
+                measure = measure(world, entity),
+                root = root ~= nil,
+                width = width,
+                height = height
+            }
+        end
+        local source = nupp.data.json.encode(batch)
+        if source == state.previous then
+            return
+        end
+        local result = nupp.data.json.decode(tecs.internal.uinative.sync(state.tree, source))
+        state.previous = source
+        state.updates = state.updates + 1
+        for _, box in ipairs(result) do
+            local entity = box.id as integer
+            local value = world:getMut(entity, Layout)
+            if value then
+                value.x, value.y = box.x as number, box.y as number
+                value.width, value.height = box.width as number, box.height as number
+                value.contentWidth, value.contentHeight = box.contentWidth as number, box.contentHeight as number
+            end
+        end
+        local changed = false
+        for _, entity in ipairs(ids) do
+            local intrinsic = world:get(entity, Intrinsic)
+            if intrinsic and intrinsic.source == "text" and intrinsic.wrap and intrinsic.scale > 0 then
+                local box = assert(world:get(entity, Layout))
+                local item = world:get(entity, tecs.gfx.Text)
+                local width = box.width / intrinsic.scale
+                if item then
+                    local natural = tecs.gfx.text.measureIntrinsic(item)
+                    -- Taffy rounds boxes to whole logical pixels. Do not wrap
+                    -- the last word solely because that rounded its natural width down.
+                    if math.abs(width - natural) < 1 then
+                        width = natural
+                    end
+                end
+                if item and math.abs(item.wrapWidth - width) > 0.01 then
+                    assert(world:getMut(entity, tecs.gfx.Text)).wrapWidth = width
+                    changed = true
+                end
+            end
+        end
+        if not changed then
+            return
+        end
+    end
+end
+
+local function apply(exclusive world: tecs.ecs.World, state: State, ids: {integer}): nil
+    local done: {[integer]: boolean} = {}
+    local visiting: {[integer]: boolean} = {}
+    local applyOne: function(exclusive running: tecs.ecs.World, entity: integer): nil
+    applyOne = function(exclusive running: tecs.ecs.World, entity: integer): nil
+        if done[entity] then
+            return
+        end
+        if visiting[entity] then
+            error("ui: ChildOf contains a cycle", 2)
+        end
+        visiting[entity] = true
+        local box = running:get(entity, Layout)
+        if box == nil then
+            return
+        end
+        local parent = parentOf(running, entity)
+        if parent ~= 0 then
+            applyOne(running, parent)
+        end
+        local root = running:get(entity, Root)
+        local paint = running:get(entity, Paint)
+        local current = assert(running:get(entity, tecs.ecs.Transform2D))
+        local x, y = box.x, box.y
+        local scroll = parent ~= 0 and running:get(parent, Scroll) or nil
+        if scroll and not running:has(entity, Scrollbar) then
+            x, y = x - scroll.x, y - scroll.y
+        end
+        if paint and paint.stretch then
+            x, y = x + box.width * 0.5, y + box.height * 0.5
+        end
+        local relative = assert(running:get(entity, tecs.ecs.RelativeTransform2D))
+        local sx, sy = relative.scaleX, relative.scaleY
+        if paint and paint.stretch then
+            sx, sy = box.width, box.height
+        end
+        if relative.x ~= x or relative.y ~= y or relative.scaleX ~= sx or relative.scaleY ~= sy then
+            relative = assert(running:getMut(entity, tecs.ecs.RelativeTransform2D))
+            relative.x, relative.y, relative.scaleX, relative.scaleY = x, y, sx, sy
+        end
+        local layer = current.layer
+        local rotation = current.rotation
+        local z = current.z
+        local parentPose = parent ~= 0 and running:get(parent, tecs.ecs.Transform2D) or nil
+        if parentPose then
+            local c, s = math.cos(parentPose.rotation), math.sin(parentPose.rotation)
+            x, y = parentPose.x
+                + x
+                * parentPose.scaleX
+                * c
+                - y
+                * parentPose.scaleY
+                * s, parentPose.y
+                + x
+                * parentPose.scaleX
+                * s
+                + y
+                * parentPose.scaleY
+                * c
+            sx, sy = sx * parentPose.scaleX, sy * parentPose.scaleY
+            rotation, layer, z = parentPose.rotation + relative.rotation, parentPose.layer, parentPose.z + relative.z
+        elseif root then
+            x, y, sx, sy = current.x, current.y, current.scaleX, current.scaleY
+            if root.space == "screen" then
+                layer = state.layer
+                sx, sy = root.sizing == "auto"
+                    and state.density
+                    or root.pixelDensity, root.sizing == "auto"
+                    and state.density
+                    or root.pixelDensity
+            end
+            if root.sizing == "camera" then
+                local camera = tecs.internal.cameraselection.pick(state.cameras)
+                if camera then
+                    local c, s = math.cos(camera.rotation), math.sin(camera.rotation)
+                    x, y = camera.x
+                        - box.width
+                        * 0.5
+                        * c
+                        + box.height
+                        * 0.5
+                        * s, camera.y
+                        - box.width
+                        * 0.5
+                        * s
+                        - box.height
+                        * 0.5
+                        * c
+                    rotation = camera.rotation
+                end
+            end
+        end
+        if current.x ~= x
+            or current.y ~= y
+            or current.scaleX ~= sx
+            or current.scaleY ~= sy
+            or current.rotation ~= rotation
+            or current.layer ~= layer
+            or current.z ~= z
+        then
+            local changed = assert(running:getMut(entity, tecs.ecs.Transform2D))
+            changed.x, changed.y, changed.scaleX, changed.scaleY = x, y, sx, sy
+            changed.rotation, changed.layer, changed.z = rotation, layer, z
+        end
+        local ownScroll = running:get(entity, Scroll)
+        if ownScroll then
+            local cx, cy = math.max(box.width, box.contentWidth), math.max(box.height, box.contentHeight)
+            local ox, oy = math.max(
+                0,
+                math.min(ownScroll.x, cx - box.width)
+            ), math.max(0, math.min(ownScroll.y, cy - box.height))
+            if ownScroll.x ~= ox
+                or ownScroll.y ~= oy
+                or ownScroll.contentWidth ~= cx
+                or ownScroll.contentHeight ~= cy
+            then
+                local changed = assert(running:getMut(entity, Scroll))
+                changed.x, changed.y, changed.contentWidth, changed.contentHeight = ox, oy, cx, cy
+            end
+        end
+        visiting[entity] = nil
+        done[entity] = true
+    end
+    for _, entity in ipairs(ids) do
+        applyOne(world, entity)
+    end
+end
+
+local function viewport(borrows world: tecs.ecs.World, entity: integer): integer
+    local parent = parentOf(world, entity)
+    while parent ~= 0 do
+        if world:has(parent, Scroll) then
+            return parent
+        end;
+        parent = parentOf(world, parent)
+    end
+
+    return 0
+end
+
+local function scrollbars(exclusive world: tecs.ecs.World, ids: {integer}): nil
+    for _, entity in ipairs(ids) do
+        local thumb = world:get(entity, Scrollbar)
+        if thumb then
+            local parent = viewport(world, entity)
+            local area = world:get(parent, Layout)
+            local scroll = world:get(parent, Scroll)
+            if area and scroll then
+                local horizontal = thumb.axis == "horizontal"
+                local extent = horizontal and area.width or area.height
+                local content = horizontal and scroll.contentWidth or scroll.contentHeight
+                local track = math.max(0, extent - thumb.inset * 2)
+                local size = content > 0 and math.min(
+                    track,
+                    math.max(thumb.minLength, track * extent / content)
+                ) or track
+                local offset = content > extent and (
+                    horizontal and scroll.x or scroll.y
+                ) / (content - extent) * (track - size) or 0
+                local x = horizontal and thumb.inset + offset or area.width - thumb.thickness - thumb.inset
+                local y = horizontal and area.height - thumb.thickness - thumb.inset or thumb.inset + offset
+                local width, height = horizontal and size or thumb.thickness, horizontal and thumb.thickness or size
+                local layout = assert(world:get(entity, Layout))
+                if layout.x ~= x or layout.y ~= y or layout.width ~= width or layout.height ~= height then
+                    layout = assert(world:getMut(entity, Layout));
+                    layout.x, layout.y, layout.width, layout.height = x, y, width, height
+                end
+                local paint = assert(world:get(entity, Paint))
+                if not paint.stretch then
+                    assert(world:getMut(entity, Paint)).stretch = true
+                end
+            end
+        end
+    end
+end
+
+local function bounds(borrows world: tecs.ecs.World, state: State, entity: integer): Hit?
+    local box = world:get(entity, Layout)
+    local pose = world:get(entity, tecs.ecs.Transform2D)
+    if box == nil or pose == nil then
+        return nil
+    end
+    local paint = world:get(entity, Paint)
+    local width, height = box.width * pose.scaleX, box.height * pose.scaleY
+    local x0, y0 = 0.0, 0.0
+    if paint and paint.stretch then
+        width, height = pose.scaleX, pose.scaleY;
+        x0, y0 = -width * 0.5, -height * 0.5
+    end
+    local camera = tecs.internal.cameraselection.pick(state.cameras)
+    local cx, cy, zoom, rotation = state.width * state.density * 0.5, state.height * state.density * 0.5, 1.0, 0.0
+    if camera then
+        cx, cy, zoom, rotation = camera.x, camera.y, camera.zoom, camera.rotation
+    end
+    local left, top, right, bottom = math.huge, math.huge, -math.huge, -math.huge
+    local c, s = math.cos(pose.rotation), math.sin(pose.rotation)
+    for _, corner in ipairs({{x0, y0}, {x0 + width, y0}, {x0, y0 + height}, {x0 + width, y0 + height}}) do
+        local x, y = pose.x + corner[1] * c - corner[2] * s, pose.y + corner[1] * s + corner[2] * c
+        x, y = tecs.gfx.layers.place(
+            pose.layer,
+            x,
+            y,
+            cx,
+            cy,
+            zoom,
+            rotation,
+            state.width * state.density,
+            state.height * state.density
+        )
+        left, top, right, bottom = math.min(left, x), math.min(top, y), math.max(right, x), math.max(bottom, y)
+    end
+
+    return new Hit(entity = entity, left = left, top = top, right = right, bottom = bottom, order = pose.z)
+end
+
+local function geometry(exclusive world: tecs.ecs.World, state: State, ids: {integer}): nil
+    local used: {[string]: boolean} = {}
+    local assigned: {[integer]: integer} = {}
+    state.hits = {}
+    for _, entity in ipairs(ids) do
+        local hit = bounds(world, state, entity)
+        if hit then
+            local clip: Hit? = nil
+            local clipKey = ""
+            local hidden = false
+            local ownStyle = world:get(entity, Style)
+            hidden = ownStyle ~= nil and ownStyle.style.display == "none"
+            local parent = parentOf(world, entity)
+            while parent ~= 0 do
+                local parentStyle = world:get(parent, Style)
+                if parentStyle and parentStyle.style.display == "none" then
+                    hidden = true
+                end
+                if world:has(parent, Scroll) then
+                    clipKey = clipKey .. ":" .. tostring(parent)
+                    local region = bounds(world, state, parent)
+                    if region then
+                        if clip == nil then
+                            clip = region
+                        else
+                            clip.left, clip.top = math.max(clip.left, region.left), math.max(clip.top, region.top)
+                            clip.right, clip.bottom = math.min(
+                                clip.right,
+                                region.right
+                            ), math.min(clip.bottom, region.bottom)
+                        end
+                    end
+                end
+                parent = parentOf(world, parent)
+            end
+            if hidden and not world:has(entity, tecs.ecs.Disabled) then
+                world:set(entity, tecs.ecs.Disabled);
+                state.hidden[entity] = true
+            elseif not hidden and state.hidden[entity] then
+                world:remove(entity, tecs.ecs.Disabled);
+                state.hidden[entity] = nil
+            end
+            local index: integer = 0
+            if clip then
+                index = state.clipKeys[clipKey] or 0
+                if index == 0 then
+                    for candidate = state.firstClip, state.lastClip do
+                        if not state.clips[candidate] then
+                            index = candidate;
+                            state.clips[index] = true;
+                            break
+                        end
+                    end
+                    if index == 0 then
+                        error("ui: clip region range is exhausted", 2)
+                    end
+                    state.clipKeys[clipKey] = index
+                end
+                used[clipKey] = true
+                assigned[entity] = index
+                local width, height = math.max(0, clip.right - clip.left), math.max(0, clip.bottom - clip.top)
+                local a, b, c, d = tecs.gfx.clips.regionOf(index)
+                if a ~= clip.left or b ~= clip.top or c ~= clip.left + width or d ~= clip.top + height then
+                    tecs.gfx.clips.setRegion(index, {x = clip.left, y = clip.top, width = width, height = height})
+                end
+                hit.left, hit.top = math.max(hit.left, clip.left), math.max(hit.top, clip.top)
+                hit.right, hit.bottom = math.min(hit.right, clip.right), math.min(hit.bottom, clip.bottom)
+            end
+            local component = world:get(entity, tecs.gfx.Clip)
+            if component and component.index ~= index then
+                assert(world:getMut(entity, tecs.gfx.Clip)).index = index
+            end
+            local interaction = world:get(entity, Interaction)
+            local style = world:get(entity, Style)
+            if not hidden and interaction and interaction.enabled and (
+                style == nil or style.style.display ~= "none"
+            ) and inScope(world, state, entity) then
+                hit.order = interaction.order * 1000000 + hit.order
+                state.hits[#state.hits + 1] = hit
+            elseif not hidden and inScope(world, state, entity) and world:has(entity, Scroll) then
+                state.hits[#state.hits + 1] = hit
+            end
+        end
+    end
+    state.clipIds = assigned
+    for clipKey, index in pairs(state.clipKeys) do
+        if not used[clipKey] then
+            tecs.gfx.clips.clearRegion(index);
+            state.clipKeys[clipKey] = nil;
+            state.clips[index] = nil
+        end
+    end
+    table.sort(state.hits, function(a: Hit, b: Hit): boolean
+        return a.order > b.order or (a.order == b.order and a.entity > b.entity)
+    end)
+end
+
+local function hitAt(borrows world: tecs.ecs.World, state: State, x: number, y: number): integer
+    for _, hit in ipairs(state.hits) do
+        if x >= hit.left and y >= hit.top and x < hit.right and y < hit.bottom and world:has(
+            hit.entity,
+            Interaction
+        ) then
+            return hit.entity
+        end
+    end
+
+    return 0
+end
+
+local function pointerFor(state: State, id: string, kind: string): Pointer
+    local p = state.pointers[id]
+    if p then
+        return p
+    end
+    p = new Pointer(
+        id = id,
+        kind = kind,
+        x = 0,
+        y = 0,
+        startX = 0,
+        startY = 0,
+        startScroll = 0,
+        hovered = 0,
+        captured = 0,
+        dragging = false
+    )
+    state.pointers[id] = p
+
+    return p
+end
+
+local function pointerEvent(
+    exclusive world: tecs.ecs.World,
+    state: State,
+    p: Pointer,
+    kind: string,
+    x: number,
+    y: number
+): nil
+    local dx, dy = x - p.x, y - p.y
+    p.x, p.y = x, y
+    local hit = hitAt(world, state, x, y)
+    if p.hovered ~= hit then
+        local previous = world:getMut(p.hovered, InteractionState)
+        if previous then
+            previous.hovered = false
+        end
+        emit(world, "pointerLeave", p.hovered, p)
+        p.hovered = hit
+        local current = world:getMut(hit, InteractionState)
+        if current then
+            current.hovered = true
+        end
+        emit(world, "pointerEnter", hit, p)
+    end
+    if kind == "down" then
+        p.captured, p.startX, p.startY = hit, x, y
+        local scrollbar = world:get(hit, Scrollbar)
+        if scrollbar then
+            local scroll = world:get(viewport(world, hit), Scroll)
+            if scroll then
+                p.startScroll = scrollbar.axis == "horizontal" and scroll.x or scroll.y
+            end
+        end
+        local current = world:getMut(hit, InteractionState)
+        if current then
+            current.pressed = true
+        end
+        focus(world, hit)
+        emit(world, "pointerDown", hit, p)
+    elseif kind == "move" then
+        local captured = world:get(p.captured, Interaction)
+        if captured and (
+            captured.draggable or world:has(p.captured, Scrollbar)
+        ) and not p.dragging and (x - p.startX) ^ 2 + (y - p.startY) ^ 2 >= state.dragThreshold ^ 2 then
+            p.dragging = true
+            assert(world:getMut(p.captured, InteractionState)).dragging = true
+            emit(world, "dragStart", p.captured, p)
+        end
+        local scrollbar = world:get(p.captured, Scrollbar)
+        if scrollbar then
+            local parent = viewport(world, p.captured)
+            local scroll = world:get(parent, Scroll)
+            local area = world:get(parent, Layout)
+            local thumb = world:get(p.captured, Layout)
+            if scroll and area and thumb then
+                local horizontal = scrollbar.axis == "horizontal"
+                local extent = horizontal and area.width or area.height
+                local content = horizontal and scroll.contentWidth or scroll.contentHeight
+                local track = extent - scrollbar.inset * 2 - (horizontal and thumb.width or thumb.height)
+                if track > 0 then
+                    local delta = (horizontal and x - p.startX or y - p.startY) / state.density
+                    local offset = p.startScroll + delta / track * (content - extent)
+                    local changed = assert(world:getMut(parent, Scroll))
+                    if horizontal then
+                        changed.x = offset
+                    else
+                        changed.y = offset
+                    end
+                end
+            end
+        end
+        emit(world, p.dragging and "dragMove" or "pointerMove", p.captured ~= 0 and p.captured or hit, p, nil, dx, dy)
+    elseif kind == "up" or kind == "cancel" then
+        local captured = p.captured
+        local current = world:getMut(captured, InteractionState)
+        if current then
+            current.pressed, current.dragging = false, false
+        end
+        emit(world, "pointerUp", captured, p)
+        if p.dragging then
+            emit(world, kind == "cancel" and "dragCancel" or "dragEnd", captured, p)
+        elseif kind == "up" and captured == hit then
+            emit(world, "click", captured, p);
+            emit(world, "activate", captured, p)
+        end
+        p.captured, p.dragging = 0, false
+    end
+end
+
+local function navigate(exclusive world: tecs.ecs.World, state: State, backwards: boolean): nil
+    local order: {[integer]: integer} = {}
+    local candidates: {integer} = {}
+    for _, hit in ipairs(state.hits) do
+        local value = world:get(hit.entity, Interaction)
+        if value and value.focusable and value.tabIndex >= 0 and inScope(world, state, hit.entity) then
+            candidates[#candidates + 1] = hit.entity;
+            order[hit.entity] = value.tabIndex
+        end
+    end
+    table.sort(candidates, function(a: integer, b: integer): boolean
+        local av, bv = order[a], order[b]
+        return av < bv or (av == bv and a < b)
+    end)
+    if #candidates == 0 then
+        return
+    end
+    local index = backwards and 1 or 0
+    for i, entity in ipairs(candidates) do
+        if entity == state.focused then
+            index = i;
+            break
+        end
+    end
+    index = (index - 1 + (backwards and -1 or 1)) % #candidates + 1
+    focus(world, candidates[index])
+end
+
+local function inputs(exclusive world: tecs.ecs.World, state: State): nil
+    local input = state.input
+    if input and not input:canRead(state.inputLayer) then
+        for _, p in pairs(state.pointers) do
+            pointerEvent(world, state, p, "cancel", p.x, p.y)
+        end
+        state.pending = {}
+        return
+    end
+    for _, event in ipairs(state.pending) do
+        if event is tecs.platform.events.PointerMoveEvent then
+            pointerEvent(
+                world,
+                state,
+                pointerFor(state, "mouse", "mouse"),
+                "move",
+                event.x * state.density,
+                event.y * state.density
+            )
+        elseif event is tecs.platform.events.PointerButtonEvent then
+            if event.button == 1 then
+                pointerEvent(
+                    world,
+                    state,
+                    pointerFor(state, "mouse", "mouse"),
+                    event.down and "down" or "up",
+                    event.x * state.density,
+                    event.y * state.density
+                )
+            end
+        elseif event is tecs.platform.events.TouchEvent then
+            local kind = event.kind == "fingerDown" and "down" or (
+                event.kind == "fingerUp" and "up" or (event.kind == "fingerCanceled" and "cancel" or "move")
+            )
+            pointerEvent(
+                world,
+                state,
+                pointerFor(state, tostring(event.touchDevice) .. ":" .. tostring(event.finger), "touch"),
+                kind,
+                event.x * state.density,
+                event.y * state.density
+            )
+            if kind == "up" or kind == "cancel" then
+                local id = tostring(event.touchDevice) .. ":" .. tostring(event.finger)
+                local pointer = state.pointers[id]
+                if pointer and pointer.hovered ~= 0 then
+                    local hovered = world:getMut(pointer.hovered, InteractionState)
+                    if hovered then
+                        hovered.hovered = false
+                    end
+                    emit(world, "pointerLeave", pointer.hovered, pointer)
+                end
+                state.pointers[id] = nil
+            end
+        elseif event is tecs.platform.events.WheelEvent then
+            for _, hit in ipairs(state.hits) do
+                if event.x
+                    * state.density >= hit.left
+                    and event.y
+                    * state.density >= hit.top
+                    and event.x
+                    * state.density < hit.right
+                    and event.y
+                    * state.density < hit.bottom
+                then
+                    local entity = hit.entity
+                    while entity ~= 0 and not world:has(entity, Scroll) do
+                        entity = parentOf(world, entity)
+                    end
+                    if entity ~= 0 then
+                        local scroll = assert(world:getMut(entity, Scroll))
+                        scroll.x = scroll.x - event.wheelX * state.wheelStep
+                        scroll.y = scroll.y - event.wheelY * state.wheelStep
+                        emit(
+                            world,
+                            "wheel",
+                            entity,
+                            pointerFor(state, "mouse", "mouse"),
+                            nil,
+                            event.wheelX,
+                            event.wheelY
+                        )
+                        break
+                    end
+                end
+            end
+        elseif event is tecs.platform.events.KeyEvent then
+            if event.down then
+                if event.physicalKey == "Tab" then
+                    navigate(
+                        world,
+                        state,
+                        input ~= nil and (
+                            input:keyDown(
+                                "ShiftLeft",
+                                state.inputLayer
+                            ) or input:keyDown("ShiftRight", state.inputLayer)
+                        )
+                    )
+                elseif event.physicalKey == "Enter" or event.physicalKey == "Space" then
+                    emit(world, "activate", state.focused, nil, "keyboard")
+                end
+            end
+        elseif event is tecs.platform.events.GamepadButtonEvent then
+            if event.down then
+                if event.button == 1 then
+                    emit(world, "activate", state.focused, nil, "controller")
+                elseif event.button == 13 or event.button == 15 then
+                    navigate(world, state, false)
+                elseif event.button == 12 or event.button == 14 then
+                    navigate(world, state, true)
+                end
+            end
+        elseif event is tecs.platform.events.FocusEvent and not event.focused then
+            for _, p in pairs(state.pointers) do
+                pointerEvent(world, state, p, "cancel", p.x, p.y)
+            end
+        end
+    end
+    state.pending = {}
+end
+
+--- Updates the logical viewport used by automatic screen roots.
+--- @param world the installed world
+--- @param width the logical viewport width
+--- @param height the logical viewport height
+--- @param density the target pixels per logical point
+export function resize(exclusive world: tecs.ecs.World, width: number, height: number, density: number?): nil
+    local state = assert(world.resources[stateKey], "ui is not installed")
+    assert(width > 0 and height > 0 and (density or 1) > 0, "ui viewport must be positive")
+    state.width, state.height, state.density = width, height, density or 1
+    state.previous = ""
+end
+
+--- Runs layout, geometry and pending interaction for the current world state.
+--- @param world the installed world
+export function update(exclusive world: tecs.ecs.World): nil
+    local state = assert(world.resources[stateKey], "ui is not installed")
+    local ids = collect(world, state)
+    for entity in pairs(state.hidden) do
+        if not world:isAlive(entity) then
+            state.hidden[entity] = nil
+        end
+    end
+    layout(world, state, ids)
+    scrollbars(world, ids)
+    apply(world, state, ids)
+    geometry(world, state, ids)
+    while #state.scopes > 0 and not world:isAlive(state.scopes[#state.scopes]) do
+        popFocusScope(world)
+    end
+    if state.focused ~= 0 then
+        local focusValue = world:get(state.focused, Interaction)
+        if focusValue == nil or not focusValue.enabled or state.hidden[
+            state.focused
+        ] or world:has(state.focused, tecs.ecs.Disabled) or not inScope(world, state, state.focused) then
+            blur(world)
+        end
+    end
+    for _, pointer in pairs(state.pointers) do
+        if pointer.captured ~= 0 then
+            local target = world:get(pointer.captured, Interaction)
+            if target == nil or not target.enabled or state.hidden[
+                pointer.captured
+            ] or world:has(pointer.captured, tecs.ecs.Disabled) or not inScope(world, state, pointer.captured) then
+                pointerEvent(world, state, pointer, "cancel", pointer.x, pointer.y)
+            end
+        end
+    end
+    inputs(world, state)
+    apply(world, state, ids)
+    scrollbars(world, ids)
+    apply(world, state, ids)
+    geometry(world, state, ids)
+    world:commit()
+    tecs.gfx.text.refresh(world)
+    for _, entity in ipairs(ids) do
+        local clip = world:get(entity, tecs.gfx.Clip)
+        if clip and world:has(entity, tecs.gfx.Text) then
+            for _, glyph in ipairs(tecs.gfx.text.glyphsOf(world, entity)) do
+                local value = world:get(glyph, tecs.gfx.Clip)
+                if value == nil or value.index ~= clip.index then
+                    world:set(glyph, tecs.gfx.Clip(clip.index))
+                end
+            end
+        end
+    end
+end
+
+--- Installs retained layout and observes platform events; repeated installation is
+--- harmless.
+--- @param world the world to install into
+--- @param options viewport, clip allocation and input settings
+export function install(exclusive world: tecs.ecs.World, options: Options?): nil
+    if world.resources[stateKey] then
+        return
+    end
+    local values = options or {}
+    assert(
+        (values.width or 800) > 0 and (values.height or 450) > 0 and (values.pixelDensity or 1) > 0,
+        "ui viewport must be positive"
+    )
+    assert(
+        (
+            values.firstClip or 1
+        ) >= 1 and (values.lastClip or 255) <= 255 and (values.firstClip or 1) <= (values.lastClip or 255),
+        "invalid UI clip range"
+    )
+    assert((values.dragThreshold or 4) >= 0 and (values.wheelStep or 40) >= 0, "invalid UI interaction settings")
+    local state = new State(
+        tree = tecs.internal.uinative.create(),
+        cameras = world:newQuery({
+            include = {tecs.gfx.Camera2D, tecs.gfx.ActiveCamera}
+        }),
+        nodes = world:newQuery({
+            include = {Node, Style, Layout}
+        }),
+        width = values.width or 800,
+        height = values.height or 450,
+        density = values.pixelDensity or 1,
+        layer = values.layer or 16,
+        firstClip = values.firstClip or 1,
+        lastClip = values.lastClip or 255,
+        clipIds = {},
+        clipKeys = {},
+        hidden = {},
+        clips = {},
+        membership = "",
+        previous = "",
+        focused = 0,
+        scopes = {},
+        restore = {},
+        hits = {},
+        pointers = {},
+        pending = {},
+        wheelStep = values.wheelStep or 40,
+        dragThreshold = values.dragThreshold or 4,
+        input = values.input,
+        inputLayer = values.inputLayer,
+        updates = 0
+    )
+    world.resources[stateKey] = state
+    assert(
+        state.firstClip >= 1 and state.lastClip <= 255 and state.firstClip <= state.lastClip,
+        "invalid UI clip range"
+    )
+    tecs.gfx.layers.configure(state.layer, {sort = "z", screenSpace = true, unlit = true, overlay = true})
+    local function receive(event: tecs.platform.events.Event, exclusive _world: tecs.ecs.World): nil
+        state.pending[#state.pending + 1] = event
+    end
+
+    world:observe(0, tecs.platform.events.on.mouseMotion, function(
+        event: tecs.platform.events.PointerMoveEvent,
+        exclusive running: tecs.ecs.World
+    ): nil
+        receive(event, running)
+    end)
+    world:observe(0, tecs.platform.events.on.mouseDown, function(
+        event: tecs.platform.events.PointerButtonEvent,
+        exclusive running: tecs.ecs.World
+    ): nil
+        receive(event, running)
+    end)
+    world:observe(0, tecs.platform.events.on.mouseUp, function(
+        event: tecs.platform.events.PointerButtonEvent,
+        exclusive running: tecs.ecs.World
+    ): nil
+        receive(event, running)
+    end)
+    world:observe(0, tecs.platform.events.on.mouseWheel, function(
+        event: tecs.platform.events.WheelEvent,
+        exclusive running: tecs.ecs.World
+    ): nil
+        receive(event, running)
+    end)
+    world:observe(0, tecs.platform.events.on.fingerDown, function(
+        event: tecs.platform.events.TouchEvent,
+        exclusive running: tecs.ecs.World
+    ): nil
+        receive(event, running)
+    end)
+    world:observe(0, tecs.platform.events.on.fingerMotion, function(
+        event: tecs.platform.events.TouchEvent,
+        exclusive running: tecs.ecs.World
+    ): nil
+        receive(event, running)
+    end)
+    world:observe(0, tecs.platform.events.on.fingerUp, function(
+        event: tecs.platform.events.TouchEvent,
+        exclusive running: tecs.ecs.World
+    ): nil
+        receive(event, running)
+    end)
+    world:observe(0, tecs.platform.events.on.fingerCanceled, function(
+        event: tecs.platform.events.TouchEvent,
+        exclusive running: tecs.ecs.World
+    ): nil
+        receive(event, running)
+    end)
+    world:observe(0, tecs.platform.events.on.keyDown, function(
+        event: tecs.platform.events.KeyEvent,
+        exclusive running: tecs.ecs.World
+    ): nil
+        receive(event, running)
+    end)
+    world:observe(0, tecs.platform.events.on.gamepadButtonDown, function(
+        event: tecs.platform.events.GamepadButtonEvent,
+        exclusive running: tecs.ecs.World
+    ): nil
+        receive(event, running)
+    end)
+    world:observe(0, tecs.platform.events.on.windowFocusLost, function(
+        event: tecs.platform.events.FocusEvent,
+        exclusive running: tecs.ecs.World
+    ): nil
+        receive(event, running)
+    end)
+    world:observe(0, tecs.platform.events.on.windowResized, function(
+        event: tecs.platform.events.ResizeEvent,
+        exclusive running: tecs.ecs.World
+    ): nil
+        if event.width > 0 and event.height > 0 then
+            resize(running, event.width, event.height, event.scaleFactor)
+        end
+    end)
+    world:observe(0, tecs.platform.events.on.windowScaleChanged, function(
+        event: tecs.platform.events.ResizeEvent,
+        exclusive running: tecs.ecs.World
+    ): nil
+        if event.width > 0 and event.height > 0 then
+            resize(running, event.width, event.height, event.scaleFactor)
+        end
+    end)
+    world:addSnapshotHandler({
+        name = "tecs.ui",
+        save = function(exclusive _world: tecs.ecs.World): any
+            return true
+        end,
+        load = function(exclusive _world: tecs.ecs.World, _value: any): nil
+            tecs.internal.uinative.destroy(state.tree)
+            state.tree = tecs.internal.uinative.create()
+            state.previous = "";
+            state.focused = 0;
+            state.scopes = {};
+            state.restore = {};
+            state.pointers = {};
+            state.pending = {}
+        end
+    })
+    world:addSystem({
+        name = "tecs.UiLayout",
+        phase = tecs.ecs.phases.RenderFirst,
+        commitAfter = true,
+        run = function(_dt: number, exclusive running: tecs.ecs.World): nil
+            update(running)
+        end
+    })
+    world:addSystem({
+        name = "tecs.UiShutdown",
+        phase = tecs.ecs.phases.Shutdown,
+        run = function(_dt: number, exclusive running: tecs.ecs.World): nil
+            if running.resources[stateKey] ~= state then
+                return
+            end
+            tecs.internal.uinative.destroy(state.tree)
+            for index in pairs(state.clips) do
+                tecs.gfx.clips.clearRegion(index)
+            end
+            running.resources[stateKey] = nil
+        end
+    })
+end
+
+--- Installs UI using the application's viewport and input.
+--- @param app the application whose world hosts the UI
+--- @param options optional layout and interaction settings
+export function plugin(exclusive app: tecs.application.Application, options: Options?): nil
+    local width, height = app.window:getSize()
+    local values = options or {}
+    values.width, values.height, values.input = width, height, app.input
+    values.pixelDensity = app.window:scaleFactor()
+    install(app.world, values)
+end
+
+--- Reports native synchronization calls, useful for checking idle layout work.
+--- @param world the installed world
+--- @return the synchronization count
+export function layouts(borrows world: tecs.ecs.World): integer
+    local state = world.resources[stateKey]
+    return state and state.updates or 0
+end

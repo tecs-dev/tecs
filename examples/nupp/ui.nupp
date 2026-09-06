@@ -1,0 +1,132 @@
+module ui
+
+--[[A retained Taffy interface. Resize the window, scroll or drag the thumb,
+then click a row or navigate with Tab and Enter. Run with `nupp task ui`.
+]]
+
+local function label(
+    exclusive world: tecs.ecs.World,
+    parent: integer,
+    font: tecs.gfx.fonts.Font,
+    value: string,
+    size: number
+): integer
+    return world:spawn(
+        tecs.ecs.ChildOf(parent),
+        tecs.ui.Style({
+            flexShrink = 0
+        }),
+        tecs.ui.Intrinsic({
+            source = "text",
+            wrap = true
+        }),
+        tecs.gfx.Text(value, font, size),
+        tecs.gfx.Tint(0.9, 0.94, 1, 1)
+    )
+end
+
+local function background(exclusive world: tecs.ecs.World, parent: integer, r: number, g: number, b: number): integer
+    return world:spawn(
+        tecs.ecs.ChildOf(parent),
+        tecs.ui.Style({
+            position = "absolute",
+            width = "100%",
+            height = "100%",
+            inset = 0
+        }),
+        tecs.ui.Paint(true),
+        tecs.gfx.Tint(r, g, b, 1),
+        tecs.gfx.Renderable2D
+    )
+end
+
+local function install(exclusive app: tecs.application.Application): nil
+    tecs.ui.plugin(app)
+    tecs.gfx.text.install(app.world)
+    local bytes = assert(nupp.io.files.read(tecs.files.assetPath("fonts/JetBrainsMono-ExtraBold.ttf")))
+    local font = assert(tecs.gfx.fonts.newTTF({bytes = bytes, name = "example/ui/mono", size = 32}))
+    local root = app.world:spawn(
+        tecs.ui.Root(),
+        tecs.ui.Style({
+            width = "100%",
+            height = "100%",
+            padding = 32,
+            gap = 16,
+            flexDirection = "column"
+        })
+    )
+    background(app.world, root, 0.045, 0.065, 0.11)
+    label(app.world, root, font, "TECS / RETAINED UI", 28)
+    label(app.world, root, font, "Taffy layout. Tecs entities. Nupp game code.", 16)
+    local status = label(app.world, root, font, "Click a row, or use Tab and Enter.", 16)
+    local list = app.world:spawn(
+        tecs.ecs.ChildOf(root),
+        tecs.ui.Style({
+            width = "100%",
+            flexGrow = 1,
+            minHeight = 0,
+            flexDirection = "column",
+            gap = 8,
+            padding = {right = 22}
+        }),
+        tecs.ui.Scroll()
+    )
+    for index = 1, 24 do
+        local button = app.world:spawn(
+            tecs.ecs.ChildOf(list),
+            tecs.ui.Style({
+                width = "100%",
+                height = 48,
+                flexShrink = 0,
+                padding = 12
+            }),
+            tecs.ui.Interaction()
+        )
+        local panel = background(app.world, button, 0.1, 0.16, 0.24)
+        label(app.world, button, font, ("%02d  Explore this world"):format(index), 16)
+        local row = index
+        app.world:observe(button, tecs.ui.Event, function(event: tecs.ui.Event, exclusive world: tecs.ecs.World): nil
+            if event.kind == "activate" then
+                assert(world:getMut(status, tecs.gfx.Text)).text = "Selected row " .. row
+            elseif event.kind == "pointerEnter" or event.kind == "focus" then
+                world:set(panel, tecs.gfx.Tint(0.15, 0.32, 0.48, 1))
+            elseif event.kind == "pointerLeave" or event.kind == "blur" then
+                world:set(panel, tecs.gfx.Tint(0.1, 0.16, 0.24, 1))
+            end
+        end)
+    end
+    app.world:spawn(
+        tecs.ecs.ChildOf(list),
+        tecs.ui.Scrollbar({
+            thickness = 8
+        }),
+        tecs.gfx.Tint(0.2, 0.75, 0.85, 1),
+        tecs.gfx.Renderable2D
+    )
+    label(app.world, root, font, "Resize the window / scroll / drag the cyan thumb", 14)
+    print("ui: retained Taffy layout and interaction ready")
+end
+
+--- Creates the retained UI demonstration session.
+--- @param title the window title
+--- @param width the initial logical width
+--- @param height the initial logical height
+--- @param debug whether guarded failures can be cleared
+--- @param maxFrames an optional frame limit
+--- @return the host session
+export function create(
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?
+): tecs.host.Session
+    return tecs.host.createWithPlugin(
+        install,
+        title or "Tecs UI | Taffy layout",
+        width or 860,
+        height or 680,
+        debug,
+        maxFrames
+    )
+end

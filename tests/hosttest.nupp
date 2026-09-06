@@ -114,7 +114,7 @@ function suite.exposesOneBatchedRenderPacketAfterACompletedFrame(): nil
     test.equal(host.iterate(session, 0), "continue")
     local reader = nupp.io.newScalarReader(host.renderPacket(session))
     test.equal(reader:readUint32(), 0x54454353)
-    test.equal(reader:readUint32(), 4)
+    test.equal(reader:readUint32(), 5)
     test.equal(reader:readUint32(), 128)
     test.equal(reader:readUint32(), 0)
     -- The graph revision and the section's byte length, neither of which this

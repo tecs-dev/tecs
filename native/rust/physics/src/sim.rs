@@ -132,6 +132,10 @@ fn public_joint(handle: ImpulseJointHandle) -> TecsPhysicsHandle {
 
 fn collider_builder(def: &TecsPhysicsColliderDef) -> ColliderBuilder {
     let shape = match def.shape {
+        SHAPE_SEGMENT => ColliderBuilder::segment(
+            Vector::new(-def.half_width, -def.half_height),
+            Vector::new(def.half_width, def.half_height),
+        ),
         SHAPE_CIRCLE => ColliderBuilder::ball(def.radius),
         SHAPE_CAPSULE => ColliderBuilder::capsule_y(def.length * 0.5, def.radius),
         _ => ColliderBuilder::cuboid(def.half_width, def.half_height),

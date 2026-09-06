@@ -1,0 +1,76 @@
+module tiled
+
+--[[An editable TMX map with TSX animation, Rapier boundaries and a moving camera.
+Run with `nupp task tiled`. Arrow keys pan; Space toggles a wall tile.
+]]
+
+local function install(exclusive app: tecs.application.Application): nil
+    local map = tecs.tiled.load(tecs.files.assetPath("maps/demo.tmx"))
+    tecs.physics.install(app.world, {gravityY = 180})
+    tecs.tiled.spawn(app.world, map, {collision = true})
+    local camera = app.world:spawn(tecs.gfx.Camera2D(512, 320, 1.5), tecs.gfx.ActiveCamera)
+    for index = 1, 8 do
+        local ball = app.world:spawn(
+            tecs.ecs.Transform2D(180 + index * 22, 80 + index * 8, 5, 1, 0, 20, 20),
+            tecs.gfx.Tint(1, 0.72, 0.28, 1),
+            tecs.gfx.Material(tecs.gpu.materials.id("circle")),
+            tecs.gfx.Renderable2D
+        )
+        tecs.physics.attach(app.world, ball, {radius = 10, restitution = 0.75})
+    end
+    local input = app.input
+    local wall = true
+    app.world:addSystem({
+        name = "example.tiled.controls",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number, exclusive world: tecs.ecs.World): nil
+            local dx, dy = 0, 0
+            if input:keyDown("ArrowLeft") then
+                dx = dx - 1
+            end
+            if input:keyDown("ArrowRight") then
+                dx = dx + 1
+            end
+            if input:keyDown("ArrowUp") then
+                dy = dy - 1
+            end
+            if input:keyDown("ArrowDown") then
+                dy = dy + 1
+            end
+            if dx ~= 0 or dy ~= 0 then
+                local eye = assert(world:getMut(camera, tecs.gfx.Camera2D));
+                eye.x = eye.x + dx * dt * 250;
+                eye.y = eye.y + dy * dt * 250
+            end
+            if input:keyPressed("Space") then
+                wall = not wall;
+                tecs.tiled.setTile(map, 1, 10, 15, {tileset = 1, id = wall and 1 or 4})
+            end
+        end
+    })
+    print("tiled: TMX, TSX, sprites, animation and collision ready")
+end
+
+--- Creates the Tiled demonstration session.
+--- @param title the window title
+--- @param width the initial logical width
+--- @param height the initial logical height
+--- @param debug whether guarded failures can be cleared
+--- @param maxFrames an optional frame limit
+--- @return the host session
+export function create(
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?
+): tecs.host.Session
+    return tecs.host.createWithPlugin(
+        install,
+        title or "Tecs Tiled | Arrows: pan, Space: edit wall",
+        width or 1100,
+        height or 720,
+        debug,
+        maxFrames
+    )
+end

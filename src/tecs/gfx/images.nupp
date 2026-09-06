@@ -367,3 +367,18 @@ export function complete(image: integer, serial: integer, ok: boolean, reason: s
         entry.reason = nil
     end
 end
+
+--- Decodes a PNG or JPEG file and queues its RGBA pixels for upload.
+--- @param path the image file path
+--- @param name the stable image name; omitted uses the file path
+--- @return the image id, whose dimensions are immediately available
+--- @raises when the file cannot be decoded
+export function load(path: string, name: string?): integer
+    -- Keep image decoding optional for an ECS-only or raw-upload application.
+    local native = require(
+        "tecs.internal.assetnative"
+    ) as {load: function(path: string, kind: integer): (string, integer, integer)}
+    local pixels, width, height = native.load(path, 1)
+
+    return upload({name = name or path, width = width, height = height, pixels = pixels})
+end

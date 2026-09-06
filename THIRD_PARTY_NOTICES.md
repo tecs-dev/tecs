@@ -25,7 +25,7 @@ before packaging will accept them.
 ## What ships
 
 An installed package contains the host executable, the Nupp runtime library,
-three native service libraries, a shader pack and the game components. The
+five native service libraries, a shader pack and the game components. The
 inventory beside this file is generated rather than written:
 
 - `cargo-dependencies.txt` names every Rust package in the built graph,
@@ -72,13 +72,14 @@ for its copyright notice to travel with a distribution, so packaging copies the
 Nupp distribution's own notices to `share/tecs/notices` rather than restating
 them here, where they would go stale against the compiler this tree pins.
 
-## In this repository but not in a package
+## Bundled font
 
 ### JetBrains Mono
 
 `assets/fonts/JetBrainsMono-ExtraBold.ttf` is JetBrains Mono, under the SIL
-Open Font License 1.1. The tests read it. It is not installed by a package
-today; a package that starts shipping a font has to carry the OFL text with it.
+Open Font License 1.1. The tests and retained UI example read it. Packages ship it under
+`share/tecs/assets/fonts` with `JetBrainsMono-OFL.txt` and the versioned
+`JetBrainsMono-NOTICE.md`.
 
 ## Scope of the checks
 

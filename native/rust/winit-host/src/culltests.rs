@@ -82,6 +82,7 @@ pub struct TestInstance {
     /// Bit 1 marks an occluder and bit 2 a drop-shadow caster.
     pub cast: u32,
     pub cast_height: f32,
+    pub clip: Option<[u32; 4]>,
 }
 
 impl TestInstance {
@@ -97,6 +98,7 @@ impl TestInstance {
             param: 0.25,
             cast: 0,
             cast_height: 0.0,
+            clip: None,
         }
     }
 
@@ -130,6 +132,11 @@ impl TestInstance {
         words[7] = self.cast_height.to_bits();
         words[16] = self.material;
         words[17] = self.lane | self.cast;
+        if let Some([left, top, right, bottom]) = self.clip {
+            words[17] |= 8;
+            words[18] = left | (top << 16);
+            words[19] = right | (bottom << 16);
+        }
         let mut bytes = [0_u8; INSTANCE_STRIDE];
         for (index, word) in words.iter().enumerate() {
             bytes[index * 4..index * 4 + 4].copy_from_slice(&word.to_ne_bytes());

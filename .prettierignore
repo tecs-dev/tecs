@@ -5,3 +5,6 @@
 out/
 build/
 assets/fonts/
+# Tiled TSX is XML, not TypeScript with JSX.
+assets/maps/**/*.tsx
+tests/fixtures/tiled/**/*.tsx

@@ -94,6 +94,8 @@ const SERVICES: &[(&str, &str)] = &[
     ("tecs-audio", "tecsaudio"),
     ("tecs-gamepad", "tecsgamepad"),
     ("tecs-physics", "tecs_physics"),
+    ("tecs-ui", "tecs_ui"),
+    ("tecs-assets", "tecs_assets"),
 ];
 
 /// The Cargo package that produces the host executable.
@@ -293,7 +295,12 @@ pub fn install(root: &Path, preset: Preset, components: &[String]) -> Result<Pat
          stage one.",
     )?;
     let selected: Vec<String> = if components.is_empty() {
-        vec![SHOWCASE.to_owned(), SMOKE.to_owned()]
+        vec![
+            SHOWCASE.to_owned(),
+            SMOKE.to_owned(),
+            "tiled".to_owned(),
+            "ui".to_owned(),
+        ]
     } else {
         components.to_vec()
     };
@@ -349,6 +356,12 @@ pub fn install(root: &Path, preset: Preset, components: &[String]) -> Result<Pat
         copy_file(&root.join(notice), &prefix.join("share/tecs").join(notice))?;
     }
     copy_runtime_notices(&sdk, &prefix)?;
+    for directory in ["maps", "fonts"] {
+        copy_tree(
+            &root.join("assets").join(directory),
+            &prefix.join("share/tecs/assets").join(directory),
+        )?;
+    }
 
     if preset.platform() == Platform::Macos {
         relocate_install_names(&libraries)?;
@@ -483,6 +496,35 @@ pub fn test(root: &Path, preset: Preset) -> Result<()> {
             scratch.path(),
         )?;
         println!("the relocated install ran {SHOWCASE} headless");
+    }
+    for (name, sentinel) in [
+        (
+            "tiled",
+            "tiled: TMX, TSX, sprites, animation and collision ready",
+        ),
+        ("ui", "ui: retained Taffy layout and interaction ready"),
+    ] {
+        let component = moved
+            .join("share/tecs/components")
+            .join(format!("{name}.nuppc"));
+        let output = installed_run(
+            &executable,
+            &[
+                "--component".as_ref(),
+                component.as_os_str(),
+                "--entry".as_ref(),
+                format!("{name}.create").as_ref(),
+                "--headless".as_ref(),
+                "--frames".as_ref(),
+                "2".as_ref(),
+            ],
+            scratch.path(),
+        )?;
+        anyhow::ensure!(
+            output.contains(sentinel),
+            "relocated {name} did not initialize: {output}"
+        );
+        println!("{}", output.trim_end());
     }
     println!("installed release runs from {}", moved.display());
     Ok(())
@@ -1217,6 +1259,9 @@ fn installed_run(
         "TECS_AUDIO_LIBRARY",
         "TECS_GAMEPAD_LIBRARY",
         "TECS_PHYSICS_LIBRARY",
+        "TECS_UI_LIBRARY",
+        "TECS_ASSETS_LIBRARY",
+        "TECS_ASSETS",
         "DYLD_LIBRARY_PATH",
         "DYLD_FALLBACK_LIBRARY_PATH",
         "LD_LIBRARY_PATH",

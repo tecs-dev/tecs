@@ -1,0 +1,42 @@
+module tecs.internal.uinative
+
+--[[
+The retained native Taffy tree used by `tecs.ui`.
+
+Taffy owns layout computation. Synchronization copies a dirty tree description
+into Rust and copies changed boxes back; no callback enters Nupp from Rust.
+]]
+
+local ffi = require("ffi")
+local readCString: function(value: any): string = ffi.string as any
+local nativelibrary = require("tecs.internal.nativelibrary")
+nativelibrary.open("tecs_ui", "TECS_UI_LIBRARY")
+
+cdef function tecsUiTreeCreate(): voidptr?
+cdef function tecsUiTreeDestroy(borrows tree: voidptr)
+cdef function tecsUiTreeSync(borrows tree: voidptr, borrows input: cstring, length: uint64): voidptr?
+cdef function tecsUiResultDestroy(borrows value: voidptr)
+cdef function tecsUiError(): cstring
+
+--- Creates an owned Taffy tree, released by `destroy` at world shutdown.
+export function create(): voidptr
+    return assert(tecsUiTreeCreate(), "Taffy could not create a tree")
+end
+
+--- Applies a tree description and returns changed boxes as JSON.
+export function sync(borrows tree: voidptr, source: string): string
+    local result = tecsUiTreeSync(tree, source, #source as uint64)
+    if result == nil then
+        error("Taffy: " .. readCString(tecsUiError()), 2)
+    end
+    local pointer = assert(result)
+    local value = readCString(pointer)
+    tecsUiResultDestroy(pointer)
+
+    return value
+end
+
+--- Releases a tree once its world stops using it.
+export function destroy(borrows tree: voidptr): nil
+    tecsUiTreeDestroy(tree)
+end

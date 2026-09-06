@@ -12,7 +12,7 @@
 use anyhow::{bail, Context, Result};
 
 pub const PACKET_MAGIC: u32 = 0x5445_4353;
-pub const PACKET_VERSION: u32 = 4;
+pub const PACKET_VERSION: u32 = 5;
 pub const PACKET_HEADER_SIZE: usize = 128;
 pub const BATCH_STRIDE: usize = 20;
 pub const INSTANCE_STRIDE: usize = 80;
@@ -53,7 +53,8 @@ const FLAG_BLENDED: u32 = 1;
 const FLAG_OCCLUDER: u32 = 2;
 const FLAG_DROP_SHADOW: u32 = 4;
 const FLAG_CASTS: u32 = FLAG_OCCLUDER | FLAG_DROP_SHADOW;
-const FLAG_ALL: u32 = FLAG_BLENDED | FLAG_OCCLUDER | FLAG_DROP_SHADOW;
+const FLAG_CLIPPED: u32 = 8;
+const FLAG_ALL: u32 = FLAG_BLENDED | FLAG_OCCLUDER | FLAG_DROP_SHADOW | FLAG_CLIPPED;
 
 /// Bit 0 of the header's flags runs the shadow lane, bit 1 the bloom chain.
 pub const FRAME_SHADOWS: u32 = 1;
@@ -491,7 +492,7 @@ pub fn parse_packet<'a>(
     }
 
     // Only the leading sixteen floats of an instance reach arithmetic; the four
-    // trailing words are the material, the flags and two reserved zeroes, and
+    // trailing words are the material, the flags and two packed clip bounds, and
     // reading those as floats would reject an ordinary id as a denormal.
     for index in 0..instance_count as usize {
         let base = index * instance_stride;
@@ -501,10 +502,14 @@ pub fn parse_packet<'a>(
                 bail!("render packet instance {index} holds a value that is not finite");
             }
         }
-        for word in 18..20 {
-            if read_u32(instances, base + word * 4) != 0 {
-                bail!("render packet instance {index} sets a reserved word");
+        let min = read_u32(instances, base + 72);
+        let max = read_u32(instances, base + 76);
+        if read_u32(instances, base + INSTANCE_FLAGS_OFFSET) & FLAG_CLIPPED != 0 {
+            if min & 65535 > max & 65535 || min >> 16 > max >> 16 {
+                bail!("render packet instance {index} has inverted clip bounds");
             }
+        } else if min != 0 || max != 0 {
+            bail!("render packet instance {index} sets a reserved word");
         }
     }
 
@@ -1022,8 +1027,22 @@ pub mod tests {
         assert!(rejection(&builder.build()).contains("reserved word"));
 
         let mut flagged = valid();
-        flagged.instances[0][INSTANCE_FLAGS_OFFSET / 4] = 8;
+        flagged.instances[0][INSTANCE_FLAGS_OFFSET / 4] = 16;
         assert!(rejection(&flagged.build()).contains("reserved flag bits"));
+    }
+
+    #[test]
+    fn validates_clipping_bounds() {
+        let mut builder = valid();
+        builder.instances[0][17] |= FLAG_CLIPPED;
+        builder.instances[0][18] = 10 | (20 << 16);
+        builder.instances[0][19] = 30 | (40 << 16);
+        assert!(parse(&builder.build()).is_ok());
+        let mut builder = valid();
+        builder.instances[0][17] |= FLAG_CLIPPED;
+        builder.instances[0][19] = 30 | (40 << 16);
+        builder.instances[0][18] = 31 | (20 << 16);
+        assert!(rejection(&builder.build()).contains("inverted clip bounds"));
     }
 
     #[test]

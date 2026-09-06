@@ -6,7 +6,7 @@ The component an installed release runs to prove its native services resolve.
 `tecs.input`, `tecs.audio` and `tecs.physics` all reach their Rust service
 through a guarded `require`, so a package that ships no library degrades to a
 silent fallback rather than failing. That is right for a game and wrong for a
-release test, which is why this component requires the three binding modules
+release test, which is why this component requires the five binding modules
 directly and raises when one cannot be loaded.
 
 Loading a binding module is all this does. Each one calls
@@ -32,6 +32,8 @@ const SERVICES: {
     {"tecs.platform.audionative", "tecsaudio"},
     {"tecs.platform.gamepadnative", "tecsgamepad"},
     {"tecs.physics.rapier", "tecs_physics"},
+    {"tecs.internal.uinative", "tecs_ui"},
+    {"tecs.internal.assetnative", "tecs_assets"},
 }
 
 --- Loads every native binding module and raises on the first that fails.

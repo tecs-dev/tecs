@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.11.0" orientation="orthogonal" renderorder="right-down" width="3" height="2" tilewidth="16" tileheight="16" infinite="0">
+ <tileset firstgid="1" source="../tiles.tsx"/>
+ <group id="1" name="group" offsetx="8" offsety="4" opacity="0.5" parallaxx="0.5">
+  <layer id="2" name="ground" width="3" height="2"><data encoding="csv">1,2,0,2147483650,1073741826,536870914</data></layer>
+ </group>
+ <objectgroup id="3" name="objects"><object id="42" name="player" class="Player" x="32" y="16" width="16" height="16"><properties><property name="health" type="int" value="100"/></properties></object></objectgroup>
+</map>

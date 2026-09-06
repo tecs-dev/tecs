@@ -3,6 +3,8 @@ members = [
     "native/rust/build-support",
     "native/rust/physics",
     "native/rust/tecs-audio",
+    "native/rust/tecs-assets",
+    "native/rust/tecs-ui",
     "native/rust/tecs-gamepad",
     "native/rust/winit-host",
 ]
@@ -55,6 +57,7 @@ spirv-cross2 = { version = "0.7.1", default-features = false, features = ["msl"]
 shlex = "2.0"
 symphonia = { version = "0.6.1", features = ["mp3"] }
 tempfile = "3.27"
+tiled = "0.16.0"
 taffy = { version = "0.12.2", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "block_layout", "content_size"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-stream = "0.1"

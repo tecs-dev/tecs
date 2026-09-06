@@ -53,11 +53,17 @@ test suite reach the same world without starting a graphics stack.
   and device enumeration; physics over Rapier; sequencing with tweening; asset
   orchestration; file watching; and an MCP debug server.
 
-Tiled map loading, retained UI, 3D rendering, custom post-processing and
-multi-camera rendering are absent from the current Nupp engine. Older Tecs
-versions had Tiled integration and a retained UI backed by Taffy; neither is
-available here. The 2D shape materials remain available, including rectangles,
-circles, rings, rounded rectangles, triangles and stars.
+- [Tiled TMX maps and TSX tilesets](docs/tiled/index.md), animated tile and image
+  layers, object factories, runtime tile edits and authored collision outlines.
+- [Retained UI backed by Taffy](docs/ui/index.md), intrinsic text and images,
+  scrolling, clipping, pointer capture, keyboard focus and controller activation.
+
+The 2D shape materials include rectangles, circles, rings, rounded rectangles,
+triangles and stars. 3D rendering, custom post-processing and multi-camera
+rendering are not available in the current engine.
+
+Run `nupp task tiled` for a map with animation and collision, or `nupp task ui`
+for the resizable, interactive interface.
 
 ## Ownership boundaries
 

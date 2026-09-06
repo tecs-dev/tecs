@@ -88,12 +88,15 @@ Every command runs from the repository root and needs a
 nupp check --strict           # Type-check every Nupp source, strictly
 nupp test                     # Build and run the test suites
 nupp task flatcolor           # Build a component and run it through the Rust host
+nupp task tiled               # TMX map with animated tiles and collision
+nupp task ui                  # Retained interface with Taffy layout
 nupp task verify              # Every gate above, plus the Rust host
 nupp build --target docs      # Render this site into out/docs
 ```
 
 [Getting started](getting-started.md) walks through building the tree, running
-an example, and writing a component of your own.
+an example, and writing a component of your own. Continue with
+[Tiled maps](tiled/index.md) and [Building interfaces](ui/index.md).
 
 ## The reference
 

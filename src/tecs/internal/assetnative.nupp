@@ -1,0 +1,31 @@
+module tecs.internal.assetnative
+
+local ffi = require("ffi")
+local readCString: function(value: any): string = ffi.string as any
+local readBytes: function(value: any, length: integer): string = ffi.string as any
+local nativelibrary = require("tecs.internal.nativelibrary")
+nativelibrary.open("tecs_assets", "TECS_ASSETS_LIBRARY")
+
+cdef function tecsAssetLoad(borrows path: cstring, length: uint64, kind: uint32, transparent: uint32): voidptr?
+cdef function tecsAssetError(): cstring
+cdef function tecsAssetData(borrows result: voidptr): cstring
+cdef function tecsAssetLength(borrows result: voidptr): uint64
+cdef function tecsAssetWidth(borrows result: voidptr): uint32
+cdef function tecsAssetHeight(borrows result: voidptr): uint32
+cdef function tecsAssetDestroy(borrows result: voidptr)
+
+--- Decodes a TMX map or image and copies its owned result before release.
+export function load(path: string, kind: integer, transparent: {integer}?): string, integer, integer
+    local color = transparent and (16777216 + transparent[1] * 65536 + transparent[2] * 256 + transparent[3]) or 0
+    local result = tecsAssetLoad(path, #path as uint64, kind as uint32, color as uint32)
+    if result == nil then
+        error("Tecs asset load: " .. readCString(tecsAssetError()), 2)
+    end
+    local pointer = assert(result)
+    local bytes = readBytes(tecsAssetData(pointer), tonumber(tecsAssetLength(pointer)) as integer)
+    local width = tonumber(tecsAssetWidth(pointer)) as integer
+    local height = tonumber(tecsAssetHeight(pointer)) as integer
+    tecsAssetDestroy(pointer)
+
+    return bytes, width, height
+end

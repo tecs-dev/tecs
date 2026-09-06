@@ -1098,4 +1098,20 @@ function suite.tweenTargetNames(): nil
     test.assert(tweeneval.resolveTarget("color.a") ~= nil)
 end
 
+function suite.retainedUiAndTiledNames(): nil
+    test.equal(tecs.ui.Node.componentName, "UiNode")
+    test.equal(tecs.ui.Style.componentName, "UiStyle")
+    test.equal(tecs.ui.Root.componentName, "UiRoot")
+    test.equal(tecs.ui.Layout.componentName, "UiLayout")
+    test.equal(tecs.ui.Paint.componentName, "UiPaint")
+    test.equal(tecs.ui.Intrinsic.componentName, "UiIntrinsic")
+    test.equal(tecs.ui.Scroll.componentName, "UiScroll")
+    test.equal(tecs.ui.Scrollbar.componentName, "UiScrollbar")
+    test.equal(tecs.ui.Interaction.componentName, "UiInteraction")
+    test.equal(tecs.ui.InteractionState.componentName, "UiInteractionState")
+    test.equal(tecs.ui.FocusScope.componentName, "UiFocusScope")
+    test.equal(tecs.tiled.Tilemap.componentName, "Tilemap")
+    test.equal(tecs.tiled.TileSource.componentName, "TileSource")
+end
+
 return suite

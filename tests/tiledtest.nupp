@@ -1,0 +1,103 @@
+local suite = {}
+function suite.loadsExternalTilesetsGroupsAndMetadata(): nil
+    local map = tecs.tiled.load("tests/fixtures/tiled/maps/level.tmx")
+    nupp.test.equal(map.width, 3)
+    nupp.test.equal(#map.layers, 2)
+    local ground = map.layers[1]
+    nupp.test.equal(ground.x, 8)
+    nupp.test.equal(ground.opacity, 0.5)
+    nupp.test.equal(ground.parallaxX, 0.5)
+    nupp.test.equal(map.tilesets[1].tiles[1].properties.cost, 2)
+    nupp.test.equal(map.layers[2].objects[1].properties.health, 100)
+    nupp.test.assert(assert(tecs.tiled.getTile(map, 1, 0, 1)).flipH)
+    nupp.test.assert(assert(tecs.tiled.getTile(map, 1, 2, 1)).flipD)
+end
+
+function suite.rendersAnimatesAndEditsOneCell(): nil
+    local world = tecs.ecs.newWorld()
+    local map = tecs.tiled.load("tests/fixtures/tiled/maps/level.tmx")
+    local root = tecs.tiled.spawn(world, map)
+    world:update(0)
+    local children = world:relationshipSources(tecs.ecs.ChildOf, root)
+    nupp.test.equal(#children, 5)
+    local entity = children[1]
+    local original = assert(world:get(entity, tecs.gfx.Sprite)).u0
+    world:update(0.15)
+    nupp.test.assert(assert(world:get(entity, tecs.gfx.Sprite)).u0 ~= original)
+    tecs.tiled.setTile(map, 1, 2, 0, {tileset = 1, id = 1})
+    world:update(0)
+    nupp.test.equal(#world:relationshipSources(tecs.ecs.ChildOf, root), 6)
+    nupp.test.assert(world:isAlive(entity))
+    tecs.tiled.setTile(map, 1, 2, 0, nil)
+    world:update(0)
+    nupp.test.equal(#world:relationshipSources(tecs.ecs.ChildOf, root), 5)
+    world:despawn(root)
+    world:commit()
+    nupp.test.equal(world.liveCount, 0)
+    world:shutdown()
+end
+
+function suite.restoresObjectsWithoutDuplicatingThem(): nil
+    local world = tecs.ecs.newWorld()
+    local marker = tecs.ecs.newTagComponent({name = "tiledtest.Player"})
+    tecs.tiled.registerObject("Player", function(exclusive running: tecs.ecs.World, object: tecs.tiled.Object): integer
+        nupp.test.equal(object.id, 42)
+        return running:spawn(marker)
+    end)
+    local map = tecs.tiled.load("tests/fixtures/tiled/maps/level.tmx")
+    local root = tecs.tiled.spawn(world, map)
+    world:update(0)
+    local count = world.liveCount
+    local snapshot = world:saveSnapshot()
+    world:loadSnapshot(snapshot)
+    world:update(0)
+    nupp.test.equal(world.liveCount, count)
+    local objects = 0
+    for _, child in ipairs(world:relationshipSources(tecs.ecs.ChildOf, root)) do
+        if world:has(child, marker) then
+            objects = objects + 1
+        end
+    end
+    nupp.test.equal(objects, 1)
+    world:shutdown()
+end
+
+function suite.buildsNativeCollisionAndRemovesEditedBoundaries(): nil
+    local world = tecs.ecs.newWorld()
+    local map = tecs.tiled.load("tests/fixtures/tiled/maps/level.tmx")
+    tecs.tiled.setTile(map, 1, 0, 1, nil)
+    tecs.tiled.setTile(map, 1, 1, 1, nil)
+    tecs.tiled.setTile(map, 1, 2, 1, nil)
+    tecs.tiled.spawn(world, map, {collision = true})
+    world:update(0);
+    world:update(1 / 60)
+    local hit = tecs.physics.raycast(world, 32, -10, 32, 40)
+    nupp.test.assert(hit ~= nil)
+    tecs.tiled.setTile(map, 1, 1, 0, nil)
+    world:update(0);
+    world:update(1 / 60)
+    nupp.test.equal(tecs.physics.raycast(world, 32, -10, 32, 40), nil)
+    world:shutdown()
+end
+
+function suite.rendersTileObjectsAndReusesRepeatingImages(): nil
+    local world = tecs.ecs.newWorld()
+    local map = tecs.tiled.load("tests/fixtures/tiled/maps/objects.tmx")
+    local root = tecs.tiled.spawn(world, map)
+    world:update(0)
+    local children = world:relationshipSources(tecs.ecs.ChildOf, root)
+    nupp.test.assert(#children > 3)
+    local object = children[1]
+    local pose = assert(world:get(object, tecs.ecs.Transform2D))
+    nupp.test.equal(pose.x, 32)
+    nupp.test.equal(pose.y, 48)
+    world:update(0)
+    nupp.test.equal(#world:relationshipSources(tecs.ecs.ChildOf, root), #children)
+    nupp.test.assert(world:isAlive(object))
+    world:remove(root, tecs.tiled.Tilemap)
+    world:update(0)
+    nupp.test.equal(#world:relationshipSources(tecs.ecs.ChildOf, root), 0)
+    world:shutdown()
+end
+
+return suite

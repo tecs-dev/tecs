@@ -91,7 +91,7 @@ local function verify(): nil
     const env = commands.sdk()
     commands.run({"cargo", "clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings"}, env)
     commands.run({"cargo", "test", "--locked", "--workspace", "--all-targets"}, env)
-    for _, target in ipairs({"host", "flatcolor", "sprites", "lighting", "nativesmoke"}) do
+    for _, target in ipairs({"host", "flatcolor", "sprites", "lighting", "nativesmoke", "tiled", "ui"}) do
         commands.run({commands.compiler(), "task", target, "--headless", "--frames", "5"}, env)
     end
 end

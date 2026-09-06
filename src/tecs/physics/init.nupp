@@ -96,7 +96,8 @@ end
 --- Write its fields through `getMut`; physics rebuilds the shape during the
 --- next fixed update.
 local record ColliderValue
-    --- Caller-writable. Selects 0 for box, 1 for circle or 2 for capsule.
+    --- Caller-writable. Selects 0 for box, 1 for circle, 2 for capsule or 3 for
+    --- segment.
     shape: integer
 
     --- Caller-writable. Sets the box half extent along x, in pixels.
@@ -274,12 +275,16 @@ export record SensorPair
 end
 
 --- The initial body and collider settings `attach` reads.
+--- `segment = {x1, y1, x2, y2}` selects a line collider in local pixels,
+--- useful for static map boundaries. It takes precedence over box or radius
+--- settings. Segment coordinates may be negative; endpoints must differ.
 export type BodyOptions = {
     kind: string?,
     halfWidth: number?,
     halfHeight: number?,
     radius: number?,
     capsuleLength: number?,
+    segment: {number}?,
     offsetX: number?,
     offsetY: number?,
     density: number?,
@@ -766,7 +771,17 @@ end
 --- @raises when a capsule is requested without a positive radius
 local function colliderFrom(options: BodyOptions): ecs.ComponentInput
     local shape = contract.SHAPE_BOX
-    if options.capsuleLength ~= nil then
+    local halfWidth, halfHeight = options.halfWidth, options.halfHeight
+    local offsetX, offsetY = options.offsetX, options.offsetY
+    if options.segment ~= nil then
+        local points = options.segment
+        assert(#points == 4, "physics: segment needs x1, y1, x2, y2")
+        local x1, y1, x2, y2 = points[1], points[2], points[3], points[4]
+        assert(x1 ~= x2 or y1 ~= y2, "physics: segment endpoints must differ")
+        shape = contract.SHAPE_SEGMENT
+        halfWidth, halfHeight = (x2 - x1) * 0.5, (y2 - y1) * 0.5
+        offsetX, offsetY = (x1 + x2) * 0.5 + (offsetX or 0), (y1 + y2) * 0.5 + (offsetY or 0)
+    elseif options.capsuleLength ~= nil then
         shape = contract.SHAPE_CAPSULE
         if options.radius == nil or options.radius <= 0 then
             error("physics: a capsule needs a positive radius", 3)
@@ -777,12 +792,12 @@ local function colliderFrom(options: BodyOptions): ecs.ComponentInput
 
     return Collider(
         shape,
-        options.halfWidth,
-        options.halfHeight,
+        halfWidth,
+        halfHeight,
         options.radius,
         options.capsuleLength,
-        options.offsetX,
-        options.offsetY,
+        offsetX,
+        offsetY,
         options.density,
         options.friction,
         options.restitution,

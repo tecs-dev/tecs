@@ -400,3 +400,28 @@ fn dispatches_to_the_material_the_instance_names() {
         "`circle` discards the quad's corner"
     );
 }
+
+#[test]
+fn clips_fragments_to_the_authored_target_rectangle() {
+    let Some(harness) = Harness::open() else {
+        eprintln!("no wgpu adapter; skipping clip draw test");
+        return;
+    };
+    let pixels = render(
+        &harness,
+        &[TestInstance {
+            clip: Some([24, 24, 40, 40]),
+            ..TestInstance::opaque(0., 0.)
+        }],
+    );
+    assert_eq!(center(&pixels), [255, 255, 255, 255]);
+    assert_eq!(corner(&pixels), [0, 0, 0, 0]);
+    let empty = render(
+        &harness,
+        &[TestInstance {
+            clip: Some([0, 0, 0, 0]),
+            ..TestInstance::opaque(0., 0.)
+        }],
+    );
+    assert_eq!(center(&empty), [0, 0, 0, 0]);
+}

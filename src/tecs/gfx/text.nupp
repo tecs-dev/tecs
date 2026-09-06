@@ -526,7 +526,8 @@ local function stateFor(exclusive world: ecs.World): Install
     end
     const created = new Install(
         texts = world:newQuery({
-            include = {TextComponent, rendercomponents.Transform2DComponent}
+            include = {TextComponent, rendercomponents.Transform2DComponent},
+            exclude = {ecs.Disabled}
         }),
         glyphs = world:newQuery({
             include = {TextGlyph}
@@ -974,4 +975,10 @@ end
 --- @return the nearest whole value, with a half rounding away from zero
 export function snap(value: number): number
     return floor(value + 0.5)
+end
+
+--- Refreshes changed text immediately after retained layout changes its boxes.
+--- @param world the world whose text and glyph entities are synchronized
+export function refresh(exclusive world: ecs.World): nil
+    run(world, stateFor(world))
 end

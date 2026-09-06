@@ -802,7 +802,23 @@ fn run_headless(config: Config) -> Result<()> {
     bridge.shutdown()
 }
 
+fn content_root(executable: &std::path::Path) -> Option<PathBuf> {
+    executable.parent()?.ancestors().find_map(|parent| {
+        [parent.join("share/tecs/assets"), parent.join("assets")]
+            .into_iter()
+            .find(|path| path.is_dir())
+    })
+}
+
 fn main() {
+    if std::env::var_os("TECS_ASSETS").is_none() {
+        if let Some(root) = std::env::current_exe()
+            .ok()
+            .and_then(|path| content_root(&path))
+        {
+            std::env::set_var("TECS_ASSETS", root);
+        }
+    }
     if let Err(error) = run() {
         eprintln!("tecs-winit-host: {error:#}");
         std::process::exit(1);

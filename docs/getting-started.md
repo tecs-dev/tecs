@@ -35,14 +35,14 @@ nupp task lighting --frames 120
 ```
 
 `nupp tasks` lists what the manifest configures. `flatcolor`,
-`sprites` and `lighting` are the example targets and tasks; `host` is the blank host, which
+`sprites`, `lighting`, `tiled` and `ui` are the example targets and tasks; `host` is the blank host, which
 opens a window and runs an empty world.
 
 `--frames N` stops after N frames and exits zero, which is what makes a
 graphical example usable as a smoke test. It needs at least two: the first
 completed frame renders, and the following turn observes the limit.
 
-`nupp test` builds the three native services, selects their exact Cargo
+`nupp test` builds the five native services, selects their exact Cargo
 artifact paths, and requires every discovered test to pass with zero skips.
 The JSON report is saved to `out/validation/nupp-tests.json`. `nupp test <suite>` narrows the same gate to named suites; `--json` keeps
 its structured report. Native libraries remain mandatory. `nupp task test-tools` checks the development
@@ -50,7 +50,7 @@ tools in their separate project; `nupp task verify` runs both.
 
 `nupp task verify` requires an embedding SDK. It runs strict checking,
 whole-tree formatting, the mandatory test gate, documentation checks, workspace
-Rust formatting/Clippy/tests, and five headless component smokes. Benchmarks
+Rust formatting/Clippy/tests, and seven headless component smokes. Benchmarks
 and relocated release-package checks remain separate commands; `verify` does
 not claim performance or platform acceptance.
 
@@ -130,8 +130,17 @@ Physics uses Rapier. Its batched native interface sends the world's changes
 and reads the resulting poses once per fixed step; games need only
 `tecs.physics.install`, `attach`, and the other entity-facing operations.
 
-Tiled map import and UI layout are not engine subsystems. Sprite sheets do not
-read Tiled map files.
+## Maps and interfaces
+
+```bash
+nupp task tiled               # TMX map, animated tiles and collision
+nupp task ui                  # Taffy layout, scrolling and interaction
+```
+
+[The Tiled guide](tiled/index.md) covers TMX/TSX files, layers, tile edits,
+object factories and collision outlines. [Building interfaces](ui/index.md)
+composes retained layout with the same shape, sprite and text entities.
+Taffy sizes UI boxes; Rapier simulates physical bodies.
 
 ## A component of your own
 

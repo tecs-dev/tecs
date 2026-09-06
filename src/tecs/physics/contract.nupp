@@ -43,6 +43,9 @@ export const SHAPE_CIRCLE: integer = 1
 --- A vertical capsule.
 export const SHAPE_CAPSULE: integer = 2
 
+--- A centered segment from negative to positive half extents.
+export const SHAPE_SEGMENT: integer = 3
+
 --- A joint holding one relative pose between two bodies.
 export const JOINT_FIXED: integer = 0
 

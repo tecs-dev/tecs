@@ -10,7 +10,7 @@ pipelines, culling, compaction, submission, and presentation. Image pixels
 never ride in a packet. They cross once through the residency commands
 `tecs.gfx.images` queues, so a frame carries only the id a batch binds.
 
-# Packet version 4
+# Packet version 5
 
 Every field is little or big endian to match the host, every integer is
 unsigned, and every real is a 32-bit float. Offsets are in bytes from the start
@@ -21,7 +21,7 @@ of the packet.
 | Offset | Type  | Field             | Contract                                             |
 | ------ | ----- | ----------------- | ---------------------------------------------------- |
 | 0      | `u32` | `magic`           | `0x54454353`, and nothing else is a Tecs packet.      |
-| 4      | `u32` | `version`         | `4`. A reader rejects every other value.              |
+| 4      | `u32` | `version`         | `5`. A reader rejects every other value.              |
 | 8      | `u32` | `headerSize`      | `128`. The graph section starts after it.             |
 | 12     | `u32` | `flags`           | Bit 0 enables the shadow lane, bit 1 bloom.           |
 | 16     | `u32` | `graphRevision`   | A reader rebuilds its graph when this changes.        |
@@ -125,9 +125,9 @@ list and one indirect draw covers them.
 | 56     | `f32` | `b`        | Blue.                                                         |
 | 60     | `f32` | `a`        | Alpha, multiplied into the sampled alpha.                     |
 | 64     | `u32` | `material` | A `tecs.gpu.materials` id, below the build's material count.  |
-| 68     | `u32` | `flags`    | Bit 0 marks the blended lane and equals the batch's; bit 1 an occluder; bit 2 a drop-shadow caster. |
-| 72     | `u32` | reserved   | Zero.                                                         |
-| 76     | `u32` | reserved   | Zero.                                                         |
+| 68     | `u32` | `flags`    | Bit 0 marks the blended lane and equals the batch's; bit 1 an occluder; bit 2 a drop-shadow caster; bit 3 enables clipping. |
+| 72     | `u32` | `clipMin` | Left in low 16 bits, top in high 16 bits; zero without bit 3.                                                         |
+| 76     | `u32` | `clipMax` | Right in low 16 bits, bottom in high 16 bits; zero without bit 3.                                                         |
 
 Bits 1 and 2 are exclusive of each other and neither is ever set with bit 0. An
 entity carrying both `Occluder2D` and `DropShadow2D` is an occluder, because
@@ -153,6 +153,7 @@ disagrees with its batch's, or whose material id its dispatch does not carry.
 local archetype = require("tecs.internal.archetype")
 local images = require("tecs.gfx.images")
 local layers = require("tecs.gfx.layers")
+local clips = require("tecs.gfx.clips")
 local lighting = require("tecs.gfx.lighting")
 local materials = require("tecs.gpu.materials")
 local passes = require("tecs.gpu.passes")
@@ -168,7 +169,7 @@ local ffi = require("ffi")
 export const MAGIC: uint32 = 0x54454353
 
 --- The packet layout this module writes.
-export const VERSION: uint32 = 4
+export const VERSION: uint32 = 5
 
 --- The byte length of the packet header.
 export const HEADER_SIZE: uint32 = 128
@@ -199,6 +200,9 @@ export const FLAG_OCCLUDER: integer = 2
 
 --- Marks an instance as a drop-shadow caster.
 export const FLAG_DROP_SHADOW: integer = 4
+
+--- Marks an instance with packed target-pixel clipping bounds.
+export const FLAG_CLIPPED: integer = 8
 
 --- Set in the header when the frame draws the shadow lane.
 export const FRAME_SHADOWS: integer = 1
@@ -231,6 +235,7 @@ export record Extractor
     private depths: {number}
     private transforms: {rendercomponents.Transform2D}
     private tints: {rendercomponents.Tint}
+    private clipIds: {integer}
     private imageIds: {integer}
     private samplers: {integer}
     private lanes: {integer}
@@ -286,6 +291,7 @@ export function new(exclusive value: world.World): Extractor
         poses = {},
         lightPoses = {},
         drawables = value:newQuery({
+            exclude = {tecs.internal.components.Disabled},
             include = {
                 rendercomponents.Transform2DComponent,
                 rendercomponents.TintComponent,
@@ -302,6 +308,7 @@ export function new(exclusive value: world.World): Extractor
         depths = depths,
         transforms = {},
         tints = {},
+        clipIds = {},
         imageIds = {},
         samplers = {},
         lanes = {},
@@ -410,6 +417,7 @@ local function collect(exclusive self: Extractor): nil
         local rowTransforms: {rendercomponents.Transform2D} = assert(active:get(rendercomponents.Transform2DComponent))
         const previous = active:get(rendercomponents.PreviousTransform2DComponent)
         local rowTints: {rendercomponents.Tint} = assert(active:get(rendercomponents.TintComponent))
+        local rowClips = active:get(clips.ClipComponent)
         local rowSprites = active:get(rendercomponents.SpriteComponent) as {rendercomponents.Sprite}?
         local rowMaterials = active:get(materials.MaterialComponent) as {materials.Material}?
         local rowOccluders = active:get(lighting.Occluder2DComponent) as {lighting.Occluder2D}?
@@ -423,6 +431,7 @@ local function collect(exclusive self: Extractor): nil
                 self.poses,
                 rows
             )
+            self.clipIds[rows] = rowClips and rowClips[index].index or 0
             const tint = rowTints[index]
             const depth = layers.depthOf(transform.layer, transform.z, transform.x, transform.y)
             if entities[rows] ~= active.entities[index] or depths[rows] ~= depth then
@@ -437,7 +446,7 @@ local function collect(exclusive self: Extractor): nil
             -- an entity that is not fully opaque leaves for the forward pass,
             -- where the depth it already sorted by decides it against the
             -- opaque geometry in front of it.
-            const blended = tint.a < 1.0
+            const blended = tint.a < 1.0 or layers.isOverlay(transform.layer)
             lanes[rows] = blended and LANE_BLEND or LANE_OPAQUE
             -- A blended entity casts nothing: it never reaches the G-buffer, so
             -- a hard silhouette of it would be a lie. An entity carrying both
@@ -770,12 +779,22 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
                     const transform = transforms[row]
                     const tint = tints[row]
                     const base = prefixWords + (index - 1) * 20
-                    floats[base + 0] = transform.x as float
-                    floats[base + 1] = transform.y as float
-                    floats[base + 2] = transform.rotation as float
+                    local x, y, angle, sx, sy = transform.x, transform.y, transform.rotation, transform.scaleX, transform.scaleY
+                    if layers.isScreenSpace(transform.layer) then
+                        -- Express target-pixel geometry in the common camera's world
+                        -- space. Culling and drawing then agree without a second
+                        -- rendering path.
+                        local dx, dy = (x - width * 0.5) / zoom, (y - height * 0.5) / zoom
+                        local c, s = math.cos(rotation), math.sin(rotation)
+                        x, y = cameraX + dx * c - dy * s, cameraY + dx * s + dy * c
+                        angle, sx, sy = angle + rotation, sx / zoom, sy / zoom
+                    end
+                    floats[base + 0] = x as float
+                    floats[base + 1] = y as float
+                    floats[base + 2] = angle as float
                     floats[base + 3] = depths[row] as float
-                    floats[base + 4] = transform.scaleX as float
-                    floats[base + 5] = transform.scaleY as float
+                    floats[base + 4] = sx as float
+                    floats[base + 5] = sy as float
                     floats[base + 6] = params[row] as float
                     floats[base + 7] = castHeights[row] as float
                     floats[base + 8] = u0[row] as float
@@ -787,9 +806,22 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
                     floats[base + 14] = tint.b as float
                     floats[base + 15] = tint.a as float
                     words[base + 16] = wrap(materialIds[row])
-                    words[base + 17] = wrap((lanes[row] == LANE_BLEND and FLAG_BLENDED or 0) + castFlags[row])
-                    words[base + 18] = 0
-                    words[base + 19] = 0
+                    local flag = (lanes[row] == LANE_BLEND and FLAG_BLENDED or 0) + castFlags[row]
+                    local leftTop, rightBottom = 0, 0
+                    if self.clipIds[row] ~= 0 then
+                        local left, top, right, bottom = clips.regionOf(self.clipIds[row])
+                        -- Pixel centers are half-integers. Quantizing at that boundary
+                        -- preserves exact coverage in the single-sample renderer.
+                        left = math.max(0, math.min(65535, math.ceil(left - 0.5)))
+                        top = math.max(0, math.min(65535, math.ceil(top - 0.5)))
+                        right = math.max(0, math.min(65535, math.ceil(right - 0.5)))
+                        bottom = math.max(0, math.min(65535, math.ceil(bottom - 0.5)))
+                        leftTop, rightBottom = left + top * 65536, right + bottom * 65536
+                        flag = flag + FLAG_CLIPPED
+                    end
+                    words[base + 17] = wrap(flag)
+                    words[base + 18] = wrap(leftTop as integer)
+                    words[base + 19] = wrap(rightBottom as integer)
                 end
                 packed = ffi.string(words, wordCount * 4)
             end

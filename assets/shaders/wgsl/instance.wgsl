@@ -56,8 +56,8 @@ struct Instance {
     color: vec4<f32>,
     material: u32,
     flags: u32,
-    reserved0: u32,
-    reserved1: u32,
+    clipMin: u32,
+    clipMax: u32,
 }
 
 struct BatchIndex {
@@ -81,6 +81,7 @@ struct VertexOutput {
     // Cosine and sine of the instance's rotation, which turns a material's
     // normal out of the quad's space and into the world's.
     @location(5) @interpolate(flat) basis: vec2<f32>,
+    @location(6) @interpolate(flat) clipBounds: vec4<f32>,
 }
 
 @vertex
@@ -127,10 +128,17 @@ fn vertexMain(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) 
     output.material = instance.material;
     output.param = instance.scale.z;
     output.basis = vec2<f32>(cosine, sine);
+    output.clipBounds = vec4<f32>(0.0, 0.0, 65535.0, 65535.0);
+    if ((instance.flags & 8u) != 0u) {
+        output.clipBounds = vec4<f32>(f32(instance.clipMin & 65535u), f32(instance.clipMin >> 16u), f32(instance.clipMax & 65535u), f32(instance.clipMax >> 16u));
+    }
     return output;
 }
 
 fn shade(input: VertexOutput, blended: bool) -> MaterialOutput {
+    if (any(input.position.xy < input.clipBounds.xy) || any(input.position.xy >= input.clipBounds.zw)) {
+        discard;
+    }
     var frag: MaterialInput;
     frag.local = input.local;
     frag.uv = input.uv;

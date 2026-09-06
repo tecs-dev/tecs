@@ -1,0 +1,1034 @@
+module tecs.tiled
+
+--[[
+Tiled TMX maps and TSX tilesets, loaded by the official Rust `tiled` crate.
+
+Maps draw through ordinary sprite entities. The loader retains tile metadata,
+object classes and properties, animations, nested layers and infinite-map
+chunks. Coordinates passed to `getTile` and `setTile` are zero-based tile
+coordinates, including negative coordinates in infinite maps. Tileset indices
+are one-based, and tile IDs are zero-based within their tileset.
+
+```nupp
+const map = tecs.tiled.load("assets/maps/level.tmx")
+tecs.tiled.spawn(world, map)
+tecs.tiled.setTile(map, 1, 4, 3, {tileset = 1, id = 7})
+```
+
+`registerObject` binds an authored object class to game code. Spawned objects
+belong to the map through `ChildOf`; snapshots preserve their gameplay state.
+Tile visuals are derived from map data and rebuilt after a snapshot load.
+]]
+
+--- A file-backed image and its authored dimensions.
+export type Image = {
+    path: string,
+    width: integer,
+    height: integer,
+    transparent: {integer}?
+}
+
+--- One tile animation frame, with duration in seconds.
+export type Frame = {
+    id: integer,
+    duration: number
+}
+
+--- A reference to one tile, including its Tiled flip flags.
+export type TileRef = {
+    tileset: integer,
+    id: integer,
+    flipH: boolean?,
+    flipV: boolean?,
+    flipD: boolean?
+}
+
+--- One nonempty tile at zero-based map coordinates.
+export type Cell = {
+    x: integer,
+    y: integer,
+    tileset: integer,
+    id: integer,
+    flipH: boolean,
+    flipV: boolean,
+    flipD: boolean
+}
+
+--- An object authored in a map or a tile collision layer.
+export type Object = {
+    id: integer,
+    name: string,
+    class: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    rotation: number,
+    visible: boolean,
+    opacity: number,
+    shape: string,
+    points: {{number}},
+    text: string,
+    properties: {[string]: any},
+    tile: {
+        source: string,
+        name: string,
+        id: integer,
+        flipH: boolean,
+        flipV: boolean,
+        flipD: boolean
+    }?
+}
+
+--- Metadata attached to a tileset's local tile ID.
+export type Tile = {
+    id: integer,
+    class: string,
+    properties: {[string]: any},
+    image: Image?,
+    collision: {Object},
+    animation: {Frame},
+    rect: {integer}?
+}
+
+--- A resolved tileset. Paths already include the TSX file's directory.
+export type Tileset = {
+    name: string,
+    source: string,
+    alignment: string,
+    tileWidth: integer,
+    tileHeight: integer,
+    columns: integer,
+    count: integer,
+    spacing: integer,
+    margin: integer,
+    x: integer,
+    y: integer,
+    image: Image?,
+    tiles: {Tile},
+    properties: {[string]: any}
+}
+
+--- A flattened layer, with inherited group offsets, tint and parallax applied.
+export type Layer = {
+    id: integer,
+    name: string,
+    kind: string,
+    visible: boolean,
+    x: number,
+    y: number,
+    parallaxX: number,
+    parallaxY: number,
+    opacity: number,
+    tint: {number},
+    properties: {[string]: any},
+    cells: {Cell},
+    objects: {Object},
+    width: integer,
+    height: integer,
+    image: Image?,
+    repeatX: boolean,
+    repeatY: boolean
+}
+
+--- A mutable map. Use setTile to notify every live instance of an edit.
+export type Map = {
+    source: string,
+    parallaxX: number,
+    parallaxY: number,
+    width: integer,
+    height: integer,
+    tileWidth: integer,
+    tileHeight: integer,
+    infinite: boolean,
+    properties: {[string]: any},
+    tilesets: {Tileset},
+    layers: {Layer},
+    revision: integer,
+    changes: {[string]: integer}
+}
+
+--- Loads a TMX map and resolves its external TSX files and templates.
+--- @param path the TMX file path
+--- @return the editable map
+--- @raises when the library cannot load the map or its orientation is unsupported
+export function load(path: string): Map
+    local source = tecs.internal.assetnative.load(path, 0)
+    local value = nupp.data.json.decode(source)
+    value.revision, value.changes = 0, {}
+    local map = value as Map
+
+    return map
+end
+
+local function key(layer: integer, x: integer, y: integer): string
+    return tostring(layer) .. ":" .. tostring(x) .. ":" .. tostring(y)
+end
+
+--- Finds a flattened layer by name.
+--- @param map the loaded map
+--- @param name the authored layer name
+--- @return the layer and its one-based index, or nil
+export function getLayer(map: Map, name: string): Layer?, integer?
+    for index, layer in ipairs(map.layers) do
+        if layer.name == name then
+            return layer, index
+        end
+    end
+
+    return nil, nil
+end
+
+--- Reads a tile at zero-based tile coordinates.
+--- @param map the loaded map
+--- @param layer the one-based flattened layer index
+--- @param x the tile column
+--- @param y the tile row
+--- @return the tile reference, or nil for an empty cell
+export function getTile(map: Map, layer: integer, x: integer, y: integer): Cell?
+    local value = map.layers[layer]
+    if value == nil or value.kind ~= "tiles" then
+        return nil
+    end
+    for _, cell in ipairs(value.cells) do
+        if cell.x == x and cell.y == y then
+            return cell
+        end
+    end
+
+    return nil
+end
+
+--- Changes one tile and invalidates only that cell in live instances.
+--- @param map the editable map
+--- @param layer the one-based flattened layer index
+--- @param x the zero-based tile column
+--- @param y the zero-based tile row
+--- @param tile the replacement, or nil to clear the cell
+--- @raises when the layer, coordinate, tileset or tile ID is invalid
+export function setTile(map: Map, layer: integer, x: integer, y: integer, tile: TileRef?): nil
+    local value = assert(map.layers[layer], "tiled: layer does not exist")
+    assert(value.kind == "tiles", "tiled: layer is not a tile layer")
+    assert(
+        map.infinite or (x >= 0 and y >= 0 and x < value.width and y < value.height),
+        "tiled: cell is outside the layer"
+    )
+    if tile then
+        local set = assert(map.tilesets[tile.tileset], "tiled: tileset does not exist")
+        local valid = set.image ~= nil and tile.id >= 0 and tile.id < set.count
+        if set.image == nil then
+            for _, entry in ipairs(set.tiles) do
+                if entry.id == tile.id and entry.image then
+                    valid = true
+                end
+            end
+        end
+        assert(valid, "tiled: tile ID is outside the tileset")
+    end
+    for index, cell in ipairs(value.cells) do
+        if cell.x == x and cell.y == y then
+            table.remove(value.cells, index);
+            break
+        end
+    end
+    if tile then
+        value.cells[
+            #value.cells + 1
+        ] = {
+            x = x,
+            y = y,
+            tileset = tile.tileset,
+            id = tile.id,
+            flipH = tile.flipH == true,
+            flipV = tile.flipV == true,
+            flipD = tile.flipD == true
+        }
+    end
+    map.revision = map.revision + 1
+    map.changes[key(layer, x, y)] = map.revision
+end
+
+--- Converts local map pixels to zero-based tile coordinates.
+--- @param map the map whose grid is used
+--- @param x local horizontal pixels
+--- @param y local vertical pixels
+--- @return the tile column and row
+export function worldToTile(map: Map, x: number, y: number): integer, integer
+    return math.floor(x / map.tileWidth) as integer, math.floor(y / map.tileHeight) as integer
+end
+
+--- Converts zero-based tile coordinates to their top-left local pixels.
+--- @param map the map whose grid is used
+--- @param x the tile column
+--- @param y the tile row
+--- @return local horizontal and vertical pixels
+export function tileToWorld(map: Map, x: integer, y: integer): number, number
+    return x * map.tileWidth, y * map.tileHeight
+end
+
+local record TilemapValue
+    --- Caller-writable. Selects a TMX path when map is absent.
+    path: string
+
+    --- Caller-writable. Selects loaded map data.
+    map: Map?
+
+    --- Caller-writable. Enables authored tile collision shapes.
+    collision: boolean
+
+    --- Engine-owned. Prevents gameplay objects being spawned twice after restore.
+    objectsSpawned: boolean
+end
+
+--- Values accepted by the Tilemap constructor.
+export type Options = {
+    path: string?,
+    map: Map?,
+    collision: boolean?
+}
+
+--- The component value for one map instance.
+export type Tilemap = TilemapValue
+
+--- Loads and displays a map through ordinary sprite entities.
+export const Tilemap: tecs.ecs.TableComponent<TilemapValue> = tecs.ecs.newComponent({
+    name = "Tilemap",
+    requires = {tecs.ecs.Transform2D},
+    construct = function(options: Options?): TilemapValue
+        local values = options or {}
+        return new TilemapValue(
+            path = values.path or "",
+            map = values.map,
+            collision = values.collision == true,
+            objectsSpawned = false
+        )
+    end,
+    default = function(): TilemapValue
+        return new TilemapValue(path = "", map = nil, collision = false, objectsSpawned = false)
+    end,
+})
+
+--- Marks generated map visuals, which are replaced on snapshot restoration.
+export const TileVisual = tecs.ecs.newTagComponent({name = "TiledVisual"})
+
+local record TileSourceValue
+    --- Read-only. Reports the tileset's local tile ID.
+    localId: integer
+
+    --- Read-only. Reports the tileset name.
+    tilesetName: string
+
+    --- Read-only. Reports the tile class.
+    class: string
+
+    --- Read-only. Reports authored custom properties.
+    properties: {[string]: any}
+end
+
+--- Metadata stored with a rendered tile.
+export type TileSource = TileSourceValue
+
+--- Constructs metadata identifying a tile's authored source.
+export const TileSource: tecs.ecs.TableComponent<TileSourceValue> = tecs.ecs.newComponent({
+    name = "TileSource",
+    construct = function(id: integer, name: string, class: string?, properties: {[string]: any}?): TileSourceValue
+        return new TileSourceValue(localId = id, tilesetName = name, class = class or "", properties = properties or {})
+    end,
+    default = function(): TileSourceValue
+        return new TileSourceValue(localId = 0, tilesetName = "", class = "", properties = {})
+    end,
+})
+
+--- A callback that spawns a gameplay entity for an authored object class.
+export type ObjectFactory = function(exclusive world: tecs.ecs.World, object: Object): integer
+
+local factories: {[string]: ObjectFactory} = {}
+
+--- Registers how a map object class creates its gameplay entity.
+--- @param class the Tiled class name
+--- @param factory a callback returning a newly spawned entity
+export function registerObject(class: string, factory: ObjectFactory): nil
+    assert(class ~= "", "tiled: object class must not be empty")
+    factories[class] = factory
+end
+
+local record Row
+    entity: integer
+    collisions: {integer}
+    layer: Layer
+    x: number
+    y: number
+    width: number
+    height: number
+    rotation: number
+    sx: number
+    sy: number
+    z: number
+    set: Tileset?
+    tile: Tile?
+    currentFrame: integer
+    flipH: boolean
+    flipV: boolean
+end
+local record Instance
+    map: Map
+    rows: {[string]: Row}
+    revision: integer
+    clock: number
+    scaleX: number
+    scaleY: number
+    collision: boolean
+end
+local record State
+    maps: tecs.ecs.Query
+    cameras: tecs.ecs.Query
+    instances: {[integer]: Instance}
+    width: number
+    height: number
+end
+local stateKey: tecs.data.Key<State> = tecs.data.newKey("tecs.tiled.state", nil)
+local images: {[string]: integer} = {}
+local function imageOf(source: Image): integer
+    local name = source.path .. (source.transparent and ":transparent:" .. table.concat(source.transparent, ",") or "")
+    local id = images[name]
+    if id and tecs.gfx.images.stateOf(id) ~= "released" then
+        return id
+    end
+    local pixels, width, height = tecs.internal.assetnative.load(source.path, 1, source.transparent)
+    id = tecs.gfx.images.upload({name = name, width = width, height = height, pixels = pixels})
+    images[name] = id
+
+    return id
+end
+
+local function tileOf(set: Tileset, id: integer): Tile?
+    for _, tile in ipairs(set.tiles) do
+        if tile.id == id then
+            return tile
+        end
+    end
+
+    return nil
+end
+
+local function sprite(
+    set: Tileset,
+    id: integer
+): tecs.internal.components.TableInstance<tecs.gfx.Sprite>, number, number
+    local tile = tileOf(set, id)
+    local source = tile and tile.image or set.image
+    assert(source, "tiled: tile has no image")
+    local image = imageOf(assert(source))
+    local iw, ih = tecs.gfx.images.sizeOf(image)
+    local x, y, width, height = 0.0, 0.0, set.tileWidth as number, set.tileHeight as number
+    if tile and tile.image then
+        width, height = iw, ih
+        if tile.rect then
+            x, y, width, height = tile.rect[1], tile.rect[2], tile.rect[3], tile.rect[4]
+        end
+    else
+        assert(set.columns > 0, "tiled: atlas tileset has no columns")
+        x = set.margin + (id % set.columns) * (set.tileWidth + set.spacing)
+        y = set.margin + math.floor(id / set.columns) * (set.tileHeight + set.spacing)
+    end
+
+    return tecs.gfx.Sprite(image, x / iw, y / ih, (x + width) / iw, (y + height) / ih), width, height
+end
+
+local function collisionBodies(
+    exclusive world: tecs.ecs.World,
+    root: integer,
+    map: Map,
+    layer: Layer,
+    cell: Cell,
+    set: Tileset,
+    tile: Tile?
+): {integer}
+    local bodies: {integer} = {}
+    if tile == nil or #tile.collision == 0 then
+        return bodies
+    end
+    if tecs.physics.of(world) == nil then
+        tecs.physics.install(world)
+    end
+    local pose = assert(world:get(root, tecs.ecs.Transform2D))
+    for _, object in ipairs(tile.collision) do
+        local points: {{number}} = {}
+        if object.shape == "polygon" or object.shape == "polyline" then
+            points = object.points
+        elseif object.shape == "rectangle" then
+            points = {{0, 0}, {object.width, 0}, {object.width, object.height}, {0, object.height}}
+        elseif object.shape == "ellipse" then
+            for i = 0, 31 do
+                local angle = i * math.pi / 16;
+                points[
+                    #points + 1
+                ] = {object.width * (0.5 + 0.5 * math.cos(angle)), object.height * (0.5 + 0.5 * math.sin(angle))}
+            end
+        else
+            error("tiled: unsupported collision shape " .. object.shape, 2)
+        end
+        local transformed: {{number}} = {}
+        local angle = object.rotation * math.pi / 180
+        for _, p in ipairs(points) do
+            local x = object.x + p[1] * math.cos(angle) - p[2] * math.sin(angle) - set.tileWidth * 0.5
+            local y = object.y + p[1] * math.sin(angle) + p[2] * math.cos(angle) - set.tileHeight * 0.5
+            if cell.flipD then
+                x, y = y, x
+            end
+            if cell.flipH then
+                x = -x
+            end
+            if cell.flipV then
+                y = -y
+            end
+            transformed[
+                #transformed + 1
+            ] = {
+                (layer.x + cell.x * map.tileWidth + set.x + set.tileWidth * 0.5 + x) * pose.scaleX,
+                (layer.y + (cell.y + 1) * map.tileHeight + set.y - set.tileHeight * 0.5 + y) * pose.scaleY
+            }
+        end
+        local body: integer = 0
+        local last = object.shape == "polyline" and #transformed - 1 or #transformed
+        for i = 1, last do
+            local a, b = transformed[i], transformed[i % #transformed + 1]
+            if a[1] ~= b[1] or a[2] ~= b[2] then
+                local options: tecs.physics.BodyOptions = {kind = "static", segment = {a[1], a[2], b[1], b[2]}}
+                if body == 0 then
+                    body = world:spawn(
+                        tecs.ecs.ChildOf(root),
+                        TileVisual,
+                        tecs.ecs.Transform2D(pose.x, pose.y, 0, pose.layer, pose.rotation)
+                    )
+                    tecs.physics.attach(world, body, options)
+                    bodies[#bodies + 1] = body
+                else
+                    local collider = world:spawn(tecs.ecs.ChildOf(body), TileVisual)
+                    tecs.physics.attachCollider(world, collider, body, options)
+                end
+            end
+        end
+    end
+
+    return bodies
+end
+
+local function cellRow(
+    exclusive world: tecs.ecs.World,
+    root: integer,
+    map: Map,
+    layer: Layer,
+    cell: Cell,
+    z: number,
+    collision: boolean
+): Row
+    local set = assert(map.tilesets[cell.tileset], "tiled: tileset is missing")
+    local value, width, height = sprite(set, cell.id)
+    local tile = tileOf(set, cell.id)
+    local rotation, sx, sy = 0.0, 1.0, 1.0
+    if cell.flipD then
+        rotation = math.pi * 0.5;
+        sy = -1
+        if cell.flipH then
+            sy = -sy
+        end
+        if cell.flipV then
+            sx = -sx
+        end
+    else
+        if cell.flipH then
+            sx = -sx
+        end
+        if cell.flipV then
+            sy = -sy
+        end
+    end
+    local entity = world:spawn(
+        tecs.ecs.ChildOf(root),
+        TileVisual,
+        tecs.ecs.Transform2D(),
+        value,
+        tecs.gfx.Tint(
+            layer.tint[1] / 255,
+            layer.tint[2] / 255,
+            layer.tint[3] / 255,
+            layer.opacity * layer.tint[4] / 255
+        ),
+        tecs.gfx.Renderable2D,
+        TileSource(cell.id, set.name, tile and tile.class or "", tile and tile.properties or {})
+    )
+    local bodies: {integer} = {}
+    if collision then
+        bodies = collisionBodies(world, root, map, layer, cell, set, tile)
+    end
+
+    return new Row(
+        entity = entity,
+        collisions = bodies,
+        layer = layer,
+        x = layer.x + cell.x * map.tileWidth + width * 0.5 + set.x,
+        y = layer.y + (cell.y + 1) * map.tileHeight - height * 0.5 + set.y,
+        width = width,
+        height = height,
+        rotation = rotation,
+        sx = sx,
+        sy = sy,
+        z = z,
+        set = set,
+        tile = tile,
+        currentFrame = -1,
+        flipH = cell.flipH,
+        flipV = cell.flipV
+    )
+end
+
+local function clear(exclusive world: tecs.ecs.World, root: integer): nil
+    for _, child in ipairs(world:relationshipSources(tecs.ecs.ChildOf, root)) do
+        if world:has(child, TileVisual) then
+            world:despawn(child)
+        end
+    end
+end
+
+local function build(exclusive world: tecs.ecs.World, root: integer, value: TilemapValue, map: Map): Instance
+    clear(world, root)
+    local pose = assert(world:get(root, tecs.ecs.Transform2D))
+    local result = new Instance(
+        map = map,
+        rows = {},
+        revision = map.revision,
+        clock = 0,
+        scaleX = pose.scaleX,
+        scaleY = pose.scaleY,
+        collision = value.collision
+    )
+    for index, layer in ipairs(map.layers) do
+        if layer.visible then
+            if layer.kind == "tiles" then
+                for _, cell in ipairs(layer.cells) do
+                    result.rows[
+                        key(index, cell.x, cell.y)
+                    ] = cellRow(world, root, map, layer, cell, index, value.collision)
+                end
+            elseif layer.kind == "image" and layer.image and not layer.repeatX and not layer.repeatY then
+                local source = assert(layer.image)
+                local image = imageOf(source)
+                local width, height = tecs.gfx.images.sizeOf(image)
+                local entity = world:spawn(
+                    tecs.ecs.ChildOf(root),
+                    TileVisual,
+                    tecs.ecs.Transform2D(),
+                    tecs.gfx.Sprite(image),
+                    tecs.gfx.Tint(
+                        layer.tint[1] / 255,
+                        layer.tint[2] / 255,
+                        layer.tint[3] / 255,
+                        layer.opacity * layer.tint[4] / 255
+                    ),
+                    tecs.gfx.Renderable2D
+                )
+                result.rows[
+                    "image:" .. index
+                ] = new Row(
+                    entity = entity,
+                    collisions = {},
+                    layer = layer,
+                    x = layer.x + width * 0.5,
+                    y = layer.y + height * 0.5,
+                    width = width,
+                    height = height,
+                    rotation = 0,
+                    sx = 1,
+                    sy = 1,
+                    z = index,
+                    set = nil,
+                    tile = nil,
+                    currentFrame = 0,
+                    flipH = false,
+                    flipV = false
+                )
+            end
+        end
+        if layer.kind == "objects" and layer.visible then
+            for _, object in ipairs(layer.objects) do
+                local ref = object.tile
+                if ref and object.visible and not factories[object.class] then
+                    local setIndex: integer = 0
+                    for si, set in ipairs(map.tilesets) do
+                        if set.source == ref.source and set.name == ref.name then
+                            setIndex = si;
+                            break
+                        end
+                    end
+                    assert(setIndex > 0, "tiled: object tileset is missing")
+                    local item = cellRow(
+                        world,
+                        root,
+                        map,
+                        layer,
+                        {
+                            x = 0,
+                            y = 0,
+                            tileset = setIndex,
+                            id = ref.id,
+                            flipH = ref.flipH,
+                            flipV = ref.flipV,
+                            flipD = ref.flipD
+                        },
+                        index,
+                        false
+                    )
+                    local set = map.tilesets[setIndex]
+                    local width, height = object.width > 0
+                        and object.width
+                        or item.width, object.height > 0
+                        and object.height
+                        or item.height
+                    local ax, ay = 0.0, 1.0
+                    local alignment = set.alignment
+                    if alignment == "Top" or alignment == "Center" or alignment == "Bottom" then
+                        ax = 0.5
+                    elseif alignment == "TopRight" or alignment == "Right" or alignment == "BottomRight" then
+                        ax = 1
+                    end
+                    if alignment == "TopLeft" or alignment == "Top" or alignment == "TopRight" then
+                        ay = 0
+                    elseif alignment == "Left" or alignment == "Center" or alignment == "Right" then
+                        ay = 0.5
+                    end
+                    local angle = object.rotation * math.pi / 180
+                    local dx, dy = (0.5 - ax) * width + set.x, (0.5 - ay) * height + set.y
+                    item.x, item.y = layer.x + object.x + dx * math.cos(
+                        angle
+                    ) - dy * math.sin(angle), layer.y + object.y + dx * math.sin(angle) + dy * math.cos(angle)
+                    item.width, item.height, item.rotation = width, height, item.rotation + angle
+                    world:set(
+                        item.entity,
+                        tecs.gfx.Tint(
+                            layer.tint[1] / 255,
+                            layer.tint[2] / 255,
+                            layer.tint[3] / 255,
+                            layer.opacity * layer.tint[4] / 255 * object.opacity
+                        )
+                    )
+                    result.rows["object:" .. object.id] = item
+                end
+            end
+        end
+        if layer.kind == "objects" and not value.objectsSpawned then
+            for _, object in ipairs(layer.objects) do
+                local factory = factories[object.class]
+                if factory then
+                    local entity = factory(world, object)
+                    world:set(entity, tecs.ecs.ChildOf(root))
+                    local angle = object.rotation * math.pi / 180
+                    local x, y = object.x + layer.x, object.y + layer.y
+                    local dx, dy = object.width * 0.5, object.height * 0.5
+                    if object.tile then
+                        dy = -dy
+                    end
+                    x, y = x + dx * math.cos(
+                        angle
+                    ) - dy * math.sin(angle), y + dx * math.sin(angle) + dy * math.cos(angle)
+                    world:set(entity, tecs.ecs.Transform2D(x, y, index))
+                    world:set(entity, tecs.ecs.RelativeTransform2D(x, y, index, angle))
+                end
+            end
+        end
+    end
+    value.objectsSpawned = true
+    world:markComponentDirty(root, Tilemap)
+
+    return result
+end
+
+-- Reuse image-layer quads while the camera remains in the same repeat cells.
+local function repeats(
+    exclusive world: tecs.ecs.World,
+    state: State,
+    root: integer,
+    instance: Instance,
+    camera: tecs.gfx.Camera2D?
+): nil
+    local map = instance.map
+    local pose = assert(world:get(root, tecs.ecs.Transform2D))
+    for index, layer in ipairs(map.layers) do
+        if layer.visible and layer.image and (layer.repeatX or layer.repeatY) then
+            local image = imageOf(assert(layer.image))
+            local width, height = tecs.gfx.images.sizeOf(image)
+            local zoom = camera and math.abs(camera.zoom) or 1
+            local radius = math.sqrt(
+                state.width * state.width + state.height * state.height
+            ) * 0.5 / math.max(zoom, 0.0001)
+            local cx, cy = camera and camera.x or state.width * 0.5, camera and camera.y or state.height * 0.5
+            cx, cy = cx * layer.parallaxX + map.parallaxX * (
+                1 - layer.parallaxX
+            ) - pose.x, cy * layer.parallaxY + map.parallaxY * (1 - layer.parallaxY) - pose.y
+            local c, s = math.cos(pose.rotation), math.sin(pose.rotation)
+            local sx, sy = math.max(math.abs(pose.scaleX), 0.0001), math.max(math.abs(pose.scaleY), 0.0001)
+            cx, cy = (
+                cx * c + cy * s
+            ) / (pose.scaleX == 0 and 1 or pose.scaleX), (-cx * s + cy * c) / (pose.scaleY == 0 and 1 or pose.scaleY)
+            local minX, maxX, minY, maxY = 0, 0, 0, 0
+            if layer.repeatX then
+                minX, maxX = math.floor(
+                    (cx - radius / sx - layer.x) / width
+                ), math.floor((cx + radius / sx - layer.x) / width)
+            end
+            if layer.repeatY then
+                minY, maxY = math.floor(
+                    (cy - radius / sy - layer.y) / height
+                ), math.floor((cy + radius / sy - layer.y) / height)
+            end
+            local prefix = "repeat:" .. index .. ":"
+            local live: {[string]: boolean} = {}
+            for y = minY, maxY do
+                for x = minX, maxX do
+                    local name = prefix .. x .. ":" .. y
+                    live[name] = true
+                    if instance.rows[name] == nil then
+                        local entity = world:spawn(
+                            tecs.ecs.ChildOf(root),
+                            TileVisual,
+                            tecs.ecs.Transform2D(),
+                            tecs.gfx.Sprite(image),
+                            tecs.gfx.Tint(
+                                layer.tint[1] / 255,
+                                layer.tint[2] / 255,
+                                layer.tint[3] / 255,
+                                layer.opacity * layer.tint[4] / 255
+                            ),
+                            tecs.gfx.Renderable2D
+                        )
+                        instance.rows[
+                            name
+                        ] = new Row(
+                            entity = entity,
+                            collisions = {},
+                            layer = layer,
+                            x = layer.x + (x + 0.5) * width,
+                            y = layer.y + (y + 0.5) * height,
+                            width = width,
+                            height = height,
+                            rotation = 0,
+                            sx = 1,
+                            sy = 1,
+                            z = index,
+                            set = nil,
+                            tile = nil,
+                            currentFrame = 0,
+                            flipH = false,
+                            flipV = false
+                        )
+                    end
+                end
+            end
+            for name, item in pairs(instance.rows) do
+                if name:sub(1, #prefix) == prefix and not live[name] then
+                    world:despawn(item.entity);
+                    instance.rows[name] = nil
+                end
+            end
+        end
+    end
+end
+
+local function step(exclusive world: tecs.ecs.World, state: State, dt: number): nil
+    local camera = tecs.internal.cameraselection.pick(state.cameras)
+    local live: {[integer]: boolean} = {}
+    for candidate, count in state.maps:iter() do
+        local values = assert(assert(candidate):get(Tilemap))
+        for row = 1, count as integer do
+            local root = assert(candidate).entities[row]
+            live[root] = true
+            local value = values[row]
+            local map = value.map
+            if map == nil then
+                map = load(value.path);
+                value.map = map;
+                world:markComponentDirty(root, Tilemap)
+            end
+            local instance = state.instances[root]
+            local currentPose = assert(world:get(root, tecs.ecs.Transform2D))
+            if instance == nil or instance.map ~= map or instance.collision ~= value.collision or (
+                value.collision and (instance.scaleX ~= currentPose.scaleX or instance.scaleY ~= currentPose.scaleY)
+            ) then
+                instance = build(world, root, value, assert(map));
+                state.instances[root] = instance
+            end
+            local active = assert(instance)
+            local loaded = assert(map)
+            if active.revision ~= loaded.revision then
+                for changed, version in pairs(loaded.changes) do
+                    if version > active.revision then
+                        local li, x, y = changed:match("^(%d+):([%-]?%d+):([%-]?%d+)$")
+                        local layerIndex, tx, ty = assert(
+                            tonumber(li)
+                        ) as integer, assert(tonumber(x)) as integer, assert(tonumber(y)) as integer
+                        local old = active.rows[changed]
+                        if old then
+                            world:despawn(old.entity);
+                            for _, body in ipairs(old.collisions) do
+                                world:despawn(body)
+                            end;
+                            active.rows[changed] = nil
+                        end
+                        local cell = getTile(loaded, layerIndex, tx, ty)
+                        if cell and loaded.layers[layerIndex].visible then
+                            active.rows[
+                                changed
+                            ] = cellRow(
+                                world,
+                                root,
+                                loaded,
+                                loaded.layers[layerIndex],
+                                cell,
+                                layerIndex,
+                                value.collision
+                            )
+                        end
+                    end
+                end
+                active.revision = loaded.revision
+            end
+            repeats(world, state, root, active, camera)
+            active.clock = active.clock + dt
+            local rootPose = assert(world:get(root, tecs.ecs.Transform2D))
+            for _, item in pairs(active.rows) do
+                for _, body in ipairs(item.collisions) do
+                    local bodyPose = world:get(body, tecs.ecs.Transform2D)
+                    if bodyPose and (
+                        bodyPose.x ~= rootPose.x or bodyPose.y ~= rootPose.y or bodyPose.rotation ~= rootPose.rotation
+                    ) then
+                        tecs.physics.teleport(world, body, rootPose.x, rootPose.y, rootPose.rotation)
+                    end
+                end
+                local pose = world:get(item.entity, tecs.ecs.Transform2D)
+                if pose then
+                    local c, s = math.cos(rootPose.rotation), math.sin(rootPose.rotation)
+                    local x = rootPose.x + item.x * rootPose.scaleX * c - item.y * rootPose.scaleY * s + (
+                        camera and (camera.x - loaded.parallaxX) * (1 - item.layer.parallaxX) or 0
+                    )
+                    local y = rootPose.y + item.x * rootPose.scaleX * s + item.y * rootPose.scaleY * c + (
+                        camera and (camera.y - loaded.parallaxY) * (1 - item.layer.parallaxY) or 0
+                    )
+                    local sx, sy = item.width * item.sx * rootPose.scaleX, item.height * item.sy * rootPose.scaleY
+                    if pose.x ~= x
+                        or pose.y ~= y
+                        or pose.scaleX ~= sx
+                        or pose.scaleY ~= sy
+                        or pose.layer ~= rootPose.layer
+                        or pose.z ~= rootPose.z
+                        + item.z
+                        or pose.rotation ~= rootPose.rotation
+                        + item.rotation
+                    then
+                        pose = assert(world:getMut(item.entity, tecs.ecs.Transform2D))
+                        pose.x, pose.y, pose.scaleX, pose.scaleY = x, y, sx, sy
+                        pose.rotation, pose.layer, pose.z = rootPose.rotation
+                            + item.rotation, rootPose.layer, rootPose.z
+                            + item.z
+                    end
+                    local tile = item.tile
+                    if tile and #tile.animation > 0 then
+                        local duration = 0.0
+                        for _, frame in ipairs(tile.animation) do
+                            duration = duration + frame.duration
+                        end
+                        if duration > 0 then
+                            local clock = active.clock % duration
+                            local selected = tile.animation[#tile.animation].id
+                            for _, frame in ipairs(tile.animation) do
+                                if clock < frame.duration then
+                                    selected = frame.id;
+                                    break
+                                end;
+                                clock = clock - frame.duration
+                            end
+                            if selected ~= item.currentFrame then
+                                local sprite, width, height = sprite(assert(item.set), selected)
+                                world:set(item.entity, sprite)
+                                item.width, item.height, item.currentFrame = width, height, selected
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    for entity in pairs(state.instances) do
+        if not live[entity] then
+            if world:isAlive(entity) then
+                clear(world, entity)
+            end;
+            state.instances[entity] = nil
+        end
+    end
+end
+
+--- Installs tile projection and animation in the world.
+--- @param world the world receiving maps
+export function install(exclusive world: tecs.ecs.World): nil
+    if world.resources[stateKey] then
+        return
+    end
+    local state = new State(
+        maps = world:newQuery({
+            include = {Tilemap, tecs.ecs.Transform2D}
+        }),
+        cameras = world:newQuery({
+            include = {tecs.gfx.Camera2D, tecs.gfx.ActiveCamera}
+        }),
+        instances = {},
+        width = 1280,
+        height = 720
+    )
+    world.resources[stateKey] = state
+    local function resized(event: tecs.platform.events.ResizeEvent, exclusive _world: tecs.ecs.World): nil
+        if event.width > 0 and event.height > 0 then
+            state.width, state.height = event.width * event.scaleFactor, event.height * event.scaleFactor
+        end
+    end
+
+    world:observe(0, tecs.platform.events.on.windowResized, resized)
+    world:observe(0, tecs.platform.events.on.windowScaleChanged, resized)
+    world:addSystem({
+        name = "tecs.Tiled",
+        phase = tecs.ecs.phases.Update,
+        commitBefore = true,
+        commitAfter = true,
+        run = function(dt: number, exclusive running: tecs.ecs.World): nil
+            step(running, state, dt)
+        end
+    })
+    world:addSystem({
+        name = "tecs.TiledPresentation",
+        phase = tecs.ecs.phases.RenderFirst,
+        commitAfter = true,
+        run = function(_dt: number, exclusive running: tecs.ecs.World): nil
+            step(running, state, 0)
+        end
+    })
+    world:addSnapshotHandler({
+        name = "tecs.tiled",
+        load = function(exclusive _world: tecs.ecs.World, _value: any): nil
+            state.instances = {}
+        end,
+        save = function(exclusive _world: tecs.ecs.World): any
+            return true
+        end
+    })
+end
+
+--- Spawns a loaded map and installs its projection system.
+--- @param world the target world
+--- @param map the loaded map
+--- @param options optional collision settings
+--- @return the parent map entity
+export function spawn(exclusive world: tecs.ecs.World, map: Map, options: Options?): integer
+    install(world)
+    local values = options or {}
+    values.map = map
+    return world:spawn(Tilemap(values))
+end

@@ -60,7 +60,7 @@ narrows it to those files, with Nupp and rustfmt handling their respective sourc
 
 `nupp task package` installs a relocatable release into `out/package`. A release carries `bin/tecs-host`, the
 prebuilt `bin/shaders.tecspack` and its manifest, `lib/` holding the Nupp runtime library beside `tecsaudio`,
-`tecsgamepad` and `tecs_physics`, the compiled components under `share/tecs/components`, and the notices,
+`tecsgamepad`, `tecs_physics`, `tecs_ui` and `tecs_assets`, the compiled components under `share/tecs/components`, and the notices,
 licenses and Cargo inventory under `share/tecs`. A Windows package puts every library in `bin/`, where that
 loader looks.
 
@@ -74,7 +74,7 @@ override removed, which is the only way to find out whether an install is reloca
 Packaging is native only. The Nupp toolchain stages an embedding library for the machine it runs on, so a
 Windows release is built on Windows.
 
-Two things a packager learns the hard way. The three service libraries resolve in a release through the
+Two things a packager learns the hard way. The five service libraries resolve in a release through the
 _executable's_ run path, not through the ancestor walk in `tecs.internal.nativelibrary`: that walk starts at
 the module's source directory, which a compiled component no longer has, so what actually finds them is a load
 by bare name reaching the loader's search of `lib/`. And a guarded plugin failure is invisible to `--headless`,
@@ -205,9 +205,12 @@ MCP debug server.
 Deferred with a recorded contract: pen input, and audio device hotplug. `src/tecs/input.nupp` states what would
 have to come back.
 
-Missing from the Nupp engine: Tiled map import, retained UI, 3D rendering,
-custom post-processing and multiple cameras. Earlier versions had Tiled support
-and a Taffy-backed UI; rendering sprites does not replace either subsystem.
+Working too: Tiled TMX/TSX loading through the official Rust `tiled` crate,
+map rendering, animation, edits, object factories and collision outlines;
+retained UI with a native Taffy tree, text/image measurement, scrolling and interaction.
+See `docs/tiled/index.md` and `docs/ui/index.md`. Run `nupp task tiled` and `nupp task ui`.
+
+Missing from the Nupp engine: 3D rendering, custom post-processing and multiple cameras.
 
 Intentionally removed: gamepad motion sensors and touchpads,
 trigger rumble, LED, player index, and standalone sensors. Each is recorded at its declaration or in the

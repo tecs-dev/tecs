@@ -18,7 +18,7 @@ for name, description in pairs(descriptions) do
         argv = { "nupp", "run", "tools/run.nupp", name },
     }
 end
-for _, name in ipairs({ "host", "flatcolor", "sprites", "lighting", "nativesmoke" }) do
+for _, name in ipairs({ "host", "flatcolor", "sprites", "lighting", "nativesmoke", "tiled", "ui" }) do
     developmentTasks[name] = {
         description = "Build and run the " .. name .. " component",
         build = name,
@@ -99,6 +99,15 @@ for index = 1, #hostExports do
 end
 nativesmokeExports[#nativesmokeExports + 1] = "nativesmoke.create"
 
+local tiledExports = {}
+local uiExports = {}
+for index = 1, #hostExports do
+    tiledExports[index] = hostExports[index]
+    uiExports[index] = hostExports[index]
+end
+tiledExports[#tiledExports + 1] = "tiled.create"
+uiExports[#uiExports + 1] = "ui.create"
+
 return {
     -- `tests` is included because leaving it out meant `nupp check --strict`
     -- never read a test file. Two suites called `suspension.gather` and
@@ -117,6 +126,10 @@ return {
                 description = "Build the headless Tecs modules",
                 entries = {
                     "tecs.application",
+                    "tecs.ui",
+                    "tecs.tiled",
+                    "tecs.internal.uinative",
+                    "tecs.internal.assetnative",
                     "tecs.assets",
                     "tecs.audio",
                     "tecs.ecs",
@@ -209,6 +222,18 @@ return {
                 description = "Build the deferred lighting, shadow and bloom Nupp example",
                 entries = { "tecs.host", "lighting" },
                 exports = lightingExports,
+            },
+            tiled = {
+                kind = "component",
+                description = "Build the TMX map example",
+                entries = { "tecs.host", "tiled" },
+                exports = tiledExports,
+            },
+            ui = {
+                kind = "component",
+                description = "Build the retained Taffy UI example",
+                entries = { "tecs.host", "ui" },
+                exports = uiExports,
             },
             -- The component `nupp task test-package` runs against an
             -- installed release. It is a component rather than a script

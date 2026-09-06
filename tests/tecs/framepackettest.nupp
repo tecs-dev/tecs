@@ -55,7 +55,7 @@ local record Batch
     count: integer
 end
 
---- Reads the fixed v4 header, holds the packet to every constant in it, and
+--- Reads the fixed v5 header, holds the packet to every constant in it, and
 --- steps past the graph section so the light table is next.
 local function header(borrows reader: nupp.io.ScalarReader): Header
     test.equal(reader:readUint32(), framepacket.MAGIC)
@@ -810,6 +810,35 @@ function suite.refreshesCachedOrderAfterChangesAndARefusedPacket(): nil
     -- Another depth edit invalidates the cached order without an error path.
     assert(world:getMut(first, ecs.Transform2D)).layer = 1
     test.equal(extractor:packet(640, 360), original)
+end
+
+function suite.packsClipsAndKeepsScreenOverlaysStillUnderACamera(): nil
+    local world = ecs.newWorld()
+    tecs.gfx.layers.configure(16, {sort = "z", screenSpace = true, overlay = true, unlit = true})
+    tecs.gfx.clips.setRegion(250, {x = 10.8, y = 20.2, width = 100, height = 50})
+    world:spawn(gfx.Camera2D(1000, 2000, 2, math.pi / 2), gfx.ActiveCamera)
+    world:spawn(ecs.Transform2D(100, 50, 0, 16, 0, 40, 20), gfx.Tint(), gfx.Renderable2D, gfx.Clip(250))
+    world:commit()
+    local extractor = framepacket.new(world)
+    local reader = nupp.io.newScalarReader(extractor:packet(800, 600))
+    local h = header(reader)
+    local b = batch(reader)
+    test.equal(b.lane, framepacket.LANE_BLEND)
+    test.assert(math.abs(reader:readFloat32() - 1125) < 0.001)
+    test.assert(math.abs(reader:readFloat32() - 1850) < 0.001)
+    test.assert(math.abs(reader:readFloat32() - math.pi / 2) < 0.001)
+    reader:skip(4)
+    test.equal(reader:readFloat32(), 20)
+    test.equal(reader:readFloat32(), 10)
+    reader:skip(10 * 4)
+    reader:skip(4)
+    test.equal(reader:readUint32(), 9)
+    test.equal(reader:readUint32(), 11 + 20 * 65536)
+    test.equal(reader:readUint32(), 111 + 70 * 65536)
+    reader:drop()
+    tecs.gfx.clips.clearRegion(250)
+    tecs.gfx.layers.configure(16, {sort = "topdown"})
+    test.equal(h.instances, 1)
 end
 
 return suite

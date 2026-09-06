@@ -273,6 +273,8 @@ pub const SHAPE_BOX: u32 = 0;
 pub const SHAPE_CIRCLE: u32 = 1;
 /// A vertical capsule.
 pub const SHAPE_CAPSULE: u32 = 2;
+/// A segment whose endpoints are the negative and positive half extents.
+pub const SHAPE_SEGMENT: u32 = 3;
 
 /// The collider reports overlap without a collision response.
 pub const COLLIDER_SENSOR: u32 = 1;
