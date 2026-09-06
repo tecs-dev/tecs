@@ -8,13 +8,19 @@ fn main() {
     let sdk = env::var_os("NUPP_SDK")
         .map(PathBuf::from)
         .unwrap_or_else(stage_sdk);
+    let linux = target_os().contains("linux");
+    let library = if linux { "libnupp.so" } else { "libnupp.a" };
     assert!(
-        sdk.join("libnupp.a").is_file(),
-        "Nupp SDK at {} has no libnupp.a",
+        sdk.join(library).is_file(),
+        "Nupp SDK at {} has no {library}",
         sdk.display()
     );
     println!("cargo:rustc-link-search=native={}", sdk.display());
-    println!("cargo:rustc-link-lib=static=nupp");
+    // A Rust staticlib carries std and its dependencies. Thin LTO in the host
+    // can pull those objects twice on Linux, even with identical compilers.
+    // The SDK's cdylib exports the same C API and already ships in lib/.
+    let linkage = if linux { "dylib" } else { "static" };
+    println!("cargo:rustc-link-lib={linkage}=nupp");
     // The static library carries a reference to the embedding library beside
     // it, so a binary that links cleanly still aborts at startup unless the
     // loader can find that. Recording a run path is what makes the binary

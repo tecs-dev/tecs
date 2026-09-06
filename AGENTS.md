@@ -88,7 +88,8 @@ Two things about that SDK are worth knowing before they cost an afternoon. It is
 set, and the runtime refuses to load a component whose declared features the library lacks, which reads as a
 load failure in a host that built cleanly. Staging runs Nupp's own Cargo build, so it clears inherited
 Cargo process overrides. Keep this tree's Rust pin aligned with the SDK's compiler: `libnupp.a` carries
-Rust's standard library, and mixing compiler versions can produce duplicate symbols on Linux.
+Rust's standard library. Linux links the SDK's shared C API library because optimized linking can
+pull duplicate standard-library objects from its static archive even with identical compiler versions.
 
 Benchmarks are in `bench/nupp`, and `signature` rather than `bitset` is the archetype-signature one, because
 this ECS has no bitset. `latency` has no counterpart: nothing in Nupp pushes an event into the host queue, and
