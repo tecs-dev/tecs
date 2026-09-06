@@ -140,7 +140,7 @@ pub fn format(root: &Path, verify: bool) -> Result<()> {
 /// `nupp test` remains useful for focused development with optional bindings;
 /// this integration gate refuses skips and missing suite discovery.
 pub fn test(root: &Path) -> Result<()> {
-    let libraries = native_libraries(root)?;
+    let libraries = native_libraries(root, false)?;
     let expected = std::fs::read_dir(root.join("tests"))?
         .map(|entry| entry.map(|entry| entry.file_name().to_string_lossy().into_owned()))
         .collect::<std::io::Result<Vec<_>>>()?
@@ -173,8 +173,9 @@ pub fn test(root: &Path) -> Result<()> {
 
 /// Uses Cargo's artifact paths so an alternate target directory cannot make
 /// the tests accidentally load a library left over in the checkout.
-fn native_libraries(root: &Path) -> Result<Vec<(&'static str, PathBuf)>> {
-    let output = Command::new("cargo")
+fn native_libraries(root: &Path, release: bool) -> Result<Vec<(&'static str, PathBuf)>> {
+    let mut build = Command::new("cargo");
+    build
         .args([
             "build",
             "--locked",
@@ -187,7 +188,11 @@ fn native_libraries(root: &Path) -> Result<Vec<(&'static str, PathBuf)>> {
             "--message-format=json-render-diagnostics",
         ])
         .current_dir(root)
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    if release {
+        build.arg("--release");
+    }
+    let output = build
         .output()
         .context("building native integration libraries")?;
     if !output.status.success() {
@@ -302,12 +307,28 @@ pub fn documentation(root: &Path, output: Option<&Path>) -> Result<PathBuf> {
 /// because a measurement taken at a different optimization level than the one
 /// that ships answers a question nobody asked.
 pub fn benchmark(root: &Path, name: &str, arguments: &[OsString]) -> Result<()> {
+    if name == "acceptance" {
+        anyhow::ensure!(
+            arguments.is_empty(),
+            "acceptance takes no benchmark overrides"
+        );
+        return benchmark_acceptance(root);
+    }
     let source = benchmark_source(root, name)?;
+    let libraries = if name == "physics" {
+        native_libraries(root, true)?
+    } else {
+        Vec::new()
+    };
+    for (variable, path) in &libraries {
+        eprintln!("benchmark release library: {variable}={}", path.display());
+    }
     let mut command = Command::new(compiler(root)?);
     command
         .arg("run")
         .arg("-O2")
         .arg(&source)
+        .envs(libraries)
         .args(arguments)
         .current_dir(root);
     let status = command
@@ -317,6 +338,166 @@ pub fn benchmark(root: &Path, name: &str, arguments: &[OsString]) -> Result<()> 
         anyhow::bail!("the {name} benchmark exited with {status}");
     }
     Ok(())
+}
+
+/// Runs fixed CPU workloads three times, outside the ordinary CI gate. Each
+/// run must meet every p95 budget; no pooling can hide a bad repetition.
+pub fn benchmark_acceptance(root: &Path) -> Result<()> {
+    let libraries = native_libraries(root, true)?;
+    let compiler = compiler(root)?;
+    let directory = root.join("out/validation/performance");
+    std::fs::create_dir_all(&directory)?;
+    let workloads = [
+        (
+            "shapes-4000",
+            "shapes",
+            "BENCH_SHAPES",
+            "2000",
+            "120",
+            vec![("update", 1.0), ("extract", 3.0), ("frame", 4.0)],
+        ),
+        (
+            "physics-1000",
+            "physics",
+            "BENCH_BODIES",
+            "1000",
+            "600",
+            vec![
+                ("commands+ecs", 2.0),
+                ("native batch", 3.0),
+                ("sync", 0.5),
+                ("update", 5.0),
+            ],
+        ),
+        (
+            "physics-4000-stress",
+            "physics",
+            "BENCH_BODIES",
+            "4000",
+            "600",
+            vec![
+                ("commands+ecs", 8.0),
+                ("native batch", 20.0),
+                ("sync", 1.0),
+                ("update", 25.0),
+            ],
+        ),
+    ];
+    let mut results = Vec::new();
+    let mut failures = Vec::new();
+    for (label, name, variable, count, warmup, budgets) in workloads {
+        for repetition in 1..=3 {
+            let mut command = Command::new(&compiler);
+            // A developer's shell must not silently change the accepted fixture.
+            for (key, _) in std::env::vars_os() {
+                if key.to_string_lossy().starts_with("BENCH_") {
+                    command.env_remove(key);
+                }
+            }
+            command
+                .args(["run", "-O2"])
+                .arg(benchmark_source(root, name)?)
+                .envs(libraries.iter().map(|(key, value)| (*key, value)))
+                .env(variable, count)
+                .env("BENCH_JSON", "1")
+                .env("BENCH_WARMUP", warmup)
+                .env("BENCH_FRAMES", "900")
+                .env("BENCH_AREA_W", "1280")
+                .env("BENCH_AREA_H", "720")
+                .env("BENCH_MODE", "frame")
+                .env("BENCH_WORKERS", "0")
+                .current_dir(root);
+            let output = command.output().context("running performance acceptance")?;
+            let stem = format!("{label}-{repetition}");
+            std::fs::write(directory.join(format!("{stem}.stdout")), &output.stdout)?;
+            std::fs::write(directory.join(format!("{stem}.stderr")), &output.stderr)?;
+            anyhow::ensure!(
+                output.status.success(),
+                "{stem} failed; see {}",
+                directory.display()
+            );
+            let stdout = String::from_utf8(output.stdout)?;
+            let report: serde_json::Value = serde_json::from_str(
+                stdout
+                    .lines()
+                    .find_map(|line| line.strip_prefix("TECS_BENCH_JSON "))
+                    .context("benchmark did not emit its structured report")?,
+            )?;
+            let violations = check_performance_budgets(&report, &budgets)?;
+            println!(
+                "{stem}: {}",
+                if violations.is_empty() {
+                    "PASS"
+                } else {
+                    "FAIL"
+                }
+            );
+            for violation in &violations {
+                eprintln!("  {violation}");
+                failures.push(format!("{stem}: {violation}"));
+            }
+            results.push(
+                serde_json::json!({"workload": label, "repetition": repetition,
+                "p95BudgetsMs": budgets, "violations": violations, "report": report}),
+            );
+        }
+    }
+    let revision = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(root)
+        .output()?;
+    let dirty = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(root)
+        .output()?;
+    let version = Command::new(&compiler)
+        .arg("--version")
+        .current_dir(root)
+        .output()?;
+    let report = serde_json::json!({"schemaVersion": 1, "os": std::env::consts::OS,
+        "architecture": std::env::consts::ARCH, "revision": String::from_utf8_lossy(&revision.stdout).trim(),
+        "dirty": !dirty.stdout.is_empty(), "compiler": compiler,
+        "compilerVersion": String::from_utf8_lossy(&version.stdout).trim(),
+        "nativeLibraries": libraries, "nativeProfile": "release", "optimization": "O2",
+        "frames": 900, "workers": 0, "results": results, "passed": failures.is_empty()});
+    std::fs::write(
+        directory.join("acceptance.json"),
+        serde_json::to_vec_pretty(&report)?,
+    )?;
+    anyhow::ensure!(
+        failures.is_empty(),
+        "performance budgets exceeded; see {}",
+        directory.display()
+    );
+    Ok(())
+}
+
+fn check_performance_budgets(
+    report: &serde_json::Value,
+    budgets: &[(&str, f64)],
+) -> Result<Vec<String>> {
+    let stages = report["stages"]
+        .as_array()
+        .context("missing performance stages")?;
+    let mut violations = Vec::new();
+    for (name, limit) in budgets {
+        let matching = stages
+            .iter()
+            .filter(|stage| stage["name"] == *name)
+            .collect::<Vec<_>>();
+        anyhow::ensure!(matching.len() == 1, "expected exactly one {name} stage");
+        let stage = matching[0];
+        anyhow::ensure!(
+            stage["samples"].as_u64() == Some(900),
+            "{name} must contain 900 samples"
+        );
+        let p95 = stage["p95"].as_f64().context("missing numeric p95")?;
+        anyhow::ensure!(p95.is_finite() && p95 >= 0.0, "invalid {name} p95");
+        if p95 > *limit {
+            violations.push(format!("{name} p95 {p95:.3} ms exceeds {limit:.3} ms"));
+        }
+    }
+    Ok(violations)
 }
 
 /// Resolves a benchmark name to its program, and lists the alternatives when
@@ -458,7 +639,7 @@ pub fn verify(root: &Path) -> Result<()> {
             anyhow::bail!("cargo {} exited with {status}", arguments[0]);
         }
     }
-    let libraries = native_libraries(root)?;
+    let libraries = native_libraries(root, false)?;
     for target in [
         DEFAULT_COMPONENT,
         "flatcolor",
@@ -522,6 +703,25 @@ fn which(program: &str) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn performance_gate_requires_complete_samples_and_checks_the_tail() {
+        let good = json!({"stages": [{"name": "extract", "samples": 900, "p95": 3.0}]});
+        assert!(check_performance_budgets(&good, &[("extract", 3.0)])
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            check_performance_budgets(&good, &[("extract", 2.9)])
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(check_performance_budgets(&good, &[("update", 3.0)]).is_err());
+        let short = json!({"stages": [{"name": "extract", "samples": 899, "p95": 1.0}]});
+        assert!(check_performance_budgets(&short, &[("extract", 3.0)]).is_err());
+        let duplicate = json!({"stages": [good["stages"][0], good["stages"][0]]});
+        assert!(check_performance_budgets(&duplicate, &[("extract", 3.0)]).is_err());
+    }
 
     fn report() -> serde_json::Value {
         json!({"ok": true, "total": 1, "passed": 1, "failed": 0, "skipped": 0,

@@ -3,8 +3,8 @@
 --- The scene is copied from `bench/shapes.tl` so the two are talking about the
 --- same work: a 4000x2400 field seeded at 42, viewed through a 1280x720 target,
 --- with a translation-only drift system moving every transform. Circles and
---- rectangles are spawned separately so each lands in its own archetype and
---- stays contiguous, which is what the Teal scene relies on as well.
+--- rectangles use their actual material ids, matching the Teal scene. Both
+--- halves share an archetype and remain contiguous in spawn order.
 ---
 --- What is measured is narrower than the Teal benchmark, and the difference is
 --- the point rather than an omission. `bench/shapes.tl` runs a window: its
@@ -35,6 +35,7 @@ local ecs = require("tecs.ecs")
 
 local framepacket = require("tecs.internal.framepacket")
 local gfx = require("tecs.gfx")
+local materials = require("tecs.gpu.materials")
 local harness = require("tecs.bench.harness")
 local time = require("nupp.time")
 
@@ -53,22 +54,11 @@ const WIDTH = 1280
 const HEIGHT = 720
 const STEP = 1.0 / 60.0
 
---- Marks the round half of the field, so it occupies its own archetype.
----
---- The Teal scene separates the two kinds with `Material`, which selects the
---- branch its fragment shader takes. No material dispatch is ported, so this
---- carries only the archetype split, which is what the CPU side of the scene
---- depends on.
-const Circle = ecs.newTagComponent({name = "bench.ShapesCircle"})
-
---- Marks the rectangular half of the field.
-const Rounded = ecs.newTagComponent({name = "bench.ShapesRounded"})
-
 const world = ecs.newWorld({maxEntities = COUNT + 1024})
 
 --- Fills the area, centered on the viewport so the visible fraction matches
 --- the Teal scene's.
-local function fill(exclusive value: ecs.World, kind: ecs.Component, base: number, spread: number): nil
+local function fill(exclusive value: ecs.World, kind: integer, base: number, spread: number): nil
     const originX = (WIDTH - AREA_W) * 0.5
     const originY = (HEIGHT - AREA_H) * 0.5
     for _ = 1, PER_KIND do
@@ -84,7 +74,7 @@ local function fill(exclusive value: ecs.World, kind: ecs.Component, base: numbe
             ),
             gfx.Tint(math.random(), math.random(), math.random(), 1.0),
             gfx.Renderable2D,
-            kind
+            gfx.Material(kind, kind == materials.id("circle") and 0.0 or 0.25)
         )
     end
 end
@@ -93,8 +83,8 @@ end
 -- every run rather than a lattice.
 math.randomseed(42)
 const spawnStarted = time.now()
-fill(world, Circle, 6.0, 10.0)
-fill(world, Rounded, 10.0, 20.0)
+fill(world, materials.id("circle"), 6.0, 10.0)
+fill(world, materials.id("rounded"), 10.0, 20.0)
 world:update(0)
 const spawnMilliseconds = time.now() - spawnStarted
 
@@ -125,12 +115,17 @@ const update = harness.newStage("update")
 const extract = harness.newStage("extract")
 const frame = harness.newStage("frame")
 
-local bytes = 0
+local packet = ""
+local profiling: nupp.profile.SampleSession? = nil
+const profilePath = harness.text("BENCH_PROFILE", "")
 for index = 1, WARMUP + FRAMES do
+    if index == WARMUP + 1 and profilePath ~= "" then
+        profiling = nupp.profile.sample({intervalMs = 1})
+    end
     const started = time.now()
     world:update(STEP)
     const simulated = time.now()
-    bytes = #extractor:packet(WIDTH, HEIGHT)
+    packet = extractor:packet(WIDTH, HEIGHT)
     const extracted = time.now()
     if index > WARMUP then
         harness.mark(update, simulated - started)
@@ -139,7 +134,14 @@ for index = 1, WARMUP + FRAMES do
     end
 end
 
-const instances = (bytes - framepacket.HEADER_SIZE - framepacket.BATCH_STRIDE) // framepacket.INSTANCE_STRIDE
+if profiling ~= nil then
+    profiling:stop(profilePath)
+end
+const bytes = #packet
+local reader = nupp.io.newScalarReader(packet:sub(37, 40))
+const instances = reader:readUint32() as integer
+reader:drop()
+assert(instances == COUNT, "benchmark packet lost instances")
 print(
     (
         "shapes: %d circles + %d rects over %.0fx%.0f, target %dx%d, mode %s"
@@ -150,4 +152,4 @@ print(
         "spawned %d entities in %.0f ms; %d frames after %d warmup, %d instances in a %d byte packet"
     ):format(COUNT, spawnMilliseconds, FRAMES, WARMUP, instances, bytes)
 )
-print(harness.format({update, extract, frame}))
+harness.finish({update, extract, frame})

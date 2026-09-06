@@ -159,6 +159,7 @@ local passes = require("tecs.gpu.passes")
 local query = require("tecs.internal.query")
 local rendercomponents = require("tecs.internal.rendercomponents")
 local world = require("tecs.internal.world")
+local zone = require("nupp.profile.zone")
 
 --- Identifies a Tecs frame packet, and is a compatibility surface.
 export const MAGIC: uint32 = 0x54454353
@@ -585,10 +586,17 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
         error("framepacket: viewport dimensions must be positive", 2)
     end
     const cameraX, cameraY, zoom, rotation = view(self, width, height)
+    zone.push("extract/collect")
     collect(self)
+    zone.pop()
+    zone.push("extract/sort")
     sortRows(self)
+    zone.pop()
+    zone.push("extract/lights")
     collectLights(self)
     sortLights(self)
+    zone.pop()
+    zone.push("extract/encode")
 
     const order = self.order
     const imageIds = self.imageIds
@@ -730,34 +738,56 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
     const v0 = self.v0
     const u1 = self.u1
     const v1 = self.v1
-    for index = 1, rows do
-        const row = order[index]
-        const transform = transforms[row]
-        const tint = tints[row]
-        writer:writeFloat32(narrow(transform.x))
-            :writeFloat32(narrow(transform.y))
-            :writeFloat32(narrow(transform.rotation))
-            :writeFloat32(narrow(depths[row]))
-            :writeFloat32(narrow(transform.scaleX))
-            :writeFloat32(narrow(transform.scaleY))
-            :writeFloat32(narrow(params[row]))
-            :writeFloat32(narrow(castHeights[row]))
-            :writeFloat32(narrow(u0[row]))
-            :writeFloat32(narrow(v0[row]))
-            :writeFloat32(narrow(u1[row]))
-            :writeFloat32(narrow(v1[row]))
-            :writeFloat32(narrow(tint.r))
-            :writeFloat32(narrow(tint.g))
-            :writeFloat32(narrow(tint.b))
-            :writeFloat32(narrow(tint.a))
-            :writeUint32(wrap(materialIds[row]))
-            :writeUint32(wrap((lanes[row] == LANE_BLEND and FLAG_BLENDED or 0) + castFlags[row]))
-            :writeUint32(0)
-            :writeUint32(0)
-    end
     writer:drop()
+    -- One checked lease owns the entire instance region. The raw views stay
+    -- inside it; each row writes exactly twenty four-byte words. Both the
+    -- header/graph boundary and INSTANCE_STRIDE are multiples of four.
+    const instanceBytes = rows * (INSTANCE_STRIDE as integer)
+    local lease = buffer:reserveWrite(buffer:length(), instanceBytes)
+    do
+        local output = lease:span()
+        do
+            local pointer, length = output:ref()
+            assert(length == instanceBytes)
+            unsafe do
+                local raw = (pointer as uint8*) + 0
+                local floats = borrowFrom(ffi.cast<float[?]>(raw), output)
+                local words = borrowFrom(ffi.cast<uint32[?]>(raw), output)
+                for index = 1, rows do
+                    const row = order[index]
+                    const transform = transforms[row]
+                    const tint = tints[row]
+                    const base = (index - 1) * 20
+                    floats[base + 0] = transform.x as float
+                    floats[base + 1] = transform.y as float
+                    floats[base + 2] = transform.rotation as float
+                    floats[base + 3] = depths[row] as float
+                    floats[base + 4] = transform.scaleX as float
+                    floats[base + 5] = transform.scaleY as float
+                    floats[base + 6] = params[row] as float
+                    floats[base + 7] = castHeights[row] as float
+                    floats[base + 8] = u0[row] as float
+                    floats[base + 9] = v0[row] as float
+                    floats[base + 10] = u1[row] as float
+                    floats[base + 11] = v1[row] as float
+                    floats[base + 12] = tint.r as float
+                    floats[base + 13] = tint.g as float
+                    floats[base + 14] = tint.b as float
+                    floats[base + 15] = tint.a as float
+                    words[base + 16] = wrap(materialIds[row])
+                    words[base + 17] = wrap((lanes[row] == LANE_BLEND and FLAG_BLENDED or 0) + castFlags[row])
+                    words[base + 18] = 0
+                    words[base + 19] = 0
+                end
+            end
+        end
+        output:drop()
+    end
+    lease:commit(instanceBytes)
     local packed = buffer:getString()
     buffer:drop()
+
+    zone.pop()
 
     return packed
 end

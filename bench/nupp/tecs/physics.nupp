@@ -8,7 +8,7 @@
 --- counted in frames rather than seconds, so both sides of a comparison see the
 --- same scene.
 ---
---- This measures the fixed step and nothing else, which is what M5's gate needs
+--- This measures the fixed update and nothing else, which is what M5's gate needs
 --- and what the Teal benchmark cannot isolate. `bench/physics.tl` runs a window
 --- and reports a `frame` row that includes extraction, acquire, record and
 --- submit; the rows to read it against are its `simulate`, `physics.step` and
@@ -26,6 +26,14 @@
 --- to skip a `world:get` per body, and the Nupp API has no such entry point, so
 --- this pays the lookup the public API charges. That is the API boundary a
 --- game actually calls, which is what the plan asks to be measured.
+---
+--- Stage boundaries: `native batch` wraps Simulation.step, including batch
+--- preparation, the Rust solve, result-buffer draining and command reset.
+--- `sync` brackets the FixedPostUpdate transform synchronization system.
+--- `commands+ecs` is the rest of update: command construction, the blower,
+--- handle/event publication, transform history and ECS phase bookkeeping.
+--- Stage clocks run identically during warmup and sampling. Their per-frame
+--- durations sum to `update`; independently computed percentiles do not.
 ---
 ---   BENCH_BODIES        Dynamic bodies in total. Defaults to 4000.
 ---   BENCH_WAVES         Waves the bodies arrive in. Defaults to 8.
@@ -60,7 +68,30 @@ const COLUMNS = 96
 const RADIUS_SQUARED = BLOWER_RADIUS * BLOWER_RADIUS
 
 const world = ecs.newWorld({maxEntities = BODIES + 1024})
-physics.install(world, {gravity = {0.0, 900.0}, workerCount = WORKERS})
+local syncStarted = 0.0
+local syncMilliseconds = 0.0
+local stepMilliseconds = 0.0
+world:addSystem({
+    name = "bench.BeforeSync",
+    phase = ecs.phases.FixedPostUpdate,
+    run = function(): nil
+        syncStarted = time.now()
+    end,
+})
+const simulation = physics.install(world, {gravity = {0.0, 900.0}, workerCount = WORKERS})
+const nativeStep = simulation.step
+simulation.step = function(dt: number): nil
+    const started = time.now()
+    nativeStep(dt)
+    stepMilliseconds = time.now() - started
+end
+world:addSystem({
+    name = "bench.AfterSync",
+    phase = ecs.phases.FixedPostUpdate,
+    run = function(): nil
+        syncMilliseconds = time.now() - syncStarted
+    end,
+})
 
 --- One jet's position and normalized direction.
 local record Jet
@@ -141,7 +172,7 @@ math.randomseed(42)
 buildContainer(world)
 
 const bodies = world:newQuery({include = {ecs.Transform2D, physics.RigidBody}})
-const perWave = BODIES // WAVES
+const perWave = (BODIES + WAVES - 1) // WAVES
 local spawned: integer = 0
 
 world:addSystem({
@@ -181,6 +212,9 @@ world:addSystem({
 
 const timestep = select(1, world:getFixedTiming())
 const update = harness.newStage("update")
+const commands = harness.newStage("commands+ecs")
+const step = harness.newStage("native batch")
+const sync = harness.newStage("sync")
 const setupStarted = time.now()
 for frame = 0, WARMUP + FRAMES - 1 do
     if frame % WAVE_FRAMES == 0 and spawned < BODIES then
@@ -193,7 +227,11 @@ for frame = 0, WARMUP + FRAMES - 1 do
     const started = time.now()
     world:update(timestep)
     if frame >= WARMUP then
-        harness.mark(update, time.now() - started)
+        const elapsed = time.now() - started
+        harness.mark(update, elapsed)
+        harness.mark(step, stepMilliseconds)
+        harness.mark(sync, syncMilliseconds)
+        harness.mark(commands, elapsed - stepMilliseconds - syncMilliseconds)
     end
 end
 const totalMilliseconds = time.now() - setupStarted
@@ -208,5 +246,5 @@ print(
         "%d bodies spawned, %d workers, one %.4f s fixed step per frame, %.0f ms wall total"
     ):format(spawned, WORKERS, timestep, totalMilliseconds)
 )
-print(harness.format({update}))
+harness.finish({commands, step, sync, update})
 world:shutdown()

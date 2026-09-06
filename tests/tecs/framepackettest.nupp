@@ -740,4 +740,48 @@ function suite.refusesALightThatCannotProject(): nil
     )
 end
 
+function suite.bulkInstancesMatchScalarRoundingAndOwnTheirBytes(): nil
+    local world = ecs.newWorld({maxEntities = 300})
+    local extractor = framepacket.new(world)
+    local values: {number} = {0.1, -7.2, 16777217, 1e-38, -0.0}
+    local entities: {integer} = {}
+    for index = 1, 300 do
+        local x = values[(index - 1) % #values + 1]
+        entities[index] = world:spawn(ecs.Transform2D(x, -0.1, 0, 1, 0.3), gfx.Tint(), gfx.Renderable2D)
+    end
+    world:commit()
+    local original = extractor:packet(640, 360)
+    local reader = nupp.io.newScalarReader(original)
+    local read = header(reader)
+    test.equal(read.instances, 300)
+    test.equal(batch(reader).count, 300)
+    local at = original:len() - 300 * 80 + 1
+    for index = 1, 300 do
+        local x = values[(index - 1) % #values + 1]
+        local expected = nupp.io.newBuffer()
+        local writer = nupp.io.newScalarWriter(expected)
+        writer:writeFloat32(nupp.math.f32.narrow(x))
+            :writeFloat32(nupp.math.f32.narrow(-0.1))
+            :writeFloat32(nupp.math.f32.narrow(0.3))
+        writer:drop()
+        test.equal(original:sub(at, at + 11), expected:getString())
+        expected:drop()
+        at = at + 80
+    end
+    reader:drop()
+    for index = 1, #entities do
+        world:despawn(entities[index])
+    end
+    world:commit()
+    local empty = nupp.io.newScalarReader(extractor:packet(640, 360))
+    test.equal(header(empty).instances, 0)
+    test.assert(empty:atEnd())
+    empty:drop()
+    -- Returned strings survive subsequent packets and buffer reclamation.
+    collectgarbage("collect")
+    local retained = nupp.io.newScalarReader(original)
+    test.equal(header(retained).instances, 300)
+    retained:drop()
+end
+
 return suite

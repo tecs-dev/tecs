@@ -31,6 +31,7 @@ print(harness.format({stage}))
 ]]
 
 local time = require("nupp.time")
+local json = require("nupp.data.json")
 
 local ceil = math.ceil
 local floor = math.floor
@@ -307,4 +308,17 @@ export function text(name: string, fallback: string): string
     end
 
     return value
+end
+
+--- Prints the human report and, when BENCH_JSON=1, a machine-readable record.
+--- Samples retain observation order; each summary carries nearest-rank tails.
+export function finish(stages: {Stage}): nil
+    print(format(stages))
+    if os.getenv("BENCH_JSON") == "1" then
+        local summaries: {Report} = {}
+        for index = 1, #stages do
+            summaries[index] = assert(report(stages[index]))
+        end
+        print("TECS_BENCH_JSON " .. json.encode({stages = summaries, samples = stages}))
+    end
 end

@@ -281,6 +281,7 @@ cargo xtask test               # Build native services; require every test to pa
 cargo xtask run flatcolor      # Open a window and render the example
 cargo xtask run lighting -- --frames 120
 cargo xtask bench shapes       # Run a benchmark from bench/nupp
+cargo xtask bench acceptance   # Three repetitions of fixed CPU workloads
 cargo xtask format             # Format every supported source language
 cargo xtask docs-check         # Validate the documentation site
 cargo xtask verify             # Checks, tests, docs, Rust and headless smokes
