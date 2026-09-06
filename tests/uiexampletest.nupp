@@ -31,6 +31,28 @@ local function controlBox(world: tecs.ecs.World, label: string): tecs.ui.Layout
     return assert(world:get(control, tecs.ui.Layout))
 end
 
+local function checkSharedFonts(world: tecs.ecs.World, density: number): nil
+    local fonts: {[number]: tecs.gfx.fonts.Font} = {}
+    local texts = world:newQuery({include = {tecs.gfx.Text}})
+    local checked = 0
+    for candidate, count in texts:iter() do
+        const column = assert(candidate:get(tecs.gfx.Text))
+        for row = 1, count as integer do
+            const text = column[row]
+            const font = assert(text.font)
+            nupp.test.equal(font.size, text.size * density)
+            const shared = fonts[text.size]
+            if shared then
+                nupp.test.assert(font == shared, "demo labels overwrite the same image with different font atlases")
+                checked = checked + 1
+            else
+                fonts[text.size] = font
+            end
+        end
+    end
+    nupp.test.assert(checked > 0, "demo must contain labels sharing a font size")
+end
+
 local function checkSceneGeometry(world: tecs.ecs.World, scene: string): nil
     if scene == "Flex" then
         const fixed = controlBox(world, "88px")
@@ -105,6 +127,7 @@ function suite.switchesEveryOriginalSceneThroughPointerInput(): nil
     end
     local heading = assert(world:get(textEntity(world, "Tecs UI"), tecs.gfx.Text))
     nupp.test.equal(assert(heading.font).size, 64)
+    checkSharedFonts(world, 2)
     tecs.host.shutdown(session)
     tecs.files.reset()
 end
@@ -125,6 +148,12 @@ function suite.keepsTheCenteredStandalonePanel(): nil
     nupp.test.equal(layout.width, 420)
     nupp.test.equal(layout.height, 540)
     nupp.test.assert(#tecs.gfx.text.glyphsOf(world, textEntity(world, "Rectangle instance")) > 0)
+    checkSharedFonts(world, 1)
+    for index, density in ipairs({2, 1, 2}) do
+        tecs.host.pushResize(session, false, 960, 640, 960 * density, 640 * density, density, index, index)
+        frame(session)
+        checkSharedFonts(world, density)
+    end
     tecs.host.shutdown(session)
     tecs.files.reset()
 end

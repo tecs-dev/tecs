@@ -3,10 +3,16 @@ module ui
 --[[Four retained UI scenes over an animated, lit sunflower field. Run `nupp task ex-ui`.]]
 
 local function fontAt(size: number, density: number): tecs.gfx.fonts.Font
+    const name = "ui-demo-" .. size .. "-" .. density
+    const existing = tecs.gfx.fonts.find(name)
+    if existing then
+        return existing
+    end
+
     return assert(
         tecs.gfx.fonts.newTTF({
             source = tecs.files.assetPath("fonts/JetBrainsMono-ExtraBold.ttf"),
-            name = "ui-demo-" .. size .. "-" .. density,
+            name = name,
             size = size * density,
             raster = "alpha"
         })
