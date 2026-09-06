@@ -348,4 +348,9 @@ version. Linux additionally needs the development packages `winit`, `wgpu`,
 `libwayland-dev`, `libxkbcommon-dev`, `libx11-dev`, `libxcursor-dev`,
 `libxi-dev` and `libxrandr-dev`.
 
+A Linux release carries the Nupp and Tecs runtime libraries. The distribution
+supplies ALSA (`libasound.so.2`) and udev (`libudev.so.1`), plus the C/C++ system
+runtime and the window-system/graphics-driver libraries for windowed execution.
+Compiler and shader-compiler tools are not needed to run a release.
+
 See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for dependency notices.

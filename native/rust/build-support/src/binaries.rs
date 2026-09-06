@@ -20,6 +20,10 @@ const LINUX_SYSTEM_LIBRARIES: &[&str] = &[
     "ld-linux-aarch64.so.1",
     "ld-linux-x86-64.so.2",
     "libc.so.6",
+    // Platform services supplied by the Linux distribution, like the window
+    // and audio frameworks on macOS. Their runtime requirements are in README.
+    "libasound.so.2",
+    "libudev.so.1",
     "libdl.so.2",
     "libgcc_s.so.1",
     "libm.so.6",
@@ -82,12 +86,18 @@ pub(crate) fn binaries(prefix: &Path) -> Result<Vec<PathBuf>> {
         .filter(|entry| entry.file_type().is_file() || entry.file_type().is_symlink())
         .filter(|entry| {
             let path = entry.path();
-            is_shared_library(path)
-                || path
-                    .parent()
-                    .and_then(Path::file_name)
-                    .and_then(|value| value.to_str())
-                    == Some("bin")
+            let in_bin = path
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|value| value.to_str())
+                == Some("bin");
+            // bin/ also carries shader data and its text manifest. Inspect
+            // extensionless Unix executables and Windows .exe files, while
+            // still passing a malformed executable to the inspector to fail.
+            let executable = path
+                .extension()
+                .is_none_or(|extension| extension.eq_ignore_ascii_case("exe"));
+            is_shared_library(path) || (in_bin && executable)
         })
         .map(|entry| entry.into_path())
         .collect();
@@ -318,6 +328,37 @@ mod tests {
     };
 
     #[test]
+    fn binary_discovery_excludes_shader_data_and_manifests() {
+        let prefix = tempdir().unwrap();
+        for name in [
+            "bin/tecs-host",
+            "bin/tecs-host.exe",
+            "bin/shaders.tecspack",
+            "bin/shaders.tecspack.txt",
+            "lib/libnupp.so",
+            "lib/libservice.so.1",
+        ] {
+            let path = prefix.path().join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "content").unwrap();
+        }
+        let found: Vec<_> = super::binaries(prefix.path())
+            .unwrap()
+            .into_iter()
+            .map(|path| path.strip_prefix(prefix.path()).unwrap().to_path_buf())
+            .collect();
+        assert_eq!(
+            found,
+            [
+                Path::new("bin/tecs-host"),
+                Path::new("bin/tecs-host.exe"),
+                Path::new("lib/libnupp.so"),
+                Path::new("lib/libservice.so.1"),
+            ]
+        );
+    }
+
+    #[test]
     fn identifies_versioned_elf_libraries() {
         assert!(is_shared_library(Path::new("libtecsphysics.so.0")));
         assert!(is_shared_library(Path::new("libtecsphysics.so.0.2.4")));
@@ -360,6 +401,9 @@ mod tests {
     #[test]
     fn applies_platform_system_library_allowlists() {
         assert!(is_system_library(Platform::Linux, "libc.so.6"));
+        assert!(is_system_library(Platform::Linux, "libasound.so.2"));
+        assert!(is_system_library(Platform::Linux, "libudev.so.1"));
+        assert!(!is_system_library(Platform::Linux, "libshaderc_shared.so"));
         assert!(!is_system_library(Platform::Linux, "libtecsphysics.so.0"));
         assert!(is_system_library(Platform::Windows, "KERNEL32.DLL"));
         assert!(is_system_library(

@@ -1130,7 +1130,13 @@ fn check_binaries(prefix: &Path, platform: Platform, problems: &mut Vec<String>)
     }
     let inspections = found
         .iter()
-        .map(|binary| Ok((binary, references(binary, platform)?)))
+        .map(|binary| {
+            Ok((
+                binary,
+                references(binary, platform)
+                    .with_context(|| format!("inspect {}", binary.display()))?,
+            ))
+        })
         .collect::<Result<Vec<_>>>()?;
     let application_search_paths: Vec<_> = if platform == Platform::Macos {
         inspections
