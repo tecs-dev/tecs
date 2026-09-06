@@ -46,12 +46,9 @@ jobs:
                 os: [macos-15, ubuntu-latest]
         runs-on: ${{ matrix.os }}
         env:
-            # A commit, not a release. The tree needs `Carry standard modules in
-            # components` and `Carry seam providers in components`, and v0.0.1
-            # is still the only tag and predates both, so a released compiler
-            # cannot check this tree or load a component it builds. Move this to
-            # a tag once one carries them.
-            NUPP_REF: 47fa30884900c174f64f9e6b2221ce5212349369
+            # This revision fixes borrowed file readers in cold component
+            # builds. Nupp 0.0.2 predates that fix; a warmed check can hide it.
+            NUPP_REF: ccf08ab394ed227bf45fdf00cca8fd3940697671
         steps:
             - uses: actions/checkout@v4
               with:
@@ -108,7 +105,7 @@ jobs:
         needs: nupp
         runs-on: macos-15
         env:
-            NUPP_REF: 47fa30884900c174f64f9e6b2221ce5212349369
+            NUPP_REF: ccf08ab394ed227bf45fdf00cca8fd3940697671
         steps:
             # Two checkouts side by side. The Nupp compiler release installed by
             # Homebrew ships no `libnupp.a`, so it cannot satisfy
@@ -180,6 +177,7 @@ jobs:
     package:
         needs: nupp
         strategy:
+            fail-fast: false
             matrix:
                 include:
                     - os: macos-15
@@ -188,7 +186,7 @@ jobs:
                       preset: linux-x64
         runs-on: ${{ matrix.os }}
         env:
-            NUPP_REF: 47fa30884900c174f64f9e6b2221ce5212349369
+            NUPP_REF: ccf08ab394ed227bf45fdf00cca8fd3940697671
         steps:
             - uses: actions/checkout@v4
               with:
@@ -245,7 +243,7 @@ jobs:
             pages: write
             id-token: write
         env:
-            NUPP_REF: 47fa30884900c174f64f9e6b2221ce5212349369
+            NUPP_REF: ccf08ab394ed227bf45fdf00cca8fd3940697671
         steps:
             - uses: actions/checkout@v4
               with:
