@@ -1,6 +1,5 @@
 local ecs = require("tecs.ecs")
 local gfx = require("tecs.gfx")
-local data = require("tecs.data")
 local physics = require("tecs.physics")
 local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
@@ -77,8 +76,8 @@ function suite.inspectionReadsCommittedArchetypesAndAnonymousResources(): nil
     local world = ecs.newWorld()
     local entity = world:spawn(gfx.Camera2D(3, 4))
     world:commit()
-    local key = data.newKey("test.mcp.resource", "")
-    local anonymous = data.newKey(nil, 0)
+    local key: nupp.data.Key<string> = nupp.data.newKey("test.mcp.resource")
+    local anonymous: nupp.data.Key<integer> = nupp.data.newKey(nil)
     world.resources[key] = "data"
     world.resources[anonymous] = 4
     mcp.bind(world)

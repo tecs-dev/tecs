@@ -22,7 +22,6 @@ local inverseindex = require("tecs.internal.inverseindex")
 local phases = require("tecs.internal.phases")
 local query = require("tecs.internal.query")
 local snapshotvalue = require("tecs.internal.snapshotvalue")
-local store = require("tecs.internal.store")
 
 --- A frame system body.
 ---
@@ -242,7 +241,7 @@ export record World
     archetypeCount: integer
     systemCount: integer
     observerCount: integer
-    resources: store.Store
+    resources: nupp.data.Store
 
     spawn: function(exclusive self: World, ...: components.Input): integer
     spawnAt: function(exclusive self: World, id: integer, ...: components.Input): nil
@@ -387,7 +386,7 @@ export function new(
         archetypeCount = 1,
         systemCount = 0,
         observerCount = 0,
-        resources = store.new()
+        resources = nupp.data.newStore()
     )
 end
 

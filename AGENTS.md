@@ -114,7 +114,7 @@ tecs/
 │   ├── sequence.nupp       # Sequencer, with the tween runtime inside it
 │   ├── assets.nupp         # Asset orchestration
 │   ├── mcp.nupp            # Debug server: transport, tools, sandbox
-│   └── events.nupp, data.nupp, files.nupp, watch.nupp
+│   └── events.nupp, files.nupp, watch.nupp
 ├── native/rust/
 │   ├── winit-host/         # The application loop, the wgpu renderer, the host ABI
 │   ├── tecs-audio/         # cpal output and capture behind a batched contract

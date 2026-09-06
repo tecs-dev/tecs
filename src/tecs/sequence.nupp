@@ -93,7 +93,6 @@ its own schema into these constructors.
 
 local ecs = require("tecs.ecs")
 local events = require("tecs.internal.events")
-local data = require("tecs.data")
 local sequencecursors = require("tecs.internal.sequencecursors")
 local sequenceprogram = require("tecs.internal.sequenceprogram")
 local sequenceregistry = require("tecs.internal.sequenceregistry")
@@ -208,7 +207,7 @@ export const DEFAULT_BUDGET: integer = sequencecursors.DEFAULT_BUDGET
 -- Who holds a pause when the caller does not say.
 local DEFAULT_HOLDER: string = "user"
 
-local stateKey: data.Key<sequencetypes.WorldState> = data.newKey("tecs.sequence.state", nil)
+local stateKey: nupp.data.Key<sequencetypes.WorldState> = nupp.data.newKey("tecs.sequence.state")
 
 local function stateFor(exclusive world: ecs.World): sequencetypes.WorldState
     local existing = world.resources[stateKey]

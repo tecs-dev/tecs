@@ -1,11 +1,10 @@
 local test = require("nupp.test")
-local data = require("tecs.data")
 local ecs = require("tecs.ecs")
 local suite = {}
 
 function suite.storesValuesUnderTypedKeys(): nil
-    local speed = data.newKey("test.store.speed", 0)
-    local store = data.newStore()
+    local speed: nupp.data.Key<number> = nupp.data.newKey("test.store.speed")
+    local store = nupp.data.newStore()
     store[speed] = 120
     local current: number? = store[speed]
     test.equal(current as number, 120)
@@ -13,17 +12,20 @@ function suite.storesValuesUnderTypedKeys(): nil
     test.assert(store[speed] == nil)
 end
 
-function suite.reusesNamedKeysAcrossDeclarations(): nil
-    local first = data.newKey("test.store.reload", "")
-    local second: data.Key<string> = data.newKey("test.store.reload", nil)
-    local found: data.Key<string>? = data.findKey("test.store.reload")
-    test.assert(first == second)
-    test.equal(found as data.Key<string>, first)
-    test.equal(data.listKeys()["test.store.reload"], first.id)
+function suite.registersANameOnceAndFindsItByLookup(): nil
+    local first: nupp.data.Key<string> = nupp.data.newKey("test.store.registered")
+    local ok = pcall(function(): nil
+        local _: nupp.data.Key<string> = nupp.data.newKey("test.store.registered")
+    end)
+    test.assert(not ok, "a second declaration of a registered name did not raise")
+    local found = nupp.data.findKey("test.store.registered") as nupp.data.Key<string>
+    test.equal(found, first)
+    test.equal(nupp.data.listKeys()["test.store.registered"], first.id)
+    test.assert(nupp.data.findKey("test.store.unregistered") == nil)
 end
 
 function suite.keepsStoresAndWorldsIndependent(): nil
-    local score = data.newKey("test.store.world.score", 0)
+    local score: nupp.data.Key<number> = nupp.data.newKey("test.store.world.score")
     local first = ecs.newWorld({maxEntities = 2})
     local second = ecs.newWorld({maxEntities = 2})
     first.resources[score] = 10
@@ -33,7 +35,7 @@ function suite.keepsStoresAndWorldsIndependent(): nil
 end
 
 function suite.preservesResourcesWhenEntitiesAreCleared(): nil
-    local label = data.newKey("test.store.clear.label", "")
+    local label: nupp.data.Key<string> = nupp.data.newKey("test.store.clear.label")
     local world = ecs.newWorld({maxEntities = 2})
     world.resources[label] = "ready"
     world:spawn()
@@ -44,7 +46,7 @@ function suite.preservesResourcesWhenEntitiesAreCleared(): nil
 end
 
 function suite.sharesTypedStateBetweenSystems(): nil
-    local frames = data.newKey("test.store.system.frames", 0)
+    local frames: nupp.data.Key<number> = nupp.data.newKey("test.store.system.frames")
     local world = ecs.newWorld({maxEntities = 2})
     world.resources[frames] = 0
     world:addSystem({

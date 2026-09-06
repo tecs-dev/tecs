@@ -48,7 +48,6 @@ loaded world rebuilds its text rather than doubling it.
 local ecs = require("tecs.ecs")
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
-local data = require("tecs.data")
 local fonts = require("tecs.gfx.fonts")
 local images = require("tecs.gfx.images")
 local query = require("tecs.internal.query")
@@ -224,7 +223,7 @@ export const TextGlyph: components.Component = ecs.newTagComponent({name = "Text
 --- The world resource the layout system keeps its ownership tables in.
 ---
 --- The key name reaches the resource registry and is a compatibility surface.
-local stateKey: data.Key<Install> = data.newKey("tecs.text.state", nil)
+local stateKey: nupp.data.Key<Install> = nupp.data.newKey("tecs.text.state")
 
 -------------------------------------------------------------------------------
 -- Shaping

@@ -49,7 +49,6 @@ which is where the solver hands back the slot it assigned.
 ]]
 
 local ecs = require("tecs.ecs")
-local data = require("tecs.data")
 local events = require("tecs.events")
 local contract = require("tecs.physics.contract")
 
@@ -664,7 +663,7 @@ end
 --- Names the world resource holding physics state.
 ---
 --- The key name is the compatibility surface `SNAPSHOT_KEY` declares.
-const stateKey: data.Key<State> = data.newKey(SNAPSHOT_KEY, nil)
+const stateKey: nupp.data.Key<State> = nupp.data.newKey(SNAPSHOT_KEY)
 
 local function toMeters(pixels: number): number
     return pixels / pixelsPerMeter

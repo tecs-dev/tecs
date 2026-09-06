@@ -5,7 +5,6 @@ local registry = require("tecs.internal.mcpregistry")
 local bindings = require("tecs.internal.mcpbindings")
 local schemas = require("tecs.internal.mcpschemas")
 local entityworld = require("tecs.internal.world")
-local store = require("tecs.internal.store")
 local cameraselection = require("tecs.internal.cameraselection")
 local rendercomponents = require("tecs.internal.rendercomponents")
 local snapshotvalue = require("tecs.internal.snapshotvalue")
@@ -97,16 +96,28 @@ register("archetypes_info", "Report one archetype's components and dirty columns
     end
     error("unknown archetype: " .. tostring(args.id))
 end)
+
+--- Detached resource rows, labelling an anonymous key `#<id>` as the tool
+--- output always has.
+local function resourceRows(borrows resources: nupp.data.Store): {any}
+    local rows: {any} = {}
+    for _, row in ipairs(nupp.data.inspectStore(resources)) do
+        rows[#rows + 1] = {id = row.id, name = row.name or ("#" .. tostring(row.id)), valueType = row.valueType}
+    end
+
+    return rows
+end
+
 register("resources_list", "List occupied world resource keys without serializing live values.", function(
     _args: {[string]: any}
 ): {[string]: any}
-    local rows = store.inspect(bindings.requireWorld().resources)
+    local rows = resourceRows(bindings.requireWorld().resources)
     return {resources = json.asArray(rows), total = #rows}
 end)
 register("resources_info", "Report whether a named world resource is present.", function(
     args: {[string]: any}
 ): {[string]: any}
-    for _, row in ipairs(store.inspect(bindings.requireWorld().resources)) do
+    for _, row in ipairs(resourceRows(bindings.requireWorld().resources)) do
         if row.name == args.name then
             return {name = row.name, present = true, valueType = row.valueType}
         end

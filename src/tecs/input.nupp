@@ -58,7 +58,6 @@ standalone motion sensors are not part of the input surface. A game that wants a
 its own art.
 ]]
 
-local data = require("tecs.data")
 local ecs = require("tecs.ecs")
 local gamepadbackend = require("tecs.platform.gamepadbackend")
 local log = require("nupp.log")
@@ -326,7 +325,7 @@ local function devices(): gamepadbackend.Backend
     return opened
 end
 
-local worldInputKey: data.Key<Input> = data.newKey("tecs.input", nil)
+local worldInputKey: nupp.data.Key<Input> = nupp.data.newKey("tecs.input")
 
 --- Clears one pad's frame-local edges.
 local function padBeginFrame(exclusive pad: Gamepad): nil

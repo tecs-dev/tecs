@@ -48,7 +48,7 @@ jobs:
         env:
             # This revision includes the cold file-reader repair and the bounded
             # binary codec used by snapshot_save and snapshot_load.
-            NUPP_REF: e90e8d42d08a517ac12b70f1d50dd9c30d705d05
+            NUPP_REF: e3247bea2f32847e0ee20d1960a1d72b402666ed
         steps:
             - uses: actions/checkout@v4
               with:
@@ -111,7 +111,7 @@ jobs:
     host:
         runs-on: macos-15
         env:
-            NUPP_REF: e90e8d42d08a517ac12b70f1d50dd9c30d705d05
+            NUPP_REF: e3247bea2f32847e0ee20d1960a1d72b402666ed
         steps:
             # Two checkouts side by side. The Nupp compiler release installed by
             # Homebrew ships no `libnupp.a`, so it cannot satisfy
@@ -194,7 +194,7 @@ jobs:
                       preset: linux-x64
         runs-on: ${{ matrix.os }}
         env:
-            NUPP_REF: e90e8d42d08a517ac12b70f1d50dd9c30d705d05
+            NUPP_REF: e3247bea2f32847e0ee20d1960a1d72b402666ed
         steps:
             - uses: actions/checkout@v4
               with:
@@ -254,7 +254,7 @@ jobs:
             pages: write
             id-token: write
         env:
-            NUPP_REF: e90e8d42d08a517ac12b70f1d50dd9c30d705d05
+            NUPP_REF: e3247bea2f32847e0ee20d1960a1d72b402666ed
         steps:
             - uses: actions/checkout@v4
               with:

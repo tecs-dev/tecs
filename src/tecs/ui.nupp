@@ -549,7 +549,7 @@ local record State
     inputLayer: tecs.input.Layer?
     updates: integer
 end
-local stateKey: tecs.data.Key<State> = tecs.data.newKey("tecs.ui.state", nil)
+local stateKey: nupp.data.Key<State> = nupp.data.newKey("tecs.ui.state")
 
 local function parentOf(borrows world: tecs.ecs.World, entity: integer): integer
     local link = world:get(entity, tecs.ecs.ChildOf)

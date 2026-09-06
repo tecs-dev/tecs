@@ -386,7 +386,7 @@ local record State
     width: number
     height: number
 end
-local stateKey: tecs.data.Key<State> = tecs.data.newKey("tecs.tiled.state", nil)
+local stateKey: nupp.data.Key<State> = nupp.data.newKey("tecs.tiled.state")
 local images: {[string]: integer} = {}
 local function imageOf(source: Image): integer
     local name = source.path .. (source.transparent and ":transparent:" .. table.concat(source.transparent, ",") or "")
