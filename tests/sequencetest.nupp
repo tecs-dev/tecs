@@ -312,7 +312,7 @@ end
 function suite.emitsSequenceEventsAtAddressZero(): nil
     local world = newWorld()
     local seen: {string} = {}
-    world:observe(0, sequence.Event, function(value: sequence.Emission, exclusive _world: ecs.World): nil
+    world:observe(0, sequence.Emission, function(value: sequence.Emission, exclusive _world: ecs.World): nil
         seen[#seen + 1] = value.name .. ":" .. tostring(value.args[1])
     end)
     local program = sequence.define(uniqueName("test.emit."), {sequence.emit("boss.ready", 7)})

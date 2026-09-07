@@ -24,6 +24,7 @@ local assets = require("tecs.assets")
 local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
 local ecs = require("tecs.ecs")
+local events = require("nupp.events")
 local animation = require("tecs.gfx.animation")
 local gamepadbackend = require("tecs.platform.gamepadbackend")
 local gfx = require("tecs.gfx")
@@ -38,6 +39,7 @@ local physicscontract = require("tecs.physics.contract")
 local platformevents = require("tecs.platform.events")
 local sequence = require("tecs.sequence")
 local text = require("tecs.gfx.text")
+local ui = require("tecs.ui")
 
 -- Internal modules carry three surfaces no public name reaches: the sequence
 -- bytecode's opcode numbering, the tween evaluator's registered name, and the
@@ -250,12 +252,23 @@ function suite.everyEngineComponentIsRegisteredUnderItsName(): nil
 end
 
 function suite.ecsEventNames(): nil
-    test.equal(ecs.OnSpawn.eventName, "OnSpawn")
-    test.equal(ecs.OnDespawn.eventName, "OnDespawn")
-    test.equal(ecs.StateEnter.eventName, "StateEnter")
-    test.equal(ecs.StateExit.eventName, "StateExit")
-    test.equal(ecs.StateBlur.eventName, "StateBlur")
-    test.equal(ecs.StateFocus.eventName, "StateFocus")
+    test.equal(events.name(ecs.OnSpawn), "OnSpawn")
+    test.equal(events.name(ecs.OnDespawn), "OnDespawn")
+    test.equal(events.name(ecs.StateEnter), "StateEnter")
+    test.equal(events.name(ecs.StateExit), "StateExit")
+    test.equal(events.name(ecs.StateBlur), "StateBlur")
+    test.equal(events.name(ecs.StateFocus), "StateFocus")
+end
+
+function suite.subsystemEventNames(): nil
+    test.equal(events.name(physics.ContactBegin), "ContactBegin")
+    test.equal(events.name(physics.ContactEnd), "ContactEnd")
+    test.equal(events.name(physics.SensorBegin), "SensorBegin")
+    test.equal(events.name(physics.SensorEnd), "SensorEnd")
+    test.equal(events.name(animation.Completed), "Completed")
+    test.equal(events.name(animation.Looped), "Looped")
+    test.equal(events.name(sequence.Emission), "SequenceEmission")
+    test.equal(events.name(ui.Event), "tecs.ui.Event")
 end
 
 -------------------------------------------------------------------------------
@@ -266,29 +279,28 @@ end
 -------------------------------------------------------------------------------
 
 function suite.platformEventNames(): nil
-    local on = platformevents.on
-    test.equal(on.quit.eventName, "tecs.platform.events.quit")
-    test.equal(on.windowCloseRequested.eventName, "tecs.platform.events.windowCloseRequested")
-    test.equal(on.windowResized.eventName, "tecs.platform.events.windowResized")
-    test.equal(on.windowScaleChanged.eventName, "tecs.platform.events.windowScaleChanged")
-    test.equal(on.windowFocusGained.eventName, "tecs.platform.events.windowFocusGained")
-    test.equal(on.windowFocusLost.eventName, "tecs.platform.events.windowFocusLost")
-    test.equal(on.keyDown.eventName, "tecs.platform.events.keyDown")
-    test.equal(on.keyUp.eventName, "tecs.platform.events.keyUp")
-    test.equal(on.mouseMotion.eventName, "tecs.platform.events.mouseMotion")
-    test.equal(on.mouseDown.eventName, "tecs.platform.events.mouseDown")
-    test.equal(on.mouseUp.eventName, "tecs.platform.events.mouseUp")
-    test.equal(on.mouseWheel.eventName, "tecs.platform.events.mouseWheel")
-    test.equal(on.textInput.eventName, "tecs.platform.events.textInput")
-    test.equal(on.fingerDown.eventName, "tecs.platform.events.fingerDown")
-    test.equal(on.fingerUp.eventName, "tecs.platform.events.fingerUp")
-    test.equal(on.fingerMotion.eventName, "tecs.platform.events.fingerMotion")
-    test.equal(on.fingerCanceled.eventName, "tecs.platform.events.fingerCanceled")
-    test.equal(on.gamepadAdded.eventName, "tecs.platform.events.gamepadAdded")
-    test.equal(on.gamepadRemoved.eventName, "tecs.platform.events.gamepadRemoved")
-    test.equal(on.gamepadButtonDown.eventName, "tecs.platform.events.gamepadButtonDown")
-    test.equal(on.gamepadButtonUp.eventName, "tecs.platform.events.gamepadButtonUp")
-    test.equal(on.gamepadAxis.eventName, "tecs.platform.events.gamepadAxis")
+    test.equal(events.name(platformevents.Quit), "tecs.platform.events.quit")
+    test.equal(events.name(platformevents.WindowCloseRequested), "tecs.platform.events.windowCloseRequested")
+    test.equal(events.name(platformevents.WindowResized), "tecs.platform.events.windowResized")
+    test.equal(events.name(platformevents.WindowScaleChanged), "tecs.platform.events.windowScaleChanged")
+    test.equal(events.name(platformevents.WindowFocusGained), "tecs.platform.events.windowFocusGained")
+    test.equal(events.name(platformevents.WindowFocusLost), "tecs.platform.events.windowFocusLost")
+    test.equal(events.name(platformevents.KeyDown), "tecs.platform.events.keyDown")
+    test.equal(events.name(platformevents.KeyUp), "tecs.platform.events.keyUp")
+    test.equal(events.name(platformevents.MouseMotion), "tecs.platform.events.mouseMotion")
+    test.equal(events.name(platformevents.MouseDown), "tecs.platform.events.mouseDown")
+    test.equal(events.name(platformevents.MouseUp), "tecs.platform.events.mouseUp")
+    test.equal(events.name(platformevents.MouseWheel), "tecs.platform.events.mouseWheel")
+    test.equal(events.name(platformevents.TextInput), "tecs.platform.events.textInput")
+    test.equal(events.name(platformevents.FingerDown), "tecs.platform.events.fingerDown")
+    test.equal(events.name(platformevents.FingerUp), "tecs.platform.events.fingerUp")
+    test.equal(events.name(platformevents.FingerMotion), "tecs.platform.events.fingerMotion")
+    test.equal(events.name(platformevents.FingerCanceled), "tecs.platform.events.fingerCanceled")
+    test.equal(events.name(platformevents.GamepadAdded), "tecs.platform.events.gamepadAdded")
+    test.equal(events.name(platformevents.GamepadRemoved), "tecs.platform.events.gamepadRemoved")
+    test.equal(events.name(platformevents.GamepadButtonDown), "tecs.platform.events.gamepadButtonDown")
+    test.equal(events.name(platformevents.GamepadButtonUp), "tecs.platform.events.gamepadButtonUp")
+    test.equal(events.name(platformevents.GamepadAxis), "tecs.platform.events.gamepadAxis")
 end
 
 function suite.platformEventKinds(): nil

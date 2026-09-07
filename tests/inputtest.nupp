@@ -143,7 +143,7 @@ function suite.applicationFoldsInputBeforeObserversAndFixedSystems(): nil
     local app = application.newApplication({
         world = {timestep = 0.1},
         plugin = function(exclusive running: application.Application): nil
-            running.world:observe(0, platformevents.on.keyDown, function(
+            running.world:observe(0, platformevents.KeyDown, function(
                 _event: platformevents.KeyEvent,
                 exclusive world: ecs.World
             ): nil

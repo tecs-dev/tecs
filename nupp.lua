@@ -172,7 +172,6 @@ return {
                     "tecs.assets",
                     "tecs.audio",
                     "tecs.ecs",
-                    "tecs.events",
                     "tecs.files",
                     "tecs.gfx",
                     "tecs.gfx.animation",

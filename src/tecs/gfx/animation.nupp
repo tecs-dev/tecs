@@ -52,7 +52,7 @@ playback carries on and shows the new frames from its next step.
 ]]
 
 local ecs = require("tecs.ecs")
-local events = require("tecs.events")
+local events = require("nupp.events")
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
 local rendercomponents = require("tecs.internal.rendercomponents")
@@ -211,8 +211,14 @@ export const AnimationComponent: ecs.TableComponent<Animation> = ecs.newComponen
 -- This persisted component name is a compatibility surface.
 export const AnimationEvents: ecs.Component = ecs.newTagComponent({name = "AnimationEvents"})
 
---- Reports one entity's animation reaching the end of its cycle.
-export record CycleEnd
+--- Fires when a non-looping tag runs past its last frame.
+---
+--- Playback stops and holds that frame, so this fires once per playthrough and
+--- never again until something restarts it.
+-- This event name is a compatibility surface.
+@derive(events.Event)
+@event(name = "Completed")
+export record Completed
     --- Read-only. Identifies the entity whose animation ended a cycle.
     entity: integer
 
@@ -224,24 +230,25 @@ export record CycleEnd
     tag: string
 end
 
-local function cycleEnd(entity: integer, source: sheet.Sheet, tag: string): CycleEnd
-    return new CycleEnd(entity = entity, sheet = source, tag = tag)
-end
-
---- Fires when a non-looping tag runs past its last frame.
----
---- Playback stops and holds that frame, so this fires once per playthrough and
---- never again until something restarts it.
--- This event name is a compatibility surface.
-export const Completed: events.Event<CycleEnd> = events.newEvent({name = "Completed", construct = cycleEnd})
-
 --- Fires when a looping tag passes its last frame and restarts.
 ---
 --- Once per fixed step at most rather than once per cycle: a step long enough
 --- to cover several cycles wraps the time once and reports one loop, so
 --- counting these is not a way to count playthroughs.
 -- This event name is a compatibility surface.
-export const Looped: events.Event<CycleEnd> = events.newEvent({name = "Looped", construct = cycleEnd})
+@derive(events.Event)
+@event(name = "Looped")
+export record Looped
+    --- Read-only. Identifies the entity whose animation ended a cycle.
+    entity: integer
+
+    --- Read-only. Reports the sheet that was playing.
+    sheet: sheet.Sheet
+
+    --- Read-only. Reports the tag that ended, or the empty string for a whole
+    --- sheet.
+    tag: string
+end
 
 --- Configures how an animation plays.
 ---
@@ -464,12 +471,13 @@ local function report(exclusive world: ecs.World, query: ecs.Query): nil
                 const source = sheet.byId(instance.sheet)
                 if source ~= nil then
                     const name = source:tagName(instance.tag)
+                    -- An emit with nobody observing constructs nothing, so the
+                    -- crowd without observers costs the registration count and
+                    -- two lookups here.
                     if crossed == CROSSED_COMPLETED then
-                        if world:hasObservers(0, Completed) then
-                            world:emit(0, Completed(entities[row], source, name))
-                        end
-                    elseif world:hasObservers(0, Looped) then
-                        world:emit(0, Looped(entities[row], source, name))
+                        world:emit(0, Completed, entities[row], source, name)
+                    else
+                        world:emit(0, Looped, entities[row], source, name)
                     end
                 end
             end

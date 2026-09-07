@@ -403,7 +403,7 @@ function suite.pollsGamepadsThroughTheInstalledSystem(): nil
     local state = input.install(world, fake.backend)
 
     local observed = 0
-    world:observe(0, platformevents.on.gamepadButtonDown, function(
+    world:observe(0, platformevents.GamepadButtonDown, function(
         event: platformevents.GamepadButtonEvent,
         exclusive _running: ecs.World
     ): nil

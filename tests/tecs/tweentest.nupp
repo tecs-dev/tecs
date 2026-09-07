@@ -261,7 +261,7 @@ function suite.firesTimelineEmitsAsTheCursorPassesThemGoingForward(): nil
     local world = newWorld()
     local actor = newActor(world)
     local seen: {string} = {}
-    world:observe(0, sequence.Event, function(value: sequence.Emission, exclusive _world: ecs.World): nil
+    world:observe(0, sequence.Emission, function(value: sequence.Emission, exclusive _world: ecs.World): nil
         seen[#seen + 1] = value.name
     end)
     local marked = sequence.timeline(uniqueName("test.marked."), {

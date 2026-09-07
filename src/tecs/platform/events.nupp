@@ -3,14 +3,16 @@ module tecs.platform.events
 --[[
 Typed platform events produced by the Rust host.
 
-Each record carries only fields meaningful for its kind. Kind strings are a
-stable external data surface used by recordings and tools. Rust translates
-`winit` events into these records and passes one ordered batch to
+Every kind is its own `nupp.events` declaration, so a world delivers a key
+press to the observers of `KeyDown` and nothing else, and the twelve shapes
+the kinds share are unions of the declarations that carry them. Kind strings
+are a stable external data surface used by recordings and tools. Rust
+translates `winit` events into these records and passes one ordered batch to
 `tecs.application.Application:iterate`.
 ]]
 
 local ecs = require("tecs.ecs")
-local events = require("tecs.events")
+local events = require("nupp.events")
 
 --- A platform event kind supported by the Rust host.
 export type Kind = "quit"
@@ -71,17 +73,36 @@ export function kinds(): {string}
     }
 end
 
---- A process or window close request.
-export record QuitEvent
-    kind: "quit" | "windowCloseRequested"
+--- A process quit request.
+@derive(events.Event)
+@event(name = "tecs.platform.events.quit")
+export record Quit
+    kind: "quit"
     timestamp: number
     sequence: integer
     window: integer
 end
 
---- A logical window size change.
-export record ResizeEvent
-    kind: "windowResized" | "windowScaleChanged"
+--- A close request for one window.
+@derive(events.Event)
+@event(name = "tecs.platform.events.windowCloseRequested")
+export record WindowCloseRequested
+    kind: "windowCloseRequested"
+    timestamp: number
+    sequence: integer
+    window: integer
+end
+
+--- A process or window close request.
+---
+--- Whichever kind carries this shape; an observer written against it fits any of them.
+export type QuitEvent = Quit | WindowCloseRequested
+
+--- A logical window resize.
+@derive(events.Event)
+@event(name = "tecs.platform.events.windowResized")
+export record WindowResized
+    kind: "windowResized"
     timestamp: number
     sequence: integer
     window: integer
@@ -92,18 +113,58 @@ export record ResizeEvent
     scaleFactor: number
 end
 
---- A window focus transition.
-export record FocusEvent
-    kind: "windowFocusGained" | "windowFocusLost"
+--- A scale-factor change with the resulting logical size.
+@derive(events.Event)
+@event(name = "tecs.platform.events.windowScaleChanged")
+export record WindowScaleChanged
+    kind: "windowScaleChanged"
+    timestamp: number
+    sequence: integer
+    window: integer
+    width: integer
+    height: integer
+    pixelWidth: integer
+    pixelHeight: integer
+    scaleFactor: number
+end
+
+--- A logical window size change.
+---
+--- Whichever kind carries this shape; an observer written against it fits any of them.
+export type ResizeEvent = WindowResized | WindowScaleChanged
+
+--- A window gaining focus.
+@derive(events.Event)
+@event(name = "tecs.platform.events.windowFocusGained")
+export record WindowFocusGained
+    kind: "windowFocusGained"
     timestamp: number
     sequence: integer
     window: integer
     focused: boolean
 end
 
---- A physical and logical keyboard transition.
-export record KeyEvent
-    kind: "keyDown" | "keyUp"
+--- A window losing focus.
+@derive(events.Event)
+@event(name = "tecs.platform.events.windowFocusLost")
+export record WindowFocusLost
+    kind: "windowFocusLost"
+    timestamp: number
+    sequence: integer
+    window: integer
+    focused: boolean
+end
+
+--- A window focus transition.
+---
+--- Whichever kind carries this shape; an observer written against it fits any of them.
+export type FocusEvent = WindowFocusGained | WindowFocusLost
+
+--- A key going down.
+@derive(events.Event)
+@event(name = "tecs.platform.events.keyDown")
+export record KeyDown
+    kind: "keyDown"
     timestamp: number
     sequence: integer
     window: integer
@@ -115,8 +176,31 @@ export record KeyEvent
     down: boolean
 end
 
+--- A key coming up.
+@derive(events.Event)
+@event(name = "tecs.platform.events.keyUp")
+export record KeyUp
+    kind: "keyUp"
+    timestamp: number
+    sequence: integer
+    window: integer
+    physicalKey: string
+    logicalKey: string?
+    text: string?
+    modifiers: integer
+    repeated: boolean
+    down: boolean
+end
+
+--- A physical and logical keyboard transition.
+---
+--- Whichever kind carries this shape; an observer written against it fits any of them.
+export type KeyEvent = KeyDown | KeyUp
+
 --- An absolute pointer position and optional relative movement.
-export record PointerMoveEvent
+@derive(events.Event)
+@event(name = "tecs.platform.events.mouseMotion")
+export record MouseMotion
     kind: "mouseMotion"
     timestamp: number
     sequence: integer
@@ -127,9 +211,14 @@ export record PointerMoveEvent
     dy: number
 end
 
---- A pointer button transition.
-export record PointerButtonEvent
-    kind: "mouseDown" | "mouseUp"
+--- An absolute pointer position and optional relative movement.
+export type PointerMoveEvent = MouseMotion
+
+--- A pointer button going down.
+@derive(events.Event)
+@event(name = "tecs.platform.events.mouseDown")
+export record MouseDown
+    kind: "mouseDown"
     timestamp: number
     sequence: integer
     window: integer
@@ -140,8 +229,30 @@ export record PointerButtonEvent
     down: boolean
 end
 
+--- A pointer button coming up.
+@derive(events.Event)
+@event(name = "tecs.platform.events.mouseUp")
+export record MouseUp
+    kind: "mouseUp"
+    timestamp: number
+    sequence: integer
+    window: integer
+    x: number
+    y: number
+    button: integer
+    clicks: integer
+    down: boolean
+end
+
+--- A pointer button transition.
+---
+--- Whichever kind carries this shape; an observer written against it fits any of them.
+export type PointerButtonEvent = MouseDown | MouseUp
+
 --- A normalized pointer wheel movement.
-export record WheelEvent
+@derive(events.Event)
+@event(name = "tecs.platform.events.mouseWheel")
+export record MouseWheel
     kind: "mouseWheel"
     timestamp: number
     sequence: integer
@@ -154,8 +265,13 @@ export record WheelEvent
     wheelTicksY: integer
 end
 
+--- A normalized pointer wheel movement.
+export type WheelEvent = MouseWheel
+
 --- Text committed by the platform input method.
-export record TextEvent
+@derive(events.Event)
+@event(name = "tecs.platform.events.textInput")
+export record TextInput
     kind: "textInput"
     timestamp: number
     sequence: integer
@@ -163,13 +279,14 @@ export record TextEvent
     text: string
 end
 
---- One finger on a touch surface.
----
---- Compatibility surface: `touchDevice` and `finger` are stable field names,
---- and both stay strings because a device and a finger are 64-bit identities
---- that a Lua number would round together.
-export record TouchEvent
-    kind: "fingerDown" | "fingerUp" | "fingerMotion" | "fingerCanceled"
+--- Text committed by the platform input method.
+export type TextEvent = TextInput
+
+--- A finger touching the surface.
+@derive(events.Event)
+@event(name = "tecs.platform.events.fingerDown")
+export record FingerDown
+    kind: "fingerDown"
     timestamp: number
     sequence: integer
     window: integer
@@ -185,21 +302,110 @@ export record TouchEvent
     down: boolean
 end
 
---- A gamepad appearing or going away.
+--- A finger leaving the surface.
+@derive(events.Event)
+@event(name = "tecs.platform.events.fingerUp")
+export record FingerUp
+    kind: "fingerUp"
+    timestamp: number
+    sequence: integer
+    window: integer
+    touchDevice: string
+    finger: string
+    x: number
+    y: number
+    dx: number
+    dy: number
+    normalX: number
+    normalY: number
+    pressure: number
+    down: boolean
+end
+
+--- A finger moving on the surface.
+@derive(events.Event)
+@event(name = "tecs.platform.events.fingerMotion")
+export record FingerMotion
+    kind: "fingerMotion"
+    timestamp: number
+    sequence: integer
+    window: integer
+    touchDevice: string
+    finger: string
+    x: number
+    y: number
+    dx: number
+    dy: number
+    normalX: number
+    normalY: number
+    pressure: number
+    down: boolean
+end
+
+--- A touch the platform cancelled.
+@derive(events.Event)
+@event(name = "tecs.platform.events.fingerCanceled")
+export record FingerCanceled
+    kind: "fingerCanceled"
+    timestamp: number
+    sequence: integer
+    window: integer
+    touchDevice: string
+    finger: string
+    x: number
+    y: number
+    dx: number
+    dy: number
+    normalX: number
+    normalY: number
+    pressure: number
+    down: boolean
+end
+
+--- One finger on a touch surface.
 ---
---- Compatibility surface: `which` names the device rather than the window.
---- `window` is zero because a gamepad belongs to no window.
-export record GamepadDeviceEvent
-    kind: "gamepadAdded" | "gamepadRemoved"
+--- Compatibility surface: `touchDevice` and `finger` are stable field names,
+--- and both stay strings because a device and a finger are 64-bit identities
+--- that a Lua number would round together.
+---
+--- Whichever kind carries this shape; an observer written against it fits any of them.
+export type TouchEvent = FingerDown | FingerUp | FingerMotion | FingerCanceled
+
+--- A gamepad appearing.
+@derive(events.Event)
+@event(name = "tecs.platform.events.gamepadAdded")
+export record GamepadAdded
+    kind: "gamepadAdded"
     timestamp: number
     sequence: integer
     window: integer
     which: integer
 end
 
---- A gamepad button transition.
-export record GamepadButtonEvent
-    kind: "gamepadButtonDown" | "gamepadButtonUp"
+--- A gamepad going away.
+@derive(events.Event)
+@event(name = "tecs.platform.events.gamepadRemoved")
+export record GamepadRemoved
+    kind: "gamepadRemoved"
+    timestamp: number
+    sequence: integer
+    window: integer
+    which: integer
+end
+
+--- A gamepad appearing or going away.
+---
+--- Compatibility surface: `which` names the device rather than the window.
+--- `window` is zero because a gamepad belongs to no window.
+---
+--- Whichever kind carries this shape; an observer written against it fits any of them.
+export type GamepadDeviceEvent = GamepadAdded | GamepadRemoved
+
+--- A gamepad button going down.
+@derive(events.Event)
+@event(name = "tecs.platform.events.gamepadButtonDown")
+export record GamepadButtonDown
+    kind: "gamepadButtonDown"
     timestamp: number
     sequence: integer
     window: integer
@@ -208,8 +414,28 @@ export record GamepadButtonEvent
     down: boolean
 end
 
+--- A gamepad button coming up.
+@derive(events.Event)
+@event(name = "tecs.platform.events.gamepadButtonUp")
+export record GamepadButtonUp
+    kind: "gamepadButtonUp"
+    timestamp: number
+    sequence: integer
+    window: integer
+    which: integer
+    button: integer
+    down: boolean
+end
+
+--- A gamepad button transition.
+---
+--- Whichever kind carries this shape; an observer written against it fits any of them.
+export type GamepadButtonEvent = GamepadButtonDown | GamepadButtonUp
+
 --- A gamepad axis reading.
-export record GamepadAxisEvent
+@derive(events.Event)
+@event(name = "tecs.platform.events.gamepadAxis")
+export record GamepadAxis
     kind: "gamepadAxis"
     timestamp: number
     sequence: integer
@@ -219,136 +445,41 @@ export record GamepadAxisEvent
     value: number
 end
 
+--- A gamepad axis reading.
+export type GamepadAxisEvent = GamepadAxis
+
 --- An event in one sealed host batch.
-export type Event = QuitEvent
-    | ResizeEvent
-    | FocusEvent
-    | KeyEvent
-    | PointerMoveEvent
-    | PointerButtonEvent
-    | WheelEvent
-    | TextEvent
-    | TouchEvent
-    | GamepadDeviceEvent
-    | GamepadButtonEvent
-    | GamepadAxisEvent
-
-local function sameQuit(value: QuitEvent): QuitEvent
-    return value
-end
-
-local function sameResize(value: ResizeEvent): ResizeEvent
-    return value
-end
-
-local function sameFocus(value: FocusEvent): FocusEvent
-    return value
-end
-
-local function sameKey(value: KeyEvent): KeyEvent
-    return value
-end
-
-local function samePointerMove(value: PointerMoveEvent): PointerMoveEvent
-    return value
-end
-
-local function samePointerButton(value: PointerButtonEvent): PointerButtonEvent
-    return value
-end
-
-local function sameWheel(value: WheelEvent): WheelEvent
-    return value
-end
-
-local function sameText(value: TextEvent): TextEvent
-    return value
-end
-
-local function sameTouch(value: TouchEvent): TouchEvent
-    return value
-end
-
-local function sameGamepadDevice(value: GamepadDeviceEvent): GamepadDeviceEvent
-    return value
-end
-
-local function sameGamepadButton(value: GamepadButtonEvent): GamepadButtonEvent
-    return value
-end
-
-local function sameGamepadAxis(value: GamepadAxisEvent): GamepadAxisEvent
-    return value
-end
-
---- Typed ECS event definitions observed at address zero.
-export record EventTypes
-    quit: events.Event<QuitEvent>
-    windowCloseRequested: events.Event<QuitEvent>
-    windowResized: events.Event<ResizeEvent>
-    windowScaleChanged: events.Event<ResizeEvent>
-    windowFocusGained: events.Event<FocusEvent>
-    windowFocusLost: events.Event<FocusEvent>
-    keyDown: events.Event<KeyEvent>
-    keyUp: events.Event<KeyEvent>
-    mouseMotion: events.Event<PointerMoveEvent>
-    mouseDown: events.Event<PointerButtonEvent>
-    mouseUp: events.Event<PointerButtonEvent>
-    mouseWheel: events.Event<WheelEvent>
-    textInput: events.Event<TextEvent>
-    fingerDown: events.Event<TouchEvent>
-    fingerUp: events.Event<TouchEvent>
-    fingerMotion: events.Event<TouchEvent>
-    fingerCanceled: events.Event<TouchEvent>
-    gamepadAdded: events.Event<GamepadDeviceEvent>
-    gamepadRemoved: events.Event<GamepadDeviceEvent>
-    gamepadButtonDown: events.Event<GamepadButtonEvent>
-    gamepadButtonUp: events.Event<GamepadButtonEvent>
-    gamepadAxis: events.Event<GamepadAxisEvent>
-end
-
-export const on = new EventTypes(
-    quit = events.newEvent({
-        name = "tecs.platform.events.quit",
-        construct = sameQuit
-    }),
-    windowCloseRequested = events.newEvent({
-        name = "tecs.platform.events.windowCloseRequested",
-        construct = sameQuit
-    }),
-    windowResized = events.newEvent({name = "tecs.platform.events.windowResized", construct = sameResize}),
-    windowScaleChanged = events.newEvent({name = "tecs.platform.events.windowScaleChanged", construct = sameResize}),
-    windowFocusGained = events.newEvent({name = "tecs.platform.events.windowFocusGained", construct = sameFocus}),
-    windowFocusLost = events.newEvent({name = "tecs.platform.events.windowFocusLost", construct = sameFocus}),
-    keyDown = events.newEvent({name = "tecs.platform.events.keyDown", construct = sameKey}),
-    keyUp = events.newEvent({name = "tecs.platform.events.keyUp", construct = sameKey}),
-    mouseMotion = events.newEvent({name = "tecs.platform.events.mouseMotion", construct = samePointerMove}),
-    mouseDown = events.newEvent({name = "tecs.platform.events.mouseDown", construct = samePointerButton}),
-    mouseUp = events.newEvent({name = "tecs.platform.events.mouseUp", construct = samePointerButton}),
-    mouseWheel = events.newEvent({name = "tecs.platform.events.mouseWheel", construct = sameWheel}),
-    textInput = events.newEvent({name = "tecs.platform.events.textInput", construct = sameText}),
-    fingerDown = events.newEvent({name = "tecs.platform.events.fingerDown", construct = sameTouch}),
-    fingerUp = events.newEvent({name = "tecs.platform.events.fingerUp", construct = sameTouch}),
-    fingerMotion = events.newEvent({name = "tecs.platform.events.fingerMotion", construct = sameTouch}),
-    fingerCanceled = events.newEvent({name = "tecs.platform.events.fingerCanceled", construct = sameTouch}),
-    gamepadAdded = events.newEvent({name = "tecs.platform.events.gamepadAdded", construct = sameGamepadDevice}),
-    gamepadRemoved = events.newEvent({name = "tecs.platform.events.gamepadRemoved", construct = sameGamepadDevice}),
-    gamepadButtonDown = events.newEvent({
-        name = "tecs.platform.events.gamepadButtonDown",
-        construct = sameGamepadButton
-    }),
-    gamepadButtonUp = events.newEvent({name = "tecs.platform.events.gamepadButtonUp", construct = sameGamepadButton}),
-    gamepadAxis = events.newEvent({name = "tecs.platform.events.gamepadAxis", construct = sameGamepadAxis})
-)
+export type Event = Quit
+    | WindowCloseRequested
+    | WindowResized
+    | WindowScaleChanged
+    | WindowFocusGained
+    | WindowFocusLost
+    | KeyDown
+    | KeyUp
+    | MouseMotion
+    | MouseDown
+    | MouseUp
+    | MouseWheel
+    | TextInput
+    | FingerDown
+    | FingerUp
+    | FingerMotion
+    | FingerCanceled
+    | GamepadAdded
+    | GamepadRemoved
+    | GamepadButtonDown
+    | GamepadButtonUp
+    | GamepadAxis
 
 --- Constructs a process or window close request.
 export function quit(window: integer?, timestamp: number?, sequence: integer?): QuitEvent
-    return new QuitEvent(kind = "quit", timestamp = timestamp or 0, sequence = sequence or 0, window = window or 0)
+    return new Quit(kind = "quit", timestamp = timestamp or 0, sequence = sequence or 0, window = window or 0)
 end
 
 --- Constructs a close request for one window.
 export function closeRequested(window: integer?, timestamp: number?, sequence: integer?): QuitEvent
-    return new QuitEvent(
+    return new WindowCloseRequested(
         kind = "windowCloseRequested",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -380,7 +511,7 @@ export function resized(
         error("platform.events.resized: pixel dimensions must be non-negative", 2)
     end
 
-    return new ResizeEvent(
+    return new WindowResized(
         kind = "windowResized",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -404,20 +535,39 @@ export function scaleChanged(
     pixelWidth: integer?,
     pixelHeight: integer?
 ): ResizeEvent
-    local event = resized(width, height, window, scaleFactor, timestamp, sequence, pixelWidth, pixelHeight)
-    event.kind = "windowScaleChanged"
+    local sized = resized(width, height, window, scaleFactor, timestamp, sequence, pixelWidth, pixelHeight)
 
-    return event
+    return new WindowScaleChanged(
+        kind = "windowScaleChanged",
+        timestamp = sized.timestamp,
+        sequence = sized.sequence,
+        window = sized.window,
+        width = sized.width,
+        height = sized.height,
+        pixelWidth = sized.pixelWidth,
+        pixelHeight = sized.pixelHeight,
+        scaleFactor = sized.scaleFactor
+    )
 end
 
 --- Constructs a window focus transition.
 export function focused(focused: boolean, window: integer?, timestamp: number?, sequence: integer?): FocusEvent
-    return new FocusEvent(
-        kind = focused and "windowFocusGained" or "windowFocusLost",
+    if focused then
+        return new WindowFocusGained(
+            kind = "windowFocusGained",
+            timestamp = timestamp or 0,
+            sequence = sequence or 0,
+            window = window or 0,
+            focused = true
+        )
+    end
+
+    return new WindowFocusLost(
+        kind = "windowFocusLost",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
         window = window or 0,
-        focused = focused
+        focused = false
     )
 end
 
@@ -436,8 +586,23 @@ export function key(
     if physicalKey == "" then
         error("platform.events.key: physicalKey must not be empty", 2)
     end
-    return new KeyEvent(
-        kind = down and "keyDown" or "keyUp",
+    if down then
+        return new KeyDown(
+            kind = "keyDown",
+            timestamp = timestamp or 0,
+            sequence = sequence or 0,
+            window = window or 0,
+            physicalKey = physicalKey,
+            logicalKey = logicalKey,
+            text = text,
+            modifiers = modifiers or 0,
+            repeated = repeated == true,
+            down = true
+        )
+    end
+
+    return new KeyUp(
+        kind = "keyUp",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
         window = window or 0,
@@ -446,7 +611,7 @@ export function key(
         text = text,
         modifiers = modifiers or 0,
         repeated = repeated == true,
-        down = down
+        down = false
     )
 end
 
@@ -460,7 +625,7 @@ export function pointerMoved(
     timestamp: number?,
     sequence: integer?
 ): PointerMoveEvent
-    return new PointerMoveEvent(
+    return new MouseMotion(
         kind = "mouseMotion",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -486,8 +651,22 @@ export function pointerButton(
     if button < 1 then
         error("platform.events.pointerButton: button must be positive", 2)
     end
-    return new PointerButtonEvent(
-        kind = down and "mouseDown" or "mouseUp",
+    if down then
+        return new MouseDown(
+            kind = "mouseDown",
+            timestamp = timestamp or 0,
+            sequence = sequence or 0,
+            window = window or 0,
+            x = x,
+            y = y,
+            button = button,
+            clicks = clicks or 1,
+            down = true
+        )
+    end
+
+    return new MouseUp(
+        kind = "mouseUp",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
         window = window or 0,
@@ -495,7 +674,7 @@ export function pointerButton(
         y = y,
         button = button,
         clicks = clicks or 1,
-        down = down
+        down = false
     )
 end
 
@@ -511,7 +690,7 @@ export function wheel(
     timestamp: number?,
     sequence: integer?
 ): WheelEvent
-    return new WheelEvent(
+    return new MouseWheel(
         kind = "mouseWheel",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -527,7 +706,7 @@ end
 
 --- Constructs committed text input.
 export function text(text: string, window: integer?, timestamp: number?, sequence: integer?): TextEvent
-    return new TextEvent(
+    return new TextInput(
         kind = "textInput",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -575,22 +754,77 @@ export function touch(
         error("platform.events.touch: finger must not be empty", 2)
     end
 
-    return new TouchEvent(
-        kind = phase,
-        timestamp = timestamp or 0,
-        sequence = sequence or 0,
-        window = window or 0,
-        touchDevice = touchDevice,
-        finger = finger,
-        x = x,
-        y = y,
-        dx = dx or 0,
-        dy = dy or 0,
-        normalX = normalX or 0,
-        normalY = normalY or 0,
-        pressure = pressure or 0,
-        down = phase == "fingerDown" or phase == "fingerMotion"
-    )
+    local at, order, over = timestamp or 0, sequence or 0, window or 0
+    local moveX, moveY, nx, ny, force = dx or 0, dy or 0, normalX or 0, normalY or 0, pressure or 0
+    if phase == "fingerDown" then
+        return new FingerDown(
+            kind = "fingerDown",
+            timestamp = at,
+            sequence = order,
+            window = over,
+            touchDevice = touchDevice,
+            finger = finger,
+            x = x,
+            y = y,
+            dx = moveX,
+            dy = moveY,
+            normalX = nx,
+            normalY = ny,
+            pressure = force,
+            down = true
+        )
+    elseif phase == "fingerMotion" then
+        return new FingerMotion(
+            kind = "fingerMotion",
+            timestamp = at,
+            sequence = order,
+            window = over,
+            touchDevice = touchDevice,
+            finger = finger,
+            x = x,
+            y = y,
+            dx = moveX,
+            dy = moveY,
+            normalX = nx,
+            normalY = ny,
+            pressure = force,
+            down = true
+        )
+    elseif phase == "fingerUp" then
+        return new FingerUp(
+            kind = "fingerUp",
+            timestamp = at,
+            sequence = order,
+            window = over,
+            touchDevice = touchDevice,
+            finger = finger,
+            x = x,
+            y = y,
+            dx = moveX,
+            dy = moveY,
+            normalX = nx,
+            normalY = ny,
+            pressure = force,
+            down = false
+        )
+    else
+        return new FingerCanceled(
+            kind = "fingerCanceled",
+            timestamp = at,
+            sequence = order,
+            window = over,
+            touchDevice = touchDevice,
+            finger = finger,
+            x = x,
+            y = y,
+            dx = moveX,
+            dy = moveY,
+            normalX = nx,
+            normalY = ny,
+            pressure = force,
+            down = false
+        )
+    end
 end
 
 --- Constructs a gamepad appearing or going away.
@@ -605,8 +839,18 @@ export function gamepadDevice(
     timestamp: number?,
     sequence: integer?
 ): GamepadDeviceEvent
-    return new GamepadDeviceEvent(
-        kind = added and "gamepadAdded" or "gamepadRemoved",
+    if added then
+        return new GamepadAdded(
+            kind = "gamepadAdded",
+            timestamp = timestamp or 0,
+            sequence = sequence or 0,
+            window = 0,
+            which = which
+        )
+    end
+
+    return new GamepadRemoved(
+        kind = "gamepadRemoved",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
         window = 0,
@@ -633,14 +877,26 @@ export function gamepadButton(
         error("platform.events.gamepadButton: button must be positive", 2)
     end
 
-    return new GamepadButtonEvent(
-        kind = down and "gamepadButtonDown" or "gamepadButtonUp",
+    if down then
+        return new GamepadButtonDown(
+            kind = "gamepadButtonDown",
+            timestamp = timestamp or 0,
+            sequence = sequence or 0,
+            window = 0,
+            which = which,
+            button = button,
+            down = true
+        )
+    end
+
+    return new GamepadButtonUp(
+        kind = "gamepadButtonUp",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
         window = 0,
         which = which,
         button = button,
-        down = down
+        down = false
     )
 end
 
@@ -663,7 +919,7 @@ export function gamepadAxis(
         error("platform.events.gamepadAxis: axis must be positive", 2)
     end
 
-    return new GamepadAxisEvent(
+    return new GamepadAxis(
         kind = "gamepadAxis",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -674,69 +930,56 @@ export function gamepadAxis(
     )
 end
 
---- Emits one translated event through the world's typed event bus.
+--- Delivers one translated event to the world's observers of its kind.
+---
+--- The host's instance is delivered as it is: nothing is copied or constructed,
+--- and observers receive it as a borrow for the call.
 --- @param world the receiving world
 --- @param event the translated platform event
 export function dispatch(exclusive world: ecs.World, event: Event): nil
-    if event is QuitEvent then
-        if event.kind == "quit" then
-            world:emit(0, on.quit(event))
-        else
-            world:emit(0, on.windowCloseRequested(event))
-        end
-    elseif event is ResizeEvent then
-        if event.kind == "windowResized" then
-            world:emit(0, on.windowResized(event))
-        else
-            world:emit(0, on.windowScaleChanged(event))
-        end
-    elseif event is FocusEvent then
-        if event.focused then
-            world:emit(0, on.windowFocusGained(event))
-        else
-            world:emit(0, on.windowFocusLost(event))
-        end
-    elseif event is KeyEvent then
-        if event.down then
-            world:emit(0, on.keyDown(event))
-        else
-            world:emit(0, on.keyUp(event))
-        end
-    elseif event is PointerMoveEvent then
-        world:emit(0, on.mouseMotion(event))
-    elseif event is PointerButtonEvent then
-        if event.down then
-            world:emit(0, on.mouseDown(event))
-        else
-            world:emit(0, on.mouseUp(event))
-        end
-    elseif event is WheelEvent then
-        world:emit(0, on.mouseWheel(event))
-    elseif event is TextEvent then
-        world:emit(0, on.textInput(event))
-    elseif event is TouchEvent then
-        if event.kind == "fingerDown" then
-            world:emit(0, on.fingerDown(event))
-        elseif event.kind == "fingerMotion" then
-            world:emit(0, on.fingerMotion(event))
-        elseif event.kind == "fingerUp" then
-            world:emit(0, on.fingerUp(event))
-        else
-            world:emit(0, on.fingerCanceled(event))
-        end
-    elseif event is GamepadDeviceEvent then
-        if event.kind == "gamepadAdded" then
-            world:emit(0, on.gamepadAdded(event))
-        else
-            world:emit(0, on.gamepadRemoved(event))
-        end
-    elseif event is GamepadButtonEvent then
-        if event.down then
-            world:emit(0, on.gamepadButtonDown(event))
-        else
-            world:emit(0, on.gamepadButtonUp(event))
-        end
-    elseif event is GamepadAxisEvent then
-        world:emit(0, on.gamepadAxis(event))
+    if event is Quit then
+        world:deliver(0, Quit, event)
+    elseif event is WindowCloseRequested then
+        world:deliver(0, WindowCloseRequested, event)
+    elseif event is WindowResized then
+        world:deliver(0, WindowResized, event)
+    elseif event is WindowScaleChanged then
+        world:deliver(0, WindowScaleChanged, event)
+    elseif event is WindowFocusGained then
+        world:deliver(0, WindowFocusGained, event)
+    elseif event is WindowFocusLost then
+        world:deliver(0, WindowFocusLost, event)
+    elseif event is KeyDown then
+        world:deliver(0, KeyDown, event)
+    elseif event is KeyUp then
+        world:deliver(0, KeyUp, event)
+    elseif event is MouseMotion then
+        world:deliver(0, MouseMotion, event)
+    elseif event is MouseDown then
+        world:deliver(0, MouseDown, event)
+    elseif event is MouseUp then
+        world:deliver(0, MouseUp, event)
+    elseif event is MouseWheel then
+        world:deliver(0, MouseWheel, event)
+    elseif event is TextInput then
+        world:deliver(0, TextInput, event)
+    elseif event is FingerDown then
+        world:deliver(0, FingerDown, event)
+    elseif event is FingerUp then
+        world:deliver(0, FingerUp, event)
+    elseif event is FingerMotion then
+        world:deliver(0, FingerMotion, event)
+    elseif event is FingerCanceled then
+        world:deliver(0, FingerCanceled, event)
+    elseif event is GamepadAdded then
+        world:deliver(0, GamepadAdded, event)
+    elseif event is GamepadRemoved then
+        world:deliver(0, GamepadRemoved, event)
+    elseif event is GamepadButtonDown then
+        world:deliver(0, GamepadButtonDown, event)
+    elseif event is GamepadButtonUp then
+        world:deliver(0, GamepadButtonUp, event)
+    elseif event is GamepadAxis then
+        world:deliver(0, GamepadAxis, event)
     end
 end

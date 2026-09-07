@@ -261,7 +261,7 @@ function suite.reportsCompletionOnceForASubscriber(): nil
     local completions = 0
     local reportedTag = "unset"
     local reportedSheet = ""
-    world:observe(0, animation.Completed, function(value: animation.CycleEnd, exclusive _world: ecs.World): nil
+    world:observe(0, animation.Completed, function(value: animation.Completed, exclusive _world: ecs.World): nil
         completions = completions + 1
         reportedTag = value.tag
         reportedSheet = value.sheet.name
@@ -302,7 +302,7 @@ function suite.reportsALoopWhenTheCycleWraps(): nil
 
     local loops = 0
     local reportedTag = "unset"
-    world:observe(0, animation.Looped, function(value: animation.CycleEnd, exclusive _world: ecs.World): nil
+    world:observe(0, animation.Looped, function(value: animation.Looped, exclusive _world: ecs.World): nil
         loops = loops + 1
         reportedTag = value.tag
     end)

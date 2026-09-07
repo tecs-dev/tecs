@@ -49,7 +49,7 @@ which is where the solver hands back the slot it assigned.
 ]]
 
 local ecs = require("tecs.ecs")
-local events = require("tecs.events")
+local events = require("nupp.events")
 local contract = require("tecs.physics.contract")
 
 const vec2 = nupp.math.vec2
@@ -253,24 +253,6 @@ export record RaycastHit
     --- Read-only. Holds the position along the segment, zero at its start and
     --- one at its end.
     fraction: number
-end
-
---- The payload both contact events carry.
-export record ContactPair
-    --- Read-only. Names one body in the contact.
-    entityA: integer
-
-    --- Read-only. Names the other body in the contact.
-    entityB: integer
-end
-
---- The payload both sensor events carry.
-export record SensorPair
-    --- Read-only. Names the sensor entity.
-    sensor: integer
-
-    --- Read-only. Names the entity that entered or left the sensor.
-    visitor: integer
 end
 
 --- The initial body and collider settings `attach` reads.
@@ -564,32 +546,53 @@ export const JointBodyB: ecs.Relationship = ecs.newRelationship({
     cascadeDelete = true,
 })
 
-local function contactPair(entityA: integer, entityB: integer): ContactPair
-    return new ContactPair(entityA = entityA, entityB = entityB)
-end
-
-local function sensorPair(sensor: integer, visitor: integer): SensorPair
-    return new SensorPair(sensor = sensor, visitor = visitor)
-end
-
 --- Fires at address zero when two bodies begin touching.
 -- This event name is a compatibility surface.
-export const ContactBegin: events.Event<ContactPair> = events.newEvent({
-    name = "ContactBegin",
-    construct = contactPair,
-})
+@derive(events.Event)
+@event(name = "ContactBegin")
+export record ContactBegin
+    --- Read-only. Identifies one body of the pair.
+    entityA: integer
+
+    --- Read-only. Identifies the other body of the pair.
+    entityB: integer
+end
 
 --- Fires at address zero when two bodies stop touching.
 -- This event name is a compatibility surface.
-export const ContactEnd: events.Event<ContactPair> = events.newEvent({name = "ContactEnd", construct = contactPair})
+@derive(events.Event)
+@event(name = "ContactEnd")
+export record ContactEnd
+    --- Read-only. Identifies one body of the pair.
+    entityA: integer
+
+    --- Read-only. Identifies the other body of the pair.
+    entityB: integer
+end
 
 --- Fires at address zero when a body enters a sensor.
 -- This event name is a compatibility surface.
-export const SensorBegin: events.Event<SensorPair> = events.newEvent({name = "SensorBegin", construct = sensorPair})
+@derive(events.Event)
+@event(name = "SensorBegin")
+export record SensorBegin
+    --- Read-only. Identifies the sensor.
+    sensor: integer
+
+    --- Read-only. Identifies the body that entered it.
+    visitor: integer
+end
 
 --- Fires at address zero when a body leaves a sensor.
 -- This event name is a compatibility surface.
-export const SensorEnd: events.Event<SensorPair> = events.newEvent({name = "SensorEnd", construct = sensorPair})
+@derive(events.Event)
+@event(name = "SensorEnd")
+export record SensorEnd
+    --- Read-only. Identifies the sensor.
+    sensor: integer
+
+    --- Read-only. Identifies the body that left it.
+    visitor: integer
+end
 
 --- The name a snapshot writes physics state under.
 ---
@@ -1704,10 +1707,14 @@ local function stepPhysics(state: State, exclusive world: ecs.World): nil
     -- enters the Nupp VM.
     for index = 1, simulation.eventCount() do
         local entityA, entityB, started, sensor = simulation.eventAt(index)
-        if sensor then
-            world:emit(0, started and SensorBegin(entityA, entityB) or SensorEnd(entityA, entityB))
+        if sensor and started then
+            world:emit(0, SensorBegin, entityA, entityB)
+        elseif sensor then
+            world:emit(0, SensorEnd, entityA, entityB)
+        elseif started then
+            world:emit(0, ContactBegin, entityA, entityB)
         else
-            world:emit(0, started and ContactBegin(entityA, entityB) or ContactEnd(entityA, entityB))
+            world:emit(0, ContactEnd, entityA, entityB)
         end
     end
 end
@@ -1992,7 +1999,7 @@ export function install(exclusive world: ecs.World, options: Options?): contract
     world:observe(
         0,
         ecs.OnDespawn,
-        function(value: ecs.EntityLifecycle, exclusive running: ecs.World): nil
+        function(value: ecs.OnDespawn, exclusive running: ecs.World): nil
             local shape = running:get(value.entity, ColliderShape)
             if shape ~= nil and shape.index1 ~= 0 and shape.world0 == state.simulation.id then
                 state.simulation.queueDestroyCollider(shape.index1, shape.generation)

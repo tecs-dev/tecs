@@ -388,7 +388,7 @@ registry.register({
         platformwindow.handleEvent(app.window, event)
         app.input:handleEvent(event)
         platformevents.dispatch(app.world, event)
-        if event is platformevents.QuitEvent then
+        if event is platformevents.Quit or event is platformevents.WindowCloseRequested then
             app:requestQuit()
         end
 

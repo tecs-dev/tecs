@@ -32,7 +32,7 @@ tecs.physics.attachJoint(world, joint, floor, wheel, {kind = "revolute", anchorA
 
 local contacts: integer = 0
 world:observe(0, tecs.physics.ContactBegin, function(
-    _value: tecs.physics.ContactPair,
+    _value: tecs.physics.ContactBegin,
     exclusive _running: tecs.ecs.World
 ): nil
     contacts = contacts + 1

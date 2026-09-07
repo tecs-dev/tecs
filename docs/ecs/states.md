@@ -129,7 +129,7 @@ notification:
 
 ```nupp
 world:observe(0, tecs.ecs.StateEnter,
-    function(event: tecs.ecs.StateChange): nil
+    function(event: tecs.ecs.StateEnter): nil
         print("entered", event.state)
     end
 )

@@ -149,7 +149,10 @@ local function fireEmits(
         -- given, and the entity it played on.
         world:emit(
             0,
-            sequencetypes.Event(emitSlot.name, {entity}, sequencecursors.packHandle(cursor.slot, cursor.generation))
+            sequencetypes.Emission,
+            emitSlot.name,
+            {entity},
+            sequencecursors.packHandle(cursor.slot, cursor.generation)
         )
     end
 end

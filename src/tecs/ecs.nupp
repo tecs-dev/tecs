@@ -132,9 +132,13 @@ export type StateFocusChange = events.StateFocusChange
 export const phases = phasevalues
 
 --- Fires at address zero after an entity becomes committed and alive.
+export type OnSpawn = events.OnSpawn
+
 export const OnSpawn = events.OnSpawn
 
 --- Fires at the entity address and address zero immediately before removal.
+export type OnDespawn = events.OnDespawn
+
 export const OnDespawn = events.OnDespawn
 
 --- Stores a durable unique name for one entity.
@@ -206,15 +210,23 @@ export type RelativeTransform2D = builtins.RelativeTransform2D
 export const RelativeTransform2D = builtins.RelativeTransform2DComponent
 
 --- Fires after a state becomes active.
+export type StateEnter = events.StateEnter
+
 export const StateEnter = events.StateEnter
 
 --- Fires before a state leaves the stack.
+export type StateExit = events.StateExit
+
 export const StateExit = events.StateExit
 
 --- Fires after the current state loses focus.
+export type StateBlur = events.StateBlur
+
 export const StateBlur = events.StateBlur
 
 --- Fires after an uncovered state regains focus.
+export type StateFocus = events.StateFocus
+
 export const StateFocus = events.StateFocus
 
 --- The greatest entity capacity supported by the packed id format.

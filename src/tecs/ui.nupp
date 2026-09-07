@@ -438,7 +438,11 @@ export const Scrollbar: tecs.ecs.TableComponent<ScrollbarValue> = tecs.ecs.newCo
 export const FocusScope = tecs.ecs.newTagComponent({name = "UiFocusScope"})
 
 --- A semantic interaction delivered first to its target, then its ancestors.
-export record EventValue
+---
+--- Observed at an entity address, or at address zero after bubbling.
+@derive(nupp.events.Event)
+@event(name = "tecs.ui.Event")
+export record Event
     --- Read-only. Identifies the interaction.
     kind: string
 
@@ -475,17 +479,6 @@ export record EventValue
     --- Caller-writable. Stops bubbling when true.
     consumed: boolean
 end
-
---- The semantic event payload.
-export type Event = EventValue
-
---- Observes UI events at an entity address, or address zero after bubbling.
-export const Event = tecs.events.newEvent({
-    name = "tecs.ui.Event",
-    construct = function(value: EventValue): EventValue
-        return value
-    end
-})
 
 --- Settings for layout, clipping and interaction.
 export type Options = {
@@ -581,7 +574,7 @@ local function emit(
     if entity == 0 then
         return false
     end
-    local value = new EventValue(
+    local value = new Event(
         kind = kind,
         target = entity,
         currentTarget = entity,
@@ -599,14 +592,14 @@ local function emit(
     while entity ~= 0 and not seen[entity] do
         seen[entity] = true
         value.currentTarget = entity
-        world:emit(entity, Event(value))
+        world:deliver(entity, Event, value)
         if value.consumed then
             return true
         end
         entity = parentOf(world, entity)
     end
     value.currentTarget = 0
-    world:emit(0, Event(value))
+    world:deliver(0, Event, value)
 
     return value.consumed
 end
@@ -1676,77 +1669,156 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
         "invalid UI clip range"
     )
     tecs.gfx.layers.configure(state.layer, {sort = "z", screenSpace = true, unlit = true, overlay = true})
-    local function receive(event: tecs.platform.events.Event, exclusive _world: tecs.ecs.World): nil
+    -- The event is the host's for the delivery and cannot be kept, so the queue
+    -- holds a copy made through the event's own constructor: the same
+    -- declaration and fields, owned here until the next update drains them.
+    local function queue(event: tecs.platform.events.Event): nil
         state.pending[#state.pending + 1] = event
     end
 
-    world:observe(0, tecs.platform.events.on.mouseMotion, function(
-        event: tecs.platform.events.PointerMoveEvent,
-        exclusive running: tecs.ecs.World
+    world:observe(0, tecs.platform.events.MouseMotion, function(
+        event: tecs.platform.events.MouseMotion,
+        exclusive _running: tecs.ecs.World
     ): nil
-        receive(event, running)
+        queue(
+            tecs.platform.events.pointerMoved(
+                event.x,
+                event.y,
+                event.dx,
+                event.dy,
+                event.window,
+                event.timestamp,
+                event.sequence
+            )
+        )
     end)
-    world:observe(0, tecs.platform.events.on.mouseDown, function(
-        event: tecs.platform.events.PointerButtonEvent,
-        exclusive running: tecs.ecs.World
+    world:observe(0, tecs.platform.events.MouseDown, function(
+        event: tecs.platform.events.MouseDown,
+        exclusive _running: tecs.ecs.World
     ): nil
-        receive(event, running)
+        queue(
+            tecs.platform.events.pointerButton(
+                true,
+                event.button,
+                event.x,
+                event.y,
+                event.clicks,
+                event.window,
+                event.timestamp,
+                event.sequence
+            )
+        )
     end)
-    world:observe(0, tecs.platform.events.on.mouseUp, function(
-        event: tecs.platform.events.PointerButtonEvent,
-        exclusive running: tecs.ecs.World
+    world:observe(0, tecs.platform.events.MouseUp, function(
+        event: tecs.platform.events.MouseUp,
+        exclusive _running: tecs.ecs.World
     ): nil
-        receive(event, running)
+        queue(
+            tecs.platform.events.pointerButton(
+                false,
+                event.button,
+                event.x,
+                event.y,
+                event.clicks,
+                event.window,
+                event.timestamp,
+                event.sequence
+            )
+        )
     end)
-    world:observe(0, tecs.platform.events.on.mouseWheel, function(
-        event: tecs.platform.events.WheelEvent,
-        exclusive running: tecs.ecs.World
+    world:observe(0, tecs.platform.events.MouseWheel, function(
+        event: tecs.platform.events.MouseWheel,
+        exclusive _running: tecs.ecs.World
     ): nil
-        receive(event, running)
+        queue(
+            tecs.platform.events.wheel(
+                event.wheelX,
+                event.wheelY,
+                event.wheelTicksX,
+                event.wheelTicksY,
+                event.x,
+                event.y,
+                event.window,
+                event.timestamp,
+                event.sequence
+            )
+        )
     end)
-    world:observe(0, tecs.platform.events.on.fingerDown, function(
-        event: tecs.platform.events.TouchEvent,
-        exclusive running: tecs.ecs.World
+    local function queueTouch(borrows event: tecs.platform.events.TouchEvent): nil
+        queue(
+            tecs.platform.events.touch(
+                event.kind,
+                event.touchDevice,
+                event.finger,
+                event.x,
+                event.y,
+                event.normalX,
+                event.normalY,
+                event.pressure,
+                event.dx,
+                event.dy,
+                event.window,
+                event.timestamp,
+                event.sequence
+            )
+        )
+    end
+
+    world:observe(0, tecs.platform.events.FingerDown, function(
+        event: tecs.platform.events.FingerDown,
+        exclusive _running: tecs.ecs.World
     ): nil
-        receive(event, running)
+        queueTouch(event)
     end)
-    world:observe(0, tecs.platform.events.on.fingerMotion, function(
-        event: tecs.platform.events.TouchEvent,
-        exclusive running: tecs.ecs.World
+    world:observe(0, tecs.platform.events.FingerMotion, function(
+        event: tecs.platform.events.FingerMotion,
+        exclusive _running: tecs.ecs.World
     ): nil
-        receive(event, running)
+        queueTouch(event)
     end)
-    world:observe(0, tecs.platform.events.on.fingerUp, function(
-        event: tecs.platform.events.TouchEvent,
-        exclusive running: tecs.ecs.World
+    world:observe(0, tecs.platform.events.FingerUp, function(
+        event: tecs.platform.events.FingerUp,
+        exclusive _running: tecs.ecs.World
     ): nil
-        receive(event, running)
+        queueTouch(event)
     end)
-    world:observe(0, tecs.platform.events.on.fingerCanceled, function(
-        event: tecs.platform.events.TouchEvent,
-        exclusive running: tecs.ecs.World
+    world:observe(0, tecs.platform.events.FingerCanceled, function(
+        event: tecs.platform.events.FingerCanceled,
+        exclusive _running: tecs.ecs.World
     ): nil
-        receive(event, running)
+        queueTouch(event)
     end)
-    world:observe(0, tecs.platform.events.on.keyDown, function(
-        event: tecs.platform.events.KeyEvent,
-        exclusive running: tecs.ecs.World
+    world:observe(0, tecs.platform.events.KeyDown, function(
+        event: tecs.platform.events.KeyDown,
+        exclusive _running: tecs.ecs.World
     ): nil
-        receive(event, running)
+        queue(
+            tecs.platform.events.key(
+                true,
+                event.physicalKey,
+                event.logicalKey,
+                event.text,
+                event.modifiers,
+                event.repeated,
+                event.window,
+                event.timestamp,
+                event.sequence
+            )
+        )
     end)
-    world:observe(0, tecs.platform.events.on.gamepadButtonDown, function(
-        event: tecs.platform.events.GamepadButtonEvent,
-        exclusive running: tecs.ecs.World
+    world:observe(0, tecs.platform.events.GamepadButtonDown, function(
+        event: tecs.platform.events.GamepadButtonDown,
+        exclusive _running: tecs.ecs.World
     ): nil
-        receive(event, running)
+        queue(tecs.platform.events.gamepadButton(true, event.which, event.button, event.timestamp, event.sequence))
     end)
-    world:observe(0, tecs.platform.events.on.windowFocusLost, function(
-        event: tecs.platform.events.FocusEvent,
-        exclusive running: tecs.ecs.World
+    world:observe(0, tecs.platform.events.WindowFocusLost, function(
+        event: tecs.platform.events.WindowFocusLost,
+        exclusive _running: tecs.ecs.World
     ): nil
-        receive(event, running)
+        queue(tecs.platform.events.focused(false, event.window, event.timestamp, event.sequence))
     end)
-    world:observe(0, tecs.platform.events.on.windowResized, function(
+    world:observe(0, tecs.platform.events.WindowResized, function(
         event: tecs.platform.events.ResizeEvent,
         exclusive running: tecs.ecs.World
     ): nil
@@ -1754,7 +1826,7 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
             resize(running, event.width, event.height, event.scaleFactor)
         end
     end)
-    world:observe(0, tecs.platform.events.on.windowScaleChanged, function(
+    world:observe(0, tecs.platform.events.WindowScaleChanged, function(
         event: tecs.platform.events.ResizeEvent,
         exclusive running: tecs.ecs.World
     ): nil

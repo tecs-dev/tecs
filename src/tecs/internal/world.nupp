@@ -17,6 +17,7 @@ local tasks = require("nupp.tasks")
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
 local events = require("tecs.internal.events")
+local nuppevents = require("nupp.events")
 local idallocator = require("tecs.internal.idallocator")
 local inverseindex = require("tecs.internal.inverseindex")
 local phases = require("tecs.internal.phases")
@@ -176,15 +177,9 @@ local record RegisteredSystem
     removed: boolean
 end
 
-local record Observer
-    id: string?
-    callback: function(value: any, exclusive world: World)
-end
-
-local record DeferredObserverStop
-    address: integer
-    eventId: integer
-    id: string
+--- The parameters an event is constructed with, so `emit` binds them by name.
+local comptime function Construction(E: type): typepack
+    return nupp.types.construction(E)
 end
 
 local record PendingSpawn
@@ -200,7 +195,10 @@ local record PendingMove
 end
 
 --- A world containing entity identities and staged structural work.
-export record World
+---
+--- A world is an event source: observers register against it by address and
+--- receive the world itself as their second argument.
+export record World is nupp.events.Source<integer>
     private allocator: idallocator.IdAllocator
     private archetypes: {archetype.Archetype}
     private archetypeBySignature: {[string]: archetype.Archetype}
@@ -225,9 +223,11 @@ export record World
     private stateStack: {string}
     private autoStateComponent: components.Component?
     private updating: boolean
-    private observers: {[integer]: {[integer]: {Observer}}}
-    private eventEmitDepth: integer
-    private deferredObserverStops: {DeferredObserverStop}
+
+    --- The entity addresses something has observed, so clearing every entity
+    --- can clear their registrations without touching the world's own.
+    private observedEntities: {[integer]: boolean}
+
     private committing: boolean
     private nominalFrameTime: number
     private fixedTimestep: number
@@ -240,7 +240,11 @@ export record World
     liveCount: integer
     archetypeCount: integer
     systemCount: integer
-    observerCount: integer
+
+    --- Observer registrations by address and event; `observers.count` is how
+    --- many are live.
+    observers: nupp.events.Observers<integer>
+
     resources: nupp.data.Store
 
     spawn: function(exclusive self: World, ...: components.Input): integer
@@ -296,16 +300,39 @@ export record World
     saveSnapshot: function(exclusive self: World, options: SnapshotOptions?): Snapshot
     loadSnapshot: function(exclusive self: World, snapshot: Snapshot): SnapshotPrelude
     addSnapshotHandler: function(exclusive self: World, handler: SnapshotHandler): nil
-    observe: function<T>(
+    observe: function<E is nupp.events.Emittable>(
         exclusive self: World,
         address: integer,
-        event: events.Event<T>,
-        callback: function(value: T, exclusive world: World),
+        event: Type<E>,
+        callback: nupp.events.Observer<E, World>,
         id: string?
     ): nil
-    stopObserving: function<T>(exclusive self: World, address: integer, event: events.Event<T>, id: string): boolean
-    hasObservers: function<T>(borrows self: World, address: integer, event: events.Event<T>): boolean
-    emit: function<T>(exclusive self: World, address: integer, event: events.Instance<T>): nil
+    observeOnce: function<E is nupp.events.Emittable>(
+        exclusive self: World,
+        address: integer,
+        event: Type<E>,
+        callback: nupp.events.Observer<E, World>,
+        id: string?
+    ): nil
+    stopObserving: function<E is nupp.events.Emittable>(
+        exclusive self: World,
+        address: integer,
+        event: Type<E>,
+        callbackOrId: nupp.events.Observer<E, World> | string
+    ): boolean
+    hasObservers: function<E is nupp.events.Emittable>(borrows self: World, address: integer, event: Type<E>): boolean
+    emit: function<E is nupp.events.Emittable>(
+        exclusive self: World,
+        address: integer,
+        event: Type<E>,
+        ...: unpackof Construction(E)
+    ): nil
+    deliver: function<E is nupp.events.Emittable>(
+        exclusive self: World,
+        address: integer,
+        event: Type<E>,
+        instance: E
+    ): nil
     clearObservers: function(exclusive self: World, address: integer): nil
 end
 
@@ -370,9 +397,7 @@ export function new(
         stateStack = {},
         autoStateComponent = nil,
         updating = false,
-        observers = {},
-        eventEmitDepth = 0,
-        deferredObserverStops = {},
+        observedEntities = {},
         committing = false,
         nominalFrameTime = nominalFrameTime or 1 / 60,
         fixedTimestep = timestep or DEFAULT_TIMESTEP,
@@ -385,7 +410,7 @@ export function new(
         liveCount = 0,
         archetypeCount = 1,
         systemCount = 0,
-        observerCount = 0,
+        observers = nuppevents.newObservers(),
         resources = nupp.data.newStore()
     )
 end
@@ -758,152 +783,123 @@ function World.newQuery(exclusive self: World, descriptor: query.Descriptor?): q
 end
 
 --- Registers an addressed typed-event observer.
+---
+--- Observers run in registration order and receive this world as their second
+--- argument. A name lets `stopObserving` remove the registration by name; a
+--- name already observing this event at this address is an error.
 --- @param self the world that owns the observer
 --- @param address zero for the world or an entity id
---- @param event the registered event definition
---- @param callback the payload callback, which receives this world explicitly
+--- @param event the event declaration
+--- @param callback what runs when one is delivered, with the event borrowed
 --- @param id an optional name used for later removal
 --- @raises when the same name already observes this event and address
-function World.observe<T>(
+function World.observe<E is nupp.events.Emittable>(
     exclusive self: World,
     address: integer,
-    event: events.Event<T>,
-    callback: function(value: T, exclusive world: World),
+    event: Type<E>,
+    callback: nupp.events.Observer<E, World>,
     id: string?
 ): nil
-    local byEvent = self.observers[address]
-    if byEvent == nil then
-        byEvent = {}
-        self.observers[address] = byEvent
+    nuppevents.observe(self, address, event, callback, id)
+    if address ~= 0 then
+        self.observedEntities[address] = true
     end
-    local observers = byEvent[event.eventId]
-    if observers == nil then
-        observers = {}
-        byEvent[event.eventId] = observers
-    end
-    if id ~= nil then
-        for index = 1, #observers do
-            if observers[index].id == id then
-                error("Observer " .. id .. " already registered", 2)
-            end
-        end
-    end
-    observers[
-        #observers + 1
-    ] = new Observer(id = id, callback = callback as function(value: any, exclusive world: World))
-    self.observerCount = self.observerCount + 1
 end
 
-local function removeObserverNow(exclusive world: World, address: integer, eventId: integer, id: string): boolean
-    local byEvent = world.observers[address]
-    local observers = byEvent and byEvent[eventId]
-    if observers == nil then
-        return false
+--- Registers an observer consumed before its first delivery.
+--- @param self the world that owns the observer
+--- @param address zero for the world or an entity id
+--- @param event the event declaration
+--- @param callback what runs, once
+--- @param id an optional name used for later removal
+--- @raises when the same name already observes this event and address
+function World.observeOnce<E is nupp.events.Emittable>(
+    exclusive self: World,
+    address: integer,
+    event: Type<E>,
+    callback: nupp.events.Observer<E, World>,
+    id: string?
+): nil
+    nuppevents.observeOnce(self, address, event, callback, id)
+    if address ~= 0 then
+        self.observedEntities[address] = true
     end
-    local present = assert(byEvent)
-    for index = 1, #observers do
-        if observers[index].id == id then
-            observers[index] = observers[#observers]
-            observers[#observers] = nil
-            world.observerCount = world.observerCount - 1
-            if #observers == 0 then
-                present[eventId] = nil
-                if next(present) == nil then
-                    world.observers[address] = nil
-                end
-            end
-            return true
-        end
-    end
-
-    return false
 end
 
---- Removes one named observer.
+--- Removes observers at one address and event.
+---
+--- Given a name, the first registration with that name goes; given the
+--- callback, every registration of it. A removal during a delivery takes
+--- effect at once for anything the delivery has not yet reached.
 --- @param self the world to modify
 --- @param address the observer address
---- @param event the observed event definition
---- @param id the name supplied at registration
---- @return whether a matching observer exists
-function World.stopObserving<T>(exclusive self: World, address: integer, event: events.Event<T>, id: string): boolean
-    if not self:hasObservers(address, event) then
-        return false
-    end
-    if self.eventEmitDepth > 0 then
-        self.deferredObserverStops[
-            #self.deferredObserverStops + 1
-        ] = new DeferredObserverStop(address = address, eventId = event.eventId, id = id)
-        return true
-    end
-
-    return removeObserverNow(self, address, event.eventId, id)
+--- @param event the observed event declaration
+--- @param callbackOrId the callback registered, or the name supplied at registration
+--- @return whether a matching observer existed
+function World.stopObserving<E is nupp.events.Emittable>(
+    exclusive self: World,
+    address: integer,
+    event: Type<E>,
+    callbackOrId: nupp.events.Observer<E, World> | string
+): boolean
+    return nuppevents.stopObserving(self, address, event, callbackOrId)
 end
 
 --- Reports whether an address has an observer for an event.
 --- @param self the world to inspect
 --- @param address the world or entity address
---- @param event the event definition
+--- @param event the event declaration
 --- @return whether at least one observer is registered
-function World.hasObservers<T>(borrows self: World, address: integer, event: events.Event<T>): boolean
-    local byEvent = self.observers[address]
-    local observers = byEvent and byEvent[event.eventId]
-    return observers ~= nil and #observers > 0
+function World.hasObservers<E is nupp.events.Emittable>(borrows self: World, address: integer, event: Type<E>): boolean
+    return nuppevents.hasObservers(self, address, event)
 end
 
-local function emitNow<T>(exclusive world: World, address: integer, event: events.Instance<T>): nil
-    local byEvent = world.observers[address]
-    local observers = byEvent and byEvent[event.eventType.eventId]
-    if observers == nil then
-        return
-    end
-    local count = #observers
-    for index = 1, count do
-        observers[index].callback(event.value, world)
-    end
-end
-
-local function applyDeferredObserverStops(exclusive world: World): nil
-    for index = 1, #world.deferredObserverStops do
-        local deferred = world.deferredObserverStops[index]
-        removeObserverNow(world, deferred.address, deferred.eventId, deferred.id)
-    end
-    world.deferredObserverStops = {}
-end
-
---- Emits a typed event synchronously to one address.
+--- Constructs an event into the world's storage and delivers it to one address.
+---
+--- Nothing is constructed when nothing observes the event there. Observers
+--- run in registration order, see each other's writes, and cannot keep the
+--- event; the storage returns to the world when the delivery leaves, whether
+--- it returned, raised, or was cancelled while an observer was suspended.
 --- @param self the world whose observers receive the event
 --- @param address zero for the world or an entity id
---- @param event the constructed event envelope
---- @raises when an observer raises
-function World.emit<T>(exclusive self: World, address: integer, event: events.Instance<T>): nil
-    if not self:hasObservers(address, event.eventType) then
-        return
-    end
-    self.eventEmitDepth = self.eventEmitDepth + 1
-    local succeeded, failure = pcall(function(): nil
-        emitNow(self, address, event)
-    end)
-    self.eventEmitDepth = self.eventEmitDepth - 1
-    if self.eventEmitDepth == 0 then
-        applyDeferredObserverStops(self)
-    end
-    if not succeeded then
-        error(failure, 0)
-    end
+--- @param event the event declaration
+--- @param ... the event's fields, positional or named
+--- @raises what an observer raised, after the storage is released
+function World.emit<E is nupp.events.Emittable>(
+    exclusive self: World,
+    address: integer,
+    event: Type<E>,
+    ...: unpackof Construction(E)
+): nil
+    nuppevents.emit(self, address, event, ...)
+end
+
+--- Delivers an event instance the caller already holds.
+---
+--- The instance stays the caller's, and what observers wrote to it is there
+--- when the delivery returns, which is what a bubbling delivery reads back.
+--- @param self the world whose observers receive the event
+--- @param address zero for the world or an entity id
+--- @param event the event declaration
+--- @param instance the instance to deliver
+--- @raises what an observer raised
+function World.deliver<E is nupp.events.Emittable>(
+    exclusive self: World,
+    address: integer,
+    event: Type<E>,
+    instance: E
+): nil
+    nuppevents.deliver(self, address, event, instance)
 end
 
 --- Clears every event observer at one address.
 --- @param self the world to modify
 --- @param address the world or entity address to clear
 function World.clearObservers(exclusive self: World, address: integer): nil
-    local byEvent = self.observers[address]
-    if byEvent == nil then
-        return
+    nuppevents.clearAddress(self, address)
+    if address ~= 0 then
+        self.observedEntities[address] = nil
     end
-    for _, observers in pairs(byEvent) do
-        self.observerCount = self.observerCount - #observers
-    end
-    self.observers[address] = nil
 end
 
 --- Stages a live or newly reserved entity for removal.
@@ -1081,7 +1077,7 @@ local function publishSpawn(exclusive world: World, pending: PendingSpawn): nil
     linkOutgoing(world, target, row, id)
     idallocator.place(world.allocator, slot, target.id, row)
     world.liveCount = world.liveCount + 1
-    world:emit(0, events.OnSpawn(id))
+    world:emit(0, events.OnSpawn, id)
 end
 
 local publishDespawn: function(exclusive world: World, id: integer): nil
@@ -1110,8 +1106,8 @@ publishDespawn = function(exclusive world: World, id: integer): nil
         end
     end
     unlinkOutgoing(world, source, row, id)
-    world:emit(id, events.OnDespawn(id))
-    world:emit(0, events.OnDespawn(id))
+    world:emit(id, events.OnDespawn, id)
+    world:emit(0, events.OnDespawn, id)
     world:clearObservers(id)
     removeFromArchetype(world, source, row)
     idallocator.freeSlot(world.allocator, slot)
@@ -1187,15 +1183,13 @@ function World.clearEntities(exclusive self: World): nil
     self.pendingDespawnBySlot = {}
     self.relationshipIndexes = {}
     self.keyIndex = {}
-    local worldObservers = self.observers[0]
-    self.observers = {}
-    self.observerCount = 0
-    if worldObservers ~= nil then
-        self.observers[0] = worldObservers
-        for _, observers in pairs(worldObservers) do
-            self.observerCount = self.observerCount + #observers
-        end
+    -- Every entity identity is gone, so every entity address is; the world's
+    -- own observers at address zero stay, which is what keeps a subsystem's
+    -- lifecycle observers and a game's global ones across a clear.
+    for address in pairs(self.observedEntities) do
+        nuppevents.clearAddress(self, address)
     end
+    self.observedEntities = {}
     self.liveCount = 0
 end
 
@@ -1314,13 +1308,13 @@ function World.pushState(exclusive self: World, name: string): nil
     if previous ~= nil then
         local previousPolicy = assert(self.statePolicies[previous])
         executeStatePolicy(self, previousPolicy.onBlur, previous)
-        self:emit(0, events.StateBlur(previous, name))
+        self:emit(0, events.StateBlur, previous, name)
     end
     self.stateStack[#self.stateStack + 1] = name
     self.autoStateComponent = component
     local policy = assert(self.statePolicies[name])
     executeStatePolicy(self, policy.onEnter, name)
-    self:emit(0, events.StateEnter(name))
+    self:emit(0, events.StateEnter, name)
 end
 
 --- Pops the active state and focuses the state below it.
@@ -1334,7 +1328,7 @@ function World.popState(exclusive self: World): nil
     local popped = self.stateStack[index]
     local poppedPolicy = assert(self.statePolicies[popped])
     executeStatePolicy(self, poppedPolicy.onExit, popped)
-    self:emit(0, events.StateExit(popped))
+    self:emit(0, events.StateExit, popped)
     self.stateStack[index] = nil
     local focused = self.stateStack[index - 1]
     if focused == nil then
@@ -1343,7 +1337,7 @@ function World.popState(exclusive self: World): nil
         self.autoStateComponent = self.stateComponents[focused]
         local focusedPolicy = assert(self.statePolicies[focused])
         executeStatePolicy(self, focusedPolicy.onFocus, focused)
-        self:emit(0, events.StateFocus(focused, popped))
+        self:emit(0, events.StateFocus, focused, popped)
     end
 end
 

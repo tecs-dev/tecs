@@ -16,7 +16,7 @@ not survive a snapshot. That is why the runtime below exists rather than
 reaching for `nupp.tasks` for the sequence's own control flow.
 ]]
 
-local events = require("tecs.internal.events")
+local events = require("nupp.events")
 local wakeheap = require("tecs.internal.wakeheap")
 local entityworld = require("tecs.internal.world")
 local query = require("tecs.internal.query")
@@ -411,7 +411,12 @@ export record WorldState
     context: ActionContext?
 end
 
---- The payload an `emit` step delivers at address zero.
+--- Fires at address zero when an `emit` step or a timeline emit runs.
+---
+--- Observers watch this one declaration and filter on the emission's `name`,
+--- rather than each name being an event type of its own.
+@derive(events.Event)
+@event(name = "SequenceEmission")
 export record Emission
     --- Read-only. Carries the name supplied to `sequence.emit`.
     name: string
@@ -423,13 +428,6 @@ export record Emission
     --- Read-only. Identifies the playback that emitted it.
     handle: Handle
 end
-
-local function emission(name: string, args: {any}, handle: Handle): Emission
-    return new Emission(name = name, args = args, handle = handle)
-end
-
---- Fires at address zero when an `emit` step or a timeline emit runs.
-export const Event: events.Event<Emission> = events.new({name = "SequenceEmission", construct = emission})
 
 --- Reports a playback's current state.
 export record Status

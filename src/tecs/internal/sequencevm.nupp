@@ -345,11 +345,10 @@ export function run(
             end
             world:emit(
                 0,
-                sequencetypes.Event(
-                    consts[a] as string,
-                    args,
-                    sequencecursors.packHandle(cursor.slot, cursor.generation)
-                )
+                sequencetypes.Emission,
+                consts[a] as string,
+                args,
+                sequencecursors.packHandle(cursor.slot, cursor.generation)
             )
             cursor.pc = cursor.pc + 1
         elseif op == sequenceprogram.JUMP then
