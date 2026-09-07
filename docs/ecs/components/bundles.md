@@ -116,6 +116,14 @@ for _archetype, _length in query:iter() do
 end
 ```
 
+Plain bundles cache their resolved signature, including transitive requirements
+and the active state tag. They enqueue raw values in a retained, fixed-stride
+queue and publish directly into columns. Ordinary plain spawns and scalar
+mutations use the same flattened transaction storage. Pending edits coalesce
+before publication; relationships and durable keys retain their required
+indexing and validation paths. A state change resolves the next bundle burst
+without retagging earlier reservations.
+
 ## Registry lookup
 
 `world:getBundle(name)` returns one bundle or `nil`.

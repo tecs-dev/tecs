@@ -11,6 +11,114 @@ whether or not it matches the declaration.
 ]]
 
 local events = require("nupp.events")
+local archetype = require("tecs.internal.archetype")
+local components = require("tecs.internal.components")
+
+--- Describes the component registry and entity counts of a saved world.
+export record SnapshotComponentEntry
+    --- Read-only. Names a registered component by its persisted key.
+    name: string
+
+    --- Read-only. Describes the saved native field layout, or nil for encoded values.
+    fingerprint: string?
+end
+
+--- Describes a saved world's registry and entity counts.
+export record SnapshotPrelude
+    --- Read-only. Reports the ECS framing version, independently of game data versions.
+    version: integer
+
+    --- Read-only. Reports the next fresh entity slot after restoration.
+    nextEntityId: integer
+
+    --- Read-only. Reports the number of saved entities.
+    entityCount: integer
+
+    --- Read-only. Reports the number of saved archetype frames.
+    archetypeCount: integer
+
+    --- Read-only. Lists the saved component names and native layouts in frame-index
+    --- order.
+    componentTable: {SnapshotComponentEntry}
+end
+
+--- Fires before snapshot selection so participants can attach data and exclude derived
+--- entities.
+@derive(events.Event)
+@event(name = "OnSnapshotSave")
+export record OnSnapshotSave
+    --- Engine-owned. Supplies save staging to event construction; use addData instead.
+    data: {[string]: any}
+
+    --- Engine-owned. Supplies exclusion staging to event construction; use exclude
+    --- instead.
+    excluded: {components.Component}
+
+    --- Attaches one named detached value to the snapshot.
+    --- @param self The call-scoped save event.
+    --- @param key The unique nonempty metadata key.
+    --- @param value The serializable metadata value.
+    --- @raises Raises when a key is empty or repeated.
+    function addData(self: OnSnapshotSave, key: string, value: any): nil
+        if key == "" or self.data[key] ~= nil then
+            error("snapshot data key is empty or written twice", 2)
+        end
+        self.data[key] = value
+    end
+
+    --- Excludes every entity carrying a derived-data component.
+    --- @param self The call-scoped save event.
+    --- @param component The component whose entities must be regenerated after load.
+    function exclude(self: OnSnapshotSave, component: components.Component): nil
+        self.excluded[#self.excluded + 1] = component
+    end
+end
+
+--- Fires after entities are restored and before custom metadata is dispatched.
+@derive(events.Event)
+@event(name = "StartSnapshotLoad")
+export record StartSnapshotLoad
+    --- Read-only. Describes the snapshot being restored.
+    prelude: SnapshotPrelude
+
+    --- Engine-owned. Supplies dispatch staging to event construction; use onData
+    --- instead.
+    handlers: {[string]: {function(value: any)}}
+
+    --- Subscribes to one custom-data key for this load only.
+    --- @param self The call-scoped load event.
+    --- @param key The nonempty metadata key.
+    --- @param callback The callback; multiple listeners receive the same key in
+    ---     registration order.
+    --- @raises Raises when the key is empty.
+    function onData(self: StartSnapshotLoad, key: string, callback: function(value: any)): nil
+        if key == "" then
+            error("snapshot data key must not be empty", 2)
+        end
+        local entries = self.handlers[key]
+        if entries == nil then
+            entries = {};
+            self.handlers[key] = entries
+        end
+        entries[#entries + 1] = callback
+    end
+end
+
+--- Fires after all custom data has loaded, before callback-staged mutations publish.
+@derive(events.Event)
+@event(name = "FinishSnapshotLoad")
+export record FinishSnapshotLoad
+    --- Read-only. Describes the restored snapshot.
+    prelude: SnapshotPrelude
+end
+
+--- Fires at address zero when a world registers a new, initially empty archetype.
+@derive(events.Event)
+@event(name = "ArchetypeCreated")
+export record ArchetypeCreated
+    --- Read-only. Identifies the new archetype, available for lifecycle observation.
+    archetype: archetype.Archetype
+end
 
 --- Fires at address zero after an entity becomes committed and alive.
 @derive(events.Event)

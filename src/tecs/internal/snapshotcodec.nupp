@@ -1,0 +1,472 @@
+module tecs.internal.snapshotcodec
+
+--[[
+Version-one snapshot framing. Dense native columns use
+one buffer append and one restore copy. Parsing retains the input owner until
+publication completes; no entity-sized native objects are allocated on that path.
+The schema slow path is cached by saved fingerprint and projects named fields.
+]]
+
+local ffi = require("ffi")
+local buffer = require("string.buffer")
+local archetype = require("tecs.internal.archetype")
+local components = require("tecs.internal.components")
+local events = require("tecs.internal.events")
+local ffistorage = require("tecs.internal.ffistorage")
+local query = require("tecs.internal.query")
+local entitycolumn = require("tecs.internal.entitycolumn")
+
+export record Data
+    key: string
+    value: any
+end
+
+export record Column
+    component: components.Component
+    storage: ffistorage.Storage?
+    pointer: any
+    values: {any}?
+    present: {[integer]: boolean}?
+    scratch: any
+end
+
+export record Frame
+    owner: string
+    ids: number[?]
+    count: integer
+    columns: {Column}
+end
+
+export record Decoded
+    prelude: events.SnapshotPrelude
+    frames: {Frame}
+    data: {Data}
+    owner: buffer.Buffer
+end
+
+local record Plan
+    source: archetype.Archetype
+    columns: {components.Component}
+    indices: {integer}
+    rows: {integer}?
+    count: integer
+end
+
+local function serialize(component: components.Component, value: any): any
+    const relationship = components.asRelationship(component)
+    if relationship ~= nil then
+        component = assert(components.findById(relationship.componentId))
+    end
+    if component.storageType == "tag" then
+        return nil
+    end
+    if component.storageType == "table" or component.storageType == "ffi" then
+        return (component as components.TableComponent<any>).snapshotSave(value)
+    end
+    if component.storageType == "relationship" then
+        return {target = components.edgeTarget(value)}
+    end
+
+    return value
+end
+
+--- Writes version-one binary framing, with raw native columns where their codecs allow
+--- it.
+export function write(
+    sources: {archetype.Archetype},
+    selection: query.Query,
+    layers: {[integer]: boolean}?,
+    nextId: integer,
+    data: {Data},
+    output: buffer.Buffer
+): events.SnapshotPrelude
+    const plans: {Plan} = {}
+    const entries: {events.SnapshotComponentEntry} = {}
+    const byId: {[integer]: integer} = {}
+    const transform = components.findByName("Transform2D")
+    local total: integer = 0
+    for index = 1, #sources do
+        const source = sources[index]
+        if #source.entities == 0 or not query.matches(selection, source) then
+            goto nextSource
+        end
+        local rows: {integer}? = nil
+        local count = #source.entities
+        if layers ~= nil and transform ~= nil and archetype.has(source, transform) then
+            rows = {}
+            const poses = assert(source.columns[transform.componentId])
+            for row = 1, count do
+                if layers[poses[row].layer as integer] then
+                    rows[#rows + 1] = row
+                end
+            end
+            count = #rows
+        end
+        if count == 0 then
+            goto nextSource
+        end
+        const columns: {components.Component} = {}
+        const indices: {integer} = {}
+        for position = 1, #source.components do
+            const component = source.components[position]
+            const relationship = components.asRelationship(component)
+            const target = components.targetOf(component)
+            if component.transient or (relationship ~= nil and not relationship.sparse and target == nil) then
+                goto nextComponent
+            end
+            columns[#columns + 1] = component
+            local entry = byId[component.componentId]
+            if entry == nil then
+                entry = #entries + 1
+                byId[component.componentId] = entry
+                const storage = ffistorage.find(component.componentId)
+                entries[
+                    entry
+                ] = new events.SnapshotComponentEntry(
+                    name = component.componentName,
+                    fingerprint = storage ~= nil and storage.rawCodec and (
+                        relationship == nil or target ~= nil
+                    ) and storage.fingerprint or nil
+                )
+            end
+            indices[#indices + 1] = entry
+            ::nextComponent::
+        end
+        plans[#plans + 1] = new Plan(source = source, columns = columns, indices = indices, rows = rows, count = count)
+        total = total + count
+        ::nextSource::
+    end
+    output:reset()
+    output:encode(1):encode(nextId):encode(total):encode(#plans):encode(#entries)
+    for index = 1, #entries do
+        output:encode(entries[index].name):encode(entries[index].fingerprint)
+    end
+    local ids: any = nil
+    local capacity: integer = 0
+    for index = 1, #plans do
+        const plan = plans[index]
+        output:encode(#plan.columns):encode(plan.count)
+        for column = 1, #plan.indices do
+            output:encode(plan.indices[column])
+        end
+        output:encode(0)
+        if plan.rows == nil then
+            output:putcdata(entitycolumn.pointer(plan.source.entities) as voidptr, plan.count * 8)
+        else
+            if capacity < plan.count then
+                ids = ffi.new("double[?]", plan.count)
+                capacity = plan.count
+            end
+            for row = 1, plan.count do
+                ids[row - 1] = plan.source.entities[assert(plan.rows)[row]]
+            end
+            output:putcdata(ids as voidptr, plan.count * 8)
+        end
+        for column = 1, #plan.columns do
+            const component = plan.columns[column]
+            const storage = ffistorage.find(component.componentId)
+            const raw = entries[plan.indices[column]].fingerprint ~= nil
+            if raw and plan.rows == nil then
+                ffistorage.writeRows(assert(storage), plan.source.columns[component.componentId], 1, plan.count, output)
+            else
+                for row = 1, plan.count do
+                    const sourceRow = plan.rows and plan.rows[row] or row
+                    if raw then
+                        ffistorage.writeRows(
+                            assert(storage),
+                            plan.source.columns[component.componentId],
+                            sourceRow,
+                            1,
+                            output
+                        )
+                    else
+                        const relationship = components.asRelationship(component)
+                        if relationship ~= nil and components.targetOf(component) == nil then
+                            const edges = archetype.edgeValues(plan.source, sourceRow - 1, relationship)
+                            if relationship.exclusive then
+                                output:encode(serialize(component, edges[1]))
+                            else
+                                const saved: {any} = {}
+                                for edge = 1, #edges do
+                                    saved[edge] = serialize(component, edges[edge])
+                                end
+                                output:encode({edges = saved})
+                            end
+                        else
+                            output:encode(
+                                serialize(component, archetype.valueAt(plan.source, sourceRow - 1, component))
+                            )
+                        end
+                    end
+                end
+            end
+        end
+    end
+    for index = 1, #data do
+        output:encode(true):encode(data[index].key):encode(data[index].value)
+    end
+    output:encode(false)
+
+    return new events.SnapshotPrelude(
+        version = 1,
+        nextEntityId = nextId,
+        entityCount = total,
+        archetypeCount = #plans,
+        componentTable = entries
+    )
+end
+
+local function integer(input: buffer.Buffer, label: string, maximum: integer): integer
+    const value = input:decode()
+    if type(value) ~= "number" or value < 0 or value % 1 ~= 0 or value > maximum then
+        error("snapshot has invalid " .. label, 3)
+    end
+
+    return value as integer
+end
+
+const schemas: {[string]: ffistorage.Storage} = {}
+
+local function savedSchema(fingerprint: string): ffistorage.Storage
+    const cached = schemas[fingerprint]
+    if cached ~= nil then
+        return cached
+    end
+    const fields, width = fingerprint:match("^(.-)|(%d+)$")
+    if fields == nil or width == nil then
+        error("invalid snapshot FFI fingerprint", 3)
+    end
+    const declarations: {string} = {}
+    for entry in fields:gmatch("[^,]+") do
+        const name, spelling = entry:match("^([%a_][%w_]*):(.+)$")
+        if name == nil or spelling == nil then
+            error("invalid snapshot FFI field", 3)
+        end
+        local scalar, extent = spelling:match("^([%w_ ]+)%[(%d+)%]$")
+        if scalar == nil then
+            scalar = spelling
+        end
+        if not scalar:match("^[%w_ ]+$") then
+            error("invalid snapshot FFI scalar", 3)
+        end
+        const allowed = scalar == "double"
+            or scalar == "float"
+            or scalar == "bool"
+            or scalar == "int"
+            or scalar == "unsigned int"
+            or scalar == "char"
+            or scalar == "unsigned char"
+            or scalar == "short"
+            or scalar == "unsigned short"
+            or scalar:match(
+            "^u?int[1368][0246]?_t$"
+        ) ~= nil
+        if not allowed then
+            error("snapshot FFI schema contains an unsupported scalar", 3)
+        end
+        if extent ~= nil and (tonumber(extent) == 0 or assert(tonumber(extent)) > 1048576) then
+            error("snapshot FFI array exceeds layout limit", 3)
+        end
+        declarations[#declarations + 1] = scalar .. " " .. name .. (extent ~= nil and "[" .. extent .. "]" or "") .. ";"
+    end
+    if #declarations == 0 or #declarations > 4096 then
+        error("invalid snapshot FFI field count", 3)
+    end
+    const element = ffi.typeof("struct { " .. table.concat(declarations) .. " }")
+    if ffi.sizeof(element) ~= tonumber(width) then
+        error("snapshot FFI fingerprint size does not match its layout", 3)
+    end
+    const storage = ffistorage.new(ffi.new(element))
+    schemas[fingerprint] = storage
+
+    return storage
+end
+
+--- Parses and bounds-checks framing while retaining native column spans in the input
+--- owner.
+export function read(bytes: string, maximum: integer): Decoded
+    const input = buffer.new()
+    input:set(bytes)
+    const version = integer(input, "version", 1)
+    if version ~= 1 then
+        error("unsupported snapshot version", 2)
+    end
+    const nextId = integer(input, "next entity id", maximum + 1)
+    const total = integer(input, "entity count", maximum)
+    const frameCount = integer(input, "archetype count", #bytes)
+    const componentCount = integer(input, "component count", #bytes)
+    const entries: {events.SnapshotComponentEntry} = {}
+    const definitions: {components.Component} = {}
+    const layouts: {[integer]: ffistorage.Storage} = {}
+    const names: {[string]: boolean} = {}
+    for index = 1, componentCount do
+        const name = input:decode()
+        const fingerprint = input:decode()
+        if type(name) ~= "string" or names[name] then
+            error("invalid or repeated snapshot component name", 2)
+        end
+        names[name] = true
+        local component = components.resolveSnapshotName(name)
+        if component == nil then
+            error("world.loadSnapshot: unknown component " .. name, 2)
+        end
+        if fingerprint ~= nil and type(fingerprint) ~= "string" then
+            error("invalid snapshot fingerprint", 2)
+        end
+        entries[index] = new events.SnapshotComponentEntry(name = name, fingerprint = fingerprint as string?)
+        definitions[index] = component
+        if fingerprint ~= nil then
+            const current = ffistorage.find(component.componentId)
+            layouts[
+                index
+            ] = current ~= nil and current.fingerprint == fingerprint and current or savedSchema(fingerprint as string)
+        end
+    end
+    const frames: {Frame} = {}
+    local counted: integer = 0
+    for index = 1, frameCount do
+        const columnCount = integer(input, "column count", componentCount)
+        const count = integer(input, "frame entity count", maximum - counted)
+        counted = counted + count
+        const columns: {Column} = {}
+        const seen: {[integer]: boolean} = {}
+        for column = 1, columnCount do
+            const entry = integer(input, "column index", componentCount)
+            if entry == 0 or seen[entry] then
+                error("invalid or repeated snapshot column", 2)
+            end
+            seen[entry] = true
+            columns[
+                column
+            ] = new Column(component = definitions[entry], storage = layouts[entry], pointer = nil, scratch = nil)
+        end
+        const mode = integer(input, "frame mode", 1)
+        const ids: any = ffi.new("double[?]", math.max(1, count))
+        if mode == 0 then
+            if #input < count * 8 then
+                error("truncated snapshot entity ids", 2)
+            end
+            ffi.copy(ids, input:ref(), count * 8)
+            input:skip(count * 8)
+            for column = 1, #columns do
+                const selected = columns[column]
+                if selected.storage ~= nil then
+                    const length = selected.storage.width * count
+                    if #input < length then
+                        error("truncated snapshot FFI column", 2)
+                    end
+                    -- The frame retains bytes, so this pointer survives parser
+                    -- advancement and is never a borrowed buffer view escaping its
+                    -- lexical scope.
+                    selected.pointer = (ffi.cast("const uint8_t *", bytes) as any) + (#bytes - #input)
+                    input:skip(length)
+                else
+                    const values: {any} = {}
+                    for row = 1, count do
+                        values[row] = input:decode()
+                    end
+                    selected.values = values
+                end
+            end
+        else
+            if columnCount > 52 then
+                error("snapshot row mask exceeds exact integer width", 2)
+            end
+            for column = 1, #columns do
+                columns[column].values = {};
+                columns[column].present = {}
+            end
+            for row = 1, count do
+                ids[row - 1] = integer(input, "entity id", 9007199254740991)
+                local mask = integer(input, "row mask", (2 ^ columnCount - 1) as integer)
+                for column = 1, #columns do
+                    const selected = columns[column]
+                    if mask % 2 == 1 then
+                        assert(selected.present)[row] = true
+                        if selected.storage ~= nil then
+                            const layout = selected.storage
+                            if #input < layout.width then
+                                error("truncated snapshot FFI row", 2)
+                            end
+                            if selected.scratch == nil then
+                                selected.scratch = ffi.new(layout.element)
+                            end
+                            const scratch = selected.scratch
+                            ffi.copy(scratch, input:ref(), layout.width)
+                            input:skip(layout.width)
+                            assert(selected.values)[row] = ffistorage.serialize(layout, scratch)
+                        else
+                            assert(selected.values)[row] = input:decode()
+                        end
+                    end
+                    mask = mask // 2
+                end
+            end
+            -- Row payloads have already been converted to field-keyed values.
+            for column = 1, #columns do
+                columns[column].storage = nil
+            end
+        end
+        frames[#frames + 1] = new Frame(owner = bytes, ids = ids as number[?], count = count, columns = columns)
+    end
+    if counted ~= total then
+        error("snapshot counts do not match its contents", 2)
+    end
+    const data: {Data} = {}
+    while true do
+        const present = input:decode()
+        if present == false then
+            break
+        end
+        if present ~= true then
+            error("invalid snapshot data framing", 2)
+        end
+        const key = input:decode()
+        if type(key) ~= "string" then
+            error("invalid snapshot data key", 2)
+        end
+        data[#data + 1] = new Data(key = key, value = input:decode())
+    end
+    if #input ~= 0 then
+        error("snapshot has trailing bytes", 2)
+    end
+
+    return new Decoded(
+        prelude = new events.SnapshotPrelude(
+            version = version,
+            nextEntityId = nextId,
+            entityCount = total,
+            archetypeCount = frameCount,
+            componentTable = entries
+        ),
+        frames = frames,
+        data = data,
+        owner = input
+    )
+end
+
+--- Returns a field-keyed payload from a saved native schema on the migration path.
+export function value(column: Column, row: integer): any
+    if column.values ~= nil then
+        return column.values[row]
+    end
+    const layout = assert(column.storage)
+    if column.scratch == nil then
+        column.scratch = ffi.new(layout.element)
+    end
+    const scratch = column.scratch
+    ffi.copy(scratch, (ffi.cast("uint8_t *", column.pointer) as any) + (row - 1) * layout.width, layout.width)
+
+    return ffistorage.serialize(layout, scratch)
+end
+
+--- Copies a checked native frame column directly into its final archetype allocation.
+export function copy(column: Column, target: archetype.Archetype, first: integer, count: integer): nil
+    const storage = assert(ffistorage.find(column.component.componentId))
+    const destination = assert(target.columns[column.component.componentId])
+    if first < 1 or first + count - 1 > ffistorage.capacity(destination) or column.storage ~= storage then
+        error("snapshot native copy has incompatible layout or bounds", 2)
+    end
+    const pointer: any = ffi.cast("uint8_t *", destination)
+    ffi.copy(pointer + first * storage.width, column.pointer, count * storage.width)
+end

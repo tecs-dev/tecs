@@ -68,3 +68,39 @@ allocation("batchSpawn", reset, spawn)
 allocation("batchSet", populated, add)
 allocation("batchRemove", tagged, remove)
 allocation("batchDespawn", populated, despawn)
+
+-- Fixed inputs isolate queue and publication costs from caller constructors.
+const scalar = tecs.ecs.newScalarComponent({name = "bench.FlatScalar", kind = "number"})
+const input = scalar(7)
+const bundle = world:newBundle("bench.flat", {required = {scalar}})
+local function scalarSpawns(): nil
+    for index = 1, count do
+        world:spawn(input)
+    end
+    world:commit()
+end
+
+local function bundleSpawns(): nil
+    for index = 1, count do
+        bundle:spawn(input)
+    end
+    world:commit()
+end
+
+local function scalarMoves(): nil
+    for _, rows, entities in query:iter() do
+        for row = 1, assert(rows) do
+            world:set(assert(entities)[row], tag)
+        end
+    end
+    world:commit()
+end
+
+const queues = {harness.newStage("scalar spawn"), harness.newStage("bundle spawn"), harness.newStage("scalar add tag")}
+harness.measure(queues[1], warmup, samples, scalarSpawns, reset)
+harness.measure(queues[2], warmup, samples, bundleSpawns, reset)
+harness.measure(queues[3], warmup, samples, scalarMoves, populated)
+print(harness.format(queues))
+allocation("scalar spawn", reset, scalarSpawns)
+allocation("bundle spawn", reset, bundleSpawns)
+allocation("scalar add tag", populated, scalarMoves)

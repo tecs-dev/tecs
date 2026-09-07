@@ -80,7 +80,7 @@ local function scalarSpelling(info: any): string
     return prefix .. tostring((info.size as integer) * 8) .. "_t"
 end
 
-local function fieldsOf(element: any): {Field}
+local function fieldsOf(element: any, opaque: boolean): {Field}
     const info = unqualified(assert(tonumber(element)) as integer)
     if typeKind(info) ~= 1 or math.floor((info.info as integer) / 8388608) % 2 == 1 then
         error("FFI component requires a struct, not a union", 3)
@@ -100,7 +100,16 @@ local function fieldsOf(element: any): {Field}
                 count = (kind.size as integer) // (member.size as integer)
                 kind = member
             end
-            const scalar = scalarSpelling(kind)
+            local scalar: string
+            if typeKind(kind) == 0 then
+                scalar = scalarSpelling(kind)
+            elseif opaque and (typeKind(kind) == 1 or typeKind(kind) == 2) then
+                -- Custom codecs own the representation of nested values and pointers.
+                -- These spellings deliberately cannot enter the automatic raw codec.
+                scalar = "opaque" .. tostring(childId(field))
+            else
+                error("nested or pointer-bearing FFI components require paired snapshot codecs or transient = true", 3)
+            end
             const spelling = scalar .. (count > 0 and "[" .. tostring(count) .. "]" or "")
             result[
                 #result + 1
@@ -117,7 +126,7 @@ local function fieldsOf(element: any): {Field}
     return result
 end
 
-export function new(sample: any): Storage
+export function new(sample: any, opaque: boolean?): Storage
     if type(sample) ~= "cdata" then
         error("newFFIComponent: default must return a Nupp struct", 2)
     end
@@ -130,7 +139,7 @@ export function new(sample: any): Storage
         error("newFFIComponent: struct must have a nonempty fixed layout", 2)
     end
     local spelling = "$[?]"
-    const fields = fieldsOf(element)
+    const fields = fieldsOf(element, opaque == true)
     const parts: {string} = {}
     for index = 1, #fields do
         parts[index] = fields[index].name .. ":" .. fields[index].spelling
@@ -143,7 +152,7 @@ export function new(sample: any): Storage
         alignment = ffi.alignof(element),
         fields = fields,
         fingerprint = table.concat(parts, ",") .. "|" .. tostring(width),
-        rawCodec = true
+        rawCodec = opaque ~= true
     )
 end
 

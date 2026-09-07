@@ -1,0 +1,64 @@
+module tecs.internal.entitycolumn
+
+--[[
+Native double entity IDs with the count stored in slot zero.
+The metatype supplies indexed access and length to Nupp callers; LuaJIT inlines
+these loads. Capacity changes happen only at publication and maintenance.
+]]
+
+local ffi = require("ffi")
+
+--- Exposes one-based exact packed entity IDs and the count in slot zero.
+export interface DoubleArray
+    metamethod __len: function(self: DoubleArray): integer
+    metamethod __index: function(self: DoubleArray, index: integer): integer
+    metamethod __newindex: function(self: DoubleArray, index: integer, id: integer?): nil
+end
+
+const native = ffi.metatype(ffi.typeof("struct { double data[?]; }"), {
+    __len = function(value: any): integer
+        return tonumber(value.data[0]) as integer
+    end,
+    __index = function(value: any, index: integer): integer?
+        if index < 0 or index > value.data[0] then
+            return nil
+        end
+        return tonumber(value.data[index]) as integer
+    end,
+    __newindex = function(value: any, index: integer, id: integer?): nil
+        if id == nil then
+            value.data[index] = 0
+            if index == value.data[0] then
+                value.data[0] = index - 1
+            end
+        else
+            value.data[index] = id
+            if index > value.data[0] then
+                value.data[0] = index
+            end
+        end
+    end
+})
+
+--- Allocates an empty native entity column with a fixed row capacity.
+export function new(capacity: integer): DoubleArray
+    return ffi.new(native, capacity + 1) as DoubleArray
+end
+
+--- Copies the live prefix into a new allocation at a publication boundary.
+export function resize(value: DoubleArray, capacity: integer): DoubleArray
+    const output = new(capacity)
+    ffi.copy((output as any).data, (value as any).data, (#value + 1) * 8)
+    return output
+end
+
+--- Empties the column without releasing its allocation.
+export function clear(value: DoubleArray): nil
+    const raw: any = value
+    raw.data[0] = 0
+end
+
+--- Returns the first live row's native pointer for a bounded bulk operation.
+export function pointer(value: DoubleArray): any
+    return (value as any).data + 1
+end

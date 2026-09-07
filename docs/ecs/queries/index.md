@@ -65,6 +65,18 @@ Use `query:count()` to count matches without visiting rows.
 
 Iteration supports nesting, including two loops over the same query. Iterators
 own traversal state only; they do not control structural transaction lifetime.
+Persistent queries retain active-only lists. The iterator methods return the
+generic-for triple: a reusable function, query-owned state and an initial
+cursor. Normal loops allocate no closure. For manual stepping, retain all three:
+
+```nupp
+local step, state, cursor = movers:iter()
+local candidate, count, entities = step(state, cursor)
+-- The first return becomes the next cursor.
+if candidate ~= nil then
+    candidate, count, entities = step(state, candidate)
+end
+```
 
 ## Structural changes
 

@@ -355,13 +355,13 @@ function suite.registrationRejectsPointerAndNestedLayouts(): nil
         function(): nil
             ffistorage.new(new PointerValue())
         end,
-        "not pointers or nested objects"
+        "require paired snapshot codecs"
     )
     test.raises(
         function(): nil
             ffistorage.new(new NestedValue())
         end,
-        "not pointers or nested objects"
+        "require paired snapshot codecs"
     )
 end
 

@@ -113,7 +113,8 @@ function suite.keepsTheViewStableAcrossIterationAndSuspension(): nil
         run = function(_dt: number, exclusive _world: tecs.ecs.World, borrows scope: nupp.tasks.Scope): nil
             local visited = 0
             for candidate in query:iter() do
-                for _, id in ipairs(assert(candidate).entities) do
+                for row = 1, #assert(candidate).entities do
+                    const id = assert(candidate).entities[row]
                     world:despawn(id)
                     world:enqueueCommit()
                     visited = visited + 1

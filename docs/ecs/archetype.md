@@ -33,6 +33,8 @@ end
 
 Rows start at 1. The iterator supplies the current length. Treat the entity column and
 component signature as read-only.
+Entity IDs use native doubles with the count in slot zero. `#entities` still
+returns the live count. Use numeric indexed loops, not table-library operations.
 
 A row identifies a position in current storage, not an entity. Despawn and
 archetype transitions use swap-pop movement, so never retain a row across
@@ -50,11 +52,13 @@ For conditional writes, read through `get`, perform the write only when
 needed, then call `markComponentDirty`.
 
 Use `world:set` to replace a component value or add one to the signature.
+Use `archetype:set(row, instance)` to replace an existing value immediately.
+Relationship payload replacement must retain an existing target.
 
 ## Bulk publication
 
 Use `batchSpawn`, `batchSet`, `batchRemove`, and `batchDespawn` for whole-query
-work. These are the original ECS operation names: adding a component is
+work. Adding a component is
 `batchSet`, and deleting entities is `batchDespawn`.
 
 ```nupp
@@ -129,3 +133,18 @@ path Tecs cannot observe, such as a value obtained through `get`.
 
 [Dirty tracking](/ecs/components/dirty-tracking.md) covers the complete write
 contract.
+
+## Lifecycle observation
+
+Observe `tecs.ecs.ArchetypeCreated` on the world's zero address, then call
+`event.archetype:addEntityObserver({...})`. Registration does not replay existing
+rows. Added and removed callbacks receive one-based inclusive ranges and the
+source or destination archetype for a move. Removed values remain readable.
+`onEntityMove` reports the swapped entity and zero-based old/new row positions.
+Activation, deactivation and destruction callbacks describe archetype lifetime.
+
+Incremental consumers can pair `structuralCount()` with `structuralDescribed`,
+`structuralAdded` and `structuralTouched`. Residue is bounded and resets when dirty
+bits clear; a consumer older than that window must refresh completely. Call
+`trackValueCount(Component)` to include that column's future explicit writes in
+the aggregate `valueCount()` counter.

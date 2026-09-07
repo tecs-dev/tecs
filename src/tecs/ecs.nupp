@@ -63,16 +63,18 @@ copies. Column views and row references expire at the next structural publicatio
 compaction, clear, or snapshot restore. Reacquire them afterwards. Never retain a
 native row reference across such a boundary or use `commit` inside its loop.
 
-Supported layouts contain numeric and boolean fields and fixed arrays of those
-types. Pointer-bearing objects, unions, bitfields, variable arrays and nested
-structs are rejected at registration, as they were outside the old FFI field
-schema. Table snapshots have automatic field codecs; arrays are saved one-based
+Automatic codecs support numeric and boolean fields and fixed arrays of those
+types. Nested structs and pointers are also supported with custom codecs or
+`transient = true`; their owners must keep pointed-to storage alive. Unions,
+bitfields and variable arrays are rejected. Never persist process-local pointer
+addresses. Table snapshots have automatic field codecs; arrays are saved one-based
 and signed/unsigned 64-bit integers are saved as exact decimal strings. Optional
-`save` and `load` hooks must be supplied together. They replace automatic codecs
+`save` and either `load` or world-aware `deserialize` hooks must be supplied
+together. They replace automatic codecs
 and disable native raw encoding in both directions so custom behavior is never
 silently bypassed. Transient and required components follow the ordinary ECS
-rules. The binary snapshot integration is a separate publication layer over
-this native storage.
+rules. Binary snapshots copy eligible native columns directly and migrate older
+scalar layouts using their saved field fingerprints.
 
 `newFFIRelationship` uses the same native field policy and supports exclusive or
 multiple targets, reverse lookup, cascades and sparse or dense edge placement.
@@ -81,8 +83,8 @@ return native columns. A wildcard relationship column is a managed array of
 references to its first native edge, not another copy of that edge. Sparse edge
 lists likewise retain native values. Changes through wildcard, target-specific
 and relationship-iteration access therefore reach the same payload. Sparse
-relationships retain constructed edge objects, matching the original sparse
-store. Reusing one edge instance for several sources shares that payload;
+relationships retain constructed edge objects. Reusing one edge instance for
+several sources shares that payload;
 construct separate instances for independent values and mark every affected
 source dirty after mutating a deliberately shared payload.
 
@@ -279,7 +281,7 @@ keys. Explicit record constants get independent shallow outer copies, retaining
 their record type; nested references remain shared. Instance-valued requirements
 remain shared. Default factories run per entity.
 
-The original bulk storage paths operate on compact batch descriptors and native
+Bulk storage paths operate on compact batch descriptors and native
 slot stamps. A contiguous spawn allocates no identity list or per-entity
 transaction records. Plain whole-archetype moves exchange common column buffers
 when the destination is empty and copy native ranges when it is populated;
@@ -295,8 +297,32 @@ the world during publication. As with scalar mutations, a
 callback failure is not an atomic rollback of already published rows.
 
 `forEachArchetype` includes empty and disabled archetypes. `dirtyArchetypes()`
-captures an independent iterator over dirty archetypes in registry order,
+captures an independent iterator over the queue in first-dirtied order,
 including empty ones changed by removal. Dirty marks clear at the end of update.
+`findArchetypes(Component)` uses the component index, including empty matches.
+`getStats(fill)` updates a caller-owned statistics record without allocating one.
+
+Entity IDs occupy contiguous native double columns. Their exact length remains
+available through `#entities`; row zero holds that length. Use indexed numeric
+loops, not table-library functions or `ipairs`, and treat the column as read-only.
+Persistent queries maintain active-only lists through lifecycle notifications.
+`iter`, `group` and `groups` return reusable generic-for functions, their state
+and an initial cursor. They allocate no per-iteration closure and support nested
+and interleaved traversal. Manual stepping must pass that state and prior result.
+
+Observe `ArchetypeCreated` at address zero to attach `addEntityObserver` callbacks
+before an archetype's first publication. Added and removed ranges are one-based;
+swap-pop `onEntityMove` positions are zero-based. Added callbacks see initialized
+values, removed callbacks can still read departing rows, and moves identify the
+opposite archetype. Activation, deactivation and destruction are also observable.
+
+`structuralDescribed(previousCount)` reports whether bounded row residue covers
+a consumer's structural count. `structuralAdded()` identifies an appended suffix;
+`structuralTouched()` returns a borrowed list and count of swap-pop overwrites.
+A false description requires a full refresh. `trackValueCount(Component)` opts
+a column into the aggregate `valueCount()` counter; structural writes do not
+increment that counter. `archetype:set(row, instance)` replaces an existing value
+and marks it dirty, but cannot change relationship membership.
 
 Call `compact()` outside dispatch on a committed world. It prunes empty dense
 relationship archetypes with dead target identities, releases their persistent
@@ -336,8 +362,8 @@ directly. Independent generators outside a world use `nupp.data.random.newRandom
 Generators are mutable and must not be shared across concurrent workers.
 
 The first stream or seed call enables snapshot persistence under `tecs.random`.
-This reserved key and its `{seed, streams}` payload retain the old architecture's
-contract, as does the byte-based name-to-seed mapping. Each saved stream contains
+This reserved key, its `{seed, streams}` payload and the byte-based name-to-seed
+mapping are persistence contracts. Each saved stream contains
 four signed 32-bit state words. Saving neither advances the generators nor
 leaves a live view into them.
 
@@ -358,6 +384,14 @@ Installing audio uses the `tecs.audio` stream for pitch variance automatically;
 standalone mixers retain their own independent Nupp generators.
 
 ## System scheduling
+
+`registerPhase({name = "game.Custom"})` registers a custom leaf; `children` makes
+an ordered tree of registered names. `position` selects its inspection-registry
+position, not automatic execution in the default frame. Run the tree explicitly
+with `runPhase`, or provide `WorldConfig.pipelineFactory` to replace scheduling.
+The custom `Pipeline` receives the world's task scope, owns system ordering and
+phase barriers, and receives all registration, phase-control and inspection calls.
+Its fixed remainder and phase-enabled flags participate in snapshots.
 
 `addSystem` accepts `before` and `after` lists of system names. Constraints apply
 only within one leaf phase; missing names and names in other phases contribute
@@ -445,8 +479,17 @@ export type WorldConfig = {
     maxEntities: integer?,
     timestep: number?,
     fixedMaxSteps: integer?,
-    fixedOverload: entityworld.FixedOverload?
+    fixedOverload: entityworld.FixedOverload?,
+
+    --- Caller-writable. Replaces the scheduler before built-in systems are installed.
+    pipelineFactory: (function(): entityworld.Pipeline)?
 }
+
+--- Implements custom scheduling while the world owns entities and task scopes.
+export type Pipeline = entityworld.Pipeline
+
+--- Declares a custom phase or ordered phase tree.
+export type PhaseDefinition = phasevalues.Definition
 
 --- A Tecs world.
 export type World = entityworld.World
@@ -467,7 +510,7 @@ export type TableComponent<T> = components.TableComponent<T>
 export type FFIComponent<T> = components.FFIComponent<T>
 
 --- Configures a native struct component and optional custom snapshot codecs.
-export type FFIComponentOptions<T> = components.TableComponentOptions<T>
+export type FFIComponentOptions<T> = TableComponentOptions<T>
 
 --- A typed native relationship with dense target columns or entity-indexed edges.
 export type FFIRelationship<T> = components.FFIRelationship<T>
@@ -476,7 +519,45 @@ export type FFIRelationship<T> = components.FFIRelationship<T>
 export type FFIRelationshipTarget<T> = components.FFIRelationshipTarget<T>
 
 --- Configures the native edge layout, constructor and relationship behavior.
-export type FFIRelationshipOptions<T> = components.FFIRelationshipOptions<T>
+export type FFIRelationshipOptions<T> = {
+    --- Caller-writable. Sets the stable relationship name.
+    name: string,
+
+    --- Caller-writable. Supplies the native layout at registration.
+    default: function(): T,
+
+    --- Caller-writable. Constructs an edge bearing the supplied target.
+    construct: function(target: integer, ...: any): T,
+
+    --- Caller-writable. Limits each source to one target; defaults to false.
+    exclusive: boolean?,
+
+    --- Caller-writable. Selects entity-indexed storage instead of dense target columns.
+    sparse: boolean?,
+
+    --- Caller-writable. Maintains target-to-source lookup.
+    reverseIndex: boolean?,
+
+    --- Caller-writable. Deletes sources with their target; requires exclusive and
+    --- reverseIndex.
+    cascadeDelete: boolean?,
+
+    --- Caller-writable. Adds missing components to the edge's source transitively.
+    requires: {ComponentInput}?,
+
+    --- Caller-writable. Omits this relationship from snapshots.
+    transient: boolean?,
+
+    --- Caller-writable. Replaces automatic encoding, paired with load or deserialize.
+    save: (function(value: T): any)?,
+
+    --- Caller-writable. Replaces automatic decoding; excludes deserialize.
+    load: (function(value: any): T)?,
+
+    --- Caller-writable. Decodes with the destination world before replacement; excludes
+    --- load.
+    deserialize: (function(exclusive world: World, value: any): T)?
+}
 
 --- A target-only entity relationship with selectable cardinality and storage.
 export type Relationship = components.RelationshipComponent
@@ -491,7 +572,35 @@ export type TagComponentOptions = components.TagComponentOptions
 export type ScalarComponentOptions = components.ScalarComponentOptions
 
 --- Options for a record-valued component.
-export type TableComponentOptions<T> = components.TableComponentOptions<T>
+export type TableComponentOptions<T> = {
+    --- Caller-writable. Supplies the process-unique persisted component name.
+    name: string,
+
+    --- Caller-writable. Constructs a component's value from positional arguments.
+    construct: function(...: any): T,
+
+    --- Caller-writable. Constructs a default value for each newly initialized entity.
+    default: function(): T,
+
+    --- Caller-writable. Encodes detached snapshot data; nil omits this component on
+    --- restore.
+    save: (function(value: T): any)?,
+
+    --- Caller-writable. Decodes snapshot data, paired with save and exclusive with
+    --- deserialize.
+    load: (function(value: any): T)?,
+
+    --- Caller-writable. Decodes with the destination world before replacement, paired
+    --- with save.
+    deserialize: (function(exclusive world: World, value: any): T)?,
+
+    --- Caller-writable. Omits this component from world snapshots.
+    transient: boolean?,
+
+    --- Caller-writable. Adds missing required components or shared instances
+    --- transitively.
+    requires: {ComponentInput}?
+}
 
 --- Construction and storage options for target-only relationships.
 export type RelationshipOptions = components.RelationshipOptions
@@ -503,7 +612,43 @@ export type DataRelationship<T> = components.DataRelationship<T>
 export type RelationshipTarget<T> = components.RelationshipTarget<T>
 
 --- Construction and storage options for typed relationship edges.
-export type DataRelationshipOptions<T> = components.DataRelationshipOptions<T>
+export type DataRelationshipOptions<T> = {
+    --- Caller-writable. Sets the stable relationship name.
+    name: string,
+
+    --- Caller-writable. Constructs an edge bearing the supplied target.
+    construct: function(target: integer, ...: any): T,
+
+    --- Caller-writable. Limits each source to one target; defaults to false.
+    exclusive: boolean?,
+
+    --- Caller-writable. Selects entity-indexed storage instead of dense target columns.
+    sparse: boolean?,
+
+    --- Caller-writable. Maintains target-to-source lookup.
+    reverseIndex: boolean?,
+
+    --- Caller-writable. Deletes sources with their target; requires exclusive and
+    --- reverseIndex.
+    cascadeDelete: boolean?,
+
+    --- Caller-writable. Adds missing components to the edge's source transitively.
+    requires: {ComponentInput}?,
+
+    --- Caller-writable. Omits this relationship from snapshots.
+    transient: boolean?,
+
+    --- Caller-writable. Encodes each typed edge into detached data.
+    save: function(value: T): any,
+
+    --- Caller-writable. Decodes each typed edge; requires exactly one of load and
+    --- deserialize.
+    load: (function(value: any): T)?,
+
+    --- Caller-writable. Decodes with the destination world before replacement; excludes
+    --- load.
+    deserialize: (function(exclusive world: World, value: any): T)?
+}
 
 --- Membership constraints, grouping and notifications for a reusable query.
 export type QueryDescriptor = query.Descriptor
@@ -513,6 +658,37 @@ export type Query = query.Query
 
 --- A dense archetype returned by query iteration.
 export type Archetype = archetype.Archetype
+
+--- Exposes the native, one-based packed entity ID column and its exact length.
+export type DoubleArray = tecs.internal.entitycolumn.DoubleArray
+
+--- Receives row and lifetime notifications from one archetype.
+export type ArchetypeEntityObserver = archetype.EntityObserver
+
+--- Reports newly registered archetypes at the world's zero address.
+export type ArchetypeCreated = events.ArchetypeCreated
+
+--- Identifies the event used to attach archetype observers before its first
+--- publication.
+export const ArchetypeCreated = events.ArchetypeCreated
+
+--- Allows snapshot participants to attach metadata and exclude regenerated entities.
+export type OnSnapshotSave = events.OnSnapshotSave
+
+--- Identifies the event emitted before snapshot selection.
+export const OnSnapshotSave = events.OnSnapshotSave
+
+--- Allows snapshot participants to subscribe to metadata during a load.
+export type StartSnapshotLoad = events.StartSnapshotLoad
+
+--- Identifies the event emitted before custom snapshot data dispatch.
+export const StartSnapshotLoad = events.StartSnapshotLoad
+
+--- Reports completion of snapshot metadata restoration.
+export type FinishSnapshotLoad = events.FinishSnapshotLoad
+
+--- Identifies the final snapshot lifecycle event.
+export const FinishSnapshotLoad = events.FinishSnapshotLoad
 
 --- Initializes or updates a contiguous one-based archetype row range at a barrier.
 export type BatchCallback = entityworld.BatchCallback
@@ -708,7 +884,8 @@ export function newWorld(config: WorldConfig?): World
         config and config.timestep,
         config and config.fixedMaxSteps,
         config and config.fixedOverload,
-        config and config.nominalFrameTime
+        config and config.nominalFrameTime,
+        config and config.pipelineFactory
     )
     builtins.install(value)
 
@@ -741,7 +918,9 @@ export const newScalarComponent: components.NewScalarComponent = components.newS
 --- @raises Raises when a requirement is unregistered or names an untargeted
 ---     relationship.
 export function newComponent<T>(options: TableComponentOptions<T>): TableComponent<T>
-    return components.newComponent(options)
+    -- The registry erases only the world argument to avoid a runtime/type cycle
+    -- through archetypes; this public boundary keeps deserializers world-typed.
+    return components.newComponent(options as components.TableComponentOptions<T>)
 end
 
 --- Registers a component backed by contiguous Nupp struct rows.
@@ -751,7 +930,7 @@ end
 --- @raises Raises when the layout is unsupported or only one custom codec is supplied.
 --- @raises Raises when the component name is empty or already registered.
 export function newFFIComponent<T>(options: FFIComponentOptions<T>): FFIComponent<T>
-    return components.newFFIComponent(options)
+    return components.newFFIComponent(options as components.TableComponentOptions<T>)
 end
 
 --- Registers a relationship with native struct payloads.
@@ -760,7 +939,7 @@ end
 --- @return Returns the callable relationship definition.
 --- @raises Raises for invalid layout, target field, relationship policy or codec pair.
 export function newFFIRelationship<T>(options: FFIRelationshipOptions<T>): FFIRelationship<T>
-    return components.newFFIRelationship(options)
+    return components.newFFIRelationship(options as any as components.FFIRelationshipOptions<T>)
 end
 
 --- Creates and registers a target-only entity relationship.
@@ -783,7 +962,7 @@ end
 --- @raises Raises when a requirement is unregistered or names an untargeted
 ---     relationship.
 export function newDataRelationship<T>(options: DataRelationshipOptions<T>): DataRelationship<T>
-    return components.newDataRelationship(options)
+    return components.newDataRelationship(options as any as components.DataRelationshipOptions<T>)
 end
 
 --- Returns a registered component by numeric id.

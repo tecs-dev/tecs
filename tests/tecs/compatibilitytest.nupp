@@ -145,6 +145,7 @@ function suite.ecsBuiltinComponentNames(): nil
     test.equal(ecs.Paused.componentName, "Paused")
     test.equal(ecs.Disabled.componentName, "Disabled")
     test.equal(ecs.Transform2D.componentName, "Transform2D")
+    test.equal(ecs.Transform3D.componentName, "Transform3D")
     test.equal(ecs.TTL.componentName, "TTL")
     test.equal(ecs.RelativeTransform2D.componentName, "RelativeTransform2D")
 end
@@ -256,6 +257,10 @@ end
 function suite.ecsEventNames(): nil
     test.equal(events.name(ecs.OnSpawn), "OnSpawn")
     test.equal(events.name(ecs.OnDespawn), "OnDespawn")
+    test.equal(events.name(ecs.ArchetypeCreated), "ArchetypeCreated")
+    test.equal(events.name(ecs.OnSnapshotSave), "OnSnapshotSave")
+    test.equal(events.name(ecs.StartSnapshotLoad), "StartSnapshotLoad")
+    test.equal(events.name(ecs.FinishSnapshotLoad), "FinishSnapshotLoad")
     test.equal(events.name(ecs.StateEnter), "StateEnter")
     test.equal(events.name(ecs.StateExit), "StateExit")
     test.equal(events.name(ecs.StateBlur), "StateBlur")

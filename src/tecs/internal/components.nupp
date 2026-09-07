@@ -62,7 +62,7 @@ export interface TableComponent<T> is Component
     construct: function(...: any): T
     defaultFactory: function(): T
     snapshotSave: function(value: T): any
-    snapshotLoad: function(value: any): T
+    snapshotLoad: function(value: any, exclusive world: any): T
     metamethod __call: function(self, ...: any): TableInstance<T>
 end
 
@@ -112,7 +112,7 @@ export interface FFIComponent<T> is Component
 
     --- Engine-owned. Reconstructs fields or invokes the custom codec; games restore
     --- through the world.
-    snapshotLoad: function(value: any): T
+    snapshotLoad: function(value: any, exclusive world: any): T
 
     metamethod __call: function(self, ...: any): FFIInstance<T, FFIComponent<T>>
 end
@@ -154,7 +154,7 @@ export interface FFIRelationship<T> is Component
 
     --- Engine-owned. Reconstructs fields or invokes the custom codec; games restore
     --- through the world.
-    snapshotLoad: function(value: any): T
+    snapshotLoad: function(value: any, exclusive world: any): T
 
     metamethod __call: function(self, ...: any): FFIInstance<T, FFIRelationship<T>>
 
@@ -199,7 +199,10 @@ export type FFIRelationshipOptions<T> = {
     save: (function(value: T): any)?,
 
     --- Caller-writable. Replaces automatic field decoding; requires save too.
-    load: (function(value: any): T)?
+    load: (function(value: any): T)?,
+
+    --- Caller-writable. Decodes an edge with its destination world; excludes load.
+    deserialize: (function(exclusive world: any, value: any): T)?
 }
 
 --- The committed value of an exclusive entity relationship.
@@ -288,7 +291,10 @@ export type DataRelationshipOptions<T> = {
 
     --- Caller-writable. Restores each typed target-bearing edge, including its record
     --- identity and methods.
-    load: function(value: any): T
+    load: (function(value: any): T)?,
+
+    --- Caller-writable. Decodes an edge with its destination world; excludes load.
+    deserialize: (function(exclusive world: any, value: any): T)?
 }
 
 --- Carries a complete edge set across the world's heterogeneous mutation seam.
@@ -371,6 +377,11 @@ export type TableComponentOptions<T> = {
     default: function(): T,
     save: (function(value: T): any)?,
     load: (function(value: any): T)?,
+
+    --- Caller-writable. Reconstructs a value with the destination world, instead of
+    --- load. This callback runs during validation, before the destination's entities
+    --- are replaced.
+    deserialize: (function(exclusive world: any, value: any): T)?,
     transient: boolean?,
 
     --- Caller-writable. Adds missing definitions or shared instance values, including
@@ -657,11 +668,20 @@ export const newScalarComponent: NewScalarComponent = createScalarComponent as N
 export function newComponent<T>(options: TableComponentOptions<T>): TableComponent<T>
     const requirements = prepareRequires(options.requires)
     validateName(options.name, "newComponent")
-    if (options.save == nil) ~= (options.load == nil) then
+    if options.load ~= nil and options.deserialize ~= nil then
+        error("newComponent: choose load or deserialize, not both", 2)
+    end
+    if (options.save == nil) ~= (options.load == nil and options.deserialize == nil) then
         error("newComponent: snapshot save and load must be provided together", 2)
     end
     local save = options.save
-    local load = options.load
+    local load: (function(value: any, exclusive world: any): T)? = options.load
+    if options.deserialize ~= nil then
+        const deserialize = options.deserialize
+        load = function(value: any, exclusive world: any): T
+            return deserialize(world, value)
+        end
+    end
     if save == nil then
         save = function(value: T): any
             return snapshotvalue.clone(value)
@@ -709,10 +729,10 @@ end
 --- @raises Raises when the layout is unsupported or the codec pair is incomplete.
 --- @raises Raises when the name is empty or already registered.
 export function newFFIComponent<T>(options: TableComponentOptions<T>): FFIComponent<T>
-    if (options.save == nil) ~= (options.load == nil) then
+    if (options.save == nil) ~= (options.load == nil and options.deserialize == nil) then
         error("newFFIComponent: snapshot save and load must be provided together", 2)
     end
-    const storage = ffistorage.new(options.default())
+    const storage = ffistorage.new(options.default(), options.save ~= nil or options.transient == true)
     const configured = table.clone(options)
     if options.save == nil then
         configured.save = function(value: T): any
@@ -773,8 +793,18 @@ end
 --- @raises Raises for invalid storage policy, duplicate names, or missing snapshot
 ---     hooks.
 export function newDataRelationship<T>(options: DataRelationshipOptions<T>): DataRelationship<T>
-    if options.save == nil or options.load == nil then
+    if options.load ~= nil and options.deserialize ~= nil then
+        error("choose load or deserialize, not both", 2)
+    end
+    if options.save == nil or (options.load == nil and options.deserialize == nil) then
         error("data relationships require snapshot save and load functions", 2)
+    end
+    local load: (function(value: any, exclusive world: any): T)? = options.load
+    if options.deserialize ~= nil then
+        const deserialize = options.deserialize
+        load = function(value: any, exclusive world: any): T
+            return deserialize(world, value)
+        end
     end
     const metadata = newRelationship({
         name = options.name,
@@ -796,7 +826,7 @@ export function newDataRelationship<T>(options: DataRelationshipOptions<T>): Dat
                 error("relationship requires an explicit target", 2)
             end,
             snapshotSave = options.save,
-            snapshotLoad = options.load,
+            snapshotLoad = assert(load),
             targeting = function(self: DataRelationship<T>, target: integer): RelationshipTarget<T>
                 return metadata:targeting(target) as RelationshipTarget<T>
             end
@@ -823,7 +853,7 @@ end
 --- @return Returns the callable native relationship definition.
 --- @raises Raises for an invalid struct, target field, policy or codec pair.
 export function newFFIRelationship<T>(options: FFIRelationshipOptions<T>): FFIRelationship<T>
-    const storage = ffistorage.new(options.default())
+    const storage = ffistorage.new(options.default(), options.save ~= nil or options.transient == true)
     local hasTarget = false
     for index = 1, #storage.fields do
         const field = storage.fields[index]
@@ -834,7 +864,10 @@ export function newFFIRelationship<T>(options: FFIRelationshipOptions<T>): FFIRe
     if not hasTarget then
         error("FFI relationship requires a number target field", 2)
     end
-    if (options.save == nil) ~= (options.load == nil) then
+    if options.load ~= nil and options.deserialize ~= nil then
+        error("choose load or deserialize, not both", 2)
+    end
+    if (options.save == nil) ~= (options.load == nil and options.deserialize == nil) then
         error("FFI relationship snapshot save and load must be provided together", 2)
     end
     local save = options.save
@@ -859,7 +892,8 @@ export function newFFIRelationship<T>(options: FFIRelationshipOptions<T>): FFIRe
         requires = options.requires,
         transient = options.transient,
         save = save,
-        load = assert(load)
+        load = load,
+        deserialize = options.deserialize
     })
     component.storageType = "ffi"
     ffistorage.register(component.componentId, storage)
@@ -1039,6 +1073,30 @@ end
 --- @return the component, or nil when the name is unknown
 export function findByName(name: string): Component?
     return registeredByName[name]
+end
+
+--- Resolves a persisted component name, materializing a dense relationship selector if
+--- needed.
+export function resolveSnapshotName(name: string): Component?
+    const found = registeredByName[name]
+    if found ~= nil then
+        return found
+    end
+    const rootName, targetText = name:match("^(.-)%-%>(%d+)$")
+    if rootName == nil or targetText == nil then
+        return nil
+    end
+    const root = registeredByName[rootName]
+    const relationship = root and asRelationship(root) or nil
+    if relationship == nil or relationship.sparse then
+        return nil
+    end
+    const target = tonumber(targetText)
+    if target == nil then
+        return nil
+    end
+
+    return relationship:targeting(target as integer)
 end
 
 --- Returns a fresh name-to-component snapshot of the registry.

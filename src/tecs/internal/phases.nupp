@@ -10,7 +10,7 @@ belong to this frame order.
 ]]
 
 --- A frame phase name.
-export type Phase = "Ingress"
+export type BuiltinPhase = "Ingress"
     | "PreStartup"
     | "Startup"
     | "PostStartup"
@@ -32,6 +32,22 @@ export type Phase = "Ingress"
     | "PreShutdown"
     | "Shutdown"
     | "PostShutdown"
+
+--- Names a built-in or explicitly registered custom phase.
+export type Phase = string
+
+--- Declares one phase or an ordered tree of phases.
+export type Definition = {
+    --- Caller-writable. Supplies a nonempty stable system-inspection name.
+    name: string,
+
+    --- Caller-writable. Selects the registry position; nil appends after existing
+    --- positions.
+    position: integer?,
+
+    --- Caller-writable. Lists already registered child names; nil declares a leaf.
+    children: {string}?
+}
 
 --- A predefined ordered group of leaf phases.
 export type PhaseGroup = "StartupGroup"

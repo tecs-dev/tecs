@@ -510,7 +510,8 @@ end
 -- Ordinary sprites retain archetype runs. A chunk owns one run so editing
 -- a tile uploads only that chunk's retained instances when its size is stable.
 local function sources(borrows self: Extractor): function(): (archetype.Archetype?, integer?, integer?, integer?)
-    const nextArchetype = self.drawables:iter()
+    const nextArchetype, iteratorState = self.drawables:iter()
+    local previous: archetype.Archetype? = nil
     local active: archetype.Archetype? = nil
     local length: integer = 0
     local row: integer = 0
@@ -520,7 +521,8 @@ local function sources(borrows self: Extractor): function(): (archetype.Archetyp
             row = row + 1
             return active, row, row, -active.entities[row]
         end
-        const candidate, count = nextArchetype()
+        const candidate, count = nextArchetype(iteratorState, previous)
+        previous = candidate
         if candidate == nil then
             return nil, nil, nil, nil
         end

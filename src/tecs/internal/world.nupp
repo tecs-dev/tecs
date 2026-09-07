@@ -26,6 +26,9 @@ local phases = require("tecs.internal.phases")
 local query = require("tecs.internal.query")
 local randomstreams = require("tecs.internal.randomstreams")
 local snapshotvalue = require("tecs.internal.snapshotvalue")
+local snapshotcodec = require("tecs.internal.snapshotcodec")
+local buffer = require("string.buffer")
+local files = require("nupp.io.files")
 
 --- A frame system body.
 ---
@@ -34,8 +37,111 @@ local snapshotvalue = require("tecs.internal.snapshotvalue")
 --- its third argument; all children settle before the logical update returns.
 export type System = function(dt: number, exclusive world: World, borrows scope: tasks.Scope)
 
+--- Replaces scheduling while preserving world mutation, event and task-scope ownership.
+export interface Pipeline
+    --- Read-only. Reports the registered system count.
+    count: integer
+
+    --- Read-only. Reports the fixed-step duration in seconds.
+    fixedTimestep: number
+
+    --- Read-only. Limits catch-up iterations in one frame.
+    fixedMaxSteps: integer
+
+    --- Read-only. Selects drop or accumulate for excess fixed time.
+    fixedOverload: FixedOverload
+
+    --- Engine-owned. Stores the fixed remainder; snapshot restore writes it.
+    fixedAccumulator: number
+
+    --- Read-only. Reports completed fixed iterations.
+    fixedStepCount: integer
+
+    --- Read-only. Reports abandoned fixed time in seconds.
+    fixedTimeDropped: number
+
+    --- Read-only. Reports abandoned whole fixed steps.
+    fixedStepsDropped: integer
+
+    --- Engine-owned. Stores enabled flags by registered phase position; snapshots
+    --- restore it.
+    phaseStates: {boolean}
+
+    --- Dispatches a frame inside the world's existing task scope.
+    --- @param self The custom scheduler.
+    --- @param dt The frame duration in seconds.
+    --- @param world The world whose systems run.
+    --- @param scope The call-scoped owner of child tasks.
+    update: function(self: Pipeline, dt: number, exclusive world: World, borrows scope: tasks.Scope): nil
+
+    --- Dispatches one phase or phase tree inside the world's task scope.
+    --- @param self The custom scheduler.
+    --- @param phase The selected phase name.
+    --- @param dt The elapsed seconds supplied to systems.
+    --- @param world The world whose systems run.
+    --- @param scope The call-scoped owner of child tasks.
+    run: function(
+        self: Pipeline,
+        phase: phases.Selection,
+        dt: number,
+        exclusive world: World,
+        borrows scope: tasks.Scope
+    ): nil
+
+    --- Registers a system and returns its unique name.
+    --- @param self The custom scheduler.
+    --- @param config The system and its ordering constraints.
+    --- @return Returns the registered name.
+    addSystem: function(self: Pipeline, config: SystemConfig): string
+
+    --- Removes a named system.
+    --- @param self The custom scheduler.
+    --- @param name The registered name.
+    --- @return Returns whether the system existed.
+    removeSystem: function(self: Pipeline, name: string): boolean
+
+    --- Returns detached system inspection data.
+    --- @param self The custom scheduler.
+    --- @return Returns systems in dispatch order.
+    listSystems: function(self: Pipeline): {SystemInfo}
+
+    --- Changes a registered system's enabled state.
+    --- @param self The custom scheduler.
+    --- @param name The registered name.
+    --- @param enabled The desired state.
+    --- @return Returns success and an optional failure reason.
+    setSystemEnabled: function(self: Pipeline, name: string, enabled: boolean): (boolean, string?)
+
+    --- Enables a phase tree.
+    --- @param self The custom scheduler.
+    --- @param phase The selected name.
+    enablePhase: function(self: Pipeline, phase: phases.Selection): nil
+
+    --- Disables a phase tree.
+    --- @param self The custom scheduler.
+    --- @param phase The selected name.
+    disablePhase: function(self: Pipeline, phase: phases.Selection): nil
+
+    --- Reports whether a leaf is enabled.
+    --- @param self The custom scheduler.
+    --- @param phase The selected name.
+    --- @return Returns whether dispatch is enabled.
+    isPhaseEnabled: function(self: Pipeline, phase: phases.Phase): boolean
+
+    --- Registers a custom phase tree and assigns any omitted position.
+    --- @param self The custom scheduler.
+    --- @param phase The phase declaration.
+    registerPhase: function(self: Pipeline, phase: phases.Definition): nil
+end
+
 --- A predicate evaluated immediately before one system dispatch.
 export type RunIf = function(dt: number, exclusive world: World, systemName: string): boolean
+
+--- Supplies cold debugger hooks without enabling public event fan-out.
+export type TransitionObserver = {
+    entity: (function(id: integer, before: archetype.Archetype?, after: archetype.Archetype?))?,
+    state: (function(kind: "push" | "pop", before: string?, after: string?, changed: string))?
+}
 
 --- The policy applied when one frame owes more than its fixed-step limit.
 export type FixedOverload = "drop" | "accumulate"
@@ -104,18 +210,25 @@ export type SystemConfig = {
 }
 
 --- One registered system as reported in execution order.
-export record SystemInfo
-    name: string
-    phase: phases.Phase
-    position: integer
-    enabled: boolean
+export type SystemInfo = {
+    --- Read-only. Names the registered system.
+    name: string,
+
+    --- Read-only. Names its dispatch phase.
+    phase: phases.Phase,
+
+    --- Read-only. Reports its position in the inspected schedule.
+    position: integer,
+
+    --- Read-only. Reports whether the scheduler permits dispatch.
+    enabled: boolean,
+
+    --- Read-only. Reports whether dispatch has an additional predicate.
     hasRunIf: boolean
-end
+}
 
 --- One component named by a snapshot.
-export record SnapshotComponentEntry
-    name: string
-end
+export type SnapshotComponentEntry = events.SnapshotComponentEntry
 
 --- One entity and its non-tag component payloads.
 export record SnapshotEntity
@@ -131,10 +244,7 @@ export record SnapshotArchetype
 end
 
 --- One named custom snapshot value.
-export record SnapshotDataEntry
-    key: string
-    value: any
-end
+export type SnapshotDataEntry = snapshotcodec.Data
 
 --- A detached, format-neutral world snapshot.
 export record Snapshot
@@ -147,19 +257,48 @@ export record Snapshot
     data: {SnapshotDataEntry}
     states: {string}
 
+    --- Read-only. Identifies binary output when a native buffer was requested.
+    format: ("binary" | "table")?
+
+    --- Read-only. Holds binary output; later saves into the same buffer overwrite it.
+    buffer: buffer.Buffer?
+
+    --- Read-only. Preserves fixed-step remainder and disabled phase names in table
+    --- output.
+    pipeline: {
+        fixedAccumulator: number,
+        phaseStates: {boolean},
+        disabledPhases: {[string]: boolean}
+    }?
+
 end
 
 --- Metadata returned after a snapshot load.
-export record SnapshotPrelude
-    version: integer
-    nextEntityId: integer
-    entityCount: integer
-    archetypeCount: integer
-    componentTable: {SnapshotComponentEntry}
-end
+export type SnapshotPrelude = events.SnapshotPrelude
 
 --- Options for a format-neutral snapshot save.
-export type SnapshotOptions = {customData: {[string]: any}?}
+export type SnapshotOptions = {
+    --- Caller-writable. Attaches unique named custom data.
+    customData: {[string]: any}?,
+
+    --- Caller-writable. Selects entities without automatic Disabled or Paused
+    --- exclusions.
+    filterQuery: query.Descriptor?,
+
+    --- Caller-writable. Selects draw layers from zero through 31; entities without
+    --- Transform2D always pass.
+    layers: {integer}?,
+
+    --- Caller-writable. Chooses binary framing or a detached table; nil retains table
+    --- output.
+    format: ("binary" | "table")?,
+
+    --- Caller-writable. Supplies reusable binary output storage, reset at save time.
+    buffer: buffer.Buffer?,
+
+    --- Caller-writable. Writes binary output to this file and also returns its buffer.
+    path: string?
+}
 
 --- A named participant in non-component snapshot data.
 export type SnapshotHandler = {
@@ -187,6 +326,12 @@ export record Bundle
     private requiredComponents: {components.Component}
     private defaultComponents: {components.Component}
     private defaultFactories: {BundleFactory?}
+    private cachedTarget: archetype.Archetype?
+    private cachedState: components.Component?
+    private requiredDefaults: {[integer]: any}
+    private plain: boolean
+    private scratchInputs: {components.Input}
+    private busy: boolean
 
     spawn: function(self: Bundle, ...: components.Input): integer
 end
@@ -216,6 +361,13 @@ local record PendingSpawn
     isSealed: boolean
 end
 
+local record SpawnShape
+    children: {[components.Component]: SpawnShape}
+    target: archetype.Archetype?
+    state: components.Component?
+    defaults: {[integer]: any}
+end
+
 local record PendingMove
     id: integer
     target: archetype.Archetype
@@ -241,6 +393,7 @@ local record SpawnBatch
     ids: {integer}?
     rawIds: number[?]?
     callback: BatchCallback?
+    rawRestore: boolean?
 end
 
 local record MutationBatch
@@ -270,6 +423,10 @@ local record PendingSegment
     writer: BatchWrite?
     spawnBatch: SpawnBatch?
     mutationBatch: MutationBatch?
+    flatFirst: integer?
+    flatLast: integer?
+    moveFirst: integer?
+    moveLast: integer?
 end
 
 local record PendingNotice
@@ -290,7 +447,22 @@ export record World is nupp.events.Source<integer>
     private maxArchetypeId: integer
     private freeArchetypeIds: {integer}
     private archetypeBySignature: {[string]: archetype.Archetype}
+    private componentArchetypes: {[integer]: {archetype.Archetype}}
+    private dirtyQueue: archetype.DirtyQueue
     private pendingSpawns: {PendingSpawn}
+    -- Each fixed-signature row is [archetype, id, optional promoted record,
+    -- component values...]. Native slot offsets replace per-entity records.
+    private flatSpawns: {any}
+    private flatSpawnCount: integer
+    private flatSealedCount: integer
+    private spawnShapes: SpawnShape
+    private spawnScratch: {[integer]: any}
+    private flatMoves: {any}
+    private flatMoveCount: integer
+    private flatMovesSealed: integer
+    private moveScratch: PendingMove
+    private mutationValues: {[integer]: any}
+    private emptyValues: {[integer]: any}
     private pendingSegments: {PendingSegment}
     private pendingSpawnBySlot: {[integer]: PendingSpawn}
     private spawnBatches: {SpawnBatch}
@@ -308,6 +480,9 @@ export record World is nupp.events.Source<integer>
     private systems: {RegisteredSystem}
     private schedule: {[phases.Phase]: {RegisteredSystem}}
     private scheduleDirty: boolean
+    private pipeline: Pipeline?
+    private customPhases: {[string]: phases.Definition}
+    private phaseOrder: {string}
     private systemNames: {[string]: RegisteredSystem}
     private anonymousSystemCount: integer
     private disabledPhases: {[string]: boolean}
@@ -325,8 +500,11 @@ export record World is nupp.events.Source<integer>
     --- can clear their registrations without touching the world's own.
     private observedEntities: {[integer]: boolean}
 
+    private transitionObserver: TransitionObserver?
+
     private committing: boolean
     private runningSystem: boolean
+    private systemThread: thread?
     private commitRequested: boolean
     private nominalFrameTime: number
     private fixedTimestep: number
@@ -336,6 +514,8 @@ export record World is nupp.events.Source<integer>
     private fixedOverload: FixedOverload
     private fixedTimeDropped: number
     private fixedStepsDropped: integer
+    private beforeFixedCallbacks: {function(exclusive world: World)}?
+    private afterFixedCallbacks: {function(exclusive world: World)}?
     liveCount: integer
     archetypeCount: integer
     systemCount: integer
@@ -433,6 +613,15 @@ export record World is nupp.events.Source<integer>
     --- @param callback The callback; it must not commit or compact during this
     ---     traversal.
     forEachArchetype: function(borrows self: World, callback: function(candidate: archetype.Archetype)): nil
+
+    --- Iterates registered archetypes containing a component, including empty ones.
+    --- @param self The world to inspect.
+    --- @param component The component used to select the index.
+    --- @return Returns an iterator over the live component index.
+    findArchetypes: function(
+        borrows self: World,
+        component: components.Component
+    ): function(): (archetype.Archetype?, integer?, tecs.internal.entitycolumn.DoubleArray?)
 
     --- Captures archetypes with dirty components in registry order.
     --- @param self The world to inspect.
@@ -577,6 +766,13 @@ export record World is nupp.events.Source<integer>
     --- @raises Raises when another registered system carries that name.
     addSystem: function(exclusive self: World, config: SystemConfig): string
 
+    --- Registers a custom leaf or tree without adding it to the default frame loop.
+    --- @param self The world whose phase registry changes.
+    --- @param phase The stable name, optional position and registered child names.
+    --- @raises Raises for duplicate names, invalid positions, unknown children or
+    ---     registration during dispatch.
+    registerPhase: function(exclusive self: World, phase: phases.Definition): nil
+
     removeSystem: function(exclusive self: World, name: string): boolean
 
     --- Reports the next schedule in phase and dependency order.
@@ -602,7 +798,13 @@ export record World is nupp.events.Source<integer>
 
     getFixedTiming: function(borrows self: World): (number, number, number)
     fixedStepCount: function(borrows self: World): integer
-    getStats: function(borrows self: World): WorldStats
+
+    --- Reports current counts and accumulated fixed-step losses.
+    --- @param self The world to inspect.
+    --- @param fill The optional caller-owned result to overwrite without allocating.
+    --- @return Returns fill itself, or a new record when fill is absent.
+    getStats: function(borrows self: World, fill: WorldStats?): WorldStats
+
     createState: function(exclusive self: World, name: string, policy: StatePolicy?): components.Component
     pushState: function(exclusive self: World, name: string): nil
     popState: function(exclusive self: World): nil
@@ -612,9 +814,29 @@ export record World is nupp.events.Source<integer>
     spawnBundle: function(exclusive self: World, name: string, ...: components.Input): integer
     getBundles: function(borrows self: World): {[string]: Bundle}
     getBundle: function(borrows self: World, name: string): Bundle?
+
+    --- Saves committed entities and durable world metadata in table or native binary
+    --- form.
+    --- @param self The world to save; staged mutations publish first.
+    --- @param options The optional format, reusable output, file, filters and custom
+    ---     metadata.
+    --- @return Returns a detached table snapshot or a tagged binary buffer, according
+    ---     to format.
+    --- @raises Raises during publication or another suspended dispatch, for invalid
+    ---     options, duplicate or reserved metadata, unencodable values, or failed file
+    ---     output.
     saveSnapshot: function(exclusive self: World, options: SnapshotOptions?): Snapshot
 
-    loadSnapshot: function(exclusive self: World, snapshot: Snapshot): SnapshotPrelude
+    --- Replaces entity state while retaining registered runtime setup.
+    --- @param self The destination with component and state definitions already
+    ---     registered.
+    --- @param snapshot The current or version-one table, tagged output, byte string or
+    ---     non-consuming buffer.
+    --- @return Returns the validated snapshot prelude.
+    --- @raises Raises during publication or another suspended dispatch, or for invalid
+    ---     framing, identities, schemas, state or codecs.
+    loadSnapshot: function(exclusive self: World, snapshot: any): SnapshotPrelude
+
     addSnapshotHandler: function(exclusive self: World, handler: SnapshotHandler): nil
     observe: function<E is nupp.events.Emittable>(
         exclusive self: World,
@@ -663,6 +885,8 @@ export const DEFAULT_FIXED_OVERLOAD: FixedOverload = "drop"
 --- @param fixedOverload what happens to whole steps beyond the limit
 --- @param nominalFrameTime the positive finite seconds per presentation tick,
 ---     defaulting to 1/60.
+--- @param pipelineFactory The optional scheduler constructor, called before built-in
+---     installation.
 --- @return the empty world
 --- @raises when a capacity or fixed-clock option is invalid
 export function new(
@@ -670,7 +894,8 @@ export function new(
     timestep: number?,
     fixedMaxSteps: integer?,
     fixedOverload: FixedOverload?,
-    nominalFrameTime: number?
+    nominalFrameTime: number?,
+    pipelineFactory: (function(): Pipeline)?
 ): World
     if timestep ~= nil and (timestep <= 0 or timestep ~= timestep) then
         error("world.new: timestep must be greater than zero", 2)
@@ -684,9 +909,20 @@ export function new(
     if nominalFrameTime ~= nil and (not (nominalFrameTime > 0) or nominalFrameTime == math.huge) then
         error("world.new: nominalFrameTime must be positive and finite", 2)
     end
-    local empty = archetype.new(1, {})
+    const dirtyQueue = new archetype.DirtyQueue(list = {}, epoch = 1)
+    local empty = archetype.new(1, {}, dirtyQueue)
     local bySignature: {[string]: archetype.Archetype} = {}
     bySignature[empty.signature] = empty
+    const phaseOrder: {string} = {}
+    local phaseIndex: integer = 1
+    while true do
+        const phase = phases.selectionAt(phases.AllGroups, phaseIndex)
+        if phase == nil then
+            break
+        end
+        phaseOrder[#phaseOrder + 1] = phase
+        phaseIndex = phaseIndex + 1
+    end
 
     return new World(
         allocator = idallocator.new(maxEntities),
@@ -695,7 +931,20 @@ export function new(
         maxArchetypeId = 1,
         freeArchetypeIds = {},
         archetypeBySignature = bySignature,
+        componentArchetypes = {},
+        dirtyQueue = dirtyQueue,
         pendingSpawns = {},
+        flatSpawns = {},
+        flatSpawnCount = 0,
+        flatSealedCount = 0,
+        spawnShapes = new SpawnShape(children = {}, defaults = {}),
+        spawnScratch = {},
+        flatMoves = {},
+        flatMoveCount = 0,
+        flatMovesSealed = 0,
+        moveScratch = new PendingMove(id = 0, target = empty, values = {}, isSealed = true),
+        mutationValues = {},
+        emptyValues = {},
         pendingSegments = {},
         pendingSpawnBySlot = {},
         spawnBatches = {},
@@ -712,6 +961,9 @@ export function new(
         systems = {},
         schedule = {},
         scheduleDirty = true,
+        pipeline = pipelineFactory and pipelineFactory() or nil,
+        customPhases = {},
+        phaseOrder = phaseOrder,
         systemNames = {},
         anonymousSystemCount = 0,
         disabledPhases = {},
@@ -757,31 +1009,67 @@ local function resolveArchetype(exclusive world: World, values: {components.Comp
         world.maxArchetypeId = world.maxArchetypeId + 1
         id = world.maxArchetypeId
     end
-    local created = archetype.new(id, values)
+    local created = archetype.new(id, values, world.dirtyQueue)
     world.archetypes[#world.archetypes + 1] = created
     world.archetypeById[id] = created
     world.archetypeBySignature[signature] = created
     world.archetypeCount = world.archetypeCount + 1
+    for index = 1, #created.components do
+        const componentId = created.components[index].componentId
+        local entries = world.componentArchetypes[componentId]
+        if entries == nil then
+            entries = {}
+            world.componentArchetypes[componentId] = entries
+        end
+        entries[#entries + 1] = created
+    end
     for index = 1, #world.queries do
         query.addArchetype(world.queries[index], created)
     end
+    world:emit(0, events.ArchetypeCreated, created)
 
     return created
 end
 
-local function reserve(
+local sealPending: function(exclusive world: World, writer: BatchWrite?): nil
+
+local function reserveFlat(
     exclusive world: World,
     id: integer,
     target: archetype.Archetype,
     values: {[integer]: any}
-): PendingSpawn
+): nil
+    if #world.pendingSpawns > 0 then
+        sealPending(world)
+    end
+    const offset = world.flatSpawnCount + 1
+    const queue = world.flatSpawns
+    queue[offset] = target
+    queue[offset + 1] = id
+    queue[offset + 2] = nil
+    for index = 1, #target.components do
+        queue[offset + 2 + index] = values[target.components[index].componentId]
+    end
+    world.flatSpawnCount = offset + 2 + #target.components
+    const slot = idallocator.slotOf(id)
+    idallocator.stampFlatSpawn(world.allocator, slot, offset)
+    world.pendingDespawnBySlot[slot] = nil
+end
+
+local function reserve(exclusive world: World, id: integer, target: archetype.Archetype, values: {[integer]: any}): nil
+    if archetype.bulkSafe(target) then
+        reserveFlat(world, id, target, values)
+        return
+    end
+    if world.flatSpawnCount > world.flatSealedCount then
+        sealPending(world)
+    end
     local slot = idallocator.slotOf(id)
     local pending = new PendingSpawn(id = id, target = target, values = values, isSealed = false)
     world.pendingDespawnBySlot[slot] = nil
     world.pendingSpawns[#world.pendingSpawns + 1] = pending
     world.pendingSpawnBySlot[slot] = pending
 
-    return pending
 end
 
 --- Adds everything the named components pull in with them.
@@ -920,6 +1208,69 @@ end
 --- @return the reserved packed entity id
 --- @raises when the world has exhausted its fixed entity capacity
 function World.spawn(exclusive self: World, ...: components.Input): integer
+    local shape = self.spawnShapes
+    local plain = true
+    for index = 1, select("#", ...) do
+        const component = components.definitionOf(select(index, ...))
+        if components.asRelationship(component) ~= nil or component == components.Key then
+            plain = false;
+            break
+        end
+        local child = shape.children[component]
+        if child == nil then
+            child = new SpawnShape(children = {}, defaults = {})
+            shape.children[component] = child
+        end
+        shape = child
+    end
+    if plain then
+        local target = shape.target
+        if target == nil or shape.state ~= self.autoStateComponent or self.archetypeById[target.id] ~= target then
+            const resolvingState = self.autoStateComponent
+            const inputs: {components.Input} = {...}
+            if self.autoStateComponent ~= nil then
+                local present = false
+                for index = 1, #inputs do
+                    if components.definitionOf(inputs[index]) == self.autoStateComponent then
+                        present = true
+                    end
+                end
+                if not present then
+                    inputs[#inputs + 1] = self.autoStateComponent
+                end
+            end
+            const definitions, supplied = collectInputs(inputs)
+            target = resolveArchetype(self, definitions)
+            table.clear(shape.defaults)
+            for index = 1, #inputs do
+                supplied[components.definitionOf(inputs[index]).componentId] = nil
+            end
+            for id, raw in pairs(supplied) do
+                shape.defaults[id] = raw
+            end
+            shape.target = target
+            shape.state = resolvingState
+        end
+        if archetype.bulkSafe(target) then
+            const supplied = self.spawnScratch
+            table.clear(supplied)
+            for id, raw in pairs(shape.defaults) do
+                supplied[id] = raw
+            end
+            for index = 1, select("#", ...) do
+                const input = select(index, ...)
+                const raw, explicit = components.explicitValue(input)
+                if explicit then
+                    supplied[components.definitionOf(input).componentId] = raw
+                end
+            end
+            const slot = idallocator.allocSlot(self.allocator)
+            const id = idallocator.encodeId(slot, idallocator.generationAt(self.allocator, slot))
+            reserveFlat(self, id, target, supplied)
+            table.clear(supplied)
+            return id
+        end
+    end
     local inputs: {components.Input} = {...}
     local stateComponent = self.autoStateComponent
     if stateComponent ~= nil then
@@ -952,7 +1303,10 @@ function World.spawnAt(exclusive self: World, id: integer, ...: components.Input
     local slot = idallocator.slotOf(id)
     local pending = self.pendingSpawnBySlot[slot]
     local archetypeId = idallocator.placement(self.allocator, slot)
-    if pending ~= nil or idallocator.spawnBatchAt(self.allocator, slot) ~= 0 or archetypeId ~= 0 then
+    if pending ~= nil or idallocator.flatSpawnAt(
+        self.allocator,
+        slot
+    ) ~= 0 or idallocator.spawnBatchAt(self.allocator, slot) ~= 0 or archetypeId ~= 0 then
         error("world.spawnAt: slot " .. tostring(slot) .. " is already reserved or alive", 2)
     end
     local definitions, supplied = collectInputs({...})
@@ -990,11 +1344,40 @@ local function pendingDespawn(borrows world: World, slot: integer): boolean
     return world.pendingDespawnBySlot[slot] or idallocator.mutationBatchAt(world.allocator, slot) < 0
 end
 
+local function resolveTransition(
+    exclusive world: World,
+    source: archetype.Archetype,
+    component: components.Component,
+    adding: boolean,
+    supplied: {[integer]: any}?
+): archetype.Archetype
+    const cacheable = not adding or #components.requiresClosure(component) == 0
+    if cacheable then
+        const cached = archetype.transition(source, component, adding)
+        if cached ~= nil and world.archetypeById[cached.id] == cached then
+            return cached
+        end
+    end
+    const target = resolveArchetype(world, withComponent(source, component, adding, supplied))
+    if cacheable then
+        archetype.cacheTransition(source, target, component, adding)
+        if #components.requiresClosure(component) == 0 then
+            archetype.cacheTransition(target, source, component, not adding)
+        end
+    end
+
+    return target
+end
+
 local function logicalArchetype(borrows world: World, id: integer): archetype.Archetype?
     local slot = idallocator.slotOf(id)
     const mutation = idallocator.mutationBatchAt(world.allocator, slot)
     if mutation > 0 and not idallocator.isStale(world.allocator, id) then
         return world.mutationBatches[mutation].target
+    end
+    const flatMove = idallocator.flatMoveAt(world.allocator, slot)
+    if flatMove ~= 0 and world.flatMoves[flatMove + 1] == id then
+        return world.flatMoves[flatMove] as archetype.Archetype
     end
     local pendingMove = world.pendingMoveBySlot[slot]
     if pendingMove ~= nil and pendingMove.id == id then
@@ -1003,6 +1386,10 @@ local function logicalArchetype(borrows world: World, id: integer): archetype.Ar
     local pendingSpawn = world.pendingSpawnBySlot[slot]
     if pendingSpawn ~= nil and pendingSpawn.id == id then
         return pendingSpawn.target
+    end
+    const flat = idallocator.flatSpawnAt(world.allocator, slot)
+    if flat ~= 0 and world.flatSpawns[flat + 1] == id then
+        return world.flatSpawns[flat] as archetype.Archetype
     end
     const batch = idallocator.spawnBatchAt(world.allocator, slot)
     if batch ~= 0 and not idallocator.isStale(world.allocator, id) then
@@ -1037,6 +1424,17 @@ local function stageMove(
         idallocator.stampMutation(world.allocator, slot, 0)
     end
     local pendingSpawn = world.pendingSpawnBySlot[slot]
+    const flat = idallocator.flatSpawnAt(world.allocator, slot)
+    if pendingSpawn == nil and flat > world.flatSealedCount and world.flatSpawns[flat + 1] == id then
+        const original = world.flatSpawns[flat] as archetype.Archetype
+        const promoted: {[integer]: any} = {}
+        for index = 1, #original.components do
+            promoted[original.components[index].componentId] = world.flatSpawns[flat + 2 + index]
+        end
+        pendingSpawn = new PendingSpawn(id = id, target = target, values = promoted, isSealed = false)
+        world.flatSpawns[flat + 2] = pendingSpawn
+        world.pendingSpawnBySlot[slot] = pendingSpawn
+    end
     if pendingSpawn ~= nil and pendingSpawn.id == id and not pendingSpawn.isSealed then
         pendingSpawn.target = target
         mergeValues(pendingSpawn.values, values)
@@ -1047,6 +1445,60 @@ local function stageMove(
         pending.target = target
         mergeValues(pending.values, values)
         return
+    end
+    const previous = idallocator.flatMoveAt(world.allocator, slot)
+    const coalesce = previous > world.flatMovesSealed and world.flatMoves[previous + 1] == id
+    if archetype.bulkSafe(target) then
+        if #world.pendingMoves > 0 then
+            sealPending(world)
+        end
+        const queue = world.flatMoves
+        const offset = world.flatMoveCount + 1
+        queue[offset] = target
+        queue[offset + 1] = id
+        local count: integer = 0
+        if coalesce then
+            count = queue[previous + 2] as integer
+            for index = 1, count * 2 do
+                queue[offset + 2 + index] = queue[previous + 2 + index]
+            end
+            queue[previous + 1] = 0
+        end
+        for componentId, raw in pairs(values) do
+            local found = false
+            for index = 1, count do
+                if queue[offset + 1 + index * 2] == componentId then
+                    queue[offset + 2 + index * 2] = raw
+                    found = true
+                    break
+                end
+            end
+            if not found then
+                count = count + 1
+                queue[offset + 1 + count * 2] = componentId
+                queue[offset + 2 + count * 2] = raw
+            end
+        end
+        queue[offset + 2] = count
+        world.flatMoveCount = offset + 2 + count * 2
+        idallocator.stampFlatMove(world.allocator, slot, offset)
+        return
+    end
+    if coalesce then
+        const combined: {[integer]: any} = {}
+        for index = 1, world.flatMoves[previous + 2] as integer do
+            combined[world.flatMoves[previous + 1 + index * 2] as integer] = world.flatMoves[previous + 2 + index * 2]
+        end
+        mergeValues(combined, values)
+        values = combined
+        world.flatMoves[previous + 1] = 0
+    end
+    if world.flatMoveCount > world.flatMovesSealed then
+        sealPending(world)
+    end
+    idallocator.stampFlatMove(world.allocator, slot, 0)
+    if values == world.mutationValues or values == world.emptyValues then
+        values = table.clone(values)
     end
     pending = new PendingMove(id = id, target = target, values = values, isSealed = false)
     world.pendingMoves[#world.pendingMoves + 1] = pending
@@ -1148,9 +1600,10 @@ function World.set(exclusive self: World, id: integer, input: components.Input, 
         stageEdges(self, id, source, relationship, edges)
         return
     end
-    local supplied: {[integer]: any} = {}
+    local raw: any = nil
     if component.storageType ~= "tag" then
-        local raw, explicit = components.explicitValue(input)
+        local explicit: boolean
+        raw, explicit = components.explicitValue(input)
         if value ~= nil then
             raw = value
             explicit = true
@@ -1161,15 +1614,26 @@ function World.set(exclusive self: World, id: integer, input: components.Input, 
         if component.storageType == "ffi" then
             raw = ffistorage.capture(assert(ffistorage.find(component.componentId)), raw)
         end
+    end
+    const reusable = archetype.has(
+        source,
+        component
+    ) or (#components.requiresClosure(component) == 0 and archetype.transition(source, component, true) ~= nil)
+    local supplied: {[integer]: any} = reusable and self.mutationValues or {}
+    table.clear(supplied)
+    if component.storageType ~= "tag" then
         supplied[component.componentId] = raw
     end
     local target = source
     if not archetype.has(source, component) then
-        target = resolveArchetype(self, withComponent(source, component, true, supplied))
+        target = resolveTransition(self, source, component, true, supplied)
     elseif component.storageType == "tag" then
         return
     end
     stageMove(self, id, target, supplied)
+    if reusable then
+        table.clear(supplied)
+    end
 end
 
 --- Stages a tag component to be absent at the next barrier.
@@ -1202,11 +1666,17 @@ function World.remove(exclusive self: World, id: integer, input: components.Inpu
         stageEdges(self, id, source, relationship, edges)
         return
     end
-    stageMove(self, id, resolveArchetype(self, withComponent(source, component, false)), {})
+    stageMove(self, id, resolveTransition(self, source, component, false), self.emptyValues)
 end
 
-local function sealPending(exclusive world: World, writer: BatchWrite?): nil
-    if #world.pendingSpawns == 0 and #world.pendingMoves == 0 and #world.pendingDespawns == 0 and writer == nil then
+sealPending = function(exclusive world: World, writer: BatchWrite?): nil
+    if #world.pendingSpawns == 0
+        and world.flatSpawnCount == world.flatSealedCount
+        and world.flatMoveCount == world.flatMovesSealed
+        and #world.pendingMoves == 0
+        and #world.pendingDespawns == 0
+        and writer == nil
+    then
         return
     end
     for index = 1, #world.pendingSpawns do
@@ -1221,8 +1691,23 @@ local function sealPending(exclusive world: World, writer: BatchWrite?): nil
         spawns = world.pendingSpawns,
         moves = world.pendingMoves,
         despawns = world.pendingDespawns,
-        writer = writer
+        writer = writer,
+        flatFirst = world.flatSealedCount + 1,
+        flatLast = world.flatSpawnCount,
+        moveFirst = world.flatMovesSealed + 1,
+        moveLast = world.flatMoveCount
     )
+    local offset = world.flatSealedCount + 1
+    while offset <= world.flatSpawnCount do
+        const target = world.flatSpawns[offset] as archetype.Archetype
+        const promoted = world.flatSpawns[offset + 2] as PendingSpawn?
+        if promoted ~= nil then
+            promoted.isSealed = true
+        end
+        offset = offset + 3 + #target.components
+    end
+    world.flatSealedCount = world.flatSpawnCount
+    world.flatMovesSealed = world.flatMoveCount
     world.pendingSpawns = {}
     world.pendingMoves = {}
     world.pendingDespawns = {}
@@ -1411,6 +1896,9 @@ function World.batchSpawnAt(
         ] ~= nil or idallocator.spawnBatchAt(
             self.allocator,
             slot
+        ) ~= 0 or idallocator.flatSpawnAt(
+            self.allocator,
+            slot
         ) ~= 0 or idallocator.placement(self.allocator, slot) ~= 0 then
             error("batchSpawnAt: duplicate or occupied entity slot", 2)
         end
@@ -1471,6 +1959,9 @@ function World.batchSpawnAtRaw(
             ] ~= nil or idallocator.spawnBatchAt(
                 self.allocator,
                 slot
+            ) ~= 0 or idallocator.flatSpawnAt(
+                self.allocator,
+                slot
             ) ~= 0 or idallocator.placement(self.allocator, slot) ~= 0 then
                 error("batchSpawnAtRaw: duplicate or occupied entity slot", 2)
             end
@@ -1519,7 +2010,7 @@ local function tryStageBulk(
     if not query.belongsTo(selection, world.queryOwner) then
         error("batch mutation requires a query from this world", 3)
     end
-    if despawning and (#world.spawnBatches > 0 or #world.pendingSpawns > 0) then
+    if despawning and (#world.spawnBatches > 0 or #world.pendingSpawns > 0 or world.flatSpawnCount > 0) then
         return false
     end
     const batches: {MutationBatch} = {}
@@ -1547,11 +2038,11 @@ local function tryStageBulk(
             if component ~= nil then
                 if removing then
                     if archetype.has(source, component) then
-                        target = resolveArchetype(world, withComponent(source, component, false))
+                        target = resolveTransition(world, source, component, false)
                     end
                 else
                     if not archetype.has(source, component) then
-                        target = resolveArchetype(world, withComponent(source, component, true, values))
+                        target = resolveTransition(world, source, component, true, values)
                     end
                     for id in pairs(values) do
                         shared[id] = true
@@ -1652,7 +2143,7 @@ function World.batchSet(
                     target = archetype.has(
                         source,
                         component
-                    ) and source or resolveArchetype(self, withComponent(source, component, true, required))
+                    ) and source or resolveTransition(self, source, component, true, required)
                     targets[source] = target
                     requirements[source] = required
                 end
@@ -1694,7 +2185,7 @@ function World.batchRemove(exclusive self: World, selection: query.Query, input:
         if source ~= nil and archetype.has(source, component) then
             local target = targets[source]
             if target == nil then
-                target = resolveArchetype(self, withComponent(source, component, false))
+                target = resolveTransition(self, source, component, false)
                 targets[source] = target
             end
             stageMove(self, id, target, {})
@@ -1952,8 +2443,21 @@ local function registerQuery(exclusive self: World, value: query.Query): query.Q
             self.queryObservers[#self.queryObservers + 1] = value
         end
     end
-    for index = 1, self.archetypeCount do
-        query.addArchetype(value, self.archetypes[index])
+    local candidates = self.archetypes
+    const included = value.descriptor.include
+    if included ~= nil then
+        for index = 1, #included do
+            const entries = self.componentArchetypes[included[index].componentId]
+            if entries == nil then
+                return value
+            end
+            if #entries < #candidates then
+                candidates = entries
+            end
+        end
+    end
+    for index = 1, #candidates do
+        query.addArchetype(value, candidates[index])
     end
 
     return value
@@ -2113,7 +2617,11 @@ function World.despawn(exclusive self: World, id: integer): nil
     const batch = idallocator.spawnBatchAt(self.allocator, slot)
     if (
         pending == nil or pending.id ~= id
-    ) and (batch == 0 or idallocator.isStale(self.allocator, id)) and not self:isAlive(id) then
+    ) and (
+        batch == 0 or idallocator.isStale(self.allocator, id)
+    ) and (
+        idallocator.flatSpawnAt(self.allocator, slot) == 0 or idallocator.isStale(self.allocator, id)
+    ) and not self:isAlive(id) then
         return
     end
     self.pendingDespawns[#self.pendingDespawns + 1] = id
@@ -2244,10 +2752,12 @@ local function unlinkOutgoing(exclusive world: World, source: archetype.Archetyp
 end
 
 local function removeFromArchetype(exclusive world: World, source: archetype.Archetype, row: integer): nil
+    const previousLast = #source.entities - 1
     local movedId = archetype.removeRow(source, row)
     if movedId ~= nil then
         local movedSlot = idallocator.slotOf(movedId)
         idallocator.place(world.allocator, movedSlot, source.id, row)
+        archetype.notifyMove(source, movedId, previousLast, row)
     end
 end
 
@@ -2261,6 +2771,7 @@ local function notifyQueries(
     observerLimit: integer?
 ): nil
     const observers = world.queryObservers
+    archetype.notifyRows(source, other, row + 1, count, added)
     local index: integer = 1
     local limit: integer = observerLimit or #observers
     while index <= limit do
@@ -2268,6 +2779,16 @@ local function notifyQueries(
         index = index + 1
         if not added then
             limit = #observers
+        end
+    end
+    const observer = world.transitionObserver
+    if observer ~= nil and observer.entity ~= nil and (added or other == nil) then
+        for position = row + 1, row + count do
+            if added then
+                observer.entity(source.entities[position], other, source)
+            else
+                observer.entity(source.entities[position], source, nil)
+            end
         end
     end
 end
@@ -2320,11 +2841,13 @@ local function publishMove(exclusive world: World, pending: PendingMove, notices
     notifyQueries(world, source, target, row, 1, false)
     unlinkOutgoing(world, source, row, id)
     local targetRow = archetype.append(target, id, values)
+    archetype.releaseMoveValues(source, target)
     -- Native values are row references: copy into the destination before swap
     -- removal overwrites their source. No per-component clone is necessary.
     removeFromArchetype(world, source, row)
     linkOutgoing(world, target, targetRow, id)
     idallocator.place(world.allocator, slot, target.id, targetRow)
+    archetype.activate(target)
     world.publishingMove = nil
     if notices ~= nil then
         notices[
@@ -2349,7 +2872,7 @@ local function publishSpawnBatch(exclusive world: World, batch: SpawnBatch): nil
             world:clearObservers(id)
             idallocator.freeSlot(world.allocator, slot)
         else
-            if plain then
+            if plain or batch.rawRestore then
                 lastRow = lastRow + 1
                 target.entities[lastRow] = id
             else
@@ -2363,8 +2886,11 @@ local function publishSpawnBatch(exclusive world: World, batch: SpawnBatch): nil
     if lastRow < firstRow then
         return
     end
-    if plain then
-        archetype.initializeRange(target, firstRow, lastRow, batch.values, batch.shared)
+    if plain or batch.rawRestore then
+        archetype.initializeRange(target, firstRow, lastRow, batch.values, batch.shared, batch.rawRestore)
+    end
+    if not batch.rawRestore then
+        archetype.activate(target)
     end
     const callback = batch.callback
     local succeeded, failure = pcall(function(): nil
@@ -2554,6 +3080,7 @@ local function publishMutationBatch(exclusive world: World, batch: MutationBatch
             end
         end
         const observerLimit = #world.queryObservers
+        archetype.activate(target)
         if batch.callback ~= nil then
             batch.callback(target, first, first + batch.count - 1, batch.count)
         end
@@ -2625,6 +3152,32 @@ local function drainCommit(exclusive world: World): nil
         if segment.mutationBatch ~= nil then
             publishMutationBatch(world, segment.mutationBatch)
         end
+        local offset = segment.flatFirst or 1
+        while offset <= (segment.flatLast or 0) do
+            const target = world.flatSpawns[offset] as archetype.Archetype
+            const id = world.flatSpawns[offset + 1] as integer
+            const slot = idallocator.slotOf(id)
+            const promoted = world.flatSpawns[offset + 2] as PendingSpawn?
+            if promoted ~= nil then
+                if world.pendingSpawnBySlot[slot] == promoted then
+                    world.pendingSpawnBySlot[slot] = nil
+                end
+                idallocator.stampFlatSpawn(world.allocator, slot, 0)
+                publishSpawn(world, promoted)
+            elseif pendingDespawn(world, slot) then
+                world:clearObservers(id)
+                idallocator.freeSlot(world.allocator, slot)
+            else
+                const row = archetype.appendFlat(target, id, world.flatSpawns, offset + 2)
+                idallocator.place(world.allocator, slot, target.id, row)
+                idallocator.stampFlatSpawn(world.allocator, slot, 0)
+                world.liveCount = world.liveCount + 1
+                notifyQueries(world, target, nil, row, 1, true)
+                world:emit(0, events.OnSpawn, id)
+            end
+            idallocator.stampFlatSpawn(world.allocator, slot, 0)
+            offset = offset + 3 + #target.components
+        end
         local index: integer = 1
         while index <= #segment.spawns do
             const pending = segment.spawns[index]
@@ -2638,6 +3191,30 @@ local function drainCommit(exclusive world: World): nil
         local notices: {PendingNotice}? = nil
         if segment.writer ~= nil then
             notices = {}
+        end
+        local moveOffset = segment.moveFirst or 1
+        while moveOffset <= (segment.moveLast or 0) do
+            const queue = world.flatMoves
+            const id = queue[moveOffset + 1] as integer
+            const count = queue[moveOffset + 2] as integer
+            if id ~= 0 then
+                const slot = idallocator.slotOf(id)
+                if idallocator.flatMoveAt(world.allocator, slot) == moveOffset then
+                    idallocator.stampFlatMove(world.allocator, slot, 0)
+                end
+                if not pendingDespawn(world, slot) then
+                    const pending = world.moveScratch
+                    pending.id = id
+                    pending.target = queue[moveOffset] as archetype.Archetype
+                    table.clear(pending.values)
+                    for index = 1, count do
+                        pending.values[queue[moveOffset + 1 + index * 2] as integer] = queue[moveOffset + 2 + index * 2]
+                    end
+                    publishMove(world, pending, notices)
+                    table.clear(pending.values)
+                end
+            end
+            moveOffset = moveOffset + 3 + count * 2
         end
         for moveIndex = 1, #segment.moves do
             const pending = segment.moves[moveIndex]
@@ -2705,6 +3282,8 @@ function World.commit(exclusive self: World): nil
     self.commitRequested = false
     if #self.pendingSegments == 0
         and #self.pendingSpawns == 0
+        and self.flatSpawnCount == 0
+        and self.flatMoveCount == 0
         and #self.pendingMoves == 0
         and #self.pendingDespawns == 0
     then
@@ -2719,6 +3298,17 @@ function World.commit(exclusive self: World): nil
     self.commitRequested = false
     self.publishingMove = nil
     if not succeeded then
+        local offset: integer = 1
+        while offset <= self.flatSpawnCount do
+            const target = self.flatSpawns[offset] as archetype.Archetype
+            const id = self.flatSpawns[offset + 1] as integer
+            const slot = idallocator.slotOf(id)
+            if idallocator.placement(self.allocator, slot) == 0 and not idallocator.isStale(self.allocator, id) then
+                self:clearObservers(id)
+                idallocator.freeSlot(self.allocator, slot)
+            end
+            offset = offset + 3 + #target.components
+        end
         -- Already published rows remain live; unplaced reservations must not leak
         -- capacity when a writer or observer interrupts the rest of the queue.
         for batchIndex = 1, #self.spawnBatches do
@@ -2744,6 +3334,13 @@ function World.commit(exclusive self: World): nil
         end
     end
     self.pendingSegments = {}
+    table.clear(self.flatSpawns)
+    self.flatSpawnCount = 0
+    self.flatSealedCount = 0
+    table.clear(self.flatMoves)
+    table.clear(self.moveScratch.values)
+    self.flatMoveCount = 0
+    self.flatMovesSealed = 0
     if not succeeded then
         idallocator.clearStamps(self.allocator)
     end
@@ -2776,6 +3373,13 @@ function World.clearEntities(exclusive self: World): nil
     end
     self.pendingSpawns = {}
     self.pendingSegments = {}
+    table.clear(self.flatSpawns)
+    self.flatSpawnCount = 0
+    self.flatSealedCount = 0
+    table.clear(self.flatMoves)
+    table.clear(self.moveScratch.values)
+    self.flatMoveCount = 0
+    self.flatMovesSealed = 0
     self.spawnBatches = {}
     self.mutationBatches = {}
     self.pendingSpawnBySlot = {}
@@ -2803,18 +3407,36 @@ function World.forEachArchetype(borrows self: World, callback: function(candidat
 end
 
 function World.dirtyArchetypes(borrows self: World): function(): archetype.Archetype?
-    const selected: {archetype.Archetype} = {}
-    for index = 1, self.archetypeCount do
-        const candidate = self.archetypes[index]
-        if candidate:anyComponentDirty() then
-            selected[#selected + 1] = candidate
-        end
-    end
+    const selected = self.dirtyQueue.list
+    const count = #selected
     local index: integer = 0
 
     return function(): archetype.Archetype?
+        while index < count do
+            index = index + 1
+            if selected[index]:anyComponentDirty() then
+                return selected[index]
+            end
+        end
+
+        return nil
+    end
+end
+
+function World.findArchetypes(
+    borrows self: World,
+    component: components.Component
+): function(): (archetype.Archetype?, integer?, tecs.internal.entitycolumn.DoubleArray?)
+    const entries = self.componentArchetypes[component.componentId]
+    local index: integer = 0
+    return function(): (archetype.Archetype?, integer?, tecs.internal.entitycolumn.DoubleArray?)
         index = index + 1
-        return selected[index]
+        const candidate = entries and entries[index] or nil
+        if candidate == nil then
+            return nil, nil, nil
+        end
+
+        return candidate, #candidate.entities, candidate.entities
     end
 end
 
@@ -2822,7 +3444,9 @@ function World.compact(exclusive self: World): (integer, integer)
     if self.updating
         or self.committing
         or #self.pendingSpawns > 0
+        or self.flatSpawnCount > 0
         or #self.pendingMoves > 0
+        or self.flatMoveCount > 0
         or #self.pendingDespawns > 0
         or #self.pendingSegments > 0
     then
@@ -2844,6 +3468,19 @@ function World.compact(exclusive self: World): (integer, integer)
             end
         end
         if dead then
+            archetype.destroy(candidate)
+            for position = 1, #candidate.components do
+                const componentId = candidate.components[position].componentId
+                const entries = assert(self.componentArchetypes[componentId])
+                for offset = #entries, 1, -1 do
+                    if entries[offset] == candidate then
+                        table.remove(entries, offset)
+                    end
+                end
+                if #entries == 0 then
+                    self.componentArchetypes[componentId] = nil
+                end
+            end
             self.archetypeBySignature[candidate.signature] = nil
             self.archetypeById[candidate.id] = nil
             self.freeArchetypeIds[#self.freeArchetypeIds + 1] = candidate.id
@@ -2992,6 +3629,10 @@ function World.pushState(exclusive self: World, name: string): nil
     local policy = assert(self.statePolicies[name])
     executeStatePolicy(self, policy.onEnter, name)
     self:emit(0, events.StateEnter, name)
+    const observer = self.transitionObserver
+    if observer ~= nil and observer.state ~= nil then
+        observer.state("push", previous, name, name)
+    end
 end
 
 --- Pops the active state and focuses the state below it.
@@ -3016,6 +3657,16 @@ function World.popState(exclusive self: World): nil
         executeStatePolicy(self, focusedPolicy.onFocus, focused)
         self:emit(0, events.StateFocus, focused, popped)
     end
+    const observer = self.transitionObserver
+    if observer ~= nil and observer.state ~= nil then
+        observer.state("pop", popped, focused, popped)
+    end
+end
+
+--- Installs or removes the cold entity/state transition observer used by debugger
+--- consumers.
+export function setTransitionObserver(exclusive world: World, observer: TransitionObserver?): nil
+    world.transitionObserver = observer
 end
 
 --- Returns the active state name.
@@ -3057,14 +3708,18 @@ end
 --- @return the reserved entity id
 --- @raises when a required input is missing, out of order, or extra
 function Bundle.spawn(self: Bundle, ...: components.Input): integer
-    local supplied: {components.Input} = {...}
-    if #supplied > #self.requiredComponents then
+    if select("#", ...) > #self.requiredComponents then
         error("Bundle '" .. self.name .. "' received too many required components", 2)
     end
-    local inputs: {components.Input} = {}
+    -- Factory reentry gets independent scratch. Ordinary calls retain the
+    -- fixed argument vector, and world.spawn's shape trie resolves it once.
+    const wasBusy = self.busy
+    local inputs: {components.Input} = wasBusy and {} or self.scratchInputs
+    self.busy = true
+    table.clear(inputs)
     for index = 1, #self.requiredComponents do
         local expected = self.requiredComponents[index]
-        local input = supplied[index]
+        local input = select(index, ...)
         if input == nil then
             error("Required component missing: " .. expected.componentName, 2)
         end
@@ -3088,8 +3743,60 @@ function Bundle.spawn(self: Bundle, ...: components.Input): integer
         inputs[#inputs + 1] = input
     end
     local world = self.world as World
+    local id: integer
+    if self.plain then
+        local target = self.cachedTarget
+        if target == nil or self.cachedState ~= world.autoStateComponent or world.archetypeById[
+            target.id
+        ] ~= target then
+            const state = world.autoStateComponent
+            if state ~= nil then
+                local present = false
+                for index = 1, #inputs do
+                    if components.definitionOf(inputs[index]) == state then
+                        present = true
+                    end
+                end
+                if not present then
+                    inputs[#inputs + 1] = state
+                end
+            end
+            const definitions, supplied = collectInputs(inputs)
+            target = resolveArchetype(world, definitions)
+            for index = 1, #inputs do
+                supplied[components.definitionOf(inputs[index]).componentId] = nil
+            end
+            self.requiredDefaults = supplied
+            self.cachedTarget = target
+            self.cachedState = state
+        end
+        if archetype.bulkSafe(target) then
+            const values = world.spawnScratch
+            table.clear(values)
+            for componentId, raw in pairs(self.requiredDefaults) do
+                values[componentId] = raw
+            end
+            for index = 1, #inputs do
+                const input = inputs[index]
+                const raw, explicit = components.explicitValue(input)
+                if explicit then
+                    values[components.definitionOf(input).componentId] = raw
+                end
+            end
+            const slot = idallocator.allocSlot(world.allocator)
+            id = idallocator.encodeId(slot, idallocator.generationAt(world.allocator, slot))
+            reserveFlat(world, id, target, values)
+            table.clear(values)
+        else
+            id = world:spawn(unpack(inputs, 1, #inputs))
+        end
+    else
+        id = world:spawn(unpack(inputs, 1, #inputs))
+    end
+    table.clear(inputs)
+    self.busy = wasBusy
 
-    return world:spawn(unpack(inputs, 1, #inputs))
+    return id
 end
 
 --- Creates and registers a reusable spawn bundle.
@@ -3112,8 +3819,12 @@ function World.newBundle(exclusive self: World, name: string, definition: Bundle
     local defaultComponents: {components.Component} = {}
     local defaultFactories: {BundleFactory?} = {}
     local seen: {[integer]: boolean} = {}
+    local plain = true
     for index = 1, #required do
         local component = required[index]
+        if components.asRelationship(component) ~= nil or component == components.Key then
+            plain = false
+        end
         if seen[component.componentId] then
             error("Component already in bundle: " .. component.componentName, 2)
         end
@@ -3121,6 +3832,9 @@ function World.newBundle(exclusive self: World, name: string, definition: Bundle
         requiredNames[index] = component.componentName
     end
     for component, configured in pairs(defaults) do
+        if components.asRelationship(component) ~= nil or component == components.Key then
+            plain = false
+        end
         if seen[component.componentId] then
             error("Component already in bundle: " .. component.componentName, 2)
         end
@@ -3141,7 +3855,11 @@ function World.newBundle(exclusive self: World, name: string, definition: Bundle
         world = self,
         requiredComponents = required,
         defaultComponents = defaultComponents,
-        defaultFactories = defaultFactories
+        defaultFactories = defaultFactories,
+        requiredDefaults = {},
+        plain = plain,
+        scratchInputs = {},
+        busy = false
     )
     self.bundles[name] = bundle
 
@@ -3234,24 +3952,43 @@ local function addSnapshotData(target: {SnapshotDataEntry}, seen: {[string]: boo
     target[#target + 1] = new SnapshotDataEntry(key = key, value = snapshotvalue.clone(value))
 end
 
---- Saves a detached, format-neutral snapshot of the committed world.
---- @param self the world to save
---- @param options optional named custom data
---- @return a caller-owned plain-value snapshot
---- @raises when called during an update or a value cannot be represented
---- @raises Raises when custom data uses the reserved tecs.random key.
 function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): Snapshot
-    if self.updating then
-        error("world.saveSnapshot: cannot save during a world update", 2)
+    if self.committing or (self.updating and (not self.runningSystem or self.systemThread ~= coroutine.running())) then
+        error("world.saveSnapshot: cannot save during publication or a suspended world update", 2)
     end
     self:commit()
+    const binary = options ~= nil and options.format == "binary"
+    if options ~= nil and not binary and (options.buffer ~= nil or options.path ~= nil) then
+        error("snapshot buffer and path require format = binary", 2)
+    end
+    const eventData: {[string]: any} = {}
+    const excluded: {components.Component} = {}
+    self:emit(0, events.OnSnapshotSave, eventData, excluded)
+    const descriptor = table.clone(options and options.filterQuery or {}) as query.Descriptor
+    descriptor.exclude = table.clone(descriptor.exclude or {})
+    for index = 1, #excluded do
+        assert(descriptor.exclude)[#assert(descriptor.exclude) + 1] = excluded[index]
+    end
+    const selection = query.new(descriptor)
+    local selectedLayers: {[integer]: boolean}? = nil
+    if options ~= nil and options.layers ~= nil then
+        selectedLayers = {}
+        for index = 1, #options.layers do
+            const layer = options.layers[index]
+            if layer < 0 or layer > 31 or layer % 1 ~= 0 then
+                error("snapshot layers must be integers from zero through 31", 2)
+            end
+            selectedLayers[layer] = true
+        end
+    end
+    const transform = components.findByName("Transform2D")
     local componentTable: {SnapshotComponentEntry} = {}
     local componentSeen: {[string]: boolean} = {}
     local savedArchetypes: {SnapshotArchetype} = {}
     local entityCount: integer = 0
     for archetypeIndex = 1, self.archetypeCount do
         local source = self.archetypes[archetypeIndex]
-        if #source.entities > 0 then
+        if not binary and #source.entities > 0 and query.matches(selection, source) then
             local names: {string} = {}
             local savedComponents: {components.Component} = {}
             for componentIndex = 1, #source.components do
@@ -3267,6 +4004,10 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
             end
             local entities: {SnapshotEntity} = {}
             for row = 1, #source.entities do
+                const pose: any = transform ~= nil and archetype.valueAt(source, row - 1, transform) or nil
+                if selectedLayers ~= nil and pose ~= nil and not selectedLayers[pose.layer as integer] then
+                    goto continueSnapshotRow
+                end
                 local values: {[string]: any} = {}
                 for componentIndex = 1, #savedComponents do
                     local component = savedComponents[componentIndex]
@@ -3283,6 +4024,7 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
                     end
                 end
                 entities[#entities + 1] = new SnapshotEntity(id = source.entities[row], values = values)
+                ::continueSnapshotRow::
             end
             entityCount = entityCount + #entities
             savedArchetypes[#savedArchetypes + 1] = new SnapshotArchetype(components = names, entities = entities)
@@ -3290,13 +4032,32 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
     end
     local data: {SnapshotDataEntry} = {}
     local dataSeen: {[string]: boolean} = {}
+    for key, value in pairs(eventData) do
+        if key == randomstreams.snapshotKey or key == "__tecs.pipeline" or key == "__tecs.stateStack" then
+            error("snapshot data uses a reserved key", 2)
+        end
+        addSnapshotData(data, dataSeen, key, value)
+    end
+    const phaseStates: {boolean} = {}
+    for index = 1, phases.count do
+        phaseStates[index] = not self.disabledPhases[assert(phases.at(index))]
+    end
+    const pipelineState = {
+        fixedAccumulator = self.fixedAccumulator,
+        phaseStates = phaseStates,
+        disabledPhases = table.clone(self.disabledPhases)
+    }
+    if self.pipeline ~= nil then
+        pipelineState.fixedAccumulator = self.pipeline.fixedAccumulator
+        pipelineState.phaseStates = table.clone(self.pipeline.phaseStates)
+    end
     local custom = options and options.customData or nil
     if custom ~= nil then
         local keys = sortedKeys(custom)
         for index = 1, #keys do
             local key = keys[index]
-            if key == randomstreams.snapshotKey then
-                error("world.saveSnapshot: tecs.random is reserved for world-managed streams", 2)
+            if key == randomstreams.snapshotKey or key == "__tecs.pipeline" or key == "__tecs.stateStack" then
+                error("world.saveSnapshot: " .. key .. " is reserved for world-managed state", 2)
             end
             addSnapshotData(data, dataSeen, key, custom[key])
         end
@@ -3318,6 +4079,38 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
         end
     end
 
+    if binary then
+        addSnapshotData(data, dataSeen, "__tecs.pipeline", pipelineState)
+        addSnapshotData(data, dataSeen, "__tecs.stateStack", self:listStates())
+        const output = assert(options).buffer or buffer.new()
+        const prelude = snapshotcodec.write(
+            self.archetypes,
+            selection,
+            selectedLayers,
+            self.allocator.nextFreshSlot,
+            data,
+            output
+        )
+        if assert(options).path ~= nil then
+            const ok, reason = files.write(assert(assert(options).path), output:tostring())
+            if not ok then
+                error("snapshot write failed: " .. assert(reason), 2)
+            end
+        end
+        return new Snapshot(
+            version = prelude.version,
+            nextEntityId = prelude.nextEntityId,
+            entityCount = prelude.entityCount,
+            archetypeCount = prelude.archetypeCount,
+            componentTable = prelude.componentTable,
+            archetypes = {},
+            data = {},
+            states = {},
+            format = "binary",
+            buffer = output
+        )
+    end
+
     return new Snapshot(
         version = SNAPSHOT_VERSION,
         nextEntityId = self.allocator.nextFreshSlot,
@@ -3326,15 +4119,26 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
         componentTable = componentTable,
         archetypes = savedArchetypes,
         data = data,
-        states = self:listStates()
+        states = self:listStates(),
+        pipeline = pipelineState
     )
 end
 
-local function loadComponentInput(component: components.Component, value: any): components.Input
+local function loadComponentInput(component: components.Component, value: any, exclusive world: World): components.Input
     const relationship = components.asRelationship(component)
     if relationship ~= nil then
+        const selected = components.targetOf(component)
+        component = assert(components.findById(relationship.componentId))
         local saved: {any}
-        if relationship.exclusive and component.storageType == "relationship" and type(value) == "number" then
+        if selected ~= nil then
+            if component.storageType == "relationship" then
+                saved = {selected}
+            else
+                saved = {value}
+            end
+        elseif type(value) == "table" and value.target ~= nil then
+            saved = {value}
+        elseif relationship.exclusive and component.storageType == "relationship" and type(value) == "number" then
             saved = {value}
         else
             if type(value) ~= "table" or type(value.edges) ~= "table" then
@@ -3350,11 +4154,16 @@ local function loadComponentInput(component: components.Component, value: any): 
         for index = 1, #saved do
             local edge: any
             if (component.storageType == "table" or component.storageType == "ffi") then
-                edge = (component as components.TableComponent<any>).snapshotLoad(snapshotvalue.clone(saved[index]))
+                edge = (
+                    component as components.TableComponent<any>
+                ).snapshotLoad(snapshotvalue.clone(saved[index]), world)
             else
-                edge = {target = saved[index]}
+                edge = {target = type(saved[index]) == "table" and saved[index].target or saved[index]}
             end
             const target = components.edgeTarget(edge)
+            if selected ~= nil and target ~= selected then
+                error("snapshot relationship payload changed its selected target", 2)
+            end
             if seen[target] then
                 error("snapshot relationship repeats a target", 2)
             end
@@ -3376,7 +4185,7 @@ local function loadComponentInput(component: components.Component, value: any): 
         local tableComponent = component as components.TableComponent<any>
         return new components.TableInstance(
             componentType = tableComponent,
-            value = tableComponent.snapshotLoad(snapshotvalue.clone(value))
+            value = tableComponent.snapshotLoad(snapshotvalue.clone(value), world)
         )
     end
     if type(value) ~= "number" or value ~= math.floor(value) then
@@ -3400,14 +4209,98 @@ local record RestoreEntity
     inputs: {components.Input}
 end
 
---- Replaces this world's entities and state stack from a snapshot.
---- @param self the destination world
---- @param snapshot the detached snapshot to load
---- @return metadata describing the loaded snapshot
---- @raises when called during an update or the snapshot is incompatible
-function World.loadSnapshot(exclusive self: World, snapshot: Snapshot): SnapshotPrelude
-    if self.updating then
-        error("world.loadSnapshot: cannot load during a world update", 2)
+function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
+    if self.committing or (self.updating and (not self.runningSystem or self.systemThread ~= coroutine.running())) then
+        error("world.loadSnapshot: cannot load during publication or a suspended world update", 2)
+    end
+    local decoded: snapshotcodec.Decoded? = nil
+    local snapshot: Snapshot
+    if type(
+        source
+    ) == "string" or type(
+        source
+    ) == "cdata" or type(source) == "userdata" or (type(source) == "table" and source.format == "binary") then
+        local bytes: string
+        if type(source) == "string" then
+            bytes = source as string
+        elseif type(source) == "table" then
+            bytes = (source.buffer as buffer.Buffer):tostring()
+        else
+            bytes = (source as buffer.Buffer):tostring()
+        end
+        decoded = snapshotcodec.read(bytes, self.allocator.maxSlotCount)
+        const prelude = decoded.prelude
+        const saved: {SnapshotArchetype} = {}
+        for index = 1, #decoded.frames do
+            const names: {string} = {}
+            const frame = decoded.frames[index]
+            for column = 1, #frame.columns do
+                names[column] = frame.columns[column].component.componentName
+            end
+            saved[index] = new SnapshotArchetype(components = names, entities = {})
+        end
+        local states: {string} = {}
+        for index = 1, #decoded.data do
+            if decoded.data[index].key == "__tecs.stateStack" then
+                states = decoded.data[index].value as {string}
+            end
+        end
+        snapshot = new Snapshot(
+            version = prelude.version,
+            nextEntityId = prelude.nextEntityId,
+            entityCount = prelude.entityCount,
+            archetypeCount = prelude.archetypeCount,
+            componentTable = prelude.componentTable,
+            archetypes = saved,
+            data = decoded.data,
+            states = states
+        )
+    else
+        if type(source) ~= "table" then
+            error("snapshot source must be a table, string or buffer", 2)
+        end
+        if source.format == "table" and source.snapshot ~= nil then
+            source = source.snapshot
+        end
+        if source.entityCount == nil then
+            -- Column-indexed tables resolve columns through their component registry.
+            const saved: {SnapshotArchetype} = {}
+            local total: integer = 0
+            for _, frame in ipairs(source.archetypes as {any}) do
+                const names: {string} = {}
+                for index, entry in ipairs(frame.columnIndices as {integer}) do
+                    names[index] = source.componentTable[entry].name as string
+                end
+                const entities: {SnapshotEntity} = {}
+                for _, row in ipairs(frame.entities as {any}) do
+                    const values: {[string]: any} = {}
+                    for index = 1, #names do
+                        values[names[index]] = row[index + 1]
+                    end
+                    entities[#entities + 1] = new SnapshotEntity(id = row[1] as integer, values = values)
+                end
+                total = total + #entities
+                saved[#saved + 1] = new SnapshotArchetype(components = names, entities = entities)
+            end
+            local states: {string} = {}
+            for _, entry in ipairs((source.data or {}) as {SnapshotDataEntry}) do
+                if entry.key == "__tecs.stateStack" then
+                    states = entry.value as {string}
+                end
+            end
+            snapshot = new Snapshot(
+                version = source.version as integer,
+                nextEntityId = source.nextEntityId as integer,
+                entityCount = total,
+                archetypeCount = #saved,
+                componentTable = source.componentTable as {SnapshotComponentEntry},
+                archetypes = saved,
+                data = (source.data or {}) as {SnapshotDataEntry},
+                states = states
+            )
+        else
+            snapshot = source as Snapshot
+        end
     end
     if snapshot.version ~= SNAPSHOT_VERSION then
         error("world.loadSnapshot: unsupported snapshot version " .. tostring(snapshot.version), 2)
@@ -3421,7 +4314,7 @@ function World.loadSnapshot(exclusive self: World, snapshot: Snapshot): Snapshot
         if declaredComponents[name] then
             error("world.loadSnapshot: repeated component-table entry " .. name, 2)
         end
-        if components.findByName(name) == nil then
+        if components.resolveSnapshotName(name) == nil then
             error("world.loadSnapshot: unknown component " .. name, 2)
         end
         declaredComponents[name] = true
@@ -3431,6 +4324,7 @@ function World.loadSnapshot(exclusive self: World, snapshot: Snapshot): Snapshot
     local seenSlots: {[integer]: boolean} = {}
     local counted: integer = 0
     local greatestSlot: integer = 0
+    const fastFrames: {[integer]: snapshotcodec.Frame} = {}
     for archetypeIndex = 1, #snapshot.archetypes do
         local saved = snapshot.archetypes[archetypeIndex]
         local definitions: {components.Component} = {}
@@ -3445,7 +4339,7 @@ function World.loadSnapshot(exclusive self: World, snapshot: Snapshot): Snapshot
             end
             names[name] = true
             referencedComponents[name] = true
-            local component = components.findByName(name)
+            local component = components.resolveSnapshotName(name)
             if component == nil then
                 error("world.loadSnapshot: unknown component " .. name, 2)
             end
@@ -3453,6 +4347,81 @@ function World.loadSnapshot(exclusive self: World, snapshot: Snapshot): Snapshot
         end
         local preparedEntities: {RestoreEntity} = {}
         prepared[archetypeIndex] = preparedEntities
+        if decoded ~= nil then
+            const frame = decoded.frames[archetypeIndex]
+            local fast = true
+            for column = 1, #frame.columns do
+                const savedColumn = frame.columns[column]
+                const component = savedColumn.component
+                const native = ffistorage.find(component.componentId)
+                const relationship = components.asRelationship(component)
+                if savedColumn.present ~= nil or (
+                    relationship ~= nil and (
+                        relationship.sparse or components.targetOf(
+                            component
+                        ) == nil or #components.requiresClosure(relationship) > 0
+                    )
+                ) or (
+                    component.storageType ~= "tag" and (
+                        native == nil
+                        or not native.rawCodec
+                        or native ~= savedColumn.storage
+                        or savedColumn.pointer == nil
+                    )
+                ) then
+                    fast = false
+                end
+                if relationship ~= nil
+                    and native ~= nil
+                    and native == savedColumn.storage
+                    and savedColumn.pointer ~= nil
+                then
+                    const selected = components.targetOf(component)
+                    const pointerType = "$ *"
+                    const rows: any = ffi.cast(ffi.typeof(pointerType, native.element), savedColumn.pointer)
+                    for row = 0, frame.count - 1 do
+                        if selected == nil or rows[row].target ~= selected then
+                            error("snapshot relationship payload changed its selected target", 2)
+                        end
+                    end
+                end
+            end
+            if fast then
+                fastFrames[archetypeIndex] = frame
+            end
+            const ids: any = frame.ids
+            for row = 1, frame.count do
+                const id = ids[row - 1] as integer
+                if id < 1 or id > 9007199254740991 or id % 1 ~= 0 then
+                    error("snapshot has invalid entity id", 2)
+                end
+                const slot = idallocator.slotOf(id)
+                if slot < 1 or slot > self.allocator.maxSlotCount or seenSlots[slot] then
+                    error("snapshot has repeated or invalid entity slot", 2)
+                end
+                seenSlots[slot] = true
+                greatestSlot = math.max(greatestSlot, slot)
+                counted = counted + 1
+                if not fast then
+                    const inputs: {components.Input} = {}
+                    for column = 1, #frame.columns do
+                        const savedColumn = frame.columns[column]
+                        local payload: any = nil
+                        if savedColumn.present ~= nil and not savedColumn.present[row] then
+                            goto nextSavedColumn
+                        end
+                        if savedColumn.component.storageType ~= "tag" then
+                            payload = snapshotcodec.value(savedColumn, row)
+                        end
+                        if savedColumn.component.storageType == "tag" or payload ~= nil then
+                            inputs[#inputs + 1] = loadComponentInput(savedColumn.component, payload, self)
+                        end
+                        ::nextSavedColumn::
+                    end
+                    preparedEntities[row] = new RestoreEntity(id = id, inputs = inputs)
+                end
+            end
+        end
         for entityIndex = 1, #saved.entities do
             local entity = saved.entities[entityIndex]
             local id = entity.id
@@ -3478,10 +4447,9 @@ function World.loadSnapshot(exclusive self: World, snapshot: Snapshot): Snapshot
             local inputs: {components.Input} = {}
             for componentIndex = 1, #definitions do
                 local component = definitions[componentIndex]
-                if component.storageType ~= "tag" and not valueNames[component.componentName] then
-                    error("world.loadSnapshot: missing value for component " .. component.componentName, 2)
+                if component.storageType == "tag" or valueNames[component.componentName] then
+                    inputs[#inputs + 1] = loadComponentInput(component, entity.values[component.componentName], self)
                 end
-                inputs[componentIndex] = loadComponentInput(component, entity.values[component.componentName])
             end
             preparedEntities[entityIndex] = new RestoreEntity(id = id, inputs = inputs)
             counted = counted + 1
@@ -3518,11 +4486,126 @@ function World.loadSnapshot(exclusive self: World, snapshot: Snapshot): Snapshot
     if dataSeen[randomstreams.snapshotKey] then
         randomState = randomstreams.prepare(dataByKey[randomstreams.snapshotKey])
     end
+    const pipeline: any = snapshot.pipeline or dataByKey["__tecs.pipeline"]
+    if pipeline ~= nil and (
+        type(
+            pipeline
+        ) ~= "table" or type(
+            pipeline.fixedAccumulator
+        ) ~= "number"
+        or pipeline.fixedAccumulator < 0
+        or pipeline.fixedAccumulator == math.huge
+        or pipeline.fixedAccumulator ~= pipeline.fixedAccumulator
+    ) then
+        error("snapshot has invalid fixed accumulator", 2)
+    end
+    if pipeline ~= nil then
+        if pipeline.phaseStates ~= nil then
+            if type(pipeline.phaseStates) ~= "table" then
+                error("snapshot has invalid phase states", 2)
+            end
+            for key, enabled in pairs(pipeline.phaseStates as table) do
+                if type(key) ~= "number" or key % 1 ~= 0 or key < 1 or type(enabled) ~= "boolean" then
+                    error("snapshot has invalid phase states", 2)
+                end
+            end
+        end
+        if pipeline.disabledPhases ~= nil then
+            if type(pipeline.disabledPhases) ~= "table" then
+                error("snapshot has invalid disabled phases", 2)
+            end
+            for key, disabled in pairs(pipeline.disabledPhases as table) do
+                if type(key) ~= "string" or type(disabled) ~= "boolean" then
+                    error("snapshot has invalid disabled phases", 2)
+                end
+            end
+        end
+    end
 
     self:clearEntities()
     self.stateStack = {}
     self.autoStateComponent = nil
     for archetypeIndex = 1, #prepared do
+        const frame = fastFrames[archetypeIndex]
+        if frame ~= nil and frame.count > 0 then
+            const inputs: {components.Input} = {}
+            local relationships = false
+            for column = 1, #frame.columns do
+                inputs[column] = frame.columns[column].component
+                if components.asRelationship(frame.columns[column].component) ~= nil then
+                    relationships = true
+                end
+            end
+            const restore = function(target: archetype.Archetype, first: integer, last: integer, count: integer): nil
+                for column = 1, #frame.columns do
+                    const savedColumn = frame.columns[column]
+                    if savedColumn.component.storageType ~= "tag" then
+                        snapshotcodec.copy(savedColumn, target, first, count)
+                    end
+                end
+                if relationships then
+                    archetype.restoreAliases(target, first, last)
+                end
+            end
+            if relationships then
+                const definitions: {components.Component} = {}
+                const roots: {[integer]: boolean} = {}
+                for column = 1, #frame.columns do
+                    const component = frame.columns[column].component
+                    definitions[#definitions + 1] = component
+                    const relationship = components.asRelationship(component)
+                    if relationship ~= nil and not roots[relationship.componentId] then
+                        roots[relationship.componentId] = true
+                        definitions[#definitions + 1] = assert(components.findById(relationship.componentId))
+                    end
+                end
+                const target = resolveArchetype(self, definitions)
+                unsafe do
+                    for index = 0, frame.count - 1 do
+                        idallocator.stakeId(self.allocator, frame.ids[index] as integer)
+                    end
+                end
+                queueSpawnBatch(
+                    self,
+                    new SpawnBatch(
+                        index = #self.spawnBatches + 1,
+                        target = target,
+                        values = {},
+                        shared = {},
+                        count = frame.count,
+                        firstId = 0,
+                        rawIds = frame.ids,
+                        callback = restore,
+                        rawRestore = true
+                    )
+                )
+            else
+                self:batchSpawnAtRaw(frame.ids, frame.count, inputs, restore)
+            end
+            const batch = self.spawnBatches[#self.spawnBatches]
+            if batch ~= nil and batch.rawIds == frame.ids and archetype.bulkSafe(batch.target) then
+                local complete = true
+                for column = 1, #batch.target.components do
+                    const component = batch.target.components[column]
+                    if component.storageType ~= "tag" then
+                        local found = false
+                        for saved = 1, #frame.columns do
+                            if frame.columns[saved].component == component then
+                                found = true;
+                                break
+                            end
+                        end
+                        if not found then
+                            complete = false;
+                            break
+                        end
+                    end
+                end
+                -- Every value column is overwritten before any publication observer.
+                -- Bypass per-row default constructors on this proven raw-copy path.
+                batch.rawRestore = complete
+            end
+        end
         local entities = prepared[archetypeIndex]
         for entityIndex = 1, #entities do
             local entity = entities[entityIndex]
@@ -3548,6 +4631,31 @@ function World.loadSnapshot(exclusive self: World, snapshot: Snapshot): Snapshot
         archetypeCount = snapshot.archetypeCount,
         componentTable = copyComponentTable(snapshot.componentTable)
     )
+    self.fixedAccumulator = pipeline ~= nil and pipeline.fixedAccumulator or 0
+    if self.pipeline ~= nil then
+        self.pipeline.fixedAccumulator = self.fixedAccumulator
+        if pipeline ~= nil and type(pipeline.phaseStates) == "table" then
+            self.pipeline.phaseStates = table.clone(pipeline.phaseStates as {boolean})
+        end
+    end
+    table.clear(self.disabledPhases)
+    if pipeline ~= nil then
+        if type(pipeline.disabledPhases) == "table" then
+            for name, disabled in pairs(pipeline.disabledPhases as {[string]: boolean}) do
+                if disabled then
+                    self.disabledPhases[name] = true
+                end
+            end
+        elseif type(pipeline.phaseStates) == "table" then
+            for index = 1, phases.count do
+                if pipeline.phaseStates[index] == false then
+                    self.disabledPhases[assert(phases.at(index))] = true
+                end
+            end
+        end
+    end
+    const listeners: {[string]: {function(value: any)}} = {}
+    self:emit(0, events.StartSnapshotLoad, prelude, listeners)
     if randomState ~= nil then
         randomstreams.restore(ensureRandom(self), randomState)
     end
@@ -3558,12 +4666,22 @@ function World.loadSnapshot(exclusive self: World, snapshot: Snapshot): Snapshot
             handler.load(self, snapshotvalue.clone(value))
         end
     end
+    for index = 1, #snapshot.data do
+        const entry = snapshot.data[index]
+        const callbacks = listeners[entry.key]
+        if callbacks ~= nil then
+            for position = 1, #callbacks do
+                callbacks[position](snapshotvalue.clone(entry.value))
+            end
+        end
+    end
     for index = 1, #self.snapshotHandlers do
         local finish = self.snapshotHandlers[index].finish
         if finish ~= nil then
             finish(self, prelude)
         end
     end
+    self:emit(0, events.FinishSnapshotLoad, prelude)
     self:commit()
 
     return prelude
@@ -3574,8 +4692,11 @@ end
 --- @param handler the stable key and optional save, load, and finish callbacks
 --- @raises when the key is empty, already registered, or reserved as tecs.random
 function World.addSnapshotHandler(exclusive self: World, handler: SnapshotHandler): nil
-    if handler.name == randomstreams.snapshotKey then
-        error("world.addSnapshotHandler: tecs.random is reserved for world-managed streams", 2)
+    if handler.name == randomstreams.snapshotKey
+        or handler.name == "__tecs.pipeline"
+        or handler.name == "__tecs.stateStack"
+    then
+        error("world.addSnapshotHandler: " .. handler.name .. " is reserved for world-managed state", 2)
     end
     if handler.name == "" then
         error("snapshot handler requires a non-empty name", 2)
@@ -3599,7 +4720,7 @@ local function orderSystems(systems: {RegisteredSystem}, phase: phases.Phase): {
         seen[index] = {}
     end
     local function edge(first: integer, second: integer): nil
-        -- Self references were no-ops in the original scheduler too.
+        -- Self references impose no ordering constraint.
         if first == second or seen[first][second] then
             return
         end
@@ -3655,6 +4776,64 @@ local function orderSystems(systems: {RegisteredSystem}, phase: phases.Phase): {
     return ordered
 end
 
+function World.registerPhase(exclusive self: World, phase: phases.Definition): nil
+    if self.updating then
+        error("registerPhase requires an idle scheduler", 2)
+    end
+    if self.pipeline ~= nil then
+        self.pipeline:registerPhase(phase);
+        return
+    end
+    if phase.name == "" or self.customPhases[phase.name] ~= nil then
+        error("phase name is empty or already registered", 2)
+    end
+    const groups = {
+        phases.StartupGroup,
+        phases.FixedUpdateGroup,
+        phases.RenderGroup,
+        phases.MainGroup,
+        phases.ShutdownGroup,
+        phases.AllGroups
+    }
+    const known: {[string]: boolean} = {}
+    for index = 1, #self.phaseOrder do
+        known[self.phaseOrder[index]] = true
+    end
+    for index = 1, #groups do
+        known[groups[index]] = true
+    end
+    if known[phase.name] then
+        error("phase name is already registered", 2)
+    end
+    const position = phase.position or (#self.phaseOrder + 1)
+    if position < 1 or position > #self.phaseOrder + 1 or position % 1 ~= 0 then
+        error("phase position is outside the registry", 2)
+    end
+    local children: {string}? = nil
+    if phase.children ~= nil then
+        children = table.clone(phase.children)
+        const seen: {[string]: boolean} = {}
+        for index = 1, #children do
+            const child = children[index]
+            if not known[child] or seen[child] then
+                error("phase tree contains an unknown or repeated child", 2)
+            end
+            seen[child] = true
+        end
+    end
+    const definition: phases.Definition = {name = phase.name, position = position, children = children}
+    self.customPhases[phase.name] = definition
+    table.insert(self.phaseOrder, position, phase.name)
+    for index = position, #self.phaseOrder do
+        const custom = self.customPhases[self.phaseOrder[index]]
+        if custom ~= nil then
+            custom.position = index
+        end
+    end
+    phase.position = position
+    self.scheduleDirty = true
+end
+
 local function buildSchedule(borrows world: World): {[phases.Phase]: {RegisteredSystem}}
     const result: {[phases.Phase]: {RegisteredSystem}} = {}
     for index = 1, #world.systems do
@@ -3670,7 +4849,7 @@ local function buildSchedule(borrows world: World): {[phases.Phase]: {Registered
     end
     local index: integer = 1
     while true do
-        const phase = phases.selectionAt(phases.AllGroups, index)
+        const phase = world.phaseOrder[index]
         if phase == nil then
             break
         end
@@ -3693,6 +4872,22 @@ local function prepareSchedule(exclusive world: World): nil
 end
 
 function World.addSystem(exclusive self: World, config: SystemConfig): string
+    if self.pipeline ~= nil then
+        const name = self.pipeline:addSystem(config)
+        self.systemCount = self.pipeline.count
+        return name
+    end
+    local known = self.customPhases[config.phase] ~= nil
+    for index = 1, #self.phaseOrder do
+        if self.phaseOrder[index] == config.phase then
+            known = true;
+            break
+        end
+    end
+    const custom = self.customPhases[config.phase]
+    if not known or (custom ~= nil and custom.children ~= nil) then
+        error("system phase must be a registered leaf", 2)
+    end
     local name = config.name
     if name == nil then
         self.anonymousSystemCount = self.anonymousSystemCount + 1
@@ -3740,6 +4935,11 @@ end
 --- @param name the registered explicit or generated name
 --- @return whether a system carried the name
 function World.removeSystem(exclusive self: World, name: string): boolean
+    if self.pipeline ~= nil then
+        const removed = self.pipeline:removeSystem(name)
+        self.systemCount = self.pipeline.count
+        return removed
+    end
     local system = self.systemNames[name]
     if system == nil then
         return false
@@ -3757,11 +4957,14 @@ function World.removeSystem(exclusive self: World, name: string): boolean
 end
 
 function World.listSystems(borrows self: World): {SystemInfo}
+    if self.pipeline ~= nil then
+        return self.pipeline:listSystems()
+    end
     const schedule = self.scheduleDirty and buildSchedule(self) or self.schedule
     local result: {SystemInfo} = {}
     local phaseIndex: integer = 1
     while true do
-        local phase = phases.selectionAt(phases.AllGroups, phaseIndex)
+        local phase = self.phaseOrder[phaseIndex]
         if phase == nil then
             break
         end
@@ -3774,13 +4977,13 @@ function World.listSystems(borrows self: World): {SystemInfo}
                     position = position + 1
                     result[
                         #result + 1
-                    ] = new SystemInfo(
+                    ] = {
                         name = system.name,
                         phase = phase,
                         position = position,
                         enabled = system.enabled,
                         hasRunIf = system.runIf ~= nil
-                    )
+                    }
                 end
             end
         end
@@ -3796,6 +4999,9 @@ end
 --- @param enabled whether future dispatches should run the system
 --- @return whether the system exists, plus a reason when it does not
 function World.setSystemEnabled(exclusive self: World, name: string, enabled: boolean): boolean, string?
+    if self.pipeline ~= nil then
+        return self.pipeline:setSystemEnabled(name, enabled)
+    end
     local system = self.systemNames[name]
     if system == nil or system.removed then
         return false, "no system named '" .. name .. "' is registered"
@@ -3805,7 +5011,15 @@ function World.setSystemEnabled(exclusive self: World, name: string, enabled: bo
     return true
 end
 
-local function setPhaseEnabled(exclusive world: World, selection: phases.Selection, enabled: boolean): nil
+local setPhaseEnabled: function(exclusive world: World, selection: phases.Selection, enabled: boolean): nil
+setPhaseEnabled = function(exclusive world: World, selection: phases.Selection, enabled: boolean): nil
+    const custom = world.customPhases[selection]
+    if custom ~= nil and custom.children ~= nil then
+        for index = 1, #custom.children do
+            setPhaseEnabled(world, custom.children[index], enabled)
+        end
+        return
+    end
     local index: integer = 1
     while true do
         local phase = phases.selectionAt(selection, index)
@@ -3825,6 +5039,10 @@ end
 --- @param self the world whose schedule changes
 --- @param phase the leaf or group to enable
 function World.enablePhase(exclusive self: World, phase: phases.Selection): nil
+    if self.pipeline ~= nil then
+        self.pipeline:enablePhase(phase);
+        return
+    end
     setPhaseEnabled(self, phase, true)
 end
 
@@ -3832,6 +5050,10 @@ end
 --- @param self the world whose schedule changes
 --- @param phase the leaf or group to disable
 function World.disablePhase(exclusive self: World, phase: phases.Selection): nil
+    if self.pipeline ~= nil then
+        self.pipeline:disablePhase(phase);
+        return
+    end
     setPhaseEnabled(self, phase, false)
 end
 
@@ -3840,6 +5062,9 @@ end
 --- @param phase the leaf phase
 --- @return whether the phase is enabled
 function World.isPhaseEnabled(borrows self: World, phase: phases.Phase): boolean
+    if self.pipeline ~= nil then
+        return self.pipeline:isPhaseEnabled(phase)
+    end
     return not self.disabledPhases[phase]
 end
 
@@ -3858,11 +5083,13 @@ local function runPhase(exclusive world: World, phase: phases.Phase, dt: number,
                 -- Publication callbacks may stop a system before its dispatch.
                 if system.enabled then
                     world.runningSystem = true
+                    world.systemThread = coroutine.running()
                     local gate = system.runIf
                     if gate == nil or gate(dt, world, system.name) then
                         system.run(dt, world, scope)
                     end
                     world.runningSystem = false
+                    world.systemThread = nil
                     if system.commitAfter or world.commitRequested then
                         world:commit()
                     end
@@ -3873,12 +5100,25 @@ local function runPhase(exclusive world: World, phase: phases.Phase, dt: number,
     world:commit()
 end
 
-local function runSelection(
+local runSelection: function(
     exclusive world: World,
     selection: phases.Selection,
     dt: number,
     borrows scope: tasks.Scope
 ): nil
+runSelection = function(
+    exclusive world: World,
+    selection: phases.Selection,
+    dt: number,
+    borrows scope: tasks.Scope
+): nil
+    const custom = world.customPhases[selection]
+    if custom ~= nil and custom.children ~= nil then
+        for index = 1, #custom.children do
+            runSelection(world, custom.children[index], dt, scope)
+        end
+        return
+    end
     local index: integer = 1
     while true do
         local phase = phases.selectionAt(selection, index)
@@ -3921,7 +5161,9 @@ local function runFixedSteps(exclusive world: World, dt: number, borrows scope: 
     while world.fixedAccumulator >= timestep and steps < world.fixedMaxSteps do
         steps = steps + 1
         world.fixedStepTotal = world.fixedStepTotal + 1
+        beginFixedStep(world)
         runPhaseRange(world, phases.fixedFirstIndex, phases.fixedLastIndex, timestep, scope)
+        finishFixedStep(world)
         world.fixedAccumulator = world.fixedAccumulator - timestep
     end
     if world.fixedAccumulator >= timestep and world.fixedOverload == "drop" then
@@ -3946,6 +5188,25 @@ local function runLifecycle(
     end
 end
 
+local function runCustomPipeline(
+    exclusive world: World,
+    phase: phases.Selection?,
+    dt: number,
+    borrows scope: tasks.Scope
+): nil
+    const pipeline = assert(world.pipeline)
+    world.runningSystem = true
+    world.systemThread = coroutine.running()
+    if phase ~= nil then
+        pipeline:run(phase, dt, world, scope)
+    else
+        pipeline:update(dt, world, scope)
+    end
+    world.runningSystem = false
+    world.systemThread = nil
+    world:commit()
+end
+
 --- Runs the three startup phases in order.
 --- @param self the world to start
 --- @raises when another dispatch is active or a startup system raises
@@ -3958,7 +5219,11 @@ function World.startup(exclusive self: World): nil
     self.updating = true
     local succeeded, failure = pcall(function(): nil
         with scope = tasks.open() do
-            runLifecycle(self, phases.startupAt, phases.startupCount, scope)
+            if self.pipeline ~= nil then
+                runCustomPipeline(self, phases.StartupGroup, 0, scope)
+            else
+                runLifecycle(self, phases.startupAt, phases.startupCount, scope)
+            end
         end
     end)
     self.updating = false
@@ -3982,7 +5247,11 @@ function World.shutdown(exclusive self: World): nil
     self.updating = true
     local succeeded, failure = pcall(function(): nil
         with scope = tasks.open() do
-            runLifecycle(self, phases.shutdownAt, phases.shutdownCount, scope)
+            if self.pipeline ~= nil then
+                runCustomPipeline(self, phases.ShutdownGroup, 0, scope)
+            else
+                runLifecycle(self, phases.shutdownAt, phases.shutdownCount, scope)
+            end
         end
     end)
     self.updating = false
@@ -4012,7 +5281,11 @@ function World.runPhase(exclusive self: World, phase: phases.Selection, dt: numb
     self.updating = true
     local succeeded, failure = pcall(function(): nil
         with scope = tasks.open() do
-            runSelection(self, phase, elapsed, scope)
+            if self.pipeline ~= nil then
+                runCustomPipeline(self, phase, elapsed, scope)
+            else
+                runSelection(self, phase, elapsed, scope)
+            end
         end
     end)
     self.updating = false
@@ -4046,18 +5319,105 @@ function World.update(exclusive self: World, dt: number): nil
     self.updating = true
     local succeeded, failure = pcall(function(): nil
         with scope = tasks.open() do
-            runUpdate(self, dt, scope)
+            if self.pipeline ~= nil then
+                runCustomPipeline(self, nil, dt, scope)
+            else
+                runUpdate(self, dt, scope)
+            end
         end
     end)
     self.updating = false
+    if self.dirtyQueue.fixed ~= nil then
+        self.dirtyQueue.fixed.active = false
+    end
     self.runningSystem = false
     self.commitRequested = false
     compactSystems(self)
     if not succeeded then
         error(failure, 0)
     end
-    for index = 1, self.archetypeCount do
-        self.archetypes[index]:clearDirtyComponents()
+    for index = 1, #self.dirtyQueue.list do
+        self.dirtyQueue.list[index]:clearDirtyComponents()
+    end
+    table.clear(self.dirtyQueue.list)
+    self.dirtyQueue.epoch = self.dirtyQueue.epoch + 1
+end
+
+--- Opens fixed tracking for either the built-in or a custom pipeline.
+export function beginFixedStep(exclusive world: World): nil
+    const state = world.dirtyQueue.fixed
+    if state == nil then
+        return
+    end
+    if state.active then
+        error("fixed tracking step is already active", 2)
+    end
+    state.step = state.step + 1
+    const before = world.beforeFixedCallbacks
+    if before ~= nil then
+        for index = 1, #before do
+            before[index](world)
+        end
+    end
+    state.active = true
+end
+
+--- Completes fixed tracking after all fixed systems have published their writes.
+export function finishFixedStep(exclusive world: World): nil
+    const state = world.dirtyQueue.fixed
+    if state == nil then
+        return
+    end
+    if not state.active then
+        error("fixed tracking has no active step", 2)
+    end
+    const after = world.afterFixedCallbacks
+    if after ~= nil then
+        for index = 1, #after do
+            after[index](world)
+        end
+    end
+    state.active = false
+end
+
+--- Returns or lazily installs generic fixed-iteration tracking for engine consumers.
+export function fixedTracking(exclusive world: World, create: boolean?): archetype.FixedState?
+    if create and world.dirtyQueue.fixed == nil then
+        world.dirtyQueue.fixed = new archetype.FixedState(
+            tracked = {},
+            trackedList = {},
+            versions = setmetatable({}, {
+                __mode = "k"
+            }),
+            writes = setmetatable({}, {
+                __mode = "k"
+            }),
+            structures = setmetatable({}, {
+                __mode = "k"
+            }),
+            step = 0,
+            active = false
+        )
+    end
+
+    return world.dirtyQueue.fixed
+end
+
+--- Registers a callback at one side of each completed fixed iteration.
+export function onFixedStep(exclusive world: World, callback: function(exclusive world: World), before: boolean): nil
+    fixedTracking(world, true)
+    if before then
+        if world.beforeFixedCallbacks == nil then
+            world.beforeFixedCallbacks = {}
+        end
+        const entries = assert(world.beforeFixedCallbacks)
+        entries[#entries + 1] = callback
+    else
+        if world.afterFixedCallbacks == nil then
+            world.afterFixedCallbacks = {}
+        end
+        const entries = assert(world.afterFixedCallbacks)
+        entries[#entries + 1] = callback
     end
 end
 
@@ -4084,47 +5444,56 @@ end
 --- @param self the world to inspect
 --- @return the fixed timestep, residual time, and clamped interpolation fraction
 function World.getFixedTiming(borrows self: World): number, number, number
-    local alpha = self.fixedAccumulator / self.fixedTimestep
+    const timestep = self.pipeline and self.pipeline.fixedTimestep or self.fixedTimestep
+    const accumulator = self.pipeline and self.pipeline.fixedAccumulator or self.fixedAccumulator
+    local alpha = accumulator / timestep
     if alpha < 0 then
         alpha = 0
     elseif alpha > 1 then
         alpha = 1
     end
 
-    return self.fixedTimestep, self.fixedAccumulator, alpha
+    return timestep, accumulator, alpha
 end
 
 --- Returns the fixed steps run since the world was created.
 --- @param self the world to inspect
 --- @return the monotonically increasing simulation step count
 function World.fixedStepCount(borrows self: World): integer
+    if self.pipeline ~= nil then
+        return self.pipeline.fixedStepCount
+    end
     return self.fixedStepTotal
 end
 
 --- Returns the accumulated fixed-step overload counters.
 --- @param self the world to inspect
 --- @return a caller-owned statistics record
-function World.getStats(borrows self: World): WorldStats
-    local componentIds: {[integer]: boolean} = {}
+function World.getStats(borrows self: World, fill: WorldStats?): WorldStats
     local componentCount: integer = 0
-    for archetypeIndex = 1, self.archetypeCount do
-        local current = self.archetypes[archetypeIndex]
-        for componentIndex = 1, #current.components do
-            local componentId = current.components[componentIndex].componentId
-            if not componentIds[componentId] then
-                componentIds[componentId] = true
-                componentCount = componentCount + 1
-            end
-        end
+    for _ in pairs(self.componentArchetypes) do
+        componentCount = componentCount + 1
+    end
+    const systems = self.pipeline and self.pipeline.count or self.systemCount
+    const timeDropped = self.pipeline and self.pipeline.fixedTimeDropped or self.fixedTimeDropped
+    const stepsDropped = self.pipeline and self.pipeline.fixedStepsDropped or self.fixedStepsDropped
+    if fill ~= nil then
+        fill.entities = self.liveCount
+        fill.archetypes = self.archetypeCount
+        fill.components = componentCount
+        fill.systems = systems
+        fill.fixedTimeDropped = timeDropped
+        fill.fixedStepsDropped = stepsDropped
+        return fill
     end
 
     return new WorldStats(
         entities = self.liveCount,
         archetypes = self.archetypeCount,
         components = componentCount,
-        systems = self.systemCount,
-        fixedTimeDropped = self.fixedTimeDropped,
-        fixedStepsDropped = self.fixedStepsDropped
+        systems = systems,
+        fixedTimeDropped = timeDropped,
+        fixedStepsDropped = stepsDropped
     )
 end
 

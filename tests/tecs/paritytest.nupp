@@ -1,0 +1,716 @@
+local test = require("nupp.test")
+local archetype = require("tecs.internal.archetype")
+local events = require("nupp.events")
+local buffer = require("string.buffer")
+local ffi = require("ffi")
+local fixedtracking = require("tecs.internal.fixedtracking")
+local entityworld = require("tecs.internal.world")
+local tasks = require("nupp.tasks")
+local suite = {}
+
+function suite.observesArchetypeRowsAndTracksResidue(): nil
+    const world = tecs.ecs.newWorld()
+    const value = tecs.ecs.newScalarComponent({name = "test.Parity.Value", kind = "number"})
+    const marker = tecs.ecs.newTagComponent({name = "test.Parity.Marker"})
+    local created: integer = 0
+    local added: integer = 0
+    local removed: integer = 0
+    local activated: integer = 0
+    local deactivated: integer = 0
+    local moved: integer = 0
+    world:observe(0, tecs.ecs.ArchetypeCreated, function(borrows event: tecs.ecs.ArchetypeCreated): nil
+        created = created + 1
+        event.archetype:addEntityObserver({
+            onEntitiesAdded = function(
+                _observer: archetype.EntityObserver,
+                candidate: archetype.Archetype,
+                first: integer,
+                last: integer,
+                count: integer,
+                source: archetype.Archetype?
+            ): nil
+                test.equal(last - first + 1, count)
+                test.assert(candidate.entities[first] ~= nil)
+                if source ~= nil then
+                    test.assert(source ~= candidate)
+                end
+                added = added + count
+            end,
+            onEntitiesRemoved = function(
+                _observer: archetype.EntityObserver,
+                candidate: archetype.Archetype,
+                first: integer,
+                _last: integer,
+                count: integer,
+                _target: archetype.Archetype?
+            ): nil
+                test.assert(candidate.entities[first] ~= nil)
+                removed = removed + count
+            end,
+            onEntityMove = function(
+                _observer: archetype.EntityObserver,
+                candidate: archetype.Archetype,
+                entity: integer,
+                fromRow: integer,
+                toRow: integer
+            ): nil
+                test.equal(fromRow, 2)
+                test.equal(toRow, 0)
+                test.equal(candidate.entities[toRow + 1], entity)
+                moved = moved + 1
+            end,
+            onActivated = function(_observer: archetype.EntityObserver, _candidate: archetype.Archetype): nil
+                activated = activated + 1
+            end,
+            onDeactivated = function(_observer: archetype.EntityObserver, candidate: archetype.Archetype): nil
+                test.equal(#candidate.entities, 0)
+                deactivated = deactivated + 1
+            end
+        })
+    end)
+    const first = world:spawn(value(1))
+    world:spawn(value(2))
+    world:spawn(value(3))
+    world:commit()
+    const source = assert((world:findArchetypes(value)()))
+    world:update(0)
+    const version = source:structuralCount()
+    source:trackValueCount(value)
+    source:set(1, value(7))
+    test.equal(source:valueCount(), 1)
+    test.equal(world:get(first, value), 7)
+    world:despawn(first)
+    world:commit()
+    const rows, count = source:structuralTouched()
+    test.equal(count, 1)
+    test.equal(rows[1], 1)
+    test.assert(source:structuralDescribed(version))
+    world:batchSet(world:newQuery({include = {value}}), marker)
+    world:commit()
+    test.equal(created, 2)
+    test.equal(added, 5)
+    test.equal(removed, 3)
+    test.equal(activated, 2)
+    test.equal(deactivated, 1)
+    test.equal(moved, 1)
+    const stats = world:getStats()
+    test.assert(world:getStats(stats) == stats)
+end
+
+function suite.dirtyArchetypesFollowFirstWriteOrder(): nil
+    const world = tecs.ecs.newWorld()
+    const left = tecs.ecs.newTagComponent({name = "test.Parity.Left"})
+    const right = tecs.ecs.newTagComponent({name = "test.Parity.Right"})
+    world:spawn(left)
+    world:spawn(right)
+    world:commit()
+    world:update(0)
+    const a = assert((world:findArchetypes(left)()))
+    const b = assert((world:findArchetypes(right)()))
+    b:markComponentDirty(right)
+    a:markComponentDirty(left)
+    b:markComponentDirty(right)
+    const next = world:dirtyArchetypes()
+    test.assert(next() == b)
+    test.assert(next() == a)
+    test.assert(next() == nil)
+end
+
+function suite.snapshotEventsFilterAndFanOut(): nil
+    const world = tecs.ecs.newWorld()
+    const derived = tecs.ecs.newTagComponent({name = "test.Parity.Derived"})
+    const retained = world:spawn(tecs.ecs.Transform3D(1, 2, 3))
+    world:spawn(derived)
+    world:commit()
+    local loaded: integer = 0
+    local finished = false
+    world:observe(0, tecs.ecs.OnSnapshotSave, function(borrows event: tecs.ecs.OnSnapshotSave): nil
+        event:addData("test.parity", 7)
+        event:exclude(derived)
+    end)
+    world:observe(0, tecs.ecs.StartSnapshotLoad, function(borrows event: tecs.ecs.StartSnapshotLoad): nil
+        test.equal(event.prelude.entityCount, 1)
+        event:onData("test.parity", function(value: any): nil
+            loaded = loaded + (value as integer)
+        end)
+        event:onData("test.parity", function(value: any): nil
+            loaded = loaded + (value as integer)
+        end)
+    end)
+    world:observe(0, tecs.ecs.FinishSnapshotLoad, function(borrows event: tecs.ecs.FinishSnapshotLoad): nil
+        test.equal(event.prelude.entityCount, 1)
+        test.equal(loaded, 14)
+        finished = true
+    end)
+    world:disablePhase("Update")
+    const saved = world:saveSnapshot()
+    world:enablePhase("Update")
+    world:loadSnapshot(saved)
+    test.assert(finished)
+    test.assert(not world:isPhaseEnabled("Update"))
+    const pose = assert(world:get(retained, tecs.ecs.Transform3D))
+    test.equal(pose.z, 3)
+    test.equal(pose.rotationW, 1)
+    test.equal(pose.scaleZ, 1)
+    test.equal(world:newQuery({include = {derived}}):count(), 0)
+    test.equal(events.name(tecs.ecs.OnSnapshotSave), "OnSnapshotSave")
+end
+
+function suite.snapshotNilSerializerOmitsTheComponent(): nil
+    local record Value
+        x: number
+    end
+    const value = tecs.ecs.newComponent({
+        name = "test.Parity.NilCodec",
+        construct = function(): Value
+            return new Value(x = 1)
+        end,
+        default = function(): Value
+            return new Value(x = 0)
+        end,
+        save = function(_value: Value): any
+            return nil
+        end,
+        load = function(_value: any): Value
+            error("nil must not reach deserialize")
+        end
+    })
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(value())
+    world:commit()
+    world:loadSnapshot(world:saveSnapshot())
+    test.assert(world:isAlive(id))
+    test.assert(world:get(id, value) == nil)
+end
+
+function suite.binarySnapshotsRestoreNativeColumnsAndRetainTheInputBuffer(): nil
+    const world = tecs.ecs.newWorld()
+    const count = 1000
+    world:batchSpawn(count, {tecs.ecs.Transform3D(1, 2, 3)})
+    world:commit()
+    const output = buffer.new()
+    const saved = world:saveSnapshot({format = "binary", buffer = output})
+    test.assert(saved.buffer == output)
+    const length = #output
+    test.assert(length > count * 80)
+    world:loadSnapshot(saved)
+    test.equal(#output, length)
+    test.equal(world:newQuery({include = {tecs.ecs.Transform3D}}):count(), count)
+    for candidate, rows in world:newQuery({include = {tecs.ecs.Transform3D}}):iter() do
+        const values = assert(candidate:get(tecs.ecs.Transform3D))
+        unsafe do
+            for row = 1, assert(rows) do
+                test.equal(values[row].z, 3);
+                test.equal(values[row].scaleX, 1)
+            end
+        end
+    end
+    world:loadSnapshot(output:tostring())
+    world:loadSnapshot(output)
+    test.equal(#output, length)
+    test.raises(function(): nil
+        world:loadSnapshot(output:tostring():sub(1, -2))
+    end)
+    test.equal(world:getStats().entities, count)
+end
+
+function suite.readsColumnIndexedTablesAndMigratesBinarySchemas(): nil
+    const world = tecs.ecs.newWorld()
+    const native = tecs.ecs.Transform3D
+    world:loadSnapshot({
+        version = 1,
+        nextEntityId = 2,
+        componentTable = {{name = "Transform3D"}},
+        archetypes = {
+            {
+                columnIndices = {1},
+                entities = {{1, {x = 4, y = 5, z = 6, rotationW = 1, scaleX = 1, scaleY = 1, scaleZ = 1}}}
+            }
+        },
+        data = {}
+    })
+    test.equal(assert(world:get(1, native)).x, 4)
+    const encoded = buffer.new()
+    encoded:encode(1):encode(2):encode(1):encode(1):encode(1)
+    encoded:encode("Transform3D"):encode("z:double,x:double|16")
+    encoded:encode(1):encode(1):encode(1):encode(0)
+    const ids: any = ffi.new("double[1]", 1)
+    const old: any = ffi.new("double[2]", 7, 9)
+    encoded:putcdata(ids as voidptr, 8):putcdata(old as voidptr, 16):encode(false)
+    world:loadSnapshot(encoded)
+    test.equal(assert(world:get(1, native)).x, 9)
+    test.equal(assert(world:get(1, native)).z, 7)
+end
+
+local struct NestedPose
+    x: number
+end
+
+local struct Nested
+    pose: NestedPose
+    pointer: uint8*?
+end
+
+function suite.nativeNestedAndPointerLayoutsUseCustomCodecs(): nil
+    const component = tecs.ecs.newFFIComponent({
+        name = "test.Parity.Nested",
+        construct = function(x: number): Nested
+            return new Nested(new NestedPose(x), nil)
+        end,
+        default = function(): Nested
+            return new Nested()
+        end,
+        save = function(value: Nested): any
+            return {x = value.pose.x}
+        end,
+        load = function(value: any): Nested
+            return new Nested(new NestedPose(value.x as number), nil)
+        end
+    })
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(component(17))
+    world:commit()
+    world:loadSnapshot(world:saveSnapshot({format = "binary"}))
+    const restored = assert(world:get(id, component))
+    test.equal(restored.pose.x, 17)
+    test.assert(assert(world:get(id, component)).pointer == nil)
+end
+
+function suite.savesAndLoadsInsideAnActiveSystem(): nil
+    const world = tecs.ecs.newWorld()
+    const marker = tecs.ecs.newTagComponent({name = "test.Parity.InSystem"})
+    world:addSystem({
+        name = "test.parity.snapshot",
+        phase = "Update",
+        run = function(_dt: number, exclusive running: tecs.ecs.World): nil
+            running:spawn(marker)
+            running:loadSnapshot(running:saveSnapshot({format = "binary"}))
+        end
+    })
+    world:update(0)
+    test.equal(world:newQuery({include = {marker}}):count(), 1)
+end
+
+function suite.customPhaseTreesDispatchAndEnableRecursively(): nil
+    const world = tecs.ecs.newWorld()
+    const first: tecs.ecs.PhaseDefinition = {name = "test.CustomFirst"}
+    world:registerPhase(first)
+    world:registerPhase({name = "test.CustomLast"})
+    world:registerPhase({name = "test.CustomGroup", children = {first.name, "test.CustomLast"}})
+    local order = ""
+    world:addSystem({
+        name = "test.custom.first",
+        phase = first.name,
+        run = function(): nil
+            order = order .. "a"
+        end
+    })
+    world:addSystem({
+        name = "test.custom.last",
+        phase = "test.CustomLast",
+        run = function(): nil
+            order = order .. "b"
+        end
+    })
+    world:update(0)
+    test.equal(order, "")
+    world:runPhase("test.CustomGroup")
+    test.equal(order, "ab")
+    world:disablePhase("test.CustomGroup")
+    world:runPhase("test.CustomGroup")
+    test.equal(order, "ab")
+    world:enablePhase("test.CustomLast")
+    world:runPhase("test.CustomGroup")
+    test.equal(order, "abb")
+    test.assert(first.position ~= nil)
+    test.raises(
+        function(): nil
+            world:registerPhase({name = "test.Cycle", children = {"test.Cycle"}})
+        end,
+        "unknown"
+    )
+end
+
+function suite.worldAwareDeserializersReceiveTheDestination(): nil
+    local record Value
+        count: integer
+    end
+    const destination = tecs.ecs.newWorld()
+    local seen = false
+    const value = tecs.ecs.newComponent({
+        name = "test.Parity.WorldAware",
+        construct = function(): Value
+            return new Value(count = 17)
+        end,
+        default = function(): Value
+            return new Value(count = 0)
+        end,
+        save = function(input: Value): any
+            return input.count
+        end,
+        deserialize = function(exclusive world: tecs.ecs.World, input: any): Value
+            seen = world == destination
+            return new Value(count = input as integer)
+        end
+    })
+    const id = destination:spawn(value())
+    destination:commit()
+    destination:loadSnapshot(destination:saveSnapshot({format = "binary"}))
+    test.assert(seen)
+    test.equal(assert(destination:get(id, value)).count, 17)
+end
+
+function suite.fixedTrackingDistinguishesVariableRateOverwrites(): nil
+    const world = tecs.ecs.newWorld({timestep = 0.1})
+    const value = tecs.ecs.newScalarComponent({name = "test.Parity.Fixed", kind = "number"})
+    const id = world:spawn(value(1))
+    world:commit()
+    const candidate = assert((world:findArchetypes(value)()))
+    fixedtracking.track(world, value)
+    local before: integer = 0
+    local after: integer = 0
+    fixedtracking.beforeStep(world, function(): nil
+        before = before + 1
+    end)
+    fixedtracking.afterStep(world, function(exclusive current: tecs.ecs.World): nil
+        after = after + 1
+        test.assert(fixedtracking.wroteThisStep(current, candidate, value))
+    end)
+    world:addSystem({
+        name = "test.parity.fixed",
+        phase = "FixedUpdate",
+        run = function(_dt: number, exclusive current: tecs.ecs.World): nil
+            current:getMut(id, value)
+        end
+    })
+    world:update(0.21)
+    test.equal(before, 2)
+    test.equal(after, 2)
+    test.equal(fixedtracking.currentStep(world), 2)
+    test.equal(fixedtracking.version(candidate, value), 2)
+    world:getMut(id, value)
+    test.assert(not fixedtracking.wroteThisStep(world, candidate, value))
+end
+
+function suite.flatQueuesPreserveCoalescingAndMixedPublicationOrder(): nil
+    const world = tecs.ecs.newWorld()
+    const a = tecs.ecs.newScalarComponent({name = "test.Parity.FlatA", kind = "number"})
+    const b = tecs.ecs.newScalarComponent({name = "test.Parity.FlatB", kind = "number"})
+    const relation = tecs.ecs.newRelationship({name = "test.Parity.FlatEdge", exclusive = true, reverseIndex = true})
+    const bundle = world:newBundle("test.parity.flat", {required = {a}})
+    const parent = world:spawn()
+    const first = bundle:spawn(a(1))
+    world:set(first, b(2))
+    world:set(first, a(3))
+    const related = world:spawn(relation(parent))
+    const last = bundle:spawn(a(4))
+    const order: {integer} = {}
+    world:observe(0, tecs.ecs.OnSpawn, function(borrows event: tecs.ecs.OnSpawn): nil
+        order[#order + 1] = event.entity
+    end)
+    world:commit()
+    test.equal(order[1], parent)
+    test.equal(order[2], first)
+    test.equal(order[3], related)
+    test.equal(order[4], last)
+    test.equal(world:get(first, a), 3)
+    test.equal(world:get(first, b), 2)
+    world:set(first, a(10))
+    world:remove(first, b)
+    world:set(first, a(11))
+    world:set(last, b(12))
+    world:set(first, relation(parent))
+    world:commit()
+    test.equal(world:get(first, a), 11)
+    test.assert(not world:has(first, b))
+    test.equal(world:get(last, b), 12)
+    test.equal(#world:relationshipSources(relation, parent), 2)
+    const canceled = bundle:spawn(a(20))
+    world:despawn(canceled)
+    world:commit()
+    test.assert(not world:isAlive(canceled))
+end
+
+function suite.sparseFramesKeepAbsentTagsAndFalseScalarsDistinct(): nil
+    const world = tecs.ecs.newWorld()
+    const tag = tecs.ecs.newTagComponent({name = "test.Parity.SparseTag"})
+    const flag = tecs.ecs.newScalarComponent({name = "test.Parity.SparseBool", kind = "boolean"})
+    const encoded = buffer.new()
+    encoded:encode(1):encode(3):encode(2):encode(1):encode(2)
+    encoded:encode(tag.componentName):encode(nil):encode(flag.componentName):encode(nil)
+    encoded:encode(2):encode(2):encode(1):encode(2):encode(1)
+    encoded:encode(1):encode(1):encode(nil)
+    encoded:encode(2):encode(2):encode(false):encode(false)
+    world:loadSnapshot(encoded)
+    test.assert(world:has(1, tag))
+    test.assert(not world:has(2, tag))
+    test.assert(not world:has(1, flag))
+    test.equal(world:get(2, flag), false)
+    world:loadSnapshot(world:saveSnapshot({format = "binary"}))
+    test.equal(world:get(2, flag), false)
+end
+
+local struct NativeEdge
+    target: number
+    weight: number
+end
+
+function suite.binaryRelationshipsRestoreDenseNativeAndSparseEdgeSets(): nil
+    const world = tecs.ecs.newWorld()
+    const dense = tecs.ecs.newFFIRelationship({
+        name = "test.Parity.NativeEdge",
+        reverseIndex = true,
+        default = function(): NativeEdge
+            return new NativeEdge()
+        end,
+        construct = function(target: integer, weight: number): NativeEdge
+            return new NativeEdge(target, weight)
+        end
+    })
+    const sparse = tecs.ecs.newRelationship({name = "test.Parity.SparseEdge", sparse = true, reverseIndex = true})
+    const left = world:spawn()
+    const right = world:spawn()
+    const source = world:spawn(dense(left, 3), dense(right, 7))
+    const second = world:spawn(sparse(left), sparse(right))
+    world:commit()
+    world:loadSnapshot(world:saveSnapshot({format = "binary"}))
+    test.equal(assert(world:get(source, dense:targeting(left))).weight, 3)
+    test.equal(assert(world:get(source, dense:targeting(right))).weight, 7)
+    test.equal(world:relationshipSources(dense, right)[1], source)
+    test.equal(world:relationshipSources(sparse, left)[1], second)
+    test.equal(world:relationshipSources(sparse, right)[1], second)
+end
+
+function suite.coldTransitionHooksObserveEntityAndStateChanges(): nil
+    const world = tecs.ecs.newWorld()
+    const tag = tecs.ecs.newTagComponent({name = "test.Parity.Transitions"})
+    local transitions: integer = 0
+    local states: integer = 0
+    entityworld.setTransitionObserver(world, {
+        entity = function(id: integer, before: archetype.Archetype?, after: archetype.Archetype?): nil
+            test.assert(id > 0)
+            test.assert(before ~= after)
+            transitions = transitions + 1
+        end,
+        state = function(_kind: string, _before: string?, _after: string?, changed: string): nil
+            test.equal(changed, "test.parity.state")
+            states = states + 1
+        end
+    })
+    const id = world:spawn()
+    world:commit()
+    world:set(id, tag)
+    world:commit()
+    world:despawn(id)
+    world:commit()
+    world:createState("test.parity.state")
+    world:pushState("test.parity.state")
+    world:popState()
+    test.equal(transitions, 3)
+    test.equal(states, 2)
+    entityworld.setTransitionObserver(world, nil)
+end
+
+function suite.customPipelineOwnsDispatchControlsAndSnapshotClock(): nil
+    const systems: {tecs.ecs.SystemConfig} = {}
+    const enabled: {[string]: boolean} = {}
+    local factoryCalls: integer = 0
+    local registeredPhase = ""
+    local ran: integer = 0
+    const pipeline: tecs.ecs.Pipeline = {
+        count = 0,
+        fixedTimestep = 0.25,
+        fixedAccumulator = 0.125,
+        fixedMaxSteps = 4,
+        fixedOverload = "accumulate",
+        fixedStepCount = 7,
+        fixedTimeDropped = 0,
+        fixedStepsDropped = 0,
+        phaseStates = {true},
+        update = function(
+            self: tecs.ecs.Pipeline,
+            dt: number,
+            exclusive world: tecs.ecs.World,
+            borrows scope: tasks.Scope
+        ): nil
+            self:run("Update", dt, world, scope)
+        end,
+        run = function(
+            self: tecs.ecs.Pipeline,
+            phase: string,
+            dt: number,
+            exclusive world: tecs.ecs.World,
+            borrows scope: tasks.Scope
+        ): nil
+            if not self.phaseStates[1] then
+                return
+            end
+            for index = 1, #systems do
+                const system = systems[index]
+                if system.phase == phase and enabled[assert(system.name)] ~= false then
+                    system.run(dt, world, scope)
+                end
+            end
+        end,
+        addSystem = function(self: tecs.ecs.Pipeline, config: tecs.ecs.SystemConfig): string
+            systems[#systems + 1] = config
+            self.count = self.count + 1
+            return assert(config.name)
+        end,
+        removeSystem = function(self: tecs.ecs.Pipeline, name: string): boolean
+            for index = 1, #systems do
+                if systems[index].name == name then
+                    table.remove(systems, index);
+                    self.count = self.count - 1;
+                    return true
+                end
+            end
+
+            return false
+        end,
+        listSystems = function(_self: tecs.ecs.Pipeline): {tecs.ecs.SystemInfo}
+            const result: {tecs.ecs.SystemInfo} = {}
+            for index = 1, #systems do
+                const system = systems[index]
+                result[
+                    index
+                ] = {
+                    name = assert(system.name),
+                    phase = system.phase,
+                    position = index,
+                    enabled = enabled[assert(system.name)] ~= false,
+                    hasRunIf = system.runIf ~= nil
+                }
+            end
+
+            return result
+        end,
+        setSystemEnabled = function(_self: tecs.ecs.Pipeline, name: string, active: boolean): (boolean, string?)
+            enabled[name] = active;
+            return true, nil
+        end,
+        enablePhase = function(self: tecs.ecs.Pipeline, _phase: string): nil
+            self.phaseStates[1] = true
+        end,
+        disablePhase = function(self: tecs.ecs.Pipeline, _phase: string): nil
+            self.phaseStates[1] = false
+        end,
+        isPhaseEnabled = function(self: tecs.ecs.Pipeline, _phase: string): boolean
+            return self.phaseStates[1]
+        end,
+        registerPhase = function(_self: tecs.ecs.Pipeline, phase: tecs.ecs.PhaseDefinition): nil
+            registeredPhase = phase.name
+        end
+    }
+    const world = tecs.ecs.newWorld({
+        pipelineFactory = function(): tecs.ecs.Pipeline
+            factoryCalls = factoryCalls + 1;
+            return pipeline
+        end
+    })
+    world:registerPhase({name = "test.CustomPipeline"})
+    test.equal(registeredPhase, "test.CustomPipeline")
+    const initial = pipeline.count
+    world:addSystem({
+        name = "test.parity.pipeline",
+        phase = "Update",
+        run = function(_dt: number, exclusive current: tecs.ecs.World): nil
+            current:spawn()
+            ran = ran + 1
+        end
+    })
+    test.equal(world:getStats().systems, initial + 1)
+    test.equal(#world:listSystems(), initial + 1)
+    world:update(0.01)
+    test.equal(ran, 1)
+    test.equal(world:getStats().entities, 1)
+    world:disablePhase("Update")
+    const saved = world:saveSnapshot({format = "binary"})
+    world:enablePhase("Update")
+    pipeline.fixedAccumulator = 0
+    world:loadSnapshot(saved)
+    test.equal(pipeline.fixedAccumulator, 0.125)
+    test.assert(not world:isPhaseEnabled("Update"))
+    world:runPhase("Update")
+    test.equal(ran, 1)
+    world:enablePhase("Update")
+    world:setSystemEnabled("test.parity.pipeline", false)
+    world:update(0)
+    test.equal(ran, 1)
+    test.assert(world:removeSystem("test.parity.pipeline"))
+    test.equal(pipeline.count, initial)
+    test.equal(world:fixedStepCount(), 7)
+    test.equal(factoryCalls, 1)
+end
+
+function suite.snapshotLayersAndMalformedPipelineValidateBeforeReplacement(): nil
+    const world = tecs.ecs.newWorld()
+    const left = world:spawn(tecs.ecs.Transform2D(1, 2, 0, 1))
+    const right = world:spawn(tecs.ecs.Transform2D(3, 4, 0, 2))
+    const unlayered = world:spawn()
+    world:commit()
+    const selected = world:saveSnapshot({format = "binary", layers = {2}})
+    world:loadSnapshot(selected)
+    test.assert(not world:isAlive(left))
+    test.assert(world:isAlive(right) and world:isAlive(unlayered))
+    const saved: any = world:saveSnapshot()
+    saved.pipeline.phaseStates = {"invalid"}
+    test.raises(
+        function(): nil
+            world:loadSnapshot(saved)
+        end,
+        "phase states"
+    )
+    test.assert(world:isAlive(right) and world:isAlive(unlayered))
+    test.raises(
+        function(): nil
+            world:saveSnapshot({customData = {["__tecs.pipeline"] = {}}})
+        end,
+        "reserved"
+    )
+end
+
+function suite.relationshipCodecsReceiveTheDestinationWorld(): nil
+    const world = tecs.ecs.newWorld()
+    local seen: integer = 0
+    const edge = tecs.ecs.newFFIRelationship({
+        name = "test.Parity.WorldAwareEdge",
+        exclusive = true,
+        default = function(): NativeEdge
+            return new NativeEdge()
+        end,
+        construct = function(target: integer, weight: number): NativeEdge
+            return new NativeEdge(target, weight)
+        end,
+        save = function(value: NativeEdge): any
+            return {target = value.target, weight = value.weight}
+        end,
+        deserialize = function(exclusive destination: tecs.ecs.World, value: any): NativeEdge
+            test.assert(destination == world)
+            seen = seen + 1
+            return new NativeEdge(value.target as number, value.weight as number)
+        end
+    })
+    const parent = world:spawn()
+    const source = world:spawn(edge(parent, 17))
+    world:commit()
+    world:loadSnapshot(world:saveSnapshot({format = "binary"}))
+    test.equal(seen, 1)
+    test.equal(assert(world:get(source, edge)).weight, 17)
+end
+
+function suite.binarySnapshotFileMatchesItsReusableBuffer(): nil
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(tecs.ecs.Transform3D(3, 4, 5))
+    world:commit()
+    with temporary = assert(nupp.io.files.createTemporaryFile()) do
+        const output = buffer.new()
+        world:saveSnapshot({format = "binary", buffer = output, path = temporary:toString()})
+        const bytes = assert(nupp.io.files.read(temporary:toString()))
+        test.equal(bytes, output:tostring())
+        world:loadSnapshot(bytes)
+        test.equal(assert(world:get(id, tecs.ecs.Transform3D)).z, 5)
+    end
+end
+
+return suite

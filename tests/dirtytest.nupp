@@ -20,7 +20,8 @@ end
 
 local function matching(world: ecs.World, component: ecs.Component): ecs.Archetype
     local query = world:newQuery({include = {component}})
-    local candidate = query:iter()()
+    local step, state = query:iter()
+    local candidate = step(state, nil)
     return assert(candidate)
 end
 

@@ -3,9 +3,9 @@ module tecs.internal.snapshotvalue
 --[[
 Detached values for the format-neutral snapshot layer.
 
-The ECS owns no JSON or binary codec. It produces plain values that Nupp serde
-can encode. Copying here prevents a saved snapshot from remaining a live view
-onto component or custom-data tables.
+The table format and custom binary payloads contain values Nupp can encode.
+Copying here prevents saved data from remaining a live view onto component or
+custom-data tables. Native column framing lives in snapshotcodec.
 ]]
 
 local function cloneValue(value: any, active: {[table]: boolean}): any

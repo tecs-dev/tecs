@@ -1,6 +1,6 @@
 module tecs.internal.dirtyranges
 
---[[Coalesced byte ranges ported from the original tecs.gpu.dirtyranges.
+--[[Coalesced byte ranges for buffer uploads.
 Adjacent writes merge. After 64 distinct ranges, one covering span bounds
 bookkeeping and trades only upload bandwidth. Storage is retained across frames.]]
 

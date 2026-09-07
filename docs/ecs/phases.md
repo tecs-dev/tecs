@@ -103,8 +103,27 @@ Systems within one phase follow registration order. The engine table above
 supplies the boundaries game plugins commonly order around. [Systems](systems.md)
 covers explicit structural barriers and conditional execution.
 
-Select predefined phase constants. The schedule does not register custom phase
-objects or expose mutable numeric positions.
+Register custom leaves and trees when a separate dispatch needs them:
+
+```nupp
+world:registerPhase({name = "game.ReplayRead"})
+world:registerPhase({name = "game.ReplayStep"})
+world:registerPhase({
+    name = "game.Replay",
+    children = {"game.ReplayRead", "game.ReplayStep"},
+})
+world:runPhase("game.Replay", dt)
+```
+
+Children must already be registered. The optional numeric `position` controls
+inspection ordering; registration does not insert work into the default frame.
+The world copies child lists, and rejects registration during dispatch.
+
+`WorldConfig.pipelineFactory` replaces scheduling before built-in systems are
+installed. The returned `tecs.ecs.Pipeline` owns system ordering, phase dispatch
+and publication barriers. The world forwards its scheduling controls and gives
+the pipeline the existing Nupp task scope. Fixed timing and phase-enabled flags
+are saved and restored through that pipeline's state.
 
 ## Disabling phases
 

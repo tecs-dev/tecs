@@ -3,13 +3,36 @@ module tecs.internal.query
 --[[
 A reusable archetype query over tag component signatures.
 
-Queries retain matching archetypes rather than rescanning the world. Iteration
-skips empty matches, so archetypes can remain registered after their final
-entity leaves and become active again without rebuilding the query.
+Queries retain signature matches, with separate active-only row and group lists.
+Lifecycle notifications update those lists without scanning empty archetypes.
+Temporary queries retain only their initial matches and scan their live row counts.
+Generic-for cursors carry no allocated closure or query-owned iteration position.
 ]]
 
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
+local entitycolumn = require("tecs.internal.entitycolumn")
+
+--- Holds a query-owned group list reused by independent generic-for cursors.
+export record GroupState
+    items: {archetype.Archetype}
+    positions: {[archetype.Archetype]: integer}
+end
+
+--- Advances an independent cursor without allocating iterator closures.
+export type IterFn = function(
+    state: Query,
+    previous: archetype.Archetype?
+): (archetype.Archetype?, integer?, entitycolumn.DoubleArray?)
+
+--- Advances an independent cursor over one query-owned group.
+export type GroupIterFn = function(
+    state: GroupState,
+    previous: archetype.Archetype?
+): (archetype.Archetype?, integer?, entitycolumn.DoubleArray?)
+
+--- Advances an independent cursor over sorted nonempty groups.
+export type GroupsIterFn = function(state: Query, previous: integer?): integer?
 
 --- Identifies the world that owns a query without retaining that world.
 export record Owner
@@ -70,28 +93,31 @@ export record Query
     private exclude: {components.Component}
     private includeAny: {components.Component}
     private active: {archetype.Archetype}
+    private positions: {[archetype.Archetype]: integer}
+    private lifecycle: archetype.EntityObserver?
     private matched: {[archetype.Archetype]: boolean}
     private groupIds: {integer}
-    private grouped: {[integer]: {archetype.Archetype}}
+    private groupPositions: {[integer]: integer}
+    private grouped: {[integer]: GroupState}
     private archetypeGroups: {[archetype.Archetype]: integer}
 
     --- Iterates nonempty archetypes, in ascending group order when grouped.
     --- @param self The query to read.
     --- @return Returns an independent iterator yielding an archetype, count and live
     ---     entity column.
-    iter: function(self: Query): function(): (archetype.Archetype?, integer?, {integer}?)
+    iter: function(self: Query): (IterFn, Query, archetype.Archetype?)
 
     --- Iterates nonempty group identifiers in ascending order.
     --- @param self The query to read.
     --- @return Returns an independent iterator, empty for ungrouped queries.
-    groups: function(self: Query): function(): integer?
+    groups: function(self: Query): (GroupsIterFn, Query, integer?)
 
     --- Iterates nonempty archetypes in one group.
     --- @param self The query to read.
     --- @param groupId The integer group identifier.
     --- @return Returns an independent iterator yielding an archetype, count and live
     ---     entity column.
-    group: function(self: Query, groupId: integer): function(): (archetype.Archetype?, integer?, {integer}?)
+    group: function(self: Query, groupId: integer): (GroupIterFn, GroupState, archetype.Archetype?)
 
     --- Returns an archetype's assigned group.
     --- @param self The query to read.
@@ -126,6 +152,65 @@ export function belongsTo(value: Query, owner: Owner): boolean
     return value.owner == owner
 end
 
+local function removeItem(
+    items: {archetype.Archetype},
+    positions: {[archetype.Archetype]: integer},
+    candidate: archetype.Archetype
+): nil
+    const index = positions[candidate]
+    if index == nil then
+        return
+    end
+    const last = items[#items]
+    items[index] = last
+    positions[last] = index
+    items[#items] = nil
+    positions[candidate] = nil
+end
+
+local function deactivate(value: Query, candidate: archetype.Archetype): nil
+    removeItem(value.active, value.positions, candidate)
+    const group = value.archetypeGroups[candidate]
+    if group ~= nil then
+        const state = value.grouped[group]
+        if state ~= nil then
+            removeItem(state.items, state.positions, candidate)
+            if #state.items == 0 and value.groupPositions[group] ~= nil then
+                const position = assert(value.groupPositions[group])
+                table.remove(value.groupIds, position)
+                value.groupPositions[group] = nil
+                for index = position, #value.groupIds do
+                    value.groupPositions[value.groupIds[index]] = index
+                end
+            end
+        end
+    end
+end
+
+local function activate(value: Query, candidate: archetype.Archetype): nil
+    if value.positions[candidate] ~= nil or not value.matched[candidate] then
+        return
+    end
+    value.active[#value.active + 1] = candidate
+    value.positions[candidate] = #value.active
+    const group = value.archetypeGroups[candidate]
+    if group ~= nil then
+        const state = assert(value.grouped[group])
+        if #state.items == 0 then
+            local position: integer = 1
+            while position <= #value.groupIds and value.groupIds[position] < group do
+                position = position + 1
+            end
+            table.insert(value.groupIds, position, group)
+            for index = position, #value.groupIds do
+                value.groupPositions[value.groupIds[index]] = index
+            end
+        end
+        state.items[#state.items + 1] = candidate
+        state.positions[candidate] = #state.items
+    end
+end
+
 --- Releases an empty archetype permanently removed by world maintenance.
 --- @param value The query to update.
 --- @param candidate The empty archetype to forget.
@@ -133,30 +218,9 @@ export function removeArchetype(value: Query, candidate: archetype.Archetype): n
     if not value.matched[candidate] then
         return
     end
+    deactivate(value, candidate)
     value.matched[candidate] = nil
-    for index = #value.active, 1, -1 do
-        if value.active[index] == candidate then
-            table.remove(value.active, index)
-        end
-    end
-    const id = value.archetypeGroups[candidate]
     value.archetypeGroups[candidate] = nil
-    if id ~= nil then
-        const items = assert(value.grouped[id])
-        for index = #items, 1, -1 do
-            if items[index] == candidate then
-                table.remove(items, index)
-            end
-        end
-        if #items == 0 then
-            value.grouped[id] = nil
-            for index = #value.groupIds, 1, -1 do
-                if value.groupIds[index] == id then
-                    table.remove(value.groupIds, index)
-                end
-            end
-        end
-    end
 end
 
 --- Creates a query with no active archetypes yet.
@@ -190,7 +254,7 @@ export function new(descriptor: Descriptor?, filterStates: boolean?): Query
         end
     end
 
-    return new Query(
+    const result = new Query(
         descriptor = {
             name = source.name,
             type = source.type,
@@ -206,11 +270,28 @@ export function new(descriptor: Descriptor?, filterStates: boolean?): Query
         exclude = exclude,
         includeAny = includeAny,
         active = {},
+        positions = {},
         matched = {},
         groupIds = {},
+        groupPositions = {},
         grouped = {},
         archetypeGroups = {}
     )
+    if not source.temp then
+        result.lifecycle = {
+            onActivated = function(_observer: archetype.EntityObserver, candidate: archetype.Archetype): nil
+                activate(result, candidate)
+            end,
+            onDeactivated = function(_observer: archetype.EntityObserver, candidate: archetype.Archetype): nil
+                deactivate(result, candidate)
+            end,
+            onArchetypeDestroyed = function(_observer: archetype.EntityObserver, candidate: archetype.Archetype): nil
+                removeArchetype(result, candidate)
+            end
+        }
+    end
+
+    return result
 end
 
 --- Reports whether an archetype satisfies a query.
@@ -249,19 +330,21 @@ export function addArchetype(value: Query, candidate: archetype.Archetype): nil
         return
     end
     value.matched[candidate] = true
-    value.active[#value.active + 1] = candidate
     const groupBy = value.descriptor.groupBy
     if groupBy ~= nil then
         const id = groupBy(candidate)
         value.archetypeGroups[candidate] = id
-        local items = value.grouped[id]
-        if items == nil then
-            items = {}
-            value.grouped[id] = items
-            value.groupIds[#value.groupIds + 1] = id
-            table.sort(value.groupIds)
+        local state = value.grouped[id]
+        if state == nil then
+            state = new GroupState(items = {}, positions = {})
+            value.grouped[id] = state
         end
-        items[#items + 1] = candidate
+    end
+    if value.lifecycle ~= nil then
+        candidate:addEntityObserver(value.lifecycle)
+    end
+    if #candidate.entities > 0 or value.descriptor.temp then
+        activate(value, candidate)
     end
     const added = value.descriptor.onEntitiesAdded
     if added ~= nil and #candidate.entities > 0 then
@@ -269,62 +352,62 @@ export function addArchetype(value: Query, candidate: archetype.Archetype): nil
     end
 end
 
---- Iterates nonempty matching archetypes and their current entity counts.
---- @param self the query to iterate
---- @return the iterator
-function Query.iter(self: Query): function(): (archetype.Archetype?, integer?, {integer}?)
-    if self.descriptor.groupBy ~= nil then
-        local groupIndex: integer = 1
-        local rowIndex: integer = 0
-        return function(): (archetype.Archetype?, integer?, {integer}?)
-            while groupIndex <= #self.groupIds do
-                const items = assert(self.grouped[self.groupIds[groupIndex]])
-                rowIndex = rowIndex + 1
-                if rowIndex > #items then
-                    groupIndex = groupIndex + 1
-                    rowIndex = 0
-                else
-                    const candidate = items[rowIndex]
-                    if #candidate.entities > 0 then
-                        return candidate, #candidate.entities, candidate.entities
-                    end
-                end
-            end
-
-            return nil, nil, nil
+local function groupStep(
+    state: GroupState,
+    previous: archetype.Archetype?
+): (archetype.Archetype?, integer?, entitycolumn.DoubleArray?)
+    local index = previous ~= nil and (state.positions[previous] or #state.items) + 1 or 1
+    while index <= #state.items do
+        const candidate = state.items[index]
+        if #candidate.entities > 0 then
+            return candidate, #candidate.entities, candidate.entities
         end
+        index = index + 1
     end
-    local active = self.active
-    local index: integer = 0
 
-    return function(): (archetype.Archetype?, integer?, {integer}?)
-        while index < #active do
-            index = index + 1
-            local candidate = active[index]
-            local count = #candidate.entities
-            if count > 0 then
-                return candidate, count, candidate.entities
-            end
-        end
-
-        return nil, nil, nil
-    end
+    return nil, nil, nil
 end
 
-function Query.group(self: Query, groupId: integer): function(): (archetype.Archetype?, integer?, {integer}?)
-    const items = self.grouped[groupId] or {}
-    local index: integer = 0
-    return function(): (archetype.Archetype?, integer?, {integer}?)
-        while index < #items do
-            index = index + 1
-            const candidate = items[index]
-            if #candidate.entities > 0 then
-                return candidate, #candidate.entities, candidate.entities
+local function iterStep(
+    state: Query,
+    previous: archetype.Archetype?
+): (archetype.Archetype?, integer?, entitycolumn.DoubleArray?)
+    if state.descriptor.groupBy ~= nil then
+        const priorGroup = previous ~= nil and state.archetypeGroups[previous] or nil
+        for index = priorGroup ~= nil and (state.groupPositions[priorGroup] or 1) or 1, #state.groupIds do
+            const id = state.groupIds[index]
+            if priorGroup == nil or id >= priorGroup then
+                const candidate, count, entities = groupStep(
+                    assert(state.grouped[id]),
+                    id == priorGroup and previous or nil
+                )
+                if candidate ~= nil then
+                    return candidate, count, entities
+                end
             end
         end
-
         return nil, nil, nil
     end
+    local index = previous ~= nil and (state.positions[previous] or #state.active) + 1 or 1
+    while index <= #state.active do
+        const candidate = state.active[index]
+        if #candidate.entities > 0 then
+            return candidate, #candidate.entities, candidate.entities
+        end
+        index = index + 1
+    end
+
+    return nil, nil, nil
+end
+
+function Query.iter(self: Query): (IterFn, Query, archetype.Archetype?)
+    return iterStep, self, nil
+end
+
+const emptyGroup = new GroupState(items = {}, positions = {})
+
+function Query.group(self: Query, groupId: integer): (GroupIterFn, GroupState, archetype.Archetype?)
+    return groupStep, self.grouped[groupId] or emptyGroup, nil
 end
 
 function Query.getGroup(self: Query, candidate: archetype.Archetype): integer?
@@ -332,9 +415,10 @@ function Query.getGroup(self: Query, candidate: archetype.Archetype): integer?
 end
 
 function Query.getGroupCount(self: Query, groupId: integer): integer
-    const items = self.grouped[groupId]
+    const state = self.grouped[groupId]
     local total: integer = 0
-    if items ~= nil then
+    if state ~= nil then
+        const items = state.items
         for index = 1, #items do
             total = total + #items[index].entities
         end
@@ -352,19 +436,19 @@ function Query.count(self: Query): integer
     return total
 end
 
-function Query.groups(self: Query): function(): integer?
-    local index: integer = 0
-    return function(): integer?
-        while index < #self.groupIds do
-            index = index + 1
-            const id = self.groupIds[index]
-            if self:getGroupCount(id) > 0 then
-                return id
-            end
+local function groupsStep(state: Query, previous: integer?): integer?
+    for index = previous ~= nil and (state.groupPositions[previous] or #state.groupIds) + 1 or 1, #state.groupIds do
+        const id = state.groupIds[index]
+        if (previous == nil or id > previous) and state:getGroupCount(id) > 0 then
+            return id
         end
-
-        return nil
     end
+
+    return nil
+end
+
+function Query.groups(self: Query): (GroupsIterFn, Query, integer?)
+    return groupsStep, self, nil
 end
 
 --- Delivers a membership change, suppressing moves wholly inside the query.

@@ -9,7 +9,7 @@ come from a LIFO stack, while contiguous ranges deliberately use only the fresh
 suffix.
 
 World code uses placement operations instead of retaining references across
-growth. Bulk transaction stamps share the slot array, as in the original ECS.
+growth. Bulk transaction stamps share the slot array.
 ]]
 
 local ffi = require("ffi")
@@ -27,6 +27,8 @@ local struct EntitySlot
     row: integer
     spawnBatch: integer
     mutationBatch: integer
+    flatSpawn: integer
+    flatMove: integer
 end
 
 local struct FreeSlot
@@ -77,6 +79,36 @@ export function stampSpawn(exclusive allocator: IdAllocator, slot: integer, batc
     slotEntry(allocator, slot).spawnBatch = batch
 end
 
+--- Records the offset of a flat pending spawn, or zero after publication.
+export function stampFlatSpawn(exclusive allocator: IdAllocator, slot: integer, offset: integer): nil
+    slotEntry(allocator, slot).flatSpawn = offset
+end
+
+--- Returns the flat pending-spawn offset without allocating a slot wrapper.
+export function flatSpawnAt(borrows allocator: IdAllocator, slot: integer): integer
+    if slot < 1 or slot > allocator.highWater then
+        return 0
+    end
+    unsafe do
+        return allocator.slots[slot].flatSpawn
+    end
+end
+
+--- Records the offset of the latest flat scalar mutation.
+export function stampFlatMove(exclusive allocator: IdAllocator, slot: integer, offset: integer): nil
+    slotEntry(allocator, slot).flatMove = offset
+end
+
+--- Returns the latest flat scalar mutation, or zero.
+export function flatMoveAt(borrows allocator: IdAllocator, slot: integer): integer
+    if slot < 1 or slot > allocator.highWater then
+        return 0
+    end
+    unsafe do
+        return allocator.slots[slot].flatMove
+    end
+end
+
 --- Returns the pending spawn descriptor, or zero.
 export function spawnBatchAt(borrows allocator: IdAllocator, slot: integer): integer
     if slot < 1 or slot > allocator.highWater then
@@ -108,6 +140,8 @@ export function clearStamps(exclusive allocator: IdAllocator): nil
         for slot = 1, allocator.highWater do
             allocator.slots[slot].spawnBatch = 0
             allocator.slots[slot].mutationBatch = 0
+            allocator.slots[slot].flatSpawn = 0
+            allocator.slots[slot].flatMove = 0
         end
     end
 end
@@ -269,6 +303,8 @@ export function freeSlot(exclusive allocator: IdAllocator, slot: integer): nil
     entry.archetypeId = 0
     entry.spawnBatch = 0
     entry.mutationBatch = 0
+    entry.flatSpawn = 0
+    entry.flatMove = 0
     local generation = entry.generation + 1
     if generation == GEN_COUNT then
         generation = 0
@@ -296,7 +332,10 @@ export function rebuildFreeStack(exclusive allocator: IdAllocator, reserved: {[i
         if placement(
             allocator,
             slot
-        ) == 0 and spawnBatchAt(allocator, slot) == 0 and (reserved == nil or not reserved[slot]) then
+        ) == 0 and spawnBatchAt(
+            allocator,
+            slot
+        ) == 0 and flatSpawnAt(allocator, slot) == 0 and (reserved == nil or not reserved[slot]) then
             count = count + 1
             unsafe do
                 allocator.freeStack[count].slot = slot
@@ -369,6 +408,8 @@ export function reset(exclusive allocator: IdAllocator): nil
             entry.row = 0
             entry.spawnBatch = 0
             entry.mutationBatch = 0
+            entry.flatSpawn = 0
+            entry.flatMove = 0
         end
     end
     allocator.maxGeneration = newGeneration

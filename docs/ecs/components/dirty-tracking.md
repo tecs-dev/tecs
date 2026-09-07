@@ -5,8 +5,9 @@ outline: deep
 
 # Dirty tracking
 
-Tecs tracks dirty state per archetype and component. One mark means that some
-row in the column may have changed. It does not track individual rows.
+Tecs tracks value dirtiness per archetype and component. One mark means that
+some row in the column may have changed. Structural residue separately records
+bounded append and swap-pop ranges for incremental consumers.
 
 Incremental consumers such as text layout and hierarchy composition use that signal to skip unchanged
 columns. A write that Tecs cannot see leaves those consumers with stale data.
@@ -76,9 +77,16 @@ Each changed column is marked on its archetype.
 
 `world:update` clears marks after the pipeline runs. A consumer must inspect the columns it reads before those marks clear.
 
+`world:dirtyArchetypes()` visits the first-dirtied queue, not the world's whole
+archetype registry. Each archetype enters that queue once per dirty window.
+Use `structuralCount()` and the structural residue methods to decide whether a
+retained consumer can update ranges or must rebuild. `trackValueCount(Component)`
+opts a column's explicit writes into a monotonic aggregate counter; structural
+changes have their own counter.
+
 ## Retained rendering
 
-The renderer also keeps monotonic write counters, as the original engine did.
+The renderer also keeps monotonic write counters.
 Those counters survive the end-of-frame dirty clear. Unchanged renderable
 archetype runs keep their packed instances and GPU buffers; a changed run
 rewrites and uploads its affected range. Structural changes that move packed

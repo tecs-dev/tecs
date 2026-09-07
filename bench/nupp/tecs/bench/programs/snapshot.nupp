@@ -1,17 +1,13 @@
 --- Snapshot save and load throughput for three archetypes.
 ---
---- The world holds a full, a partial, and a position-only archetype, which is
---- the fixture `bench/snapshot.tl` builds. Three archetypes keep the benchmark
+--- The world holds a full, a partial, and a position-only archetype.
+--- Three archetypes keep the benchmark
 --- off a single contiguous copy path and make save and restore pay for the
 --- archetype framing a real game carries.
 ---
---- What this measures is not what the Teal benchmark measures, and the two
---- numbers must not be subtracted from each other. Teal snapshots are binary:
---- `world:saveSnapshot` writes into a `string.buffer` and the row is reported
---- in MiB/s. A Nupp snapshot is the format-neutral `Snapshot` record, and no
---- binary framing is ported, so there are no bytes to divide by and the row is
---- reported in entities per second instead. The comparable claim is per entity
---- and per component, not per byte.
+--- The benchmark uses native structs and version-one binary framing.
+--- Save reuses one buffer; load copies native columns into
+--- their final allocations and includes identity validation and publication.
 ---
 --- Setup stays outside the timed windows. A load replaces the same world's
 --- entities from one prepared snapshot, which `loadSnapshot` reads without
@@ -23,6 +19,8 @@
 
 local ecs = require("tecs.ecs")
 
+local buffer = require("string.buffer")
+
 local harness = require("tecs.bench.harness")
 
 const COUNT = harness.count("BENCH_SNAPSHOT_COUNT", 10000)
@@ -30,52 +28,51 @@ const WARMUP = harness.optionalCount("BENCH_SNAPSHOT_WARMUP", 5)
 const SAMPLES = harness.count("BENCH_SNAPSHOT_SAMPLES", 31)
 
 --- A two-dimensional vector stored in a record-valued column.
-local record Vector
+local struct Vector
     x: number
     y: number
 end
 
 --- Current and maximum hit points stored in a record-valued column.
-local record Health
+local struct Health
     current: integer
     maximum: integer
 end
 
-const Position = ecs.newComponent({
+const Position = ecs.newFFIComponent({
     name = "bench.SnapshotPosition",
     construct = function(x: number, y: number): Vector
-        return new Vector(x = x, y = y)
+        return new Vector(x, y)
     end,
     default = function(): Vector
-        return new Vector(x = 0, y = 0)
+        return new Vector(0, 0)
     end,
 })
 
-const Velocity = ecs.newComponent({
+const Velocity = ecs.newFFIComponent({
     name = "bench.SnapshotVelocity",
     construct = function(x: number, y: number): Vector
-        return new Vector(x = x, y = y)
+        return new Vector(x, y)
     end,
     default = function(): Vector
-        return new Vector(x = 0, y = 0)
+        return new Vector(0, 0)
     end,
 })
 
-const Vitality = ecs.newComponent({
+const Vitality = ecs.newFFIComponent({
     name = "bench.SnapshotHealth",
     construct = function(current: integer, maximum: integer): Health
-        return new Health(current = current, maximum = maximum)
+        return new Health(current, maximum)
     end,
     default = function(): Health
-        return new Health(current = 100, maximum = 100)
+        return new Health(100, 100)
     end,
 })
 
 --- Fills a world with the three-archetype fixture.
 ---
---- The Nupp world has no `batchSpawn`, so each entity is spawned on its own.
---- That is setup rather than a measured operation, and the archetype shape it
---- produces is what the timed windows read.
+--- Setup is outside the measured operations; the three signatures determine
+--- the column framing charged to save and restore.
 local function populate(exclusive world: ecs.World, count: integer): nil
     const third = count // 3
     for index = 1, third do
@@ -97,13 +94,15 @@ if saveWorld:getStats().entities ~= COUNT then
 end
 
 const save = harness.newStage("save")
+const output = buffer.new()
+const options: ecs.SnapshotOptions = {format = "binary", buffer = output}
 harness.measure(save, WARMUP, SAMPLES, function(): nil
-    if saveWorld:saveSnapshot().entityCount ~= COUNT then
+    if saveWorld:saveSnapshot(options).entityCount ~= COUNT then
         error("bench: save produced the wrong entity count", 0)
     end
 end)
 
-const prepared = saveWorld:saveSnapshot()
+const prepared = saveWorld:saveSnapshot(options)
 const loadWorld = ecs.newWorld({maxEntities = COUNT + 64})
 const load = harness.newStage("load")
 harness.measure(load, WARMUP, SAMPLES, function(): nil
@@ -119,5 +118,10 @@ for _, stage in ipairs({save, load}) do
     const row = harness.report(stage)
     if row ~= nil then
         print(("snapshot %-4s %d entities  %.0f entities/s"):format(row.name, COUNT, COUNT * 1000.0 / row.p50))
+        print(
+            (
+                "snapshot %-4s %.3f MiB  %.1f MiB/s"
+            ):format(row.name, #output / 1048576, #output / 1048576 * 1000 / row.p50)
+        )
     end
 end

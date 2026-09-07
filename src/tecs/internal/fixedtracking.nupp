@@ -1,0 +1,100 @@
+module tecs.internal.fixedtracking
+
+--[[
+Opt-in fixed-iteration observation.
+Variable-rate writes invalidate the fixed sample instead of being interpolated
+as though they belonged to the preceding simulation step.
+]]
+
+local archetype = require("tecs.internal.archetype")
+local components = require("tecs.internal.components")
+local entityworld = require("tecs.internal.world")
+
+--- Reports whether this world has opted into fixed-iteration tracking.
+export function enabled(exclusive world: entityworld.World): boolean
+    return entityworld.fixedTracking(world) ~= nil
+end
+
+--- Opens the next fixed iteration, including before-step callbacks.
+export function beginStep(exclusive world: entityworld.World): nil
+    entityworld.beginFixedStep(world)
+end
+
+--- Delivers after-step callbacks and closes the active fixed iteration.
+export function finishStep(exclusive world: entityworld.World): nil
+    entityworld.finishFixedStep(world)
+end
+
+--- Advances only the opted-in fixed mutation sample for one column.
+export function mark(value: archetype.Archetype, component: components.Component): nil
+    archetype.markFixed(value, component)
+end
+
+--- Advances all present fixed samples and the fixed structural version.
+export function markAll(value: archetype.Archetype): nil
+    archetype.markFixedAll(value)
+end
+
+--- Opts one component into monotonically versioned fixed samples.
+export function track(exclusive world: entityworld.World, component: components.Component): nil
+    const state = assert(entityworld.fixedTracking(world, true))
+    if state.tracked[component.componentId] then
+        return
+    end
+    state.tracked[component.componentId] = true
+    state.trackedList[#state.trackedList + 1] = component
+end
+
+--- Registers a callback before each fixed iteration starts accepting writes.
+export function beforeStep(
+    exclusive world: entityworld.World,
+    callback: function(exclusive world: entityworld.World)
+): nil
+    entityworld.onFixedStep(world, callback, true)
+end
+
+--- Registers a callback after each fixed iteration's systems have run.
+export function afterStep(
+    exclusive world: entityworld.World,
+    callback: function(exclusive world: entityworld.World)
+): nil
+    entityworld.onFixedStep(world, callback, false)
+end
+
+--- Returns the fixed mutation version, or minus one for untracked columns.
+export function version(value: archetype.Archetype, component: components.Component): integer
+    const state = archetype.tracking(value)
+    if state == nil or not state.tracked[component.componentId] then
+        return -1
+    end
+    const versions = state.versions[value]
+
+    return versions and (versions[component.componentId] or 0) or 0
+end
+
+--- Returns the fixed structural version, or minus one for an untracked world.
+export function structureVersion(value: archetype.Archetype): integer
+    const state = archetype.tracking(value)
+    return state and (state.structures[value] or 0) or -1
+end
+
+--- Returns the current fixed iteration, or zero before tracking begins.
+export function currentStep(exclusive world: entityworld.World): integer
+    const state = entityworld.fixedTracking(world)
+    return state and state.step or 0
+end
+
+--- Reports a write in this fixed iteration that no variable-rate write superseded.
+export function wroteThisStep(
+    exclusive world: entityworld.World,
+    value: archetype.Archetype,
+    component: components.Component
+): boolean
+    const state = entityworld.fixedTracking(world)
+    if state == nil or archetype.tracking(value) ~= state then
+        return false
+    end
+    const writes = state.writes[value]
+
+    return writes ~= nil and writes[component.componentId] == state.step
+end
