@@ -292,7 +292,7 @@ export type Options = {
 export type Tilemap = TilemapValue
 
 --- Loads a map as static TileChunks and animated sprite entities.
-export const Tilemap: tecs.ecs.TableComponent<TilemapValue> = tecs.ecs.newComponent({
+export const Tilemap: tecs.ecs.ComponentDefinition<TilemapValue> = tecs.ecs.newComponent(TilemapValue, {
     name = "Tilemap",
     requires = {tecs.ecs.Transform2D},
     construct = function(options: Options?): TilemapValue
@@ -330,7 +330,7 @@ end
 export type TileSource = TileSourceValue
 
 --- Constructs metadata identifying a tile's authored source.
-export const TileSource: tecs.ecs.TableComponent<TileSourceValue> = tecs.ecs.newComponent({
+export const TileSource: tecs.ecs.ComponentDefinition<TileSourceValue> = tecs.ecs.newComponent(TileSourceValue, {
     name = "TileSource",
     construct = function(id: integer, name: string, class: string?, properties: {[string]: any}?): TileSourceValue
         return new TileSourceValue(localId = id, tilesetName = name, class = class or "", properties = properties or {})
@@ -373,7 +373,7 @@ local record Row
 end
 local record Chunk
     row: Row
-    value: tecs.internal.components.FFIInstance<tecs.gfx.TileChunk, tecs.ecs.FFIComponent<tecs.gfx.TileChunk>>
+    value: tecs.internal.components.FFIInstance<tecs.gfx.TileChunk, tecs.ecs.ComponentDefinition<tecs.gfx.TileChunk>>
     cells: {[string]: Cell}
     tileset: integer
     layerIndex: integer
@@ -440,7 +440,7 @@ end
 local function sprite(
     set: Tileset,
     id: integer
-): tecs.internal.components.FFIInstance<tecs.gfx.Sprite, tecs.ecs.FFIComponent<tecs.gfx.Sprite>>, number, number
+): tecs.internal.components.FFIInstance<tecs.gfx.Sprite, tecs.ecs.ComponentDefinition<tecs.gfx.Sprite>>, number, number
     local tile = tileOf(set, id)
     local source = tile and tile.image or set.image
     assert(source, "tiled: tile has no image")

@@ -282,6 +282,7 @@ return {
                     "tecs.internal.builtins",
                     "tecs.internal.componentids",
                     "tecs.internal.components",
+                    "tecs.internal.derived",
                     "tecs.internal.events",
                     "tecs.internal.framepump",
                     "tecs.internal.framepacket",

@@ -1,0 +1,254 @@
+local test = require("nupp.test")
+local suite = {}
+
+local function readDerived<T is tecs.ecs.ComponentValue>(
+    borrows world: tecs.ecs.World,
+    id: integer,
+    declaration: Type<T>
+): T?
+    return world:get(id, declaration)
+end
+
+local function readEdge<T is tecs.ecs.RelationshipPayload>(
+    borrows world: tecs.ecs.World,
+    id: integer,
+    declaration: Type<T>
+): T?
+    return world:getFirstRelationship(id, declaration)
+end
+
+@derive(tecs.ecs.Component, nupp.derive.Debug, nupp.derive.Serde)
+local struct Velocity
+    x: number = 0
+    y: number = 0
+end
+
+@derive(tecs.ecs.Component, nupp.derive.Debug)
+local record Description
+    text: string = ""
+end
+
+@derive(tecs.ecs.Component)
+@component(transient = true)
+local struct Requiring
+    weight: number = 1
+end
+tecs.ecs.newComponent(Requiring, {requires = {Velocity}})
+
+function suite.configuredDerivedRequirementsAndTransientPolicyApplyToRawValues(): nil
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(new Requiring())
+    world:commit()
+    test.assert(world:has(id, Velocity))
+    const loaded = tecs.ecs.newWorld()
+    loaded:loadSnapshot(world:saveSnapshot({format = "binary"}))
+    test.assert(loaded:has(id, Velocity))
+    test.equal(loaded:has(id, Requiring), false)
+    loaded:shutdown()
+    world:shutdown()
+end
+
+function suite.stagedNativeRowsAreCapturedBeforeTheirStorageChanges(): nil
+    const world = tecs.ecs.newWorld()
+    const source = world:spawn(new Velocity(3, 4))
+    world:commit()
+    const copied = world:spawn(assert(world:get(source, Velocity)))
+    assert(world:getMut(source, Velocity)).x = 99
+    world:commit()
+    test.equal(assert(world:get(copied, Velocity)).x, 3)
+    world:shutdown()
+end
+
+@derive(tecs.ecs.Relationship)
+@relationship(reverseIndex = true)
+local struct Spring
+    target: number
+    stiffness: number = 1
+end
+
+local constructions: integer = 0
+@derive(tecs.ecs.Component)
+local struct Counted
+    x: number
+    constructor(self, x: number?)
+        constructions += 1
+        self.x = x or 9
+    end
+end
+
+@derive(tecs.ecs.Component)
+local struct Reused
+    x: number
+    constructor(self)
+        self.x = self.x + 1
+    end
+end
+
+function suite.nativeBatchDefaultsStartWithZeroedReusedStorage(): nil
+    const world = tecs.ecs.newWorld()
+    const first = assert(world:batchSpawn(32, {Reused}))
+    world:commit()
+    assert(world:getMut(first, Reused)).x = 99
+    world:batchDespawn(world:newQuery({include = {Reused}}))
+    world:commit()
+    const replacement = assert(world:batchSpawn(32, {Reused}))
+    world:commit()
+    test.equal(assert(world:get(replacement, Reused)).x, 1)
+    world:shutdown()
+end
+
+function suite.registrationDoesNotRunConstructorsAndBatchInitializesRows(): nil
+    local before = constructions
+    tecs.ecs.definition(Counted)
+    test.equal(constructions, before)
+    const world = tecs.ecs.newWorld()
+    const first = assert(world:batchSpawn(256, {Counted}))
+    world:commit()
+    test.equal(constructions - before, 256)
+    test.equal(assert(world:get(first, Counted)).x, 9)
+    world:shutdown()
+end
+
+function suite.derivedValuesPreserveTypedNativeAndManagedColumns(): nil
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(new Velocity(10, 20), new Description(text = "Player"))
+    world:commit()
+    const velocity: Velocity = assert(readDerived(world, id, Velocity))
+    test.equal(velocity.x, 10)
+    test.equal(assert(world:get(id, Description)).text, "Player")
+    for candidate, count in world:newQuery({include = {Velocity, Description}}):iter() do
+        const column: Velocity[?] = assert(candidate:getMut(Velocity))
+        unsafe do
+            for row = 1, assert(count) do
+                column[row].x += 2
+            end
+        end
+    end
+    test.equal(assert(world:get(id, Velocity)).x, 12)
+    world:shutdown()
+end
+
+function suite.derivedRelationshipsCarryTypedNativePayloads(): nil
+    const world = tecs.ecs.newWorld()
+    const target = world:spawn()
+    const id = world:spawn(new Spring(target, 0.5))
+    world:commit()
+    test.equal(assert(readEdge(world, id, Spring)).stiffness, 0.5)
+    test.equal(world:relationshipSources(Spring, target)[1], id)
+    for candidate in world:newQuery({include = {Spring}}):iter() do
+        const wildcard: {Spring} = assert(candidate:get(Spring))
+        test.equal(wildcard[1].stiffness, 0.5)
+    end
+    const selected = tecs.ecs.targeting(Spring, target)
+    for candidate in world:newQuery({include = {selected}}):iter() do
+        const column: Spring[?] = assert(candidate:get(selected))
+        unsafe do
+            test.equal(column[1].stiffness, 0.5)
+        end
+    end
+    local sum: number = 0
+    world:forEachRelationship(id, Spring, function(edge: Spring): nil
+        sum += edge.stiffness
+    end)
+    test.equal(sum, 0.5)
+    world:shutdown()
+end
+
+@derive(tecs.ecs.Component)
+@component(name = "test.Derived.Pinned")
+local record Pinned
+    value: integer = 7
+end
+
+@derive(tecs.ecs.Relationship)
+@relationship(sparse = true, reverseIndex = true)
+local record Follow
+    target: integer
+    label: string = "follow"
+end
+
+function suite.namesAreQualifiedAndExplicitOverridesAreStable(): nil
+    const definition = tecs.ecs.definition(Velocity)
+    test.equal(definition.componentName, "derivedtest.Velocity")
+    test.equal(tecs.ecs.definition(Pinned).componentName, "test.Derived.Pinned")
+    test.equal(tecs.ecs.definition(Velocity), definition)
+end
+
+function suite.factoriesCreateDistinctIdentitiesWithoutChangingStorage(): nil
+    const first = tecs.ecs.newComponent(Velocity, {name = "test.Derived.First"})
+    const second = tecs.ecs.newComponent(Velocity, {name = "test.Derived.Second"})
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(first(3, 4), second(5, 6))
+    world:commit()
+    test.equal(assert(world:get(id, first)).x, 3)
+    test.equal(assert(world:get(id, second)).x, 5)
+    test.assert(first.componentId ~= second.componentId)
+    test.equal(first.storageType, "ffi")
+    test.equal(tecs.ecs.newComponent(Velocity), tecs.ecs.newComponent(Velocity))
+    world:shutdown()
+end
+
+function suite.factoriesRejectMismatchedDerivesAndIncompleteCodecs(): nil
+    local ok = pcall(function(): nil
+        tecs.ecs.newComponent(Spring)
+    end)
+    test.equal(ok, false)
+    ok = pcall(function(): nil
+        tecs.ecs.newRelationship(Velocity)
+    end)
+    test.equal(ok, false)
+    ok = pcall(function(): nil
+        tecs.ecs.newRelationship(Follow, {
+            name = "test.Derived.IncompleteCodec",
+            load = function(value: any): Follow
+                return new Follow(target = value.target as integer)
+            end,
+        })
+    end)
+    test.equal(ok, false)
+end
+
+function suite.batchDefaultsAndMutationsUseDerivedDeclarations(): nil
+    const world = tecs.ecs.newWorld()
+    world:batchSpawn(256, {Velocity})
+    world:commit()
+    const query = world:newQuery({include = {Velocity}})
+    test.equal(query:count(), 256)
+    world:batchSet(query, new Pinned(value = 9))
+    world:commit()
+    test.equal(world:newQuery({include = {Pinned}}):count(), 256)
+    world:batchRemove(query, Pinned)
+    world:commit()
+    test.equal(world:newQuery({include = {Pinned}}):count(), 0)
+    const bundle = world:newBundle("derived", {required = {Velocity}, with = {[Pinned] = true}})
+    const id = bundle:spawn(new Velocity())
+    world:commit()
+    test.equal(assert(world:get(id, Pinned)).value, 7)
+    world:shutdown()
+end
+
+function suite.managedAndNativeEdgesRoundTripWithoutHandwrittenCodecs(): nil
+    const world = tecs.ecs.newWorld()
+    const target = world:spawn()
+    const id = world:spawn(
+        new Velocity(3, 4),
+        new Description(text = "saved"),
+        new Follow(target = target),
+        new Spring(target, 0.75)
+    )
+    for _, format in ipairs({"table", "binary"}) do
+        const snapshot = world:saveSnapshot({format = format as "table" | "binary"})
+        const loaded = tecs.ecs.newWorld()
+        loaded:loadSnapshot(snapshot)
+        test.equal(assert(loaded:get(id, Velocity)).x, 3)
+        test.equal(assert(loaded:get(id, Description)).text, "saved")
+        test.assert(assert(loaded:get(id, Description)):debug():find("saved", 1, true) ~= nil)
+        test.assert(assert(loaded:get(id, Velocity)):debug():find("3", 1, true) ~= nil)
+        test.equal(assert(loaded:get(id, Follow)).label, "follow")
+        test.equal(assert(loaded:get(id, Spring)).stiffness, 0.75)
+        loaded:shutdown()
+    end
+    world:shutdown()
+end
+
+return suite

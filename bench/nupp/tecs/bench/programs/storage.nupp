@@ -1,5 +1,5 @@
--- Native ECS columns against the original direct FFI-array loop and managed rows.
--- All three use the same two-double layout and arithmetic. Setup is untimed.
+-- Native ECS columns, derived declarations, direct arrays and managed rows.
+-- Every loop uses the same two-double layout and arithmetic. Setup is untimed.
 local ffi = require("ffi")
 local buffer = require("string.buffer")
 local ffistorage = require("tecs.internal.ffistorage")
@@ -9,16 +9,16 @@ const count = harness.count("BENCH_STORAGE_COUNT", 100000)
 const warmup = harness.optionalCount("BENCH_STORAGE_WARMUP", 120)
 const samples = harness.count("BENCH_STORAGE_SAMPLES", 301)
 
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(tecs.ecs.Component, nupp.derive.Debug, nupp.derive.Serde)
 local struct NativePoint
-    x: number
-    y: number
+    x: number = 0
+    y: number = 1
 end
 local record ManagedPoint
     x: number
     y: number
 end
-const native = tecs.ecs.newFFIComponent({
+const native = tecs.ecs.newComponent(NativePoint, {
     name = "bench.NativePoint",
     construct = function(): NativePoint
         return new NativePoint(0, 1)
@@ -27,7 +27,7 @@ const native = tecs.ecs.newFFIComponent({
         return new NativePoint(0, 1)
     end
 })
-const managed = tecs.ecs.newComponent({
+const managed = tecs.ecs.newComponent(ManagedPoint, {
     name = "bench.ManagedPoint",
     construct = function(): ManagedPoint
         return new ManagedPoint(x = 0, y = 1)
@@ -38,6 +38,10 @@ const managed = tecs.ecs.newComponent({
 })
 const nativeWorld = tecs.ecs.newWorld({maxEntities = count + 64})
 const managedWorld = tecs.ecs.newWorld({maxEntities = count + 64})
+const derivedWorld = tecs.ecs.newWorld({maxEntities = count + 64})
+derivedWorld:batchSpawn(count, {NativePoint})
+derivedWorld:commit()
+const derivedQuery = derivedWorld:newQuery({include = {NativePoint}})
 nativeWorld:batchSpawn(count, {native})
 managedWorld:batchSpawn(count, {managed})
 nativeWorld:commit()
@@ -79,15 +83,28 @@ local function managedLoop(): nil
     end
 end
 
+local function derivedLoop(): nil
+    for candidate, rows in derivedQuery:iter() do
+        const column = assert(candidate:getMut(NativePoint))
+        unsafe do
+            for row = 1, assert(rows) do
+                column[row].x += column[row].y
+            end
+        end
+    end
+end
+
 const direct = harness.newStage("direct FFI")
 const ecs = harness.newStage("native ECS")
 const tables = harness.newStage("managed ECS")
+const derived = harness.newStage("derived ECS")
 harness.measure(direct, warmup, samples, directLoop)
 harness.measure(ecs, warmup, samples, nativeLoop)
 harness.measure(tables, warmup, samples, managedLoop)
+harness.measure(derived, warmup, samples, derivedLoop)
 
--- Compare the buffer-direct copy used by the old snapshot implementation with
--- the bounded native-column copy. Neither materializes a string or row table.
+-- Compare direct buffer copies with bounded native-column copies.
+-- Neither materializes a string or row table.
 const bytes = buffer.new(count * 16)
 const storage = assert(ffistorage.find(native.componentId))
 local column: any
@@ -107,20 +124,56 @@ harness.measure(nativeRaw, warmup, samples, function(): nil
     ffistorage.writeRows(storage, column, 1, count, bytes)
 end)
 
+local function repeatLoops(run: function(): nil): nil
+    for _ = 1, 100 do
+        run()
+    end
+end
+
+for _ = 1, 3 do
+    repeatLoops(nativeLoop)
+    repeatLoops(derivedLoop)
+end
 collectgarbage("collect")
 collectgarbage("stop")
-for _ = 1, 20 do
-    nativeLoop()
-end
 const before = collectgarbage("count")
-for _ = 1, 100 do
-    nativeLoop()
-end
+repeatLoops(nativeLoop)
 const allocated = (collectgarbage("count") - before) * 1024
+const derivedBefore = collectgarbage("count")
+repeatLoops(derivedLoop)
+const derivedAllocated = (collectgarbage("count") - derivedBefore) * 1024
 collectgarbage("restart")
+
+const nativeBatch = harness.newStage("native batch")
+const derivedBatch = harness.newStage("derived batch")
+harness.measure(
+    nativeBatch,
+    5,
+    31,
+    function(): nil
+        nativeWorld:batchSpawn(count, {native})
+        nativeWorld:commit()
+    end,
+    function(): nil
+        nativeWorld:clearEntities()
+    end
+)
+harness.measure(
+    derivedBatch,
+    5,
+    31,
+    function(): nil
+        derivedWorld:batchSpawn(count, {NativePoint})
+        derivedWorld:commit()
+    end,
+    function(): nil
+        derivedWorld:clearEntities()
+    end
+)
 print("Rows per window: " .. tostring(count))
-print(harness.format({direct, ecs, tables, raw, nativeRaw}))
+print(harness.format({direct, ecs, derived, tables, raw, nativeRaw, nativeBatch, derivedBatch}))
 print("Native ECS allocations over 100 full query loops: " .. tostring(allocated) .. " bytes")
+print("Derived ECS allocations over 100 full query loops: " .. tostring(derivedAllocated) .. " bytes")
 unsafe do
     assert(baseline[0].x == warmup + samples)
 end

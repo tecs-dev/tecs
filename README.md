@@ -91,6 +91,20 @@ decodes audio, `cpal` owns the device, `gilrs` owns gamepad enumeration and its
 mapping database, and Rapier owns rigid-body storage and stepping. What crosses
 into game code is a flat typed value, not a library handle.
 
+## Component declarations
+
+A component is a value declaration with an ECS derive, not a parallel schema.
+Nupp supplies construction, reflection and derived methods; Tecs assigns the
+component identity and specializes its storage. Structs use native columns and
+records use managed columns without separate public factory families. Query
+column types are selected at compile time, so this common declaration surface
+adds no per-row dispatch.
+
+Module-qualified declaration names remove registration boilerplate. An explicit
+annotation name pins identities that must survive a module or declaration rename.
+Factories remain useful for custom policies and for distinct component identities
+that share one value layout, not for choosing its physical representation.
+
 ## System ordering
 
 Phase boundaries carry the engine's frame dependencies. Named `before` and

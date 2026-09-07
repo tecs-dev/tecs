@@ -1272,7 +1272,7 @@ end
 
 --- Spawns an effect emitter; requires a Transform2D. Snapshots name the effect
 --- and preserve playback, then refill an empty GPU field after restoration.
-export const ParticleEmitter = ecs.newComponent({
+export const ParticleEmitter = ecs.newComponent(Emitter, {
     name = "ParticleEmitter",
     construct = makeEmitter,
     requires = {rendercomponents.Transform2DComponent},

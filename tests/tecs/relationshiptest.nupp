@@ -234,7 +234,7 @@ function suite.preservesTypedEdgePayloadsThroughUpdatesMovesAndSnapshots(): nil
         return new WeightedEdge(target = data.target as integer, weight = data.weight as number)
     end
     for mode = 1, 2 do
-        const relationship = tecs.ecs.newDataRelationship({
+        const relationship = tecs.ecs.newRelationship(WeightedEdge, {
             name = "test.WeightedEdges" .. tostring(mode),
             sparse = mode == 1,
             reverseIndex = true,

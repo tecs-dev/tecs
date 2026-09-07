@@ -301,7 +301,7 @@ end
 --- carrying one would name whatever the next run interned in its place. The
 --- voice is not saved: a snapshot records that an entity has a sound, not how
 --- far through it the backend had got, so it starts again.
-export const SoundComponent: ecs.FFIComponent<Sound> = ecs.newFFIComponent({
+export const SoundComponent: ecs.ComponentDefinition<Sound> = ecs.newComponent(Sound, {
     -- This persisted component name is a compatibility surface.
     name = "Sound",
     construct = function(

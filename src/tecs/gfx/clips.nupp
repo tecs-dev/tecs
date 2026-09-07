@@ -72,7 +72,7 @@ export struct Clip
 end
 
 --- The process-wide `Clip` component definition.
-export const ClipComponent: ecs.FFIComponent<Clip> = ecs.newFFIComponent({
+export const ClipComponent: ecs.ComponentDefinition<Clip> = ecs.newComponent(Clip, {
     -- This persisted component name is a compatibility surface, and so is the
     -- `index` key the default snapshot codec writes under it.
     name = "Clip",

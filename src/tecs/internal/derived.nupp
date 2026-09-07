@@ -1,0 +1,31 @@
+module tecs.internal.derived
+
+--[[Declaration contracts and compile-time storage selection for ECS values.]]
+
+--- Marks a declaration whose instances may be supplied to ECS mutations.
+export sealed interface Value
+end
+
+--- Marks a declaration whose instances carry an entity relationship target.
+export sealed interface Edge is Value
+end
+
+--- Selects the physical column without introducing a runtime dispatch.
+--- @param T The declared value type.
+--- @return Returns its native or managed column type.
+export comptime function StorageColumn(T: type): type
+    if nupp.types.describe(T).declarationKind == "struct" then
+        return nupp.types.carray(T)
+    end
+    return nupp.types.array(T)
+end
+
+--- Selects the column exposed by a declaration, including wildcard relationship views.
+--- @param T The declared component or edge value type.
+--- @return Returns a native component column or a managed wildcard edge view.
+export comptime function Column(T: type): type
+    if nupp.derive.claims(T, Edge) then
+        return nupp.types.array(T)
+    end
+    return StorageColumn(T)
+end

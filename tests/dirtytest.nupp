@@ -6,8 +6,8 @@ local record DirtyPosition
     x: number
 end
 
-local function positionComponent(name: string): ecs.TableComponent<DirtyPosition>
-    return ecs.newComponent({
+local function positionComponent(name: string): ecs.ComponentDefinition<DirtyPosition>
+    return ecs.newComponent(DirtyPosition, {
         name = name,
         construct = function(x: number): DirtyPosition
             return new DirtyPosition(x = x)

@@ -3,7 +3,7 @@ local test = require("nupp.test")
 local record Point
     x: number
 end
-const position = tecs.ecs.newComponent({
+const position = tecs.ecs.newComponent(Point, {
     name = "test.BulkPosition",
     construct = function(x: number): Point
         return new Point(x = x)
@@ -582,7 +582,7 @@ end
 
 function suite.batchDefaultsStillRunForEveryEntityAndEachReset(): nil
     local sequence = 0
-    const unique = tecs.ecs.newComponent({
+    const unique = tecs.ecs.newComponent(Point, {
         name = "test.BulkUniqueDefault",
         default = function(): Point
             sequence += 1
@@ -604,7 +604,7 @@ end
 
 function suite.failingBulkDefaultsDoNotExchangeLiveSourceColumns(): nil
     local fail = false
-    const fragile = tecs.ecs.newComponent({
+    const fragile = tecs.ecs.newComponent(Point, {
         name = "test.BulkFailingDefault",
         construct = function(): Point
             return new Point(x = 0)

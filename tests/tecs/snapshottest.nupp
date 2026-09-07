@@ -8,8 +8,8 @@ local record SnapshotPosition
     label: string
 end
 
-local function positionComponent(name: string): ecs.TableComponent<SnapshotPosition>
-    return ecs.newComponent({
+local function positionComponent(name: string): ecs.ComponentDefinition<SnapshotPosition>
+    return ecs.newComponent(SnapshotPosition, {
         name = name,
         construct = function(x: number, label: string): SnapshotPosition
             return new SnapshotPosition(x = x, label = label)
@@ -82,7 +82,7 @@ function suite.omitsTransientComponentsButKeepsTheirEntities(): nil
 end
 
 function suite.usesCustomComponentSnapshotHooks(): nil
-    local position = ecs.newComponent({
+    local position = ecs.newComponent(SnapshotPosition, {
         name = "test.SnapshotCustom",
         construct = function(x: number, label: string): SnapshotPosition
             return new SnapshotPosition(x = x, label = label)

@@ -10,6 +10,12 @@ matching archetype, reads through `get`, and takes writable columns through
 `getMut`:
 
 ```nupp
+@derive(tecs.ecs.Component)
+local struct Velocity
+    x: number = 0
+    y: number = 0
+end
+
 local Transform2D = tecs.ecs.Transform2D
 local movers = world:newQuery({
     include = {Transform2D, Velocity},
@@ -44,6 +50,22 @@ around those values.
 
 ## Storage choices
 
+Derive `tecs.ecs.Component` on the value declaration. A `struct` selects native
+columns and a `record` selects managed columns. Pass `new Velocity(...)` to
+mutations and `Velocity` itself to queries, reads, removals and bulk defaults.
+The component name defaults to the module-qualified declaration name. Pin a
+persisted identity with `@component(name = "game.Velocity")`; moving or renaming
+an unpinned declaration changes its snapshot identity.
+
+`tecs.ecs.newComponent(Velocity, options)` configures requirements, codecs or
+custom factories, or gives the same value layout a distinct component identity.
+It does not choose a different physical representation. Configure the default
+identity before using the declaration in a world.
+
+Generic helpers accept `Type<T>` with `T is tecs.ecs.ComponentValue`. Helpers
+that inspect edges can use `T is tecs.ecs.RelationshipPayload`. These bounds keep
+the stored value type intact without importing an internal module.
+
 | Kind                           | Use                                                    |
 | ------------------------------ | ------------------------------------------------------ |
 | Native struct                  | Fixed-layout numeric data in contiguous native columns |
@@ -51,9 +73,9 @@ around those values.
 | [Scalar](scalar-components.md) | One number, boolean or string per entity               |
 | [Tag](tag-components.md)       | Presence with no per-entity value                      |
 
-The engine uses the same factories. Transform, tint, shape material, camera,
+The engine uses the same storage selection. Transform, tint, shape material, camera,
 lighting, animation, audio state, physics values, and numeric UI components use
-`newFFIComponent` with native structs. `Renderable2D` is a tag. Text, styles,
+native structs with storage selected by their declarations. `Renderable2D` is a tag. Text, styles,
 Tiled metadata and other components with strings or managed collections remain
 records.
 

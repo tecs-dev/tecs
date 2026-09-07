@@ -11,7 +11,7 @@ local struct Point
     y: number
 end
 
-const point = tecs.ecs.newFFIComponent({
+const point = tecs.ecs.newComponent(Point, {
     name = "test.FFI.Point",
     construct = function(x: number, y: number): Point
         return new Point(x, y)
@@ -105,7 +105,7 @@ function suite.stagedRowInputsOutliveSourceRelocation(): nil
 end
 
 function suite.sharedStructLayoutsKeepDistinctComponentIdentity(): nil
-    const twin = tecs.ecs.newFFIComponent({
+    const twin = tecs.ecs.newComponent(Point, {
         name = "test.FFI.Twin",
         construct = function(x: number): Point
             return new Point(x, 0)
@@ -133,7 +133,7 @@ local record Label
 end
 
 function suite.mixedColumnsAndRequiredTransientDefaultsSurviveMoves(): nil
-    const label = tecs.ecs.newComponent({
+    const label = tecs.ecs.newComponent(Label, {
         name = "test.FFI.Label",
         construct = function(text: string): Label
             return new Label(text = text)
@@ -142,7 +142,7 @@ function suite.mixedColumnsAndRequiredTransientDefaultsSurviveMoves(): nil
             return new Label(text = "default")
         end
     })
-    const transient = tecs.ecs.newFFIComponent({
+    const transient = tecs.ecs.newComponent(Point, {
         name = "test.FFI.Transient",
         transient = true,
         construct = function(): Point
@@ -210,13 +210,13 @@ end
 function suite.invalidFactoriesFailBeforeRegistration(): nil
     test.raises(
         function(): nil
-            tecs.ecs.newFFIComponent({
+            tecs.ecs.newComponent(0 as any, {
                 name = "test.FFI.Invalid",
                 construct = function(): any
-                    return {}
+                    return 0
                 end,
                 default = function(): any
-                    return {}
+                    return 0
                 end,
                 save = function(value: any): any
                     return value
@@ -226,11 +226,11 @@ function suite.invalidFactoriesFailBeforeRegistration(): nil
                 end
             })
         end,
-        "Nupp struct"
+        "record or struct"
     )
     test.raises(
         function(): nil
-            tecs.ecs.newFFIComponent({
+            tecs.ecs.newComponent(Point, {
                 name = "test.FFI.NoCodec",
                 construct = function(): Point
                     return new Point()
@@ -268,7 +268,7 @@ local struct ArrayValue
     enabled: boolean
 end
 
-const arrays = tecs.ecs.newFFIComponent({
+const arrays = tecs.ecs.newComponent(ArrayValue, {
     name = "test.FFI.Arrays",
     construct = function(): ArrayValue
         return new ArrayValue()
@@ -426,11 +426,8 @@ local struct Edge
 end
 
 function suite.nativeRelationshipsKeepWildcardAndTargetViewsAliased(): nil
-    const relationship = tecs.ecs.newFFIRelationship({
+    const relationship = tecs.ecs.newRelationship(Edge, {
         name = "test.FFI.DenseEdge",
-        default = function(): Edge
-            return new Edge()
-        end,
         construct = function(target: integer, weight: number): Edge
             return new Edge(target, weight)
         end,
@@ -465,11 +462,8 @@ function suite.nativeRelationshipsKeepWildcardAndTargetViewsAliased(): nil
 end
 
 function suite.stagedNativeEdgesOutliveTheirSourceRow(): nil
-    const relationship = tecs.ecs.newFFIRelationship({
+    const relationship = tecs.ecs.newRelationship(Edge, {
         name = "test.FFI.CapturedEdges",
-        default = function(): Edge
-            return new Edge()
-        end,
         construct = function(target: integer, weight: number): Edge
             return new Edge(target, weight)
         end
@@ -492,12 +486,9 @@ end
 
 function suite.sparseNativeEdgesAndRequirementsSurviveRestore(): nil
     const required = tecs.ecs.newTagComponent({name = "test.FFI.Required"})
-    const relationship = tecs.ecs.newFFIRelationship({
+    const relationship = tecs.ecs.newRelationship(Edge, {
         name = "test.FFI.SparseEdge",
         sparse = true,
-        default = function(): Edge
-            return new Edge()
-        end,
         construct = function(target: integer, weight: number): Edge
             return new Edge(target, weight)
         end,

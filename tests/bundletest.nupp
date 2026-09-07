@@ -22,7 +22,7 @@ end
 
 function suite.callsDefaultFactoriesForEverySpawn(): nil
     local world = ecs.newWorld()
-    local position = ecs.newComponent({
+    local position = ecs.newComponent(Position, {
         name = "test.BundlePosition",
         construct = function(x: number, y: number): Position
             return new Position(x = x, y = y)

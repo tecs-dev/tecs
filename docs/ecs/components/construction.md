@@ -4,7 +4,31 @@ description: "Constructor inputs, stored values, defaults and validation"
 
 # Component construction
 
-Structured components map public constructor arguments to stored values.
+Derived components use Nupp's own field defaults and constructors. A value made
+with `new` goes directly into `world:spawn` or `world:set`:
+
+```nupp
+@derive(tecs.ecs.Component)
+local struct Health
+    value: number = 100
+    max: number = 100
+end
+
+local entity = world:spawn(new Health(80, 120))
+world:batchSpawn(100, {Health})
+```
+
+The derive publishes an initializer so default additions and bulk spawns use
+the same initialization rules. Native bulk defaults initialize rows in place.
+Registration inspects the declaration and never evaluates a user constructor.
+Reusable initializers require one unambiguous construction path. Nupp rejects
+multiple constructors, generic owners, affine fields, and constructors that let
+`self` escape or transfer owned arguments into fields. Such declarations can
+instead use an explicit named factory without the ECS derive.
+
+## Factory configuration
+
+Use a factory when a separate component identity or custom call shape is useful.
 
 - `Component(...)` calls the registered `construct` function and carries the
   result across a spawn or set boundary.
@@ -19,7 +43,7 @@ local record HealthValue
     max: number
 end
 
-local Health = tecs.ecs.newComponent({
+local Health = tecs.ecs.newComponent(HealthValue, {
     name = "Health",
     construct = function(value: number?, maximum: number?): HealthValue
         return new HealthValue(value = value or 100, max = maximum or 100)
@@ -40,7 +64,8 @@ do not use `value or true` when false must be preserved.
 
 Use a typed options record as the constructor argument when names make a call
 clearer. Create Nupp records with `new Record(field = value)`. The ECS
-component token remains the value supplied to `world:spawn` or `world:set`.
+definition wraps factory-created values supplied to `world:spawn` or `world:set`.
+Values of derived declarations need no wrapper.
 
 ## Validation and derived values
 

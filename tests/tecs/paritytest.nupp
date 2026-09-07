@@ -160,7 +160,7 @@ function suite.snapshotNilSerializerOmitsTheComponent(): nil
     local record Value
         x: number
     end
-    const value = tecs.ecs.newComponent({
+    const value = tecs.ecs.newComponent(Value, {
         name = "test.Parity.NilCodec",
         construct = function(): Value
             return new Value(x = 1)
@@ -252,7 +252,7 @@ local struct Nested
 end
 
 function suite.nativeNestedAndPointerLayoutsUseCustomCodecs(): nil
-    const component = tecs.ecs.newFFIComponent({
+    const component = tecs.ecs.newComponent(Nested, {
         name = "test.Parity.Nested",
         construct = function(x: number): Nested
             return new Nested(new NestedPose(x), nil)
@@ -337,7 +337,7 @@ function suite.worldAwareDeserializersReceiveTheDestination(): nil
     end
     const destination = tecs.ecs.newWorld()
     local seen = false
-    const value = tecs.ecs.newComponent({
+    const value = tecs.ecs.newComponent(Value, {
         name = "test.Parity.WorldAware",
         construct = function(): Value
             return new Value(count = 17)
@@ -457,12 +457,9 @@ end
 
 function suite.binaryRelationshipsRestoreDenseNativeAndSparseEdgeSets(): nil
     const world = tecs.ecs.newWorld()
-    const dense = tecs.ecs.newFFIRelationship({
+    const dense = tecs.ecs.newRelationship(NativeEdge, {
         name = "test.Parity.NativeEdge",
         reverseIndex = true,
-        default = function(): NativeEdge
-            return new NativeEdge()
-        end,
         construct = function(target: integer, weight: number): NativeEdge
             return new NativeEdge(target, weight)
         end
@@ -673,12 +670,9 @@ end
 function suite.relationshipCodecsReceiveTheDestinationWorld(): nil
     const world = tecs.ecs.newWorld()
     local seen: integer = 0
-    const edge = tecs.ecs.newFFIRelationship({
+    const edge = tecs.ecs.newRelationship(NativeEdge, {
         name = "test.Parity.WorldAwareEdge",
         exclusive = true,
-        default = function(): NativeEdge
-            return new NativeEdge()
-        end,
         construct = function(target: integer, weight: number): NativeEdge
             return new NativeEdge(target, weight)
         end,

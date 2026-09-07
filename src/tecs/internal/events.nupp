@@ -69,8 +69,8 @@ export record OnSnapshotSave
     --- Excludes every entity carrying a derived-data component.
     --- @param self The call-scoped save event.
     --- @param component The component whose entities must be regenerated after load.
-    function exclude(self: OnSnapshotSave, component: components.Component): nil
-        self.excluded[#self.excluded + 1] = component
+    function exclude(self: OnSnapshotSave, component: components.Selector): nil
+        self.excluded[#self.excluded + 1] = components.select(component)
     end
 end
 

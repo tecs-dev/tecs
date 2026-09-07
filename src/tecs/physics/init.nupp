@@ -349,7 +349,7 @@ export type Body = BodyValue
 
 --- Declares a body's simulation behavior.
 -- This persisted component name is a compatibility surface.
-export const Body: ecs.FFIComponent<BodyValue> = ecs.newFFIComponent({
+export const Body: ecs.ComponentDefinition<BodyValue> = ecs.newComponent(BodyValue, {
     name = "Body",
     construct = newBody,
     default = function(): BodyValue
@@ -394,7 +394,7 @@ export type Collider = ColliderValue
 
 --- Declares a body's geometry, material and collision filtering.
 -- This persisted component name is a compatibility surface.
-export const Collider: ecs.FFIComponent<ColliderValue> = ecs.newFFIComponent({
+export const Collider: ecs.ComponentDefinition<ColliderValue> = ecs.newComponent(ColliderValue, {
     name = "Collider",
     construct = newCollider,
     default = function(): ColliderValue
@@ -411,7 +411,7 @@ export type Motion = MotionValue
 
 --- Preserves a body's saved velocity across pauses and snapshots.
 -- This persisted component name is a compatibility surface.
-export const Motion: ecs.FFIComponent<MotionValue> = ecs.newFFIComponent({
+export const Motion: ecs.ComponentDefinition<MotionValue> = ecs.newComponent(MotionValue, {
     name = "Motion",
     construct = newMotion,
     default = function(): MotionValue
@@ -432,7 +432,7 @@ end
 --- Engine-owned and transient. A snapshot never carries it, because the slot
 --- it names belongs to one run of one simulation.
 -- This component name is a compatibility surface.
-export const RigidBody: ecs.FFIComponent<SolverHandle> = ecs.newFFIComponent({
+export const RigidBody: ecs.ComponentDefinition<SolverHandle> = ecs.newComponent(SolverHandle, {
     name = "RigidBody",
     construct = newHandle,
     default = emptyHandle,
@@ -443,7 +443,7 @@ export const RigidBody: ecs.FFIComponent<SolverHandle> = ecs.newFFIComponent({
 ---
 --- Engine-owned and transient.
 -- This component name is a compatibility surface.
-export const ColliderShape: ecs.FFIComponent<SolverHandle> = ecs.newFFIComponent({
+export const ColliderShape: ecs.ComponentDefinition<SolverHandle> = ecs.newComponent(SolverHandle, {
     name = "ColliderShape",
     construct = newHandle,
     default = emptyHandle,
@@ -454,7 +454,7 @@ export const ColliderShape: ecs.FFIComponent<SolverHandle> = ecs.newFFIComponent
 ---
 --- Engine-owned and transient.
 -- This component name is a compatibility surface.
-export const JointLink: ecs.FFIComponent<SolverHandle> = ecs.newFFIComponent({
+export const JointLink: ecs.ComponentDefinition<SolverHandle> = ecs.newComponent(SolverHandle, {
     name = "JointLink",
     construct = newHandle,
     default = emptyHandle,
@@ -500,7 +500,7 @@ export type Joint = JointValue
 
 --- Declares a joint between the two bodies its entity relates to.
 -- This persisted component name is a compatibility surface.
-export const Joint: ecs.FFIComponent<JointValue> = ecs.newFFIComponent({
+export const Joint: ecs.ComponentDefinition<JointValue> = ecs.newComponent(JointValue, {
     name = "Joint",
     construct = newJoint,
     default = function(): JointValue

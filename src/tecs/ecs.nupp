@@ -7,34 +7,33 @@ The ECS exposes staged entity lifetime, tag and scalar components, dense
 archetype storage, and reusable queries. A spawn reserves its id immediately,
 and `commit` publishes structural changes.
 
-## Native component storage
+## Declaring components
 
-`newFFIComponent` stores Nupp structs inline in contiguous native columns. Nupp
+Derive `tecs.ecs.Component` on a record or struct, use its declaration in queries,
+and supply ordinary `new` values to mutations. Structs select native columns;
+records select managed columns. Names default to the module-qualified declaration
+name. `@component(name = "game.Velocity")` pins a persisted name across declaration
+or namespace changes; `@component(transient = true)` omits snapshot values.
+
+Native components store Nupp structs inline in contiguous native columns. Nupp
 owns the struct layout and methods. Tecs owns column capacity, publication and
 dirty tracking. There is no generated parallel C schema and no row wrapper in
 the query loop. A native column grows geometrically with a single memory copy;
 bulk spawns reserve the whole destination range before calling their writer.
 
 ```nupp
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(tecs.ecs.Component, nupp.derive.Debug, nupp.derive.Serde)
 local struct Velocity
-    x: number
-    y: number
+    x: number = 0
+    y: number = 0
 end
-local velocity = tecs.ecs.newFFIComponent({
-    name = "game.Velocity",
-    construct = function(x: number, y: number): Velocity
-        return new Velocity(x, y)
-    end,
-    default = function(): Velocity return new Velocity() end,
-})
 local world = tecs.ecs.newWorld()
-world:batchSpawn(1000, {velocity})
+world:batchSpawn(1000, {Velocity})
 world:commit()
-for candidate, count in world:newQuery({include = {velocity}}):iter() do
-    local column = assert(candidate:getMut(velocity))
+for candidate, count in world:newQuery({include = {Velocity}}):iter() do
+    local column = assert(candidate:getMut(Velocity))
     unsafe do
-        for row = 1, count do column[row].x += 1 end
+        for row = 1, assert(count) do column[row].x += 1 end
     end
 end
 ```
@@ -76,7 +75,11 @@ silently bypassed. Transient and required components follow the ordinary ECS
 rules. Binary snapshots copy eligible native columns directly and migrate older
 scalar layouts using their saved field fingerprints.
 
-`newFFIRelationship` uses the same native field policy and supports exclusive or
+Derive `tecs.ecs.Relationship` on a target-bearing record or struct. Optional
+`@relationship` settings configure its name, exclusivity, sparse placement,
+reverse indexing, cascades and transient snapshot policy. Use
+`tecs.ecs.targeting(EdgeType, target)` for a dense target-specific selector.
+Native relationships use the same field policy and support exclusive or
 multiple targets, reverse lookup, cascades and sparse or dense edge placement.
 Its struct must contain a `target: number` field. Dense `targeting()` selectors
 return native columns. A wildcard relationship column is a managed array of
@@ -208,12 +211,23 @@ every edge in that order. Its archetype counterpart takes a one-based row.
 Edge values are live; use `getMut` before changing payload fields. Never write
 an edge's `target` field directly: `set` maintains the signature and reverse index.
 
-`newDataRelationship` adds typed record payloads. Its constructor receives the
-target first and returns a record with that same `target` field. Explicit `save`
-and `load` hooks preserve the record's type and behavior across snapshots.
-`DataRelationship<T>` retains `T` through world reads, iteration and targeted
+`newRelationship(EdgeType, options)` creates an explicit payload relationship.
+Its constructor receives the target first and returns a value with that same
+`target` field. Automatic codecs preserve the top-level declared type; custom
+codecs handle resource identities or nested managed types.
+`RelationshipDefinition<T>` retains `T` through world reads, iteration and targeted
 column access. Snapshots store relationship names and edges, independent of
 generated dense target-component identifiers.
+
+`newComponent(ValueType, options)` and `newRelationship(EdgeType, options)` create
+distinct named definitions from one value declaration. When the type derives the
+ECS contract, its initializer supplies construction and defaults. A type without
+that derive supplies explicit construction factories and a name. Registration
+uses the type witness without running a constructor or default factory.
+Custom codecs, world-aware decoding and requirements belong in
+these options. Calling a factory with a derived type's default name registers
+that type's definition; a different name creates an independent identity whose
+values must be supplied through the returned factory.
 
 `reverseIndex = true` enables `relationshipSources`, callback-based `targets`,
 and depth-first `traverse`. Traversal excludes its root, reports direct children
@@ -464,6 +478,7 @@ local idallocator = require("tecs.internal.idallocator")
 local archetype = require("tecs.internal.archetype")
 local builtins = require("tecs.internal.builtins")
 local components = require("tecs.internal.components")
+local derived = require("tecs.internal.derived")
 local entityworld = require("tecs.internal.world")
 local events = require("tecs.internal.events")
 local phasevalues = require("tecs.internal.phases")
@@ -497,67 +512,182 @@ export type World = entityworld.World
 --- A process-wide component definition.
 export type Component = components.Component
 
+--- Bounds generic helpers to records or structs deriving the component contract.
+export type ComponentValue = derived.Value
+
+--- Bounds generic helpers to target-bearing declarations deriving the relationship
+--- contract.
+export type RelationshipPayload = derived.Edge
+
+local comptime function componentOptions(info: nupp.derive.Info, edge: boolean): any
+    local result = {name = info.qualifiedName, representation = info.kind, relationship = edge}
+    for _, annotation in ipairs(info.annotations) do
+        if annotation.name == (edge and "relationship" or "component") then
+            for _, argument in ipairs(annotation.arguments) do
+                result[argument.name] = argument.value
+            end
+        end
+    end
+
+    return result
+end
+
+--- Marks a record or struct as an ECS component and selects its physical storage.
+--- @param info The declaration being derived.
+--- @return Returns its metadata and reusable initializer recipe.
+--- @raises Raises when the declaration cannot supply a reusable initializer.
+export comptime function Component(info: nupp.derive.Info): nupp.derive.Result<derived.Value>
+    if info.kind ~= "record" and info.kind ~= "struct" then
+        return nupp.derive.error("Component requires a record or fixed-layout struct", info.reference)
+    end
+    return nupp.derive.implement{data = {tecs = componentOptions(info, false)}, initializer = true}
+end
+
+--- Marks a target-bearing record or struct as an ECS relationship.
+--- @param info The declaration being derived.
+--- @return Returns its metadata and reusable initializer recipe.
+--- @raises Raises when the target, policies or initializer are invalid.
+export comptime function Relationship(info: nupp.derive.Info): nupp.derive.Result<derived.Edge>
+    if info.kind ~= "record" and info.kind ~= "struct" then
+        return nupp.derive.error("Relationship requires a record or fixed-layout struct", info.reference)
+    end
+    local target = false
+    for _, field in ipairs(info.fields) do
+        if field.name == "target" then
+            local name = nupp.types.describe(field.readType).name
+            if name ~= "number" and (info.kind == "struct" or name ~= "integer") then
+                return nupp.derive.error(
+                    "Relationship target must be number in a struct, or number or integer in a record",
+                    field.reference
+                )
+            end
+            target = true
+        end
+    end
+    if not target then
+        return nupp.derive.error("Relationship requires a target field", info.reference)
+    end
+    local policy = componentOptions(info, true)
+    if policy.cascadeDelete and not (policy.exclusive and policy.reverseIndex) then
+        return nupp.derive.error("cascadeDelete requires exclusive and reverseIndex", info.reference)
+    end
+
+    return nupp.derive.implement{data = {tecs = policy}, initializer = true}
+end
+
+--- Configures a derived component's persisted identity and snapshot policy.
+@annotation(targets = {"record", "struct"})
+export record component
+    --- Caller-writable. Pins the persisted name; nil uses the qualified declaration.
+    name: string?
+
+    --- Caller-writable. Omits this component's values from snapshots.
+    transient: boolean?
+end
+
+--- Configures a derived relationship's identity, cardinality and storage policy.
+@annotation(targets = {"record", "struct"})
+export record relationship
+    --- Caller-writable. Pins the persisted name; nil uses the qualified declaration.
+    name: string?
+
+    --- Caller-writable. Omits this relationship from snapshots.
+    transient: boolean?
+
+    --- Caller-writable. Limits each source to one target when true.
+    exclusive: boolean?
+
+    --- Caller-writable. Selects entity-indexed edges instead of dense target columns.
+    sparse: boolean?
+
+    --- Caller-writable. Maintains target-to-source lookup when true.
+    reverseIndex: boolean?
+
+    --- Caller-writable. Deletes sources with their target; requires both index and
+    --- exclusivity.
+    cascadeDelete: boolean?
+end
+
 --- A component definition or constructed value accepted by a mutation.
 export type ComponentInput = components.Input
 
 --- A primitive-valued component definition.
 export type ScalarComponent<T> = components.ScalarComponent<T>
 
---- A record-valued component definition.
-export type TableComponent<T> = components.TableComponent<T>
+--- A named definition with its column type selected from the value declaration.
+export type ComponentDefinition<T> = components.TypedComponent<T>
 
---- A typed native struct component with contiguous, one-based C-array columns.
-export type FFIComponent<T> = components.FFIComponent<T>
+--- A payload relationship whose target selector retains the physical column type.
+export type RelationshipDefinition<T> = components.TypedRelationship<T>
 
---- Configures a native struct component and optional custom snapshot codecs.
-export type FFIComponentOptions<T> = TableComponentOptions<T>
+--- Configures an explicit component identity from a declaration.
+export type ComponentOptions<T> = {
+    --- Caller-writable. Sets the persisted identity; defaults to the derived name.
+    name: string?,
 
---- A typed native relationship with dense target columns or entity-indexed edges.
-export type FFIRelationship<T> = components.FFIRelationship<T>
+    --- Caller-writable. Overrides the declaration's initializer for factory calls.
+    construct: (function(...: any): T)?,
 
---- Selects one target-specific native relationship column.
-export type FFIRelationshipTarget<T> = components.FFIRelationshipTarget<T>
+    --- Caller-writable. Overrides per-entity default initialization.
+    default: (function(): T)?,
 
---- Configures the native edge layout, constructor and relationship behavior.
-export type FFIRelationshipOptions<T> = {
-    --- Caller-writable. Sets the stable relationship name.
-    name: string,
-
-    --- Caller-writable. Supplies the native layout at registration.
-    default: function(): T,
-
-    --- Caller-writable. Constructs an edge bearing the supplied target.
-    construct: function(target: integer, ...: any): T,
-
-    --- Caller-writable. Limits each source to one target; defaults to false.
-    exclusive: boolean?,
-
-    --- Caller-writable. Selects entity-indexed storage instead of dense target columns.
-    sparse: boolean?,
-
-    --- Caller-writable. Maintains target-to-source lookup.
-    reverseIndex: boolean?,
-
-    --- Caller-writable. Deletes sources with their target; requires exclusive and
-    --- reverseIndex.
-    cascadeDelete: boolean?,
-
-    --- Caller-writable. Adds missing components to the edge's source transitively.
-    requires: {ComponentInput}?,
-
-    --- Caller-writable. Omits this relationship from snapshots.
+    --- Caller-writable. Omits this definition's values from snapshots.
     transient: boolean?,
 
-    --- Caller-writable. Replaces automatic encoding, paired with load or deserialize.
+    --- Caller-writable. Adds missing components or shared instances transitively.
+    requires: {ComponentInput}?,
+
+    --- Caller-writable. Replaces automatic encoding; pair with load or deserialize.
     save: (function(value: T): any)?,
 
-    --- Caller-writable. Replaces automatic decoding; excludes deserialize.
+    --- Caller-writable. Reconstructs a saved value; excludes deserialize.
     load: (function(value: any): T)?,
 
-    --- Caller-writable. Decodes with the destination world before replacement; excludes
-    --- load.
+    --- Caller-writable. Reconstructs a value with the destination world; excludes load.
     deserialize: (function(exclusive world: World, value: any): T)?
 }
+
+--- Configures a named payload relationship from a declaration.
+export type EdgeOptions<T> = {
+    --- Caller-writable. Sets the persisted identity; defaults to the derived name.
+    name: string?,
+
+    --- Caller-writable. Constructs an edge from its target and optional payload
+    --- arguments.
+    construct: (function(target: integer, ...: any): T)?,
+
+    --- Caller-writable. Omits this definition's edges from snapshots.
+    transient: boolean?,
+
+    --- Caller-writable. Adds missing components or shared instances transitively.
+    requires: {ComponentInput}?,
+
+    --- Caller-writable. Replaces automatic encoding; pair with load or deserialize.
+    save: (function(value: T): any)?,
+
+    --- Caller-writable. Reconstructs a saved edge; excludes deserialize.
+    load: (function(value: any): T)?,
+
+    --- Caller-writable. Reconstructs an edge with the destination world; excludes load.
+    deserialize: (function(exclusive world: World, value: any): T)?,
+
+    --- Caller-writable. Limits each source to one target when true.
+    exclusive: boolean?,
+
+    --- Caller-writable. Selects entity-indexed edges instead of dense target columns.
+    sparse: boolean?,
+
+    --- Caller-writable. Maintains target-to-source lookup when true.
+    reverseIndex: boolean?,
+
+    --- Caller-writable. Deletes sources with their target; requires reverseIndex and
+    --- exclusive.
+    cascadeDelete: boolean?
+}
+
+--- Accepts target-only options or a declaration with payload relationship options.
+export type NewRelationship = (function(options: RelationshipOptions): Relationship)
+    & (function<T>(witness: Type<T>, options: EdgeOptions<T>?): RelationshipDefinition<T>)
 
 --- A target-only entity relationship with selectable cardinality and storage.
 export type Relationship = components.RelationshipComponent
@@ -571,84 +701,8 @@ export type TagComponentOptions = components.TagComponentOptions
 --- Options accepted by the kind-correlated scalar component factory.
 export type ScalarComponentOptions = components.ScalarComponentOptions
 
---- Options for a record-valued component.
-export type TableComponentOptions<T> = {
-    --- Caller-writable. Supplies the process-unique persisted component name.
-    name: string,
-
-    --- Caller-writable. Constructs a component's value from positional arguments.
-    construct: function(...: any): T,
-
-    --- Caller-writable. Constructs a default value for each newly initialized entity.
-    default: function(): T,
-
-    --- Caller-writable. Encodes detached snapshot data; nil omits this component on
-    --- restore.
-    save: (function(value: T): any)?,
-
-    --- Caller-writable. Decodes snapshot data, paired with save and exclusive with
-    --- deserialize.
-    load: (function(value: any): T)?,
-
-    --- Caller-writable. Decodes with the destination world before replacement, paired
-    --- with save.
-    deserialize: (function(exclusive world: World, value: any): T)?,
-
-    --- Caller-writable. Omits this component from world snapshots.
-    transient: boolean?,
-
-    --- Caller-writable. Adds missing required components or shared instances
-    --- transitively.
-    requires: {ComponentInput}?
-}
-
 --- Construction and storage options for target-only relationships.
 export type RelationshipOptions = components.RelationshipOptions
-
---- A relationship carrying typed edge records with a target field.
-export type DataRelationship<T> = components.DataRelationship<T>
-
---- A typed component selecting one dense relationship target.
-export type RelationshipTarget<T> = components.RelationshipTarget<T>
-
---- Construction and storage options for typed relationship edges.
-export type DataRelationshipOptions<T> = {
-    --- Caller-writable. Sets the stable relationship name.
-    name: string,
-
-    --- Caller-writable. Constructs an edge bearing the supplied target.
-    construct: function(target: integer, ...: any): T,
-
-    --- Caller-writable. Limits each source to one target; defaults to false.
-    exclusive: boolean?,
-
-    --- Caller-writable. Selects entity-indexed storage instead of dense target columns.
-    sparse: boolean?,
-
-    --- Caller-writable. Maintains target-to-source lookup.
-    reverseIndex: boolean?,
-
-    --- Caller-writable. Deletes sources with their target; requires exclusive and
-    --- reverseIndex.
-    cascadeDelete: boolean?,
-
-    --- Caller-writable. Adds missing components to the edge's source transitively.
-    requires: {ComponentInput}?,
-
-    --- Caller-writable. Omits this relationship from snapshots.
-    transient: boolean?,
-
-    --- Caller-writable. Encodes each typed edge into detached data.
-    save: function(value: T): any,
-
-    --- Caller-writable. Decodes each typed edge; requires exactly one of load and
-    --- deserialize.
-    load: (function(value: any): T)?,
-
-    --- Caller-writable. Decodes with the destination world before replacement; excludes
-    --- load.
-    deserialize: (function(exclusive world: World, value: any): T)?
-}
 
 --- Membership constraints, grouping and notifications for a reusable query.
 export type QueryDescriptor = query.Descriptor
@@ -910,59 +964,59 @@ end
 ---     relationship.
 export const newScalarComponent: components.NewScalarComponent = components.newScalarComponent
 
---- Creates and registers a record-valued component.
---- @param options the process-unique name, constructor, default factory, and snapshot
----     policy
---- @return the registered table component
---- @raises when the name is empty or already registered
+--- Registers a declaration with managed or native columns selected from its layout.
+--- The default identity of a derived declaration is cached. Configure it before
+--- its first use, or supply a distinct name to create another identity.
+--- @param witness The record or struct declaration whose values this definition stores.
+--- @param options The optional identity, constructor, defaults and snapshot policy.
+--- @return Returns a callable definition with the declaration's exact column type.
+--- @raises Raises when the name is empty or already belongs to another definition.
+--- @raises Raises when a declaration has neither an initializer nor an explicit
+---     constructor.
+--- @raises Raises when a native layout is unsupported or snapshot codecs are
+---     incomplete.
 --- @raises Raises when a requirement is unregistered or names an untargeted
 ---     relationship.
-export function newComponent<T>(options: TableComponentOptions<T>): TableComponent<T>
-    -- The registry erases only the world argument to avoid a runtime/type cycle
-    -- through archetypes; this public boundary keeps deserializers world-typed.
-    return components.newComponent(options as components.TableComponentOptions<T>)
+export function newComponent<T>(witness: Type<T>, options: ComponentOptions<T>?): ComponentDefinition<T>
+    return components.fromType(witness, options, false) as ComponentDefinition<T>
 end
 
---- Registers a component backed by contiguous Nupp struct rows.
---- @param options The constructor and default returning the same struct type, with
----     optional paired codecs overriding automatic detached field snapshots.
---- @return Returns the callable native component definition.
---- @raises Raises when the layout is unsupported or only one custom codec is supplied.
---- @raises Raises when the component name is empty or already registered.
-export function newFFIComponent<T>(options: FFIComponentOptions<T>): FFIComponent<T>
-    return components.newFFIComponent(options as components.TableComponentOptions<T>)
+local function createRelationship(witness: any, options: any): any
+    if type(witness) == "table" and type(rawget(witness, "name")) == "string" and options == nil then
+        return components.newRelationship(witness)
+    end
+    return components.fromType(witness, options, true)
 end
 
---- Registers a relationship with native struct payloads.
---- @param options The layout witness and constructor, with a number-valued target
----     field, plus optional codecs and edge storage policy.
---- @return Returns the callable relationship definition.
---- @raises Raises for invalid layout, target field, relationship policy or codec pair.
-export function newFFIRelationship<T>(options: FFIRelationshipOptions<T>): FFIRelationship<T>
-    return components.newFFIRelationship(options as any as components.FFIRelationshipOptions<T>)
-end
-
---- Creates and registers a target-only entity relationship.
---- @param options the relationship name and reverse-index behavior
---- @return the callable relationship component
+--- Registers a target-only relationship or a record or struct payload declaration.
+--- The one-argument options form creates target-only edges. The declaration form
+--- selects managed or native payload storage without running a user constructor.
+--- @param witness The payload declaration, or target-only options without a
+---     declaration.
+--- @param options The optional identity, edge policies, constructor and snapshot codec.
+--- @return Returns a callable relationship definition with typed payload access.
 --- @raises Raises when cascade deletion lacks exclusivity or reverse indexing.
---- @raises Raises when a requirement is unregistered or names an untargeted
----     relationship.
-export function newRelationship(options: RelationshipOptions): Relationship
-    return components.newRelationship(options)
+--- @raises Raises when the name is invalid or already belongs to another definition.
+--- @raises Raises when a payload declaration does not provide a valid target field.
+--- @raises Raises when a native layout is unsupported or snapshot codecs are
+---     incomplete.
+export const newRelationship: NewRelationship = createRelationship as NewRelationship
+
+--- Selects the typed dense column for one target of a derived relationship.
+--- @param relationship The derived edge declaration.
+--- @param target The committed or reserved target identifier.
+--- @return Returns a reusable selector with the edge's exact physical column type.
+--- @raises Raises when the relationship is sparse or the target is invalid.
+export function targeting<T is derived.Edge>(relationship: Type<T>, target: integer): ComponentDefinition<T>
+    const definition = components.select(relationship)
+    return assert(components.asRelationship(definition)):targeting(target) as ComponentDefinition<T>
 end
 
---- Registers a relationship carrying typed edge records.
---- @param options The target-bearing constructor, storage policy and typed snapshot
----     hooks.
---- @return Returns the callable relationship; its constructor's first argument is the
----     target entity.
---- @raises Raises when the name is duplicated, storage policy is invalid or snapshot
----     hooks are missing.
---- @raises Raises when a requirement is unregistered or names an untargeted
----     relationship.
-export function newDataRelationship<T>(options: DataRelationshipOptions<T>): DataRelationship<T>
-    return components.newDataRelationship(options as any as components.DataRelationshipOptions<T>)
+--- Returns the registered definition for a derived component declaration.
+--- @param declaration The component declaration to register if necessary.
+--- @return Returns its process-wide identity and storage metadata.
+export function definition<T is derived.Value>(declaration: Type<T>): Component
+    return components.select(declaration)
 end
 
 --- Returns a registered component by numeric id.

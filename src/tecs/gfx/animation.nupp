@@ -122,7 +122,7 @@ export struct Animation
 end
 
 --- The process-wide `Animation` component definition.
-export const AnimationComponent: ecs.FFIComponent<Animation> = ecs.newFFIComponent({
+export const AnimationComponent: ecs.ComponentDefinition<Animation> = ecs.newComponent(Animation, {
     -- This persisted component name is a compatibility surface.
     name = "Animation",
     construct = function(

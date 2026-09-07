@@ -12,6 +12,9 @@ primitives and use a small wrapper only at spawn and set boundaries.
 local componentids = require("tecs.internal.componentids")
 local snapshotvalue = require("tecs.internal.snapshotvalue")
 local ffistorage = require("tecs.internal.ffistorage")
+local derived = require("tecs.internal.derived")
+local derive = require("nupp.derive")
+local ffi = require("ffi")
 
 --- A registered component definition.
 export interface Component
@@ -22,6 +25,32 @@ export interface Component
     componentName: string
     storageType: string
     transient: boolean
+end
+
+--- Accepts an explicit definition or a declaration deriving the ECS contract.
+export type Selector = Component | Type<derived.Value>
+
+--- A callable definition whose column is selected from its declared value type.
+export interface TypedComponent<T> is Component
+    associated type Value == T
+    associated type Column == derived.StorageColumn(T)
+    construct: function(...: any): T
+    defaultFactory: function(): T
+    snapshotSave: function(value: T): any
+    snapshotLoad: function(value: any, exclusive world: any): T
+    metamethod __call: function(self, ...: any): FFIInstance<T, TypedComponent<T>>
+end
+
+--- A callable payload relationship with typed target-specific columns.
+export interface TypedRelationship<T> is Component
+    associated type Value == T
+    associated type Column == {T}
+    construct: function(...: any): T
+    defaultFactory: function(): T
+    snapshotSave: function(value: T): any
+    snapshotLoad: function(value: any, exclusive world: any): T
+    metamethod __call: function(self, ...: any): FFIInstance<T, TypedRelationship<T>>
+    targeting: function(self: TypedRelationship<T>, target: integer): TypedComponent<T>
 end
 
 --- A marker component with no per-entity column.
@@ -81,90 +110,14 @@ export record FFIInstance<T, C>
     value: T
 end
 
---- A component whose values occupy contiguous native struct rows.
-export interface FFIComponent<T> is Component
-    associated type Value == T
-    associated type Column == T[?]
+--- A native component uses the same typed definition contract as a managed one.
+export type FFIComponent<T> = TypedComponent<T>
 
-    --- Read-only. Identifies this definition uniquely within the process.
-    componentId: integer
+--- A native target selector preserves its declared physical column.
+export type FFIRelationshipTarget<T> = TypedComponent<T>
 
-    --- Read-only. Names this component in snapshots and diagnostic tools.
-    componentName: string
-
-    --- Read-only. Reports the native storage kind, ffi.
-    storageType: string
-
-    --- Read-only. Reports whether snapshots omit this definition.
-    transient: boolean
-
-    --- Engine-owned. Exposes the constructor to mutation internals; games call the
-    --- definition.
-    construct: function(...: any): T
-
-    --- Engine-owned. Supplies default initialization; games use the component
-    --- definition.
-    defaultFactory: function(): T
-
-    --- Engine-owned. Encodes fields or invokes the custom codec; games save through the
-    --- world.
-    snapshotSave: function(value: T): any
-
-    --- Engine-owned. Reconstructs fields or invokes the custom codec; games restore
-    --- through the world.
-    snapshotLoad: function(value: any, exclusive world: any): T
-
-    metamethod __call: function(self, ...: any): FFIInstance<T, FFIComponent<T>>
-end
-
---- Selects one native edge column by its dense relationship target.
-export interface FFIRelationshipTarget<T> is Component
-    associated type Value == T
-    associated type Column == T[?]
-end
-
---- A relationship whose payload uses native structs and native dense columns.
-export interface FFIRelationship<T> is Component
-    associated type Value == T
-    associated type Column == {T}
-
-    --- Read-only. Identifies this definition uniquely within the process.
-    componentId: integer
-
-    --- Read-only. Names this component in snapshots and diagnostic tools.
-    componentName: string
-
-    --- Read-only. Reports the native storage kind, ffi.
-    storageType: string
-
-    --- Read-only. Reports whether snapshots omit this definition.
-    transient: boolean
-
-    --- Engine-owned. Exposes the constructor to mutation internals; games call the
-    --- definition.
-    construct: function(...: any): T
-
-    --- Engine-owned. Supplies default initialization; games use the component
-    --- definition.
-    defaultFactory: function(): T
-
-    --- Engine-owned. Encodes fields or invokes the custom codec; games save through the
-    --- world.
-    snapshotSave: function(value: T): any
-
-    --- Engine-owned. Reconstructs fields or invokes the custom codec; games restore
-    --- through the world.
-    snapshotLoad: function(value: any, exclusive world: any): T
-
-    metamethod __call: function(self, ...: any): FFIInstance<T, FFIRelationship<T>>
-
-    --- Returns the component selecting the edge to one dense target.
-    --- @param self The relationship definition.
-    --- @param target The packed target entity id.
-    --- @return Returns a stable, typed native target-column selector.
-    --- @raises Raises when the relationship is sparse or the target is invalid.
-    targeting: function(self: FFIRelationship<T>, target: integer): FFIRelationshipTarget<T>
-end
+--- A native relationship uses the common payload definition contract.
+export type FFIRelationship<T> = TypedRelationship<T>
 
 --- Configures a relationship with an inline native target and payload.
 export type FFIRelationshipOptions<T> = {
@@ -311,6 +264,8 @@ end
 
 --- A component definition or value supplied at a mutation boundary.
 export type Input = Component
+    | Type<derived.Value>
+    | derived.Value
     | ScalarInstance<any>
     | TableInstance<any>
     | FFIInstance<any, any>
@@ -417,6 +372,8 @@ export type RelationshipOptions = {
 }
 
 local registeredByName: {[string]: Component} = {}
+local derivedByWitness: {[any]: Component} = {}
+local nativeReferences: {[integer]: Component} = {}
 local registeredById: {[integer]: Component} = {}
 local registeredRelationships: {RelationshipComponent} = {}
 local relationshipById: {[integer]: RelationshipComponent} = {}
@@ -725,14 +682,18 @@ end
 
 --- Registers a Nupp struct as a contiguous native component column.
 --- @param options The constructor, default struct, and optional paired codecs.
+--- @param witness The optional layout declaration, avoiding default construction.
 --- @return Returns the callable struct component definition.
 --- @raises Raises when the layout is unsupported or the codec pair is incomplete.
 --- @raises Raises when the name is empty or already registered.
-export function newFFIComponent<T>(options: TableComponentOptions<T>): FFIComponent<T>
+export function newFFIComponent<T>(options: TableComponentOptions<T>, witness: any?): FFIComponent<T>
     if (options.save == nil) ~= (options.load == nil and options.deserialize == nil) then
         error("newFFIComponent: snapshot save and load must be provided together", 2)
     end
-    const storage = ffistorage.new(options.default(), options.save ~= nil or options.transient == true)
+    const storage = ffistorage.new(
+        witness ~= nil and ffi.new(witness) or options.default(),
+        options.save ~= nil or options.transient == true
+    )
     const configured = table.clone(options)
     if options.save == nil then
         configured.save = function(value: T): any
@@ -911,6 +872,166 @@ export function newFFIRelationship<T>(options: FFIRelationshipOptions<T>): FFIRe
     return component as FFIRelationship<T>
 end
 
+--- Registers a declaration or creates a distinct named definition from its layout.
+--- @param witness The Nupp record or struct declaration.
+--- @param options The optional identity, construction, persistence and edge policies.
+--- @param relationship Whether this definition represents edges.
+--- @return Returns the registered, storage-specialized definition.
+export function fromType(witness: any, options: any, relationship: boolean): Component
+    if type(witness) ~= "table" and type(witness) ~= "cdata" then
+        error("component type must be a record or struct declaration", 2)
+    end
+    const entry = derive.entry(witness)
+    const metadata = entry and entry.schema.data and entry.schema.data.tecs or nil
+    if metadata ~= nil and (metadata.relationship == true) ~= relationship then
+        error("component factory does not match the declaration's ECS derive", 2)
+    end
+    if options == nil and derivedByWitness[witness] ~= nil then
+        return assert(derivedByWitness[witness])
+    end
+    local configured = table.clone(options or {})
+    if metadata ~= nil then
+        for key, value in pairs(metadata) do
+            if configured[key] == nil then
+                configured[key] = value
+            end
+        end
+    end
+    if type(configured.name) ~= "string" or configured.name == "" then
+        error("component requires an ECS derive or an explicit non-empty name", 2)
+    end
+    const initializer = derive.initializer(witness)
+    const native = type(witness) == "cdata"
+    if relationship and configured.default ~= nil then
+        error("relationship construction requires a target; use construct, not default", 2)
+    end
+    if configured.construct == nil then
+        if initializer == nil then
+            error("component type requires an ECS derive or explicit construct and default factories", 2)
+        end
+        configured.construct = function(...: any): any
+            const value = native and ffi.new(witness) or setmetatable({}, witness)
+            return initializer(value, ...)
+        end
+    end
+    if not relationship and configured.default == nil then
+        const construct = configured.construct
+        configured.default = function(): any
+            return construct()
+        end
+    end
+    if native and relationship then
+        -- The layout witness is zero-initialized without invoking an edge constructor.
+        configured.default = function(): any
+            return ffi.new(witness)
+        end
+    end
+    if not native and configured.save == nil and configured.load == nil and configured.deserialize == nil then
+        configured.save = function(value: any): any
+            return snapshotvalue.clone(value)
+        end
+        configured.load = function(value: any): any
+            return setmetatable(snapshotvalue.clone(value), witness)
+        end
+    end
+    local definition: Component
+    if relationship then
+        definition = (native and newFFIRelationship(configured) or newDataRelationship(configured)) as Component
+    else
+        definition = (native and newFFIComponent(configured, witness) or newComponent(configured)) as Component
+    end
+    if metadata ~= nil and configured.name == metadata.name then
+        derivedByWitness[witness] = definition
+    end
+    if native and not relationship and initializer ~= nil and (
+        options == nil or (options.default == nil and options.construct == nil)
+    ) then
+        assert(ffistorage.find(definition.componentId)).initialize = function(value: any): nil
+            initializer(value)
+        end
+    end
+
+    return definition
+end
+
+local function derivedDefinition(witness: any): Component
+    const known = derivedByWitness[witness]
+    if known ~= nil then
+        return known
+    end
+    const entry = derive.entry(witness)
+    const metadata = entry and entry.schema.data and entry.schema.data.tecs or nil
+    if metadata == nil then
+        error("ECS value must derive Component or Relationship", 3)
+    end
+    const definition = fromType(witness, nil, metadata.relationship == true)
+    derivedByWitness[witness] = definition
+
+    return definition
+end
+
+--- Resolves a type witness once; explicit definitions take the direct path.
+--- @param selector The explicit definition or derived declaration.
+--- @return Returns the process-wide definition.
+export function select(selector: Selector): Component
+    const raw: any = selector
+    if type(raw) == "table" and rawget(raw, "storageType") ~= nil then
+        return raw as Component
+    end
+
+    return derivedDefinition(raw)
+end
+
+--- Resolves declarations before storing a reusable component list.
+--- @param values The caller-owned definitions or type witnesses.
+--- @return Returns a fresh list of registered definitions.
+export function selectAll(values: {Selector}?): {Component}
+    const result: {Component} = {}
+    for index = 1, #(values or {}) do
+        result[index] = select(assert(values)[index])
+    end
+
+    return result
+end
+
+local function valueDefinition(value: any): Component?
+    if type(value) == "table" then
+        const witness = getmetatable(value)
+        if witness ~= nil and derive.entry(witness) ~= nil then
+            return derivedDefinition(witness)
+        end
+    elseif type(value) == "cdata" then
+        -- CType witnesses convert to their numeric type id; struct instances do not.
+        if tonumber(value) ~= nil then
+            return nil
+        end
+        const witness = ffi.typeof(value)
+        const typeId = assert(tonumber(witness)) as integer
+        const cached = nativeReferences[typeId]
+        if cached ~= nil then
+            return cached
+        end
+        if derive.entry(witness) ~= nil then
+            const definition = derivedDefinition(witness)
+            nativeReferences[typeId] = definition
+            return definition
+        end
+        -- A borrowed row has a reference CType. Resolve it once per reference type.
+        local found: Component? = nil
+        derive.forEach(function(entry: derive.Entry): nil
+            if entry.schema.data.tecs ~= nil and type(entry.mt) == "cdata" and ffi.istype(entry.mt, value) then
+                found = derivedDefinition(entry.mt)
+            end
+        end)
+        if found ~= nil then
+            nativeReferences[typeId] = found
+        end
+        return found
+    end
+
+    return nil
+end
+
 --- Reads the validated target at the heterogeneous relationship storage seam.
 --- @param value The target-bearing edge record.
 --- @return Returns its packed target identifier.
@@ -955,8 +1076,13 @@ export function definitionOf(input: Input): Component
     if input is RelationshipInstance then
         return input.componentType
     end
+    if type(input) == "table" and rawget(input as table, "storageType") ~= nil then
+        return input as Component
+    end
 
-    return input
+    const value = valueDefinition(input)
+
+    return value or select(input as Selector)
 end
 
 --- Returns an input's scalar payload and whether it supplied one.
@@ -980,6 +1106,17 @@ export function explicitValue(input: Input): any, boolean
     end
     if input is RelationshipInstance then
         return input.value, true
+    end
+    if type(input) == "table" and rawget(input as table, "storageType") ~= nil then
+        return nil, false
+    end
+
+    const definition = valueDefinition(input)
+    if definition ~= nil then
+        if definition.storageType == "ffi" then
+            return ffistorage.capture(assert(ffistorage.find(definition.componentId)), input), true
+        end
+        return input, true
     end
 
     return nil, false
@@ -1072,13 +1209,29 @@ end
 --- @param name the process-wide component name
 --- @return the component, or nil when the name is unknown
 export function findByName(name: string): Component?
-    return registeredByName[name]
+    const known = registeredByName[name]
+    if known ~= nil then
+        return known
+    end
+    local found: Component? = nil
+    derive.forEach(function(entry: derive.Entry): nil
+        const metadata = entry.schema.data.tecs
+        if metadata ~= nil and metadata.name == name then
+            const candidate = derivedDefinition(entry.mt)
+            if found ~= nil and found ~= candidate then
+                error("duplicate derived component name " .. name, 2)
+            end
+            found = candidate
+        end
+    end)
+
+    return found
 end
 
 --- Resolves a persisted component name, materializing a dense relationship selector if
 --- needed.
 export function resolveSnapshotName(name: string): Component?
-    const found = registeredByName[name]
+    const found = findByName(name)
     if found ~= nil then
         return found
     end
@@ -1086,7 +1239,7 @@ export function resolveSnapshotName(name: string): Component?
     if rootName == nil or targetText == nil then
         return nil
     end
-    const root = registeredByName[rootName]
+    const root = findByName(rootName)
     const relationship = root and asRelationship(root) or nil
     if relationship == nil or relationship.sparse then
         return nil
@@ -1102,6 +1255,11 @@ end
 --- Returns a fresh name-to-component snapshot of the registry.
 --- @return the caller-owned registry snapshot
 export function declared(): {[string]: Component}
+    derive.forEach(function(entry: derive.Entry): nil
+        if entry.schema.data.tecs ~= nil then
+            derivedDefinition(entry.mt)
+        end
+    end)
     local result: {[string]: Component} = {}
     for name, component in pairs(registeredByName) do
         if targetById[component.componentId] == nil then

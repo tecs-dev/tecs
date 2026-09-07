@@ -2,8 +2,8 @@ module tecs.internal.ffistorage
 
 --[[
 Native struct columns. Layout comes from the Nupp struct declaration, not a
-second runtime schema. Rows are one-based, retaining the old ECS's unused row
-zero, geometric reserve and memcpy relocation. Archetypes own capacity; no
+second runtime schema. Rows are one-based with unused row zero, geometric
+reserve and memcpy relocation. Archetypes own capacity; no
 weak-key lookup or allocation occurs on an indexed read or write.
 ]]
 
@@ -25,6 +25,7 @@ export record Storage
     fields: {Field}
     fingerprint: string
     rawCodec: boolean
+    initialize: (function(value: any): nil)?
     allocator: (function(bytes: integer, alignment: integer): (any, any))?
 end
 
@@ -353,6 +354,12 @@ export function copyRows(
     const target, bytes = rowBytes(storage, destination, first, count)
     const origin = rowBytes(storage, source, sourceFirst, count)
     ffi.copy(target, origin, bytes)
+end
+
+--- Zeroes a bounded native row range before initializing reused storage.
+export function clearRows(storage: Storage, column: any, first: integer, count: integer): nil
+    const pointer, bytes = rowBytes(storage, column, first, count)
+    ffi.fill(pointer, bytes, 0)
 end
 
 --- Appends live rows directly to the buffer without intermediate strings.

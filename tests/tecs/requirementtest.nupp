@@ -11,7 +11,7 @@ local record Point
     x: number
 end
 
-const point = tecs.ecs.newComponent({
+const point = tecs.ecs.newComponent(Point, {
     name = "test.RequirePoint",
     construct = function(x: number): Point
         return new Point(x = x)
@@ -223,7 +223,7 @@ local record Edge
 end
 
 function suite.supportsDataRelationshipsAndRequiredEdges(): nil
-    const relation = tecs.ecs.newDataRelationship({
+    const relation = tecs.ecs.newRelationship(Edge, {
         name = "test.RequireDataRelation",
         reverseIndex = true,
         requires = {marker},

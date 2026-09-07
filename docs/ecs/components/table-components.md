@@ -4,9 +4,21 @@ description: "Record-valued components, construction, validation and lifecycle r
 
 # Record components
 
-Table components hold strings, nested tables, opaque handles, and data that
-needs reference semantics. Define the record, then register the functions
-that construct its values:
+Record components hold strings, nested tables, opaque handles, and data that
+needs reference semantics. Derive the component contract on the record and use
+its ordinary constructor:
+
+```nupp
+@derive(tecs.ecs.Component)
+local record Label
+    text: string = ""
+end
+
+local entity = world:spawn(new Label(text = "Player"))
+```
+
+Use `newComponent` to configure a declaration or create another named identity
+for its value type:
 
 ```nupp
 local record HealthValue
@@ -14,7 +26,7 @@ local record HealthValue
     max: number
 end
 
-local Health = tecs.ecs.newComponent({
+local Health = tecs.ecs.newComponent(HealthValue, {
     name = "Health",
     construct = function(value: number?, maximum: number?): HealthValue
         return new HealthValue(value = value or 100, max = maximum or 100)

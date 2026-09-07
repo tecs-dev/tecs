@@ -39,7 +39,7 @@ local struct Health
     maximum: integer
 end
 
-const Position = ecs.newFFIComponent({
+const Position = ecs.newComponent(Vector, {
     name = "bench.SnapshotPosition",
     construct = function(x: number, y: number): Vector
         return new Vector(x, y)
@@ -49,7 +49,7 @@ const Position = ecs.newFFIComponent({
     end,
 })
 
-const Velocity = ecs.newFFIComponent({
+const Velocity = ecs.newComponent(Vector, {
     name = "bench.SnapshotVelocity",
     construct = function(x: number, y: number): Vector
         return new Vector(x, y)
@@ -59,7 +59,7 @@ const Velocity = ecs.newFFIComponent({
     end,
 })
 
-const Vitality = ecs.newFFIComponent({
+const Vitality = ecs.newComponent(Health, {
     name = "bench.SnapshotHealth",
     construct = function(current: integer, maximum: integer): Health
         return new Health(current, maximum)

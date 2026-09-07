@@ -181,7 +181,7 @@ says.
   `RecordingOptions` when it has several), declared next to the function that
   takes them, every field documented, optionality explicit.
 - Interfaces describe capabilities and families: `Component`,
-  `ScalarComponent<T>`, `TableComponent<T>`.
+  `ScalarComponent<T>`, `ComponentDefinition<T>`.
 - Closed string sets are union aliases rather than a bare `string` field.
 - A record field that is private to the module is declared `private`, and the
   documentation generator hides it, so it never becomes part of a contract by
@@ -189,40 +189,32 @@ says.
 
 ## Components
 
-- Declare the value record, then the process-wide definition beside it:
+- Derive the ECS contract on the value declaration:
 
   ```nupp
   --- Gives an entity a velocity in world units per second.
-  export record Velocity
+  @derive(tecs.ecs.Component)
+  export struct Velocity
       --- Caller-writable. Sets the horizontal speed in world units per second.
-      x: number
+      x: number = 0
 
       --- Caller-writable. Sets the vertical speed in world units per second.
-      y: number
+      y: number = 0
   end
-
-  --- The process-wide `Velocity` component definition.
-  export const VelocityComponent: ecs.TableComponent<Velocity> = ecs.newComponent({
-      name = "Velocity",
-      construct = function(x: number?, y: number?): Velocity
-          return new Velocity(x = x or 0, y = y or 0)
-      end,
-      default = function(): Velocity
-          return new Velocity(x = 0, y = 0)
-      end,
-  })
   ```
 
-- **Pick the storage the data actually is.** `ecs.newScalarComponent` holds one
-  value per entity and iterates as a flat column. `ecs.newComponent` holds a
-  record. `ecs.newTagComponent` holds nothing.
+- **Pick the representation the data actually is.** A struct occupies inline
+  native rows; a record uses managed storage. `newComponent(ValueType, options)`
+  creates a distinct identity or supplies custom construction and snapshot policies.
+  `newScalarComponent` holds primitive values; `newTagComponent` holds nothing.
 - Tag components beat boolean fields when the flag is stable and queried often:
   queries match archetypes directly instead of scanning. A frequently toggled
   tag moves entities between archetypes every flip; a field is the right call
   for high-frequency toggles.
-- Give every component a `name` matching its record name. Queries, MCP and
-  snapshots use it, and it is a compatibility surface: say so at the
-  declaration.
+- Derived names default to the module-qualified declaration name. Pin an explicit
+  `@component(name = "...")` or `@relationship(name = "...")` when persisted
+  identity must survive a declaration or namespace rename. Preserve existing
+  persisted component names when migrating declarations.
 - A component names what it cannot be meaningful without through its
   requirements, so a spawn that adds it adds those too.
 - Keep components as data. Behavior belongs in systems.

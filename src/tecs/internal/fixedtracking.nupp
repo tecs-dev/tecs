@@ -26,7 +26,8 @@ export function finishStep(exclusive world: entityworld.World): nil
 end
 
 --- Advances only the opted-in fixed mutation sample for one column.
-export function mark(value: archetype.Archetype, component: components.Component): nil
+export function mark(value: archetype.Archetype, component: components.Selector): nil
+    const component = components.select(component)
     archetype.markFixed(value, component)
 end
 
@@ -36,7 +37,8 @@ export function markAll(value: archetype.Archetype): nil
 end
 
 --- Opts one component into monotonically versioned fixed samples.
-export function track(exclusive world: entityworld.World, component: components.Component): nil
+export function track(exclusive world: entityworld.World, component: components.Selector): nil
+    const component = components.select(component)
     const state = assert(entityworld.fixedTracking(world, true))
     if state.tracked[component.componentId] then
         return
@@ -62,7 +64,8 @@ export function afterStep(
 end
 
 --- Returns the fixed mutation version, or minus one for untracked columns.
-export function version(value: archetype.Archetype, component: components.Component): integer
+export function version(value: archetype.Archetype, component: components.Selector): integer
+    const component = components.select(component)
     const state = archetype.tracking(value)
     if state == nil or not state.tracked[component.componentId] then
         return -1
@@ -88,8 +91,9 @@ end
 export function wroteThisStep(
     exclusive world: entityworld.World,
     value: archetype.Archetype,
-    component: components.Component
+    component: components.Selector
 ): boolean
+    const component = components.select(component)
     const state = entityworld.fixedTracking(world)
     if state == nil or archetype.tracking(value) ~= state then
         return false

@@ -183,7 +183,7 @@ end
 --- The component name and the `text`, `font`, `size`, `align`, and `wrapWidth`
 --- snapshot keys are a compatibility surface. A snapshot stores the font by
 --- name, because a font is a shared table rather than a value.
-export const TextComponent: components.TableComponent<Text> = ecs.newComponent({
+export const TextComponent: ecs.ComponentDefinition<Text> = ecs.newComponent(Text, {
     name = "Text",
     construct = function(value: string?, font: fonts.Font?, size: number?, align: Align?, wrapWidth: number?): Text
         return newText(value, font, size, align, wrapWidth)

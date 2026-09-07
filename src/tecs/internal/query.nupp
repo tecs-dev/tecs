@@ -49,14 +49,14 @@ export type Descriptor = {
 
     --- Caller-writable. Requires all listed components and overrides their automatic
     --- exclusions.
-    include: {components.Component}?,
+    include: {components.Selector}?,
 
     --- Caller-writable. Requires at least one listed component; an empty list adds no
     --- constraint.
-    includeAny: {components.Component}?,
+    includeAny: {components.Selector}?,
 
     --- Caller-writable. Rejects every listed component.
-    exclude: {components.Component}?,
+    exclude: {components.Selector}?,
 
     --- Caller-writable. Receives entering rows after publication, including initial
     --- members.
@@ -235,9 +235,9 @@ export function new(descriptor: Descriptor?, filterStates: boolean?): Query
     if source.temp and (source.onEntitiesAdded ~= nil or source.onEntitiesRemoved ~= nil) then
         error("temporary queries cannot have membership callbacks", 2)
     end
-    const include = table.clone(source.include or {})
-    const exclude = table.clone(source.exclude or {})
-    const includeAny = table.clone(source.includeAny or {})
+    const include = components.selectAll(source.include)
+    const exclude = components.selectAll(source.exclude)
+    const includeAny = components.selectAll(source.includeAny)
     if filterStates then
         const automatic = source.type == "logic" and {components.Disabled, components.Paused} or {components.Disabled}
         for index = 1, #automatic do

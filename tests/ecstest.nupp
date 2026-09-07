@@ -77,7 +77,7 @@ local record PublicPoint
 end
 
 function suite.exposesTableComponentsThroughThePublicModule(): nil
-    local position: ecs.TableComponent<PublicPoint> = ecs.newComponent({
+    local position: ecs.ComponentDefinition<PublicPoint> = ecs.newComponent(PublicPoint, {
         name = "test.PublicPosition",
         construct = function(x: number): PublicPoint
             return new PublicPoint(x = x)

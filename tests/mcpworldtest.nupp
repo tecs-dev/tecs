@@ -10,7 +10,7 @@ local record Point
     y: number
 end
 
-local Position = ecs.newComponent({
+local Position = ecs.newComponent(Point, {
     name = "test.mcp.Position",
     construct = function(x: number?, y: number?): Point
         return new Point(x = x or 0, y = y or 0)

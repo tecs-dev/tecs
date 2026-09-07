@@ -9,6 +9,7 @@ zero-based. Swap removal updates every column in lockstep.
 ]]
 
 local components = require("tecs.internal.components")
+local derived = require("tecs.internal.derived")
 local ffistorage = require("tecs.internal.ffistorage")
 local entitycolumn = require("tecs.internal.entitycolumn")
 
@@ -140,7 +141,7 @@ export record Archetype
     --- Enables aggregate value counting for one present component.
     --- @param self The archetype to track.
     --- @param component The column whose future writes contribute to valueCount.
-    trackValueCount: function(self: Archetype, component: components.Component): nil
+    trackValueCount: function(self: Archetype, component: components.Selector): nil
 
     --- Writes one existing component without changing row membership.
     --- @param self The archetype to update.
@@ -150,11 +151,13 @@ export record Archetype
     ---     relationship membership or a durable key.
     set: function(self: Archetype, row: integer, input: components.Input): nil
 
-    get: function<C is components.Component>(self: Archetype, component: C): C.Column?
-    getMut: function<C is components.Component>(self: Archetype, component: C): C.Column?
-    isComponentDirty: function(self: Archetype, component: components.Component): boolean
+    get: (function<C is components.Component>(self: Archetype, component: C): C.Column?)
+        & (function<T is derived.Value>(self: Archetype, component: Type<T>): derived.Column(T)?)
+    getMut: (function<C is components.Component>(self: Archetype, component: C): C.Column?)
+        & (function<T is derived.Value>(self: Archetype, component: Type<T>): derived.Column(T)?)
+    isComponentDirty: function(self: Archetype, component: components.Selector): boolean
     anyComponentDirty: function(self: Archetype): boolean
-    markComponentDirty: function(self: Archetype, component: components.Component): nil
+    markComponentDirty: function(self: Archetype, component: components.Selector): nil
     markAllComponentsDirty: function(self: Archetype): nil
     clearDirtyComponents: function(self: Archetype): nil
     dirtyComponents: function(self: Archetype): function(): components.Component?
@@ -163,26 +166,39 @@ export record Archetype
     structuralCount: function(self: Archetype): integer
 
     --- Returns one column's write count, which survives dirty-bit clearing.
-    writeCount: function(self: Archetype, component: components.Component): integer
+    writeCount: function(self: Archetype, component: components.Selector): integer
 
     --- Iterates an entity row's edges in target order.
     --- @param self The archetype containing the row.
     --- @param relationship The relationship definition or a target-specific component.
     --- @param row The one-based row to inspect.
     --- @param callback The callback receiving each live edge value.
-    forEachRelationship: function<C is components.Component>(
-        self: Archetype,
-        relationship: C,
-        row: integer,
-        callback: function(value: C.Value)
-    ): nil
+    forEachRelationship: (
+        function<C is components.Component>(
+            self: Archetype,
+            relationship: C,
+            row: integer,
+            callback: function(value: C.Value)
+        ): nil
+    )
+        & (
+        function<T is derived.Edge>(
+            self: Archetype,
+            relationship: Type<T>,
+            row: integer,
+            callback: function(value: T)
+        ): nil
+    )
 
     --- Returns the first edge in target order.
     --- @param self The archetype containing the row.
     --- @param relationship The relationship to inspect.
     --- @param row The one-based entity row.
     --- @return Returns the live edge value, or nil when no edge exists.
-    getFirstRelationship: function<C is components.Component>(self: Archetype, relationship: C, row: integer): C.Value?
+    getFirstRelationship: (
+        function<C is components.Component>(self: Archetype, relationship: C, row: integer): C.Value?
+    )
+        & (function<T is derived.Edge>(self: Archetype, relationship: Type<T>, row: integer): T?)
 end
 
 --- Produces the canonical signature for a component collection.
@@ -310,15 +326,16 @@ end
 --- @param self the archetype to inspect
 --- @param component the value-bearing component to find
 --- @return the dense raw-value column
-function Archetype.get<C is components.Component>(self: Archetype, component: C): C.Column?
-    return column(self, component)
+Archetype.get = function(self: Archetype, component: components.Selector): any
+    return column(self, components.select(component))
 end
 
 --- Returns a component column and marks it dirty before the caller can write.
 --- @param self the archetype to modify
 --- @param component the value-bearing component to find
 --- @return the dense raw-value column, or nil when absent or a tag
-function Archetype.getMut<C is components.Component>(self: Archetype, component: C): C.Column?
+Archetype.getMut = function(self: Archetype, selector: components.Selector): any
+    const component = components.select(selector)
     local result = column(self, component)
     if result ~= nil then
         self:markComponentDirty(component)
@@ -331,7 +348,8 @@ end
 --- @param self the archetype to inspect
 --- @param component the component to test
 --- @return whether the component belongs to this archetype and is dirty
-function Archetype.isComponentDirty(self: Archetype, component: components.Component): boolean
+function Archetype.isComponentDirty(self: Archetype, component: components.Selector): boolean
+    const component = components.select(component)
     return has(self, component) and self.dirty[component.componentId] == true
 end
 
@@ -407,7 +425,8 @@ end
 --- Marks one present component dirty.
 --- @param self the archetype to modify
 --- @param component the component whose column or membership changed
-function Archetype.markComponentDirty(self: Archetype, component: components.Component): nil
+function Archetype.markComponentDirty(self: Archetype, component: components.Selector): nil
+    const component = components.select(component)
     if has(self, component) then
         enqueueDirty(self)
         markFixed(self, component)
@@ -442,7 +461,8 @@ function Archetype.structuralCount(self: Archetype): integer
     return self.structureVersion
 end
 
-function Archetype.writeCount(self: Archetype, component: components.Component): integer
+function Archetype.writeCount(self: Archetype, component: components.Selector): integer
+    const component = components.select(component)
     return self.valueVersions[component.componentId] or 0
 end
 
@@ -488,7 +508,8 @@ function Archetype.valueCount(self: Archetype): integer
     return self.valueVersion
 end
 
-function Archetype.trackValueCount(self: Archetype, component: components.Component): nil
+function Archetype.trackValueCount(self: Archetype, component: components.Selector): nil
+    const component = components.select(component)
     if has(self, component) then
         self.countedValues[component.componentId] = true
     end
@@ -779,6 +800,15 @@ local function fillColumn(
 ): nil
     const stored = assert(value.columns[component.componentId])
     if raw == nil then
+        const native = ffistorage.find(component.componentId)
+        const initialize = native and native.initialize
+        if initialize ~= nil then
+            ffistorage.clearRows(assert(native), stored, first, last - first + 1)
+            for row = first, last do
+                initialize(stored[row])
+            end
+            return
+        end
         for row = first, last do
             stored[row] = components.defaultValue(component)
         end
@@ -1165,11 +1195,8 @@ export function setEdges(
     value:markComponentDirty(relationship)
 end
 
-function Archetype.getFirstRelationship<C is components.Component>(
-    self: Archetype,
-    relationship: C,
-    row: integer
-): C.Value?
+Archetype.getFirstRelationship = function(self: Archetype, selector: components.Selector, row: integer): any
+    const relationship = components.select(selector)
     if components.asRelationship(relationship) == nil then
         error("expected a relationship", 2)
     end
@@ -1180,12 +1207,13 @@ function Archetype.getFirstRelationship<C is components.Component>(
     return valueAt(self, row - 1, relationship)
 end
 
-function Archetype.forEachRelationship<C is components.Component>(
+Archetype.forEachRelationship = function(
     self: Archetype,
-    relationship: C,
+    selector: components.Selector,
     row: integer,
-    callback: function(value: C.Value)
+    callback: function(value: any)
 ): nil
+    const relationship = components.select(selector)
     const metadata = assert(components.asRelationship(relationship), "expected a relationship")
     if row < 1 or row > #self.entities then
         return
@@ -1194,7 +1222,7 @@ function Archetype.forEachRelationship<C is components.Component>(
     const edges = edgeValues(self, row - 1, metadata)
     for index = 1, #edges do
         if selected == nil or components.edgeTarget(edges[index]) == selected then
-            callback(edges[index] as C.Value)
+            callback(edges[index])
         end
     end
 end

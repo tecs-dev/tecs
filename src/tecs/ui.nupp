@@ -99,7 +99,7 @@ export type LayoutOptions = {
 }
 
 --- Constructs Layout with its default values for omitted fields.
-export const Layout: tecs.ecs.FFIComponent<LayoutValue> = tecs.ecs.newFFIComponent({
+export const Layout: tecs.ecs.ComponentDefinition<LayoutValue> = tecs.ecs.newComponent(LayoutValue, {
     name = "UiLayout",
     transient = true,
     construct = function(options: LayoutOptions?): LayoutValue
@@ -127,7 +127,7 @@ end
 export type Style = StyleValue
 
 --- Constructs Style with its default values for omitted fields.
-export const Style: tecs.ecs.TableComponent<StyleValue> = tecs.ecs.newComponent({
+export const Style: tecs.ecs.ComponentDefinition<StyleValue> = tecs.ecs.newComponent(StyleValue, {
     name = "UiStyle",
     requires = {Node, Layout, tecs.gfx.Clip, tecs.ecs.Transform2D, tecs.ecs.RelativeTransform2D},
     construct = function(style: StyleOptions?): StyleValue
@@ -168,7 +168,7 @@ export type RootOptions = {
 }
 
 --- Constructs Root with its default values for omitted fields.
-export const Root: tecs.ecs.TableComponent<RootValue> = tecs.ecs.newComponent({
+export const Root: tecs.ecs.ComponentDefinition<RootValue> = tecs.ecs.newComponent(RootValue, {
     name = "UiRoot",
     requires = {Style},
     construct = function(options: RootOptions?): RootValue
@@ -196,7 +196,7 @@ end
 export type Paint = PaintValue
 
 --- Constructs Paint with its default values for omitted fields.
-export const Paint: tecs.ecs.FFIComponent<PaintValue> = tecs.ecs.newFFIComponent({
+export const Paint: tecs.ecs.ComponentDefinition<PaintValue> = tecs.ecs.newComponent(PaintValue, {
     name = "UiPaint",
     construct = function(stretch: boolean?): PaintValue
         return new PaintValue(stretch == true)
@@ -240,7 +240,7 @@ export type IntrinsicOptions = {
 }
 
 --- Constructs Intrinsic with its default values for omitted fields.
-export const Intrinsic: tecs.ecs.TableComponent<IntrinsicValue> = tecs.ecs.newComponent({
+export const Intrinsic: tecs.ecs.ComponentDefinition<IntrinsicValue> = tecs.ecs.newComponent(IntrinsicValue, {
     name = "UiIntrinsic",
     requires = {Style},
     construct = function(options: IntrinsicOptions?): IntrinsicValue
@@ -286,7 +286,7 @@ export type ScrollOptions = {
 }
 
 --- Constructs Scroll with its default values for omitted fields.
-export const Scroll: tecs.ecs.FFIComponent<ScrollValue> = tecs.ecs.newFFIComponent({
+export const Scroll: tecs.ecs.ComponentDefinition<ScrollValue> = tecs.ecs.newComponent(ScrollValue, {
     name = "UiScroll",
     requires = {Style},
     construct = function(options: ScrollOptions?): ScrollValue
@@ -350,22 +350,25 @@ export type InteractionStateOptions = {
 }
 
 --- Constructs InteractionState with its default values for omitted fields.
-export const InteractionState: tecs.ecs.FFIComponent<InteractionStateValue> = tecs.ecs.newFFIComponent({
-    name = "UiInteractionState",
-    transient = true,
-    construct = function(options: InteractionStateOptions?): InteractionStateValue
-        local values = options or {}
-        return new InteractionStateValue(
-            values.hovered ?? false,
-            values.pressed ?? false,
-            values.focused ?? false,
-            values.dragging ?? false
-        )
-    end,
-    default = function(): InteractionStateValue
-        return new InteractionStateValue(false, false, false, false)
-    end,
-})
+export const InteractionState: tecs.ecs.ComponentDefinition<InteractionStateValue> = tecs.ecs.newComponent(
+    InteractionStateValue,
+    {
+        name = "UiInteractionState",
+        transient = true,
+        construct = function(options: InteractionStateOptions?): InteractionStateValue
+            local values = options or {}
+            return new InteractionStateValue(
+                values.hovered ?? false,
+                values.pressed ?? false,
+                values.focused ?? false,
+                values.dragging ?? false
+            )
+        end,
+        default = function(): InteractionStateValue
+            return new InteractionStateValue(false, false, false, false)
+        end,
+    }
+)
 
 @derive(nupp.derive.Debug, nupp.derive.Serde)
 local struct InteractionValue
@@ -398,7 +401,7 @@ export type InteractionOptions = {
 }
 
 --- Constructs Interaction with its default values for omitted fields.
-export const Interaction: tecs.ecs.FFIComponent<InteractionValue> = tecs.ecs.newFFIComponent({
+export const Interaction: tecs.ecs.ComponentDefinition<InteractionValue> = tecs.ecs.newComponent(InteractionValue, {
     name = "UiInteraction",
     requires = {Style, InteractionState},
     construct = function(options: InteractionOptions?): InteractionValue
@@ -417,7 +420,7 @@ export const Interaction: tecs.ecs.FFIComponent<InteractionValue> = tecs.ecs.new
 })
 
 --- Constructs Scrollbar with its default values for omitted fields.
-export const Scrollbar: tecs.ecs.TableComponent<ScrollbarValue> = tecs.ecs.newComponent({
+export const Scrollbar: tecs.ecs.ComponentDefinition<ScrollbarValue> = tecs.ecs.newComponent(ScrollbarValue, {
     name = "UiScrollbar",
     requires = {Style, Paint, Interaction},
     construct = function(options: ScrollbarOptions?): ScrollbarValue

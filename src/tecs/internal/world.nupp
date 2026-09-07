@@ -17,6 +17,7 @@ local ffi = require("ffi")
 local random = require("nupp.data.random")
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
+local derived = require("tecs.internal.derived")
 local events = require("tecs.internal.events")
 local nuppevents = require("nupp.events")
 local ffistorage = require("tecs.internal.ffistorage")
@@ -313,8 +314,8 @@ export type BundleFactory = function(): components.Input
 
 --- A declarative reusable spawn shape.
 export type BundleDefinition = {
-    required: {components.Component}?,
-    with: {[components.Component]: true | BundleFactory}?
+    required: {components.Selector}?,
+    with: {[components.Selector]: true | BundleFactory}?
 }
 
 --- A world-bound reusable spawn shape.
@@ -620,7 +621,7 @@ export record World is nupp.events.Source<integer>
     --- @return Returns an iterator over the live component index.
     findArchetypes: function(
         borrows self: World,
-        component: components.Component
+        component: components.Selector
     ): function(): (archetype.Archetype?, integer?, tecs.internal.entitycolumn.DoubleArray?)
 
     --- Captures archetypes with dirty components in registry order.
@@ -635,36 +636,47 @@ export record World is nupp.events.Source<integer>
     compact: function(exclusive self: World): (integer, integer)
 
     isAlive: function(borrows self: World, id: integer): boolean
-    has: function(borrows self: World, id: integer, component: components.Component): boolean
+    has: function(borrows self: World, id: integer, component: components.Selector): boolean
     byKey: function(borrows self: World, key: string): integer?
     requireKey: function(borrows self: World, key: string): integer
-    get: function<C is components.Component>(borrows self: World, id: integer, component: C): C.Value?
-    getMut: function<C is components.Component>(exclusive self: World, id: integer, component: C): C.Value?
-    markComponentDirty: function(exclusive self: World, id: integer, component: components.Component): nil
-    relationshipSources: function(borrows self: World, relationship: components.Component, target: integer): {integer}
+    get: (function<C is components.Component>(borrows self: World, id: integer, component: C): C.Value?)
+        & (function<T is derived.Value>(borrows self: World, id: integer, component: Type<T>): T?)
+    getMut: (function<C is components.Component>(exclusive self: World, id: integer, component: C): C.Value?)
+        & (function<T is derived.Value>(exclusive self: World, id: integer, component: Type<T>): T?)
+    markComponentDirty: function(exclusive self: World, id: integer, component: components.Selector): nil
+    relationshipSources: function(borrows self: World, relationship: components.Selector, target: integer): {integer}
 
     --- Iterates a source entity's edges in target order.
     --- @param self The world to inspect.
     --- @param id The committed source identifier.
     --- @param relationship The relationship definition or target-specific component.
     --- @param callback The callback receiving each live edge value.
-    forEachRelationship: function<C is components.Component>(
-        borrows self: World,
-        id: integer,
-        relationship: C,
-        callback: function(value: C.Value)
-    ): nil
+    forEachRelationship: (
+        function<C is components.Component>(
+            borrows self: World,
+            id: integer,
+            relationship: C,
+            callback: function(value: C.Value)
+        ): nil
+    )
+        & (
+        function<T is derived.Edge>(
+            borrows self: World,
+            id: integer,
+            relationship: Type<T>,
+            callback: function(value: T)
+        ): nil
+    )
 
     --- Returns the first edge in target order.
     --- @param self The world to inspect.
     --- @param id The committed source identifier.
     --- @param relationship The relationship to inspect.
     --- @return Returns nil when the source or edge is absent.
-    getFirstRelationship: function<C is components.Component>(
-        borrows self: World,
-        id: integer,
-        relationship: C
-    ): C.Value?
+    getFirstRelationship: (
+        function<C is components.Component>(borrows self: World, id: integer, relationship: C): C.Value?
+    )
+        & (function<T is derived.Edge>(borrows self: World, id: integer, relationship: Type<T>): T?)
 
     --- Visits sources targeting an entity in ascending identifier order.
     --- @param self The world to inspect.
@@ -676,7 +688,7 @@ export record World is nupp.events.Source<integer>
     targets: function<T>(
         borrows self: World,
         target: integer,
-        relationship: components.Component,
+        relationship: components.Selector,
         callback: function(source: integer, context: T),
         context: T
     ): nil
@@ -691,7 +703,7 @@ export record World is nupp.events.Source<integer>
     traverse: function(
         borrows self: World,
         root: integer,
-        relationship: components.Component
+        relationship: components.Selector
     ): function(): (integer?, integer?)
 
     --- Walks the first outgoing edge at each level, in target order.
@@ -706,7 +718,7 @@ export record World is nupp.events.Source<integer>
     walkUp: function<T>(
         borrows self: World,
         id: integer,
-        relationship: components.Component,
+        relationship: components.Selector,
         callback: function(ancestor: integer, depth: integer, context: T): boolean?,
         context: T,
         maxDepth: integer?
@@ -2218,7 +2230,8 @@ end
 --- @param id the packed entity id
 --- @param component the component to find
 --- @return whether the live entity's archetype contains the component
-function World.has(borrows self: World, id: integer, component: components.Component): boolean
+function World.has(borrows self: World, id: integer, component: components.Selector): boolean
+    const component = components.select(component)
     if not self:isAlive(id) then
         return false
     end
@@ -2233,7 +2246,8 @@ end
 --- @param id the packed entity id
 --- @param component the component to read
 --- @return the raw scalar, tag singleton, or nil when absent or dead
-function World.get<C is components.Component>(borrows self: World, id: integer, component: C): C.Value?
+World.get = function(borrows self: World, id: integer, selector: components.Selector): any
+    const component = components.select(selector)
     if not self:isAlive(id) then
         return nil
     end
@@ -2248,7 +2262,8 @@ end
 --- @param id the packed entity id
 --- @param component the component the caller intends to write
 --- @return the live value, or nil when absent or dead
-function World.getMut<C is components.Component>(exclusive self: World, id: integer, component: C): C.Value?
+World.getMut = function(exclusive self: World, id: integer, selector: components.Selector): any
+    const component = components.select(selector)
     if not self:isAlive(id) then
         return nil
     end
@@ -2264,7 +2279,8 @@ end
 --- @param self the world to modify
 --- @param id the packed entity id
 --- @param component the component whose storage changed
-function World.markComponentDirty(exclusive self: World, id: integer, component: components.Component): nil
+function World.markComponentDirty(exclusive self: World, id: integer, component: components.Selector): nil
+    const component = components.select(component)
     if not self:isAlive(id) then
         return
     end
@@ -2309,8 +2325,8 @@ end
 --- @param target the target entity id
 --- @return a sorted caller-owned source list
 --- @raises Raises when the component is not a relationship with a reverse index.
-function World.relationshipSources(borrows self: World, relationship: components.Component, target: integer): {integer}
-    const metadata = assert(components.asRelationship(relationship), "expected a relationship")
+function World.relationshipSources(borrows self: World, relationship: components.Selector, target: integer): {integer}
+    const metadata = assert(components.asRelationship(components.select(relationship)), "expected a relationship")
     if not metadata.reverseIndex then
         error("relationshipSources requires reverseIndex = true", 2)
     end
@@ -2324,12 +2340,13 @@ function World.relationshipSources(borrows self: World, relationship: components
     return result
 end
 
-function World.forEachRelationship<C is components.Component>(
+World.forEachRelationship = function(
     borrows self: World,
     id: integer,
-    relationship: C,
-    callback: function(value: C.Value)
+    selector: components.Selector,
+    callback: function(value: any)
 ): nil
+    const relationship = components.select(selector)
     if not self:isAlive(id) then
         return
     end
@@ -2337,21 +2354,19 @@ function World.forEachRelationship<C is components.Component>(
     assert(self.archetypeById[archetypeId]):forEachRelationship(relationship, row + 1, callback)
 end
 
-function World.getFirstRelationship<C is components.Component>(
-    borrows self: World,
-    id: integer,
-    relationship: C
-): C.Value?
+World.getFirstRelationship = function(borrows self: World, id: integer, selector: components.Selector): any
+    const relationship = components.select(selector)
     if components.asRelationship(relationship) == nil then
         error("expected a relationship", 2)
     end
+
     return self:get(id, relationship)
 end
 
 function World.targets<T>(
     borrows self: World,
     target: integer,
-    relationship: components.Component,
+    relationship: components.Selector,
     callback: function(source: integer, context: T),
     context: T
 ): nil
@@ -2364,9 +2379,9 @@ end
 function World.traverse(
     borrows self: World,
     root: integer,
-    relationship: components.Component
+    relationship: components.Selector
 ): function(): (integer?, integer?)
-    const metadata = assert(components.asRelationship(relationship), "expected a relationship")
+    const metadata = assert(components.asRelationship(components.select(relationship)), "expected a relationship")
     if not metadata.reverseIndex then
         error("traverse requires reverseIndex = true", 2)
     end
@@ -2405,12 +2420,12 @@ end
 function World.walkUp<T>(
     borrows self: World,
     id: integer,
-    relationship: components.Component,
+    relationship: components.Selector,
     callback: function(ancestor: integer, depth: integer, context: T): boolean?,
     context: T,
     maxDepth: integer?
 ): nil
-    const metadata = assert(components.asRelationship(relationship), "expected a relationship")
+    const metadata = assert(components.asRelationship(components.select(relationship)), "expected a relationship")
     const limit = maxDepth or 100
     if limit < 1 then
         error("walkUp requires a positive depth limit", 2)
@@ -2447,7 +2462,7 @@ local function registerQuery(exclusive self: World, value: query.Query): query.Q
     const included = value.descriptor.include
     if included ~= nil then
         for index = 1, #included do
-            const entries = self.componentArchetypes[included[index].componentId]
+            const entries = self.componentArchetypes[components.select(included[index]).componentId]
             if entries == nil then
                 return value
             end
@@ -3425,9 +3440,9 @@ end
 
 function World.findArchetypes(
     borrows self: World,
-    component: components.Component
+    component: components.Selector
 ): function(): (archetype.Archetype?, integer?, tecs.internal.entitycolumn.DoubleArray?)
-    const entries = self.componentArchetypes[component.componentId]
+    const entries = self.componentArchetypes[components.select(component).componentId]
     local index: integer = 0
     return function(): (archetype.Archetype?, integer?, tecs.internal.entitycolumn.DoubleArray?)
         index = index + 1
@@ -3812,7 +3827,7 @@ function World.newBundle(exclusive self: World, name: string, definition: Bundle
     if self.bundles[name] ~= nil then
         error("Bundle with name '" .. name .. "' already exists", 2)
     end
-    local required = definition and definition.required or {}
+    local required = components.selectAll(definition and definition.required)
     local defaults = definition and definition.with or {}
     local requiredNames: {string} = {}
     local defaultedNames: {string} = {}
@@ -3831,7 +3846,8 @@ function World.newBundle(exclusive self: World, name: string, definition: Bundle
         seen[component.componentId] = true
         requiredNames[index] = component.componentName
     end
-    for component, configured in pairs(defaults) do
+    for selector, configured in pairs(defaults) do
+        const component = components.select(selector)
         if components.asRelationship(component) ~= nil or component == components.Key then
             plain = false
         end
