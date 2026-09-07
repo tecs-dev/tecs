@@ -1,0 +1,181 @@
+module shapes
+
+--[[Built-in shape gallery and the scene used by `nupp task bench render`.
+Run `nupp task ex-shapes` for the gallery. BENCH_COUNT selects the exact number
+of shapes; BENCH_SHAPE selects one material or `all`. BENCH_MOTION is
+`static` or `moving`. The grid initially fits inside the render target.
+BENCH_INTERACTIVE enables wheel zoom, WASD/arrow panning and R to reset.]]
+
+local function install(exclusive app: tecs.application.Application, interactive: boolean): nil
+    const count = tonumber(os.getenv("BENCH_COUNT") or "12")
+    assert(
+        count and count >= 1 and count % 1 == 0 and count <= tecs.ecs.MAX_ENTITIES,
+        "BENCH_COUNT must fit the entity limit"
+    )
+    const total = count as integer
+    assert(
+        not interactive or total < tecs.ecs.MAX_ENTITIES,
+        "interactive benchmark needs one entity slot for its camera"
+    )
+    const kind = os.getenv("BENCH_SHAPE") or "all"
+    const motion = os.getenv("BENCH_MOTION") or "static"
+    assert(motion == "static" or motion == "moving", "BENCH_MOTION must be static or moving")
+    const names = {
+        "textured",
+        "circle",
+        "ellipse",
+        "rounded",
+        "ring",
+        "frame",
+        "line",
+        "capsule",
+        "pie",
+        "star",
+        "triangle",
+        "emissive"
+    }
+    const selected = kind == "rectangle" and "textured" or kind
+    const ids: {integer} = {}
+    for _, name in ipairs(names) do
+        ids[#ids + 1] = tecs.gpu.materials.id(name)
+    end
+    const fixed = selected ~= "all" and tecs.gpu.materials.id(selected) or 0
+    tecs.gfx.lighting.setAmbient(1, 1, 1)
+    const world = app.world
+    const window = app.window
+    const input = app.input
+    local camera: integer? = nil
+    local centerX, centerY = 0.0, 0.0
+    local spawned = false
+    world:addSystem({
+        name = "example.shapes.spawn",
+        phase = tecs.ecs.phases.First,
+        run = function(): nil
+            if spawned then
+                return
+            end
+            spawned = true
+            const started = nupp.time.now()
+            const width, height = window:getPixelSize()
+            centerX, centerY = width * 0.5, height * 0.5
+            if interactive then
+                camera = world:spawn(tecs.gfx.Camera2D(centerX, centerY), tecs.gfx.ActiveCamera)
+            end
+            const columns = math.ceil(math.sqrt(total * width / height))
+            const rows = math.ceil(total / columns)
+            const cellWidth, cellHeight = width / columns, height / rows
+            const size = math.min(cellWidth, cellHeight) * 0.8
+            for index = 0, total - 1 do
+                world:spawn(
+                    tecs.ecs.Transform2D(
+                        (index % columns + 0.5) * cellWidth,
+                        (math.floor(index / columns) + 0.5) * cellHeight,
+                        0,
+                        1,
+                        0,
+                        size,
+                        size
+                    ),
+                    tecs.gfx.Tint(0.2 + (index % 5) * 0.16, 0.3 + (index % 3) * 0.2, 0.8, 1),
+                    tecs.gfx.Material(selected == "all" and ids[index % #ids + 1] or fixed, 0.25),
+                    tecs.gfx.Renderable2D
+                )
+            end
+            print(
+                (
+                    "shapes: %d %s, %s, target %dx%d, quad %.3fpx, spawn %.0fms"
+                ):format(total, kind, motion, width, height, size, nupp.time.now() - started)
+            )
+        end
+    })
+    if interactive then
+        world:addSystem({
+            name = "example.shapes.camera",
+            phase = tecs.ecs.phases.Update,
+            run = function(dt: number): nil
+                const id = camera
+                if id == nil then
+                    return
+                end
+                local dx, dy = 0, 0
+                if input:keyDown(
+                    "ArrowLeft"
+                ) or input:keyDown("KeyA") or input:keyPressed("ArrowLeft") or input:keyPressed("KeyA") then
+                    dx = dx - 1
+                end
+                if input:keyDown(
+                    "ArrowRight"
+                ) or input:keyDown("KeyD") or input:keyPressed("ArrowRight") or input:keyPressed("KeyD") then
+                    dx = dx + 1
+                end
+                if input:keyDown(
+                    "ArrowUp"
+                ) or input:keyDown("KeyW") or input:keyPressed("ArrowUp") or input:keyPressed("KeyW") then
+                    dy = dy - 1
+                end
+                if input:keyDown(
+                    "ArrowDown"
+                ) or input:keyDown("KeyS") or input:keyPressed("ArrowDown") or input:keyPressed("KeyS") then
+                    dy = dy + 1
+                end
+                -- Wheel notches and smooth trackpad pixels use different units.
+                const wheel = input.wheelTicksY ~= 0 and input.wheelTicksY or input.wheelY / 40
+                const reset = input:keyPressed("KeyR") or input:keyPressed("Home")
+                if dx == 0 and dy == 0 and wheel == 0 and not reset then
+                    return
+                end
+                const eye = assert(world:getMut(id, tecs.gfx.Camera2D))
+                if reset then
+                    eye.x, eye.y, eye.zoom = centerX, centerY, 1
+                else
+                    eye.zoom = math.max(0.01, math.min(1000, eye.zoom * math.exp(wheel * 0.12)))
+                    eye.x = eye.x + dx * math.min(dt, 0.1) * 600 / eye.zoom
+                    eye.y = eye.y + dy * math.min(dt, 0.1) * 600 / eye.zoom
+                end
+            end
+        })
+    end
+    if motion == "moving" then
+        const moving = world:newQuery({include = {tecs.ecs.Transform2D, tecs.gfx.Renderable2D}})
+        world:addSystem({
+            name = "example.shapes.rotate",
+            phase = tecs.ecs.phases.Update,
+            run = function(): nil
+                for candidate, amount in moving:iter() do
+                    const transforms = assert(candidate:getMut(tecs.ecs.Transform2D))
+                    for row = 1, amount as integer do
+                        transforms[row].rotation = transforms[row].rotation + 0.01
+                    end
+                end
+            end
+        })
+    end
+end
+
+--- Creates the shape gallery or benchmark with the full entity capacity.
+--- @param title the window title
+--- @param width the initial logical width
+--- @param height the initial logical height
+--- @param debug whether application failures can be cleared
+--- @param maxFrames optional frame limit
+--- @param interactive overrides BENCH_INTERACTIVE when supplied
+--- @return the session the native host drives
+export function create(
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?,
+    interactive: boolean?
+): tecs.host.Session
+    const view = interactive == true or (interactive == nil and os.getenv("BENCH_INTERACTIVE") == "1")
+    return tecs.host.newSession({
+        world = {maxEntities = tecs.ecs.MAX_ENTITIES},
+        window = {title = title or "Tecs shapes", width = width, height = height},
+        plugin = function(exclusive app: tecs.application.Application): nil
+            install(app, view)
+        end,
+        debug = debug,
+        debugMaxFrames = maxFrames
+    })
+end

@@ -239,6 +239,14 @@ export function samplerOf(image: integer): integer
     return entry.sampler
 end
 
+local residencyVersion: integer = 0
+
+--- Returns the revision of image residency and sampling metadata.
+--- @return A monotonic count that changes when residency or sampling changes.
+export function residencyRevision(): integer
+    return residencyVersion
+end
+
 --- Returns the sampler index one filter and address mode select.
 --- @param filter the filtering mode, defaulting to `"nearest"`
 --- @param address the addressing mode, defaulting to `"clamp"`
@@ -288,6 +296,7 @@ export function upload(options: UploadOptions): integer
     entry.state = "pending"
     entry.width = options.width
     entry.height = options.height
+    residencyVersion = residencyVersion + 1
     entry.sampler = sampler
     entry.reason = nil
     entry.serial = nextSerial
@@ -321,6 +330,7 @@ export function release(name: string): boolean, string?
         return false, "gfx.images.release: " .. name .. " is not uploaded"
     end
     nextSerial = nextSerial + 1
+    residencyVersion = residencyVersion + 1
     entry.state = "released"
     entry.reason = nil
     entry.serial = nextSerial
@@ -357,12 +367,14 @@ export function complete(image: integer, serial: integer, ok: boolean, reason: s
         return
     end
     if not ok then
+        residencyVersion = residencyVersion + 1
         entry.state = "failed"
         entry.reason = reason
 
         return
     end
     if entry.state == "pending" then
+        residencyVersion = residencyVersion + 1
         entry.state = "resident"
         entry.reason = nil
     end

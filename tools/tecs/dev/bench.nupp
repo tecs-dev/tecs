@@ -23,7 +23,7 @@ local function source(name: string): string
         end
     end
     table.sort(available)
-    error("unknown benchmark " .. name .. "; expected " .. table.concat(available, ", ") .. ", acceptance")
+    error("unknown benchmark " .. name .. "; expected " .. table.concat(available, ", ") .. ", render, acceptance")
 end
 
 local function acceptance(): nil
@@ -157,7 +157,42 @@ end
 --- Runs an optimized benchmark, or the fixed three-repetition acceptance gate.
 export function run(args: {string}): nil
     const name = assert(table.remove(args, 1), "usage: nupp task bench <name> [args...]")
-    if name == "acceptance" then
+    if name == "render" then
+        local interactive = false
+        for index = #args, 1, -1 do
+            if args[index] == "--interactive" then
+                interactive = true
+                table.remove(args, index)
+            end
+        end
+        commands.run({commands.compiler(), "build", "--target", "ex-shapes", "-O2"})
+        const env = commands.sdk()
+        env.BENCH_COUNT = os.getenv("BENCH_COUNT") or "100000"
+        env.BENCH_SHAPE = os.getenv("BENCH_SHAPE") or "rectangle"
+        env.BENCH_MOTION = os.getenv("BENCH_MOTION") or "static"
+        env.BENCH_INTERACTIVE = interactive and "1" or "0"
+        local hostArgs = {
+            "cargo",
+            "run",
+            "--release",
+            "--locked",
+            "-p",
+            "tecs-winit-host",
+            "--",
+            "--component",
+            "out/nupp/shapes.nuppc",
+            "--entry",
+            "shapes.create"
+        }
+        if interactive then
+            hostArgs[#hostArgs + 1] = "--benchmark-view"
+        else
+            hostArgs[#hostArgs + 1] = "--benchmark-output"
+            hostArgs[#hostArgs + 1] = "out/validation/performance/render.json"
+        end
+        commands.run(commands.append(hostArgs, args), env)
+        return
+    elseif name == "acceptance" then
         assert(#args == 0, "acceptance takes no benchmark overrides")
         acceptance()
         return

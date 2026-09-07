@@ -55,7 +55,7 @@ local record Batch
     count: integer
 end
 
---- Reads the fixed v5 header, holds the packet to every constant in it, and
+--- Reads the versioned header, holds the packet to every constant in it, and
 --- steps past the graph section so the light table is next.
 local function header(borrows reader: nupp.io.ScalarReader): Header
     test.equal(reader:readUint32(), framepacket.MAGIC)

@@ -100,7 +100,8 @@ local function verify(): nil
         "nativesmoke",
         "tiled",
         "ui",
-        "uistandalone"
+        "uistandalone",
+        "shapes"
     }) do
         commands.run({commands.compiler(), "task", "ex-" .. target, "--headless", "--frames", "5"}, env)
     end

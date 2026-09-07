@@ -19,6 +19,8 @@ export record Archetype
     entities: {integer}
     columns: {[integer]: {any}}
     private dirty: {[integer]: boolean}
+    private structureVersion: integer
+    private valueVersions: {[integer]: integer}
 
     get: function<C is components.Component>(self: Archetype, component: C): {C.Value}?
     getMut: function<C is components.Component>(self: Archetype, component: C): {C.Value}?
@@ -28,6 +30,12 @@ export record Archetype
     markAllComponentsDirty: function(self: Archetype): nil
     clearDirtyComponents: function(self: Archetype): nil
     dirtyComponents: function(self: Archetype): function(): components.Component?
+
+    --- Returns the structural write count, which survives dirty-bit clearing.
+    structuralCount: function(self: Archetype): integer
+
+    --- Returns one column's write count, which survives dirty-bit clearing.
+    writeCount: function(self: Archetype, component: components.Component): integer
 end
 
 --- Produces the canonical signature for a component collection.
@@ -81,7 +89,9 @@ export function new(id: integer, values: {components.Component}): Archetype
         components = ordered,
         entities = {},
         columns = columns,
-        dirty = {}
+        dirty = {},
+        structureVersion = 0,
+        valueVersions = {}
     )
 end
 
@@ -143,15 +153,25 @@ end
 function Archetype.markComponentDirty(self: Archetype, component: components.Component): nil
     if has(self, component) then
         self.dirty[component.componentId] = true
+        self.valueVersions[component.componentId] = (self.valueVersions[component.componentId] or 0) + 1
     end
 end
 
 --- Marks every component in the archetype dirty after a structural change.
 --- @param self the archetype to modify
 function Archetype.markAllComponentsDirty(self: Archetype): nil
+    self.structureVersion = self.structureVersion + 1
     for index = 1, #self.components do
         self.dirty[self.components[index].componentId] = true
     end
+end
+
+function Archetype.structuralCount(self: Archetype): integer
+    return self.structureVersion
+end
+
+function Archetype.writeCount(self: Archetype, component: components.Component): integer
+    return self.valueVersions[component.componentId] or 0
 end
 
 --- Clears every component dirty mark.
@@ -277,6 +297,7 @@ end
 --- Clears every entity and value column while preserving signature identity.
 --- @param value the archetype to clear
 export function clear(value: Archetype): nil
+    value.structureVersion = value.structureVersion + 1
     value.entities = {}
     for componentId, _column in pairs(value.columns) do
         value.columns[componentId] = {}

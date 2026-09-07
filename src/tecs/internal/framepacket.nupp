@@ -10,7 +10,7 @@ pipelines, culling, compaction, submission, and presentation. Image pixels
 never ride in a packet. They cross once through the residency commands
 `tecs.gfx.images` queues, so a frame carries only the id a batch binds.
 
-# Packet version 5
+# Packet version 6
 
 Every field is little or big endian to match the host, every integer is
 unsigned, and every real is a 32-bit float. Offsets are in bytes from the start
@@ -21,15 +21,15 @@ of the packet.
 | Offset | Type  | Field             | Contract                                             |
 | ------ | ----- | ----------------- | ---------------------------------------------------- |
 | 0      | `u32` | `magic`           | `0x54454353`, and nothing else is a Tecs packet.      |
-| 4      | `u32` | `version`         | `5`. A reader rejects every other value.              |
+| 4      | `u32` | `version`         | `6`. A reader rejects every other value.              |
 | 8      | `u32` | `headerSize`      | `128`. The graph section starts after it.             |
-| 12     | `u32` | `flags`           | Bit 0 enables the shadow lane, bit 1 bloom.           |
+| 12     | `u32` | `flags`           | Bits 0/1 enable shadows/bloom; bits 2/3 retain/patch instances.           |
 | 16     | `u32` | `graphRevision`   | A reader rebuilds its graph when this changes.        |
 | 20     | `u32` | `graphBytes`      | Byte length of the graph section.                     |
 | 24     | `u32` | `batchStride`     | `20`.                                                 |
 | 28     | `u32` | `batchCount`      | Zero only when `instanceCount` is zero.               |
 | 32     | `u32` | `instanceStride`  | `80`.                                                 |
-| 36     | `u32` | `instanceCount`   | How many instances follow the batch table.            |
+| 36     | `u32` | `instanceCount`   | Total resident instance count, including unchanged instances.            |
 | 40     | `f32` | `targetWidth`     | Render target width in pixels, greater than zero.     |
 | 44     | `f32` | `targetHeight`    | Render target height in pixels, greater than zero.    |
 | 48     | `f32` | `cameraX`         | View center x in world units.                         |
@@ -39,7 +39,7 @@ of the packet.
 | 64     | `u32` | `lightStride`     | `32`.                                                 |
 | 68     | `u32` | `lightCount`      | At most 256, the ceiling one frame resolves.          |
 | 72     | `u32` | `casterCount`     | Instances carrying a cast flag, which sizes the list. |
-| 76     | `u32` | reserved          | Zero.                                                 |
+| 76     | `u32` | sceneRevision     | Resident generation; zero for an independent snapshot.                                                 |
 | 80     | `f32` | `ambientR`        | Ambient red, at or above zero.                        |
 | 84     | `f32` | `ambientG`        | Ambient green.                                        |
 | 88     | `f32` | `ambientB`        | Ambient blue.                                         |
@@ -83,7 +83,26 @@ Lights are ordered by ascending entity id, so the same scene bins and casts the
 same way every frame however the archetypes are laid out. A world holding more
 than the ceiling keeps the lowest ids and drops the rest.
 
-## Batch table, `batchCount` entries of 20 bytes after the light table
+## Retained and partial frames
+
+This is the old SpriteFramePacket dirty-range seam adapted to the managed ABI:
+persistent instance storage and dirty ranges cross in place of a full snapshot.
+A full frame carries the batch table and all instances. A retained frame (bit 2)
+ends after the lights and names the receiver's already-validated scene revision;
+it carries no batch or instance bytes. A delta frame (bit 3) also omits the batch
+table, then carries a base revision, a range count (1 to 64), and that many
+`u32 offset, u32 size` pairs followed by their bytes. Ranges are sorted,
+nonoverlapping and aligned to whole instances. The header names the new revision.
+
+A delta preserves the instance count, batch layout and caster count. Relayouts
+send a full frame. The receiver validates every changed instance and rejects
+unknown generations, malformed ranges, invalid material IDs and mismatched lanes.
+The host reports its resident generation on the next call; zero requests a full
+refresh after graphics reconstruction. `Extractor.packet` continues to return
+an independent complete snapshot. Neither dirty-bit clearing nor a skipped
+extraction loses a write: run comparisons use monotonic counters.
+
+## Batch table, `batchCount` entries of 20 bytes after the light table (full frames)
 
 | Offset | Type  | Field           | Contract                                                |
 | ------ | ----- | --------------- | ------------------------------------------------------- |
@@ -104,7 +123,7 @@ instances and still draw a batch: compaction preserves packet order, so the
 survivors of a single-lane batch are a contiguous run of that lane's visible
 list and one indirect draw covers them.
 
-## Instances, `instanceCount` entries of 80 bytes after the batch table
+## Instances, `instanceCount` entries of 80 bytes after the batch table (full frames)
 
 | Offset | Type  | Field      | Contract                                                     |
 | ------ | ----- | ---------- | ------------------------------------------------------------ |
@@ -135,7 +154,7 @@ dropping that half would silently unblock a light, and a blended entity casts
 nothing at all: it never reaches the G-buffer, so a hard silhouette of it would
 be a lie.
 
-The four sixteen-byte groups are what a backend binds as a storage buffer, so
+The four sixteen-byte groups and trailing words are what a backend binds as a storage buffer, so
 the layout is a `vec4` quadruple followed by four words rather than the field
 order a reader would pick.
 
@@ -151,6 +170,7 @@ disagrees with its batch's, or whose material id its dispatch does not carry.
 ]]
 
 local archetype = require("tecs.internal.archetype")
+local dirtyranges = require("tecs.internal.dirtyranges")
 local images = require("tecs.gfx.images")
 local layers = require("tecs.gfx.layers")
 local clips = require("tecs.gfx.clips")
@@ -169,7 +189,7 @@ local ffi = require("ffi")
 export const MAGIC: uint32 = 0x54454353
 
 --- The packet layout this module writes.
-export const VERSION: uint32 = 5
+export const VERSION: uint32 = 6
 
 --- The byte length of the packet header.
 export const HEADER_SIZE: uint32 = 128
@@ -210,6 +230,12 @@ export const FRAME_SHADOWS: integer = 1
 --- Set in the header when the frame draws the bloom chain.
 export const FRAME_BLOOM: integer = 2
 
+--- Reuses the receiver's validated resident instance generation.
+export const FRAME_RETAINED: integer = 4
+
+--- Carries dirty byte ranges over a validated resident generation.
+export const FRAME_DELTA: integer = 8
+
 const narrow = nupp.math.f32.narrow
 const wrap = nupp.math.u32.wrap
 const huge = math.huge
@@ -218,10 +244,29 @@ local function finite(value: number): boolean
     return value == value and value ~= huge and value ~= -huge
 end
 
---- A world-bound reusable renderer query.
----
---- The row arrays grow to a scene's high-water mark and are then reused, so a
---- steady scene extracts without allocating anything but the packet itself.
+local record Run
+    archetype: archetype.Archetype
+    offset: integer
+    length: integer
+    structAt: integer
+    valueAt: {integer}
+    dirty: boolean
+    seen: boolean
+    screenSpace: boolean
+end
+
+local record View
+    width: integer
+    height: integer
+    x: number
+    y: number
+    zoom: number
+    rotation: number
+end
+
+--- A world-bound renderer query with retained packed instances and dirty runs.
+--- Clean runs preserve their packed bytes; the receiver supplies the generation
+--- it has already validated and uploaded.
 export record Extractor
     private world: world.World
     private poses: {rendercomponents.Transform2D}
@@ -247,7 +292,25 @@ export record Extractor
     private v0: {number}
     private u1: {number}
     private v1: {number}
-    private packetWords: array.Array<uint32>
+    private cacheValid: boolean
+    private sceneRevision: integer
+    private runs: {[integer]: Run}
+    private ranges: dirtyranges.Ranges
+    private drawSlots: {integer}
+    private relayout: boolean
+    private batchDirty: boolean
+    private rewritten: integer
+    private cachedAlpha: number
+    private cachedView: {number}
+    private cachedLayers: integer
+    private cachedClips: integer
+    private cachedImages: integer
+    private cachedMaterials: integer
+    private cachedBatches: integer
+    private cachedCasters: integer
+    private cachedBatchBytes: string
+    private screenSpace: boolean
+    private instanceWords: array.Array<uint32>
     private orderChanged: boolean
     private rowCount: integer
     private sorted: integer
@@ -260,7 +323,14 @@ export record Extractor
     private lightsSorted: integer
     private beforeLight: function(left: integer, right: integer): boolean
 
+    --- Encodes a complete standalone snapshot, including every batch and instance.
+    --- @param width the physical target width in pixels
+    --- @param height the physical target height in pixels
+    --- @return an independent packet that needs no receiver cache
     packet: function(exclusive self: Extractor, width: integer, height: integer): string
+
+    --- Encodes a frame, omitting instances already resident at the receiver.
+    frame: function(exclusive self: Extractor, width: integer, height: integer, residentRevision: integer): string
 end
 
 --- Creates an extractor and registers its queries with one world.
@@ -320,7 +390,25 @@ export function new(exclusive value: world.World): Extractor
         v0 = {},
         u1 = {},
         v1 = {},
-        packetWords = array.scalar(array.uint32, 256),
+        cacheValid = false,
+        sceneRevision = 0,
+        runs = {},
+        ranges = dirtyranges.new(),
+        drawSlots = {},
+        relayout = true,
+        batchDirty = true,
+        rewritten = 0,
+        cachedAlpha = -1,
+        cachedView = {},
+        cachedLayers = -1,
+        cachedClips = -1,
+        cachedImages = -1,
+        cachedMaterials = -1,
+        cachedBatches = 0,
+        cachedCasters = 0,
+        cachedBatchBytes = "",
+        screenSpace = false,
+        instanceWords = array.scalar(array.uint32, 256),
         orderChanged = true,
         rowCount = 0,
         sorted = 0,
@@ -388,7 +476,7 @@ local function presented(
     return pose
 end
 
---- Reads every renderable row into the extractor's reused arrays.
+--- Reads dirty archetype runs into the retained extraction arrays.
 --- @raises when an entity selects a material id this build does not carry
 local function collect(exclusive self: Extractor): nil
     const entities = self.entities
@@ -414,93 +502,119 @@ local function collect(exclusive self: Extractor): nil
     self.orderChanged = true
     for candidate, count in self.drawables:iter() do
         local active = candidate as archetype.Archetype
-        local rowTransforms: {rendercomponents.Transform2D} = assert(active:get(rendercomponents.Transform2DComponent))
-        const previous = active:get(rendercomponents.PreviousTransform2DComponent)
-        local rowTints: {rendercomponents.Tint} = assert(active:get(rendercomponents.TintComponent))
-        local rowClips = active:get(clips.ClipComponent)
-        local rowSprites = active:get(rendercomponents.SpriteComponent) as {rendercomponents.Sprite}?
-        local rowMaterials = active:get(materials.MaterialComponent) as {materials.Material}?
-        local rowOccluders = active:get(lighting.Occluder2DComponent) as {lighting.Occluder2D}?
-        local rowDropShadows = active:get(lighting.DropShadow2DComponent) as {lighting.DropShadow2D}?
-        for index = 1, count as integer do
-            rows = rows + 1
-            const transform = presented(
-                rowTransforms[index],
-                previous ~= nil and previous[index] or nil,
-                alpha,
-                self.poses,
-                rows
-            )
-            self.clipIds[rows] = rowClips and rowClips[index].index or 0
-            const tint = rowTints[index]
-            const depth = layers.depthOf(transform.layer, transform.z, transform.x, transform.y)
-            if entities[rows] ~= active.entities[index] or depths[rows] ~= depth then
-                orderChanged = true
-            end
-            entities[rows] = active.entities[index]
-            transforms[rows] = transform
-            tints[rows] = tint
-            depths[rows] = depth
-            -- The lane is the tint's alpha and nothing else. The G-buffer pass
-            -- writes with replace and has nowhere to put partial coverage, so
-            -- an entity that is not fully opaque leaves for the forward pass,
-            -- where the depth it already sorted by decides it against the
-            -- opaque geometry in front of it.
-            const blended = tint.a < 1.0 or layers.isOverlay(transform.layer)
-            lanes[rows] = blended and LANE_BLEND or LANE_OPAQUE
-            -- A blended entity casts nothing: it never reaches the G-buffer, so
-            -- a hard silhouette of it would be a lie. An entity carrying both
-            -- cast components is an occluder, because dropping that half would
-            -- silently unblock a light.
-            local flag: integer = 0
-            local height: number = 0.0
-            if not blended then
-                if rowOccluders ~= nil then
-                    flag = FLAG_OCCLUDER
-                    height = rowOccluders[index].height
-                elseif rowDropShadows ~= nil then
-                    flag = FLAG_DROP_SHADOW
-                    height = rowDropShadows[index].height
+        const run = assert(self.runs[active.id])
+        if not run.dirty then
+            rows = rows + (count as integer)
+        else
+            run.screenSpace = false
+            local rowTransforms: {
+                rendercomponents.Transform2D
+            } = assert(active:get(rendercomponents.Transform2DComponent))
+            const previous = active:get(rendercomponents.PreviousTransform2DComponent)
+            local rowTints: {rendercomponents.Tint} = assert(active:get(rendercomponents.TintComponent))
+            local rowClips = active:get(clips.ClipComponent)
+            local rowSprites = active:get(rendercomponents.SpriteComponent) as {rendercomponents.Sprite}?
+            local rowMaterials = active:get(materials.MaterialComponent) as {materials.Material}?
+            local rowOccluders = active:get(lighting.Occluder2DComponent) as {lighting.Occluder2D}?
+            local rowDropShadows = active:get(lighting.DropShadow2DComponent) as {lighting.DropShadow2D}?
+            for index = 1, count as integer do
+                rows = rows + 1
+                const transform = presented(
+                    rowTransforms[index],
+                    previous ~= nil and previous[index] or nil,
+                    alpha,
+                    self.poses,
+                    rows
+                )
+                self.clipIds[rows] = rowClips and rowClips[index].index or 0
+                if layers.isScreenSpace(transform.layer) then
+                    run.screenSpace = true
                 end
-            end
-            castFlags[rows] = flag
-            castHeights[rows] = flag == 0 and 0.0 or height
-            if rowMaterials == nil then
-                materialIds[rows] = 0
-                params[rows] = 0.25
-            else
-                const material = rowMaterials[index]
-                if material.id < 0 or material.id >= materialCount then
-                    error("framepacket: material id " .. tostring(material.id) .. " is not one this build carries", 3)
+                const oldImage, oldSampler, oldLane, oldFlag = imageIds[
+                    rows
+                ], samplers[rows], lanes[rows], castFlags[rows]
+                const tint = rowTints[index]
+                const depth = layers.depthOf(transform.layer, transform.z, transform.x, transform.y)
+                if entities[rows] ~= active.entities[index] or depths[rows] ~= depth then
+                    orderChanged = true
                 end
-                materialIds[rows] = material.id
-                params[rows] = material.param
-            end
-            if rowSprites == nil then
-                imageIds[rows] = 0
-                samplers[rows] = 0
-                u0[rows] = 0.0
-                v0[rows] = 0.0
-                u1[rows] = 1.0
-                v1[rows] = 1.0
-            else
-                const sprite = rowSprites[index]
-                const image = sprite.image
-                -- An image that never became resident draws against the
-                -- backend's white fallback rather than dropping the entity.
-                if image ~= 0 and images.stateOf(image) == "resident" then
-                    imageIds[rows] = image
-                    samplers[rows] = images.samplerOf(image)
+                entities[rows] = active.entities[index]
+                transforms[rows] = transform
+                tints[rows] = tint
+                depths[rows] = depth
+                -- The lane is the tint's alpha and nothing else. The G-buffer pass
+                -- writes with replace and has nowhere to put partial coverage, so
+                -- an entity that is not fully opaque leaves for the forward pass,
+                -- where the depth it already sorted by decides it against the
+                -- opaque geometry in front of it.
+                const blended = tint.a < 1.0 or layers.isOverlay(transform.layer)
+                lanes[rows] = blended and LANE_BLEND or LANE_OPAQUE
+                -- A blended entity casts nothing: it never reaches the G-buffer, so
+                -- a hard silhouette of it would be a lie. An entity carrying both
+                -- cast components is an occluder, because dropping that half would
+                -- silently unblock a light.
+                local flag: integer = 0
+                local height: number = 0.0
+                if not blended then
+                    if rowOccluders ~= nil then
+                        flag = FLAG_OCCLUDER
+                        height = rowOccluders[index].height
+                    elseif rowDropShadows ~= nil then
+                        flag = FLAG_DROP_SHADOW
+                        height = rowDropShadows[index].height
+                    end
+                end
+                castFlags[rows] = flag
+                castHeights[rows] = flag == 0 and 0.0 or height
+                if rowMaterials == nil then
+                    materialIds[rows] = 0
+                    params[rows] = 0.25
                 else
+                    const material = rowMaterials[index]
+                    if material.id < 0 or material.id >= materialCount then
+                        error(
+                            "framepacket: material id " .. tostring(material.id) .. " is not one this build carries",
+                            3
+                        )
+                    end
+                    materialIds[rows] = material.id
+                    params[rows] = material.param
+                end
+                if rowSprites == nil then
                     imageIds[rows] = 0
                     samplers[rows] = 0
+                    u0[rows] = 0.0
+                    v0[rows] = 0.0
+                    u1[rows] = 1.0
+                    v1[rows] = 1.0
+                else
+                    const sprite = rowSprites[index]
+                    const image = sprite.image
+                    -- An image that never became resident draws against the
+                    -- backend's white fallback rather than dropping the entity.
+                    if image ~= 0 and images.stateOf(image) == "resident" then
+                        imageIds[rows] = image
+                        samplers[rows] = images.samplerOf(image)
+                    else
+                        imageIds[rows] = 0
+                        samplers[rows] = 0
+                    end
+                    u0[rows] = sprite.u0
+                    v0[rows] = sprite.v0
+                    u1[rows] = sprite.u1
+                    v1[rows] = sprite.v1
                 end
-                u0[rows] = sprite.u0
-                v0[rows] = sprite.v0
-                u1[rows] = sprite.u1
-                v1[rows] = sprite.v1
+                if oldImage ~= imageIds[
+                    rows
+                ] or oldSampler ~= samplers[rows] or oldLane ~= lanes[rows] or oldFlag ~= castFlags[rows] then
+                    self.batchDirty = true
+                end
             end
         end
+    end
+    self.screenSpace = false
+    for _, run in pairs(self.runs) do
+        self.screenSpace = self.screenSpace or run.screenSpace
     end
     self.orderChanged = orderChanged or rows ~= self.rowCount
     self.rowCount = rows
@@ -582,61 +696,152 @@ local function sortRows(exclusive self: Extractor): nil
     self.orderChanged = false
 end
 
---- Encodes one complete scene packet.
---- @param self the extractor to run
---- @param width the positive render target width in pixels
---- @param height the positive render target height in pixels
---- @return a host-endian versioned packet owned by the caller
---- @raises when a viewport dimension is not positive, when the active camera
----     holds a zoom that is not greater than zero, or when an entity selects a
----     material this build does not carry
-function Extractor.packet(exclusive self: Extractor, width: integer, height: integer): string
-    if width < 1 or height < 1 then
-        error("framepacket: viewport dimensions must be positive", 2)
+local watched: {
+    tecs.internal.components.Component
+} = {
+    rendercomponents.Transform2DComponent,
+    rendercomponents.TintComponent,
+    rendercomponents.PreviousTransform2DComponent,
+    rendercomponents.SpriteComponent,
+    materials.MaterialComponent,
+    lighting.Occluder2DComponent,
+    lighting.DropShadow2DComponent,
+    clips.ClipComponent,
+}
+
+-- Port of SpriteExtractor.layoutPacked and its clean-run gate. Length or
+-- offset changes relayout the packed scene; otherwise only dirty runs rewrite.
+-- Monotonic write counts preserve changes across end-of-frame dirty clears.
+local function sceneChanged(exclusive self: Extractor, eye: View, snapshot: boolean): boolean
+    local force = not self.cacheValid or snapshot
+    const layerVersion, clipVersion = layers.revision(), clips.revision()
+    const imageVersion, materialVersion = images.residencyRevision(), materials.revision()
+    force = force
+        or layerVersion ~= self.cachedLayers
+        or clipVersion ~= self.cachedClips
+        or imageVersion ~= self.cachedImages
+        or materialVersion ~= self.cachedMaterials
+    const viewport = {eye.width, eye.height, eye.x, eye.y, eye.zoom, eye.rotation}
+    if self.screenSpace then
+        for index, value in ipairs(viewport) do
+            force = force or self.cachedView[index] ~= value
+        end
     end
-    const cameraX, cameraY, zoom, rotation = view(self, width, height)
-    zone.push("extract/collect")
-    collect(self)
-    zone.pop()
-    zone.push("extract/sort")
-    sortRows(self)
-    zone.pop()
-    zone.push("extract/lights")
-    collectLights(self)
-    sortLights(self)
-    zone.pop()
-    zone.push("extract/encode")
+    for _, run in pairs(self.runs) do
+        run.seen = false
+    end
+    local total: integer = 0
+    local relayout = not self.cacheValid
+    local changed = force
+    local _, _, alpha = self.world:getFixedTiming()
+    for candidate, count in self.drawables:iter() do
+        const active = candidate as archetype.Archetype
+        local run = self.runs[active.id]
+        if run == nil or run.archetype ~= active then
+            run = new Run(
+                archetype = active,
+                offset = total,
+                length = count as integer,
+                structAt = -1,
+                valueAt = {},
+                dirty = true,
+                seen = true,
+                screenSpace = false
+            )
+            self.runs[active.id] = run
+            relayout = true
+        end
+        relayout = relayout or run.offset ~= total or run.length ~= count
+        run.offset, run.length, run.seen = total, count as integer, true
+        total = total + run.length
+        const structural = active:structuralCount()
+        run.dirty = force or run.structAt ~= structural or (
+            alpha ~= self.cachedAlpha and active:get(rendercomponents.PreviousTransform2DComponent) ~= nil
+        )
+        run.structAt = structural
+        for index, component in ipairs(watched) do
+            const writes = active:writeCount(component)
+            run.dirty = run.dirty or run.valueAt[index] ~= writes
+            run.valueAt[index] = writes
+        end
+        changed = changed or run.dirty
+    end
+    for id, run in pairs(self.runs) do
+        if not run.seen then
+            self.runs[id] = nil
+            relayout = true
+        end
+    end
+    self.relayout = relayout
+    self.batchDirty = relayout
+    self.rewritten = 0
+    for _, run in pairs(self.runs) do
+        run.dirty = run.dirty or relayout
+        if run.dirty then
+            self.rewritten = self.rewritten + run.length
+        end
+    end
+    self.cachedView, self.cachedAlpha = viewport, alpha
+    self.cachedLayers, self.cachedClips = layerVersion, clipVersion
+    self.cachedImages, self.cachedMaterials = imageVersion, materialVersion
 
-    const order = self.order
-    const imageIds = self.imageIds
-    const samplers = self.samplers
-    const lanes = self.lanes
-    const castFlags = self.castFlags
-    const rows = self.rowCount
+    return changed or relayout
+end
 
-    -- The batch table is written before the instances, so the runs are counted
-    -- once here and the values are read again below rather than staged.
-    local batches: integer = 0
+local function rebuildBatches(exclusive self: Extractor): nil
+    const order, rows = self.order, self.rowCount
+    const imageIds, samplers, lanes = self.imageIds, self.samplers, self.lanes
     local runImage: integer = -1
     local runSampler: integer = -1
     local runLane: integer = -1
+    local batchBuffer = nupp.io.newBuffer()
+    local batchWriter = nupp.io.newScalarWriter(batchBuffer)
+    runImage = -1
+    runSampler = -1
+    runLane = -1
+    local runFirst: integer = 0
+    local runLength: integer = 0
     for index = 1, rows do
         const row = order[index]
         if imageIds[row] ~= runImage or samplers[row] ~= runSampler or lanes[row] ~= runLane then
-            batches = batches + 1
+            if runLength > 0 then
+                batchWriter:writeUint32(wrap(runImage))
+                    :writeUint32(wrap(runSampler))
+                    :writeUint32(wrap(runLane))
+                    :writeUint32(wrap(runFirst))
+                    :writeUint32(wrap(runLength))
+            end
             runImage = imageIds[row]
             runSampler = samplers[row]
             runLane = lanes[row]
+            runFirst = index - 1
+            runLength = 0
         end
+        runLength = runLength + 1
+    end
+    if runLength > 0 then
+        batchWriter:writeUint32(wrap(runImage))
+            :writeUint32(wrap(runSampler))
+            :writeUint32(wrap(runLane))
+            :writeUint32(wrap(runFirst))
+            :writeUint32(wrap(runLength))
     end
 
+    batchWriter:drop()
+    self.cachedBatchBytes = batchBuffer:getString()
+    batchBuffer:drop()
+    self.cachedBatches = #self.cachedBatchBytes // 20
     local casters: integer = 0
     for index = 1, rows do
-        if castFlags[index] ~= 0 then
+        if self.castFlags[index] ~= 0 then
             casters = casters + 1
         end
     end
+    self.cachedCasters = casters
+end
 
+local function prefix(exclusive self: Extractor, eye: View, mode: integer, revision: integer): string
+    const batches, rows, casters = self.cachedBatches, self.rowCount, self.cachedCasters
     const shadowTuning = lighting.shadows()
     const bloomTuning = lighting.bloom()
     -- A frame with no caster and no light runs the shadow lane over an empty
@@ -649,6 +854,7 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
     if bloomTuning ~= nil then
         frameFlags = frameFlags + FRAME_BLOOM
     end
+    frameFlags = frameFlags + mode
     const ambientR, ambientG, ambientB = lighting.ambient()
     const lightCount = self.lightCount
 
@@ -665,16 +871,16 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
         :writeUint32(wrap(batches))
         :writeUint32(INSTANCE_STRIDE)
         :writeUint32(wrap(rows))
-        :writeFloat32(narrow(width))
-        :writeFloat32(narrow(height))
-        :writeFloat32(narrow(cameraX))
-        :writeFloat32(narrow(cameraY))
-        :writeFloat32(narrow(zoom))
-        :writeFloat32(narrow(rotation))
+        :writeFloat32(narrow(eye.width))
+        :writeFloat32(narrow(eye.height))
+        :writeFloat32(narrow(eye.x))
+        :writeFloat32(narrow(eye.y))
+        :writeFloat32(narrow(eye.zoom))
+        :writeFloat32(narrow(eye.rotation))
         :writeUint32(LIGHT_STRIDE)
         :writeUint32(wrap(lightCount))
         :writeUint32(wrap(casters))
-        :writeUint32(0)
+        :writeUint32(wrap(revision))
         :writeFloat32(narrow(ambientR))
         :writeFloat32(narrow(ambientG))
         :writeFloat32(narrow(ambientB))
@@ -706,37 +912,18 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
             :writeFloat32(narrow(light.intensity))
     end
 
-    runImage = -1
-    runSampler = -1
-    runLane = -1
-    local runFirst: integer = 0
-    local runLength: integer = 0
-    for index = 1, rows do
-        const row = order[index]
-        if imageIds[row] ~= runImage or samplers[row] ~= runSampler or lanes[row] ~= runLane then
-            if runLength > 0 then
-                writer:writeUint32(wrap(runImage))
-                    :writeUint32(wrap(runSampler))
-                    :writeUint32(wrap(runLane))
-                    :writeUint32(wrap(runFirst))
-                    :writeUint32(wrap(runLength))
-            end
-            runImage = imageIds[row]
-            runSampler = samplers[row]
-            runLane = lanes[row]
-            runFirst = index - 1
-            runLength = 0
-        end
-        runLength = runLength + 1
+    if mode == 0 then
+        writer:writeBytes(self.cachedBatchBytes)
     end
-    if runLength > 0 then
-        writer:writeUint32(wrap(runImage))
-            :writeUint32(wrap(runSampler))
-            :writeUint32(wrap(runLane))
-            :writeUint32(wrap(runFirst))
-            :writeUint32(wrap(runLength))
-    end
+    writer:drop()
+    const bytes = buffer:getString()
+    buffer:drop()
 
+    return bytes
+end
+
+local function packInstances(exclusive self: Extractor, eye: View, full: boolean): nil
+    const lanes, castFlags = self.lanes, self.castFlags
     const depths = self.depths
     const transforms = self.transforms
     const tints = self.tints
@@ -747,89 +934,180 @@ function Extractor.packet(exclusive self: Extractor, width: integer, height: int
     const v0 = self.v0
     const u1 = self.u1
     const v1 = self.v1
-    writer:drop()
-    const prefix = buffer:getString()
-    buffer:drop()
-    assert(#prefix % 4 == 0, "framepacket: instance region must be word aligned")
-    const prefixWords = #prefix // 4
-    const wordCount = prefixWords + rows * 20
-    if self.packetWords.count < wordCount then
-        local capacity = self.packetWords.count
-        while capacity < wordCount do
+    const cameraX, cameraY, zoom, rotation = eye.x, eye.y, eye.zoom, eye.rotation
+    const width, height = eye.width, eye.height
+    const wordsNeeded = self.rowCount * 20
+    if self.instanceWords.count < wordsNeeded then
+        local capacity = self.instanceWords.count
+        while capacity < wordsNeeded do
             capacity = capacity * 2
         end
-        self.packetWords = array.scalar(array.uint32, capacity)
+        self.instanceWords = array.scalar(array.uint32, capacity)
     end
-    local packed = ""
-    -- Nupp owns and retains the array. One checked writable view bounds all
-    -- stores; raw typed pointers stay in this scope, rooted back to that view.
-    -- Copying to a string gives the caller an independent immutable packet.
+    self.ranges:clear()
+    local output = self.instanceWords:write()
     do
-        local output = self.packetWords:write()
-        do
-            local pointer, length = output:ref()
-            assert(wordCount <= length)
-            unsafe do
-                local raw = (pointer as uint32*) + 0
-                local floats = borrowFrom(ffi.cast<float[?]>(raw), output)
-                local words = borrowFrom(ffi.cast<uint32[?]>(raw), output)
-                ffi.copy(words, prefix, #prefix)
-                for index = 1, rows do
-                    const row = order[index]
-                    const transform = transforms[row]
-                    const tint = tints[row]
-                    const base = prefixWords + (index - 1) * 20
-                    local x, y, angle, sx, sy = transform.x, transform.y, transform.rotation, transform.scaleX, transform.scaleY
-                    if layers.isScreenSpace(transform.layer) then
-                        -- Express target-pixel geometry in the common camera's world
-                        -- space. Culling and drawing then agree without a second
-                        -- rendering path.
-                        local dx, dy = (x - width * 0.5) / zoom, (y - height * 0.5) / zoom
-                        local c, s = math.cos(rotation), math.sin(rotation)
-                        x, y = cameraX + dx * c - dy * s, cameraY + dx * s + dy * c
-                        angle, sx, sy = angle + rotation, sx / zoom, sy / zoom
+        local pointer, length = output:ref()
+        assert(wordsNeeded <= length)
+        unsafe do
+            local raw = (pointer as uint32*) + 0
+            local floats = borrowFrom(ffi.cast<float[?]>(raw), output)
+            local words = borrowFrom(ffi.cast<uint32[?]>(raw), output)
+            for _, run in pairs(self.runs) do
+                if full or run.dirty then
+                    local low: integer = self.rowCount
+                    local high: integer = 0
+                    for row = run.offset + 1, run.offset + run.length do
+                        const index = self.drawSlots[row]
+                        low, high = math.min(low, index - 1) as integer, math.max(high, index) as integer
+                        const transform = transforms[row]
+                        const tint = tints[row]
+                        const base = (index - 1) * 20
+                        local x, y, angle, sx, sy = transform.x, transform.y, transform.rotation, transform.scaleX, transform.scaleY
+                        if layers.isScreenSpace(transform.layer) then
+                            -- Express target-pixel geometry in the common camera's
+                            -- world space. Culling and drawing then agree without a
+                            -- second rendering path.
+                            local dx, dy = (x - width * 0.5) / zoom, (y - height * 0.5) / zoom
+                            local c, s = math.cos(rotation), math.sin(rotation)
+                            x, y = cameraX + dx * c - dy * s, cameraY + dx * s + dy * c
+                            angle, sx, sy = angle + rotation, sx / zoom, sy / zoom
+                        end
+                        floats[base + 0] = x as float
+                        floats[base + 1] = y as float
+                        floats[base + 2] = angle as float
+                        floats[base + 3] = depths[row] as float
+                        floats[base + 4] = sx as float
+                        floats[base + 5] = sy as float
+                        floats[base + 6] = params[row] as float
+                        floats[base + 7] = castHeights[row] as float
+                        floats[base + 8] = u0[row] as float
+                        floats[base + 9] = v0[row] as float
+                        floats[base + 10] = u1[row] as float
+                        floats[base + 11] = v1[row] as float
+                        floats[base + 12] = tint.r as float
+                        floats[base + 13] = tint.g as float
+                        floats[base + 14] = tint.b as float
+                        floats[base + 15] = tint.a as float
+                        words[base + 16] = wrap(materialIds[row])
+                        local flag = (lanes[row] == LANE_BLEND and FLAG_BLENDED or 0) + castFlags[row]
+                        local leftTop, rightBottom = 0, 0
+                        if self.clipIds[row] ~= 0 then
+                            local left, top, right, bottom = clips.regionOf(self.clipIds[row])
+                            -- Pixel centers are half-integers. Quantizing at that
+                            -- boundary preserves exact coverage in the single-sample
+                            -- renderer.
+                            left = math.max(0, math.min(65535, math.ceil(left - 0.5)))
+                            top = math.max(0, math.min(65535, math.ceil(top - 0.5)))
+                            right = math.max(0, math.min(65535, math.ceil(right - 0.5)))
+                            bottom = math.max(0, math.min(65535, math.ceil(bottom - 0.5)))
+                            leftTop, rightBottom = left + top * 65536, right + bottom * 65536
+                            flag = flag + FLAG_CLIPPED
+                        end
+                        words[base + 17] = wrap(flag)
+                        words[base + 18] = wrap(leftTop as integer)
+                        words[base + 19] = wrap(rightBottom as integer)
                     end
-                    floats[base + 0] = x as float
-                    floats[base + 1] = y as float
-                    floats[base + 2] = angle as float
-                    floats[base + 3] = depths[row] as float
-                    floats[base + 4] = sx as float
-                    floats[base + 5] = sy as float
-                    floats[base + 6] = params[row] as float
-                    floats[base + 7] = castHeights[row] as float
-                    floats[base + 8] = u0[row] as float
-                    floats[base + 9] = v0[row] as float
-                    floats[base + 10] = u1[row] as float
-                    floats[base + 11] = v1[row] as float
-                    floats[base + 12] = tint.r as float
-                    floats[base + 13] = tint.g as float
-                    floats[base + 14] = tint.b as float
-                    floats[base + 15] = tint.a as float
-                    words[base + 16] = wrap(materialIds[row])
-                    local flag = (lanes[row] == LANE_BLEND and FLAG_BLENDED or 0) + castFlags[row]
-                    local leftTop, rightBottom = 0, 0
-                    if self.clipIds[row] ~= 0 then
-                        local left, top, right, bottom = clips.regionOf(self.clipIds[row])
-                        -- Pixel centers are half-integers. Quantizing at that boundary
-                        -- preserves exact coverage in the single-sample renderer.
-                        left = math.max(0, math.min(65535, math.ceil(left - 0.5)))
-                        top = math.max(0, math.min(65535, math.ceil(top - 0.5)))
-                        right = math.max(0, math.min(65535, math.ceil(right - 0.5)))
-                        bottom = math.max(0, math.min(65535, math.ceil(bottom - 0.5)))
-                        leftTop, rightBottom = left + top * 65536, right + bottom * 65536
-                        flag = flag + FLAG_CLIPPED
-                    end
-                    words[base + 17] = wrap(flag)
-                    words[base + 18] = wrap(leftTop as integer)
-                    words[base + 19] = wrap(rightBottom as integer)
+                    self.ranges:mark(low * 80, (high - low) * 80)
                 end
-                packed = ffi.string(words, wordCount * 4)
             end
         end
-        output:drop()
+    end
+    output:drop()
+    self.ranges:sort()
+end
+
+local function payload(exclusive self: Extractor, delta: boolean, baseRevision: integer): string
+    local pieces: {string} = {}
+    if delta then
+        local buffer = nupp.io.newBuffer()
+        local writer = nupp.io.newScalarWriter(buffer)
+        writer:writeUint32(wrap(baseRevision)):writeUint32(wrap(self.ranges.count))
+        for index = 0, self.ranges.count - 1 do
+            const offset, size = self.ranges:at(index)
+            writer:writeUint32(wrap(offset)):writeUint32(wrap(size))
+        end
+        writer:drop()
+        pieces[1] = buffer:getString()
+        buffer:drop()
+    end
+    local input = self.instanceWords:read()
+    do
+        local pointer, length = input:ref()
+        assert(self.rowCount * 20 <= length)
+        unsafe do
+            local raw = (pointer as uint8*) + 0
+            local bytes = borrowFrom(ffi.cast<uint8*>(raw), input)
+            if delta then
+                for index = 0, self.ranges.count - 1 do
+                    const offset, size = self.ranges:at(index)
+                    pieces[#pieces + 1] = ffi.string(bytes + offset, size)
+                end
+            else
+                pieces[1] = ffi.string(bytes, self.rowCount * 80)
+            end
+        end
     end
 
+    return table.concat(pieces)
+end
+
+local function encode(exclusive self: Extractor, width: integer, height: integer, residentRevision: integer?): string
+    assert(width > 0 and height > 0, "framepacket: viewport dimensions must be positive")
+    const cameraX, cameraY, zoom, rotation = view(self, width, height)
+    const eye = new View(width = width, height = height, x = cameraX, y = cameraY, zoom = zoom, rotation = rotation)
+    const previous = self.sceneRevision
+    const matched = self.cacheValid and residentRevision ~= nil and residentRevision == previous
+    const changed = sceneChanged(self, eye, residentRevision == nil)
+    self.cacheValid = false
+    local reordered = false
+    if changed then
+        self.sceneRevision = self.sceneRevision + 1
+        assert(self.sceneRevision <= 4294967295, "framepacket: scene revision exhausted")
+        zone.push("extract/collect")
+        collect(self)
+        zone.pop()
+        reordered = self.orderChanged
+        if reordered then
+            zone.push("extract/sort")
+            sortRows(self)
+            for index, row in ipairs(self.order) do
+                self.drawSlots[row] = index
+            end
+            zone.pop()
+        end
+    end
+    const layoutChanged = self.batchDirty or reordered
+    if layoutChanged then
+        rebuildBatches(self)
+    end
+    zone.push("extract/lights")
+    collectLights(self)
+    sortLights(self)
+    zone.pop()
+    local mode: integer = 0
+    if matched and not changed then
+        mode = FRAME_RETAINED
+    elseif matched and not layoutChanged and not self.relayout and self.rewritten < self.rowCount then
+        mode = FRAME_DELTA
+    end
+    zone.push("extract/encode")
+    const head = prefix(self, eye, mode, residentRevision ~= nil and self.sceneRevision or 0)
+    local bytes = head
+    if mode ~= FRAME_RETAINED then
+        packInstances(self, eye, mode ~= FRAME_DELTA)
+        bytes = head .. payload(self, mode == FRAME_DELTA, previous)
+    end
+    self.cacheValid = residentRevision ~= nil
     zone.pop()
 
-    return packed
+    return bytes
+end
+
+function Extractor.packet(exclusive self: Extractor, width: integer, height: integer): string
+    return encode(self, width, height, nil)
+end
+
+function Extractor.frame(exclusive self: Extractor, width: integer, height: integer, residentRevision: integer): string
+    return encode(self, width, height, residentRevision)
 end

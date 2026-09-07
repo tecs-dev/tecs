@@ -1,3 +1,4 @@
+mod benchmark;
 mod bridge;
 #[cfg(test)]
 mod culltests;
@@ -24,7 +25,7 @@ use anyhow::{anyhow, Context, Result};
 use bridge::{
     Bridge, FrameState, ImageCommand, SessionOptions, TouchEvent, WindowCommand, WindowState,
 };
-use graphics::Graphics;
+use graphics::{DrawCountReadback, Graphics};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{
@@ -48,6 +49,8 @@ struct Config {
     debug: bool,
     headless: bool,
     max_frames: Option<u32>,
+    benchmark: Option<benchmark::Run>,
+    benchmark_view: bool,
 }
 
 struct App {
@@ -66,7 +69,11 @@ struct App {
     modifiers: ModifiersState,
     sequence: u64,
     shutdown: bool,
+    failure: Option<String>,
     frame_parked: bool,
+    stats_started: Option<Instant>,
+    stats_frames: u32,
+    stats_pending: Option<(DrawCountReadback, u32, f64)>,
 }
 
 impl App {
@@ -98,7 +105,11 @@ impl App {
             modifiers: ModifiersState::empty(),
             sequence: 0,
             shutdown: false,
+            failure: None,
             frame_parked: false,
+            stats_started: None,
+            stats_frames: 0,
+            stats_pending: None,
         })
     }
 
@@ -152,7 +163,11 @@ impl App {
             cursor_visible: true,
             cursor_grab: "none".to_owned(),
         };
-        let graphics = Graphics::new(Arc::clone(&window), event_loop.owned_display_handle())?;
+        let graphics = Graphics::new(
+            Arc::clone(&window),
+            event_loop.owned_display_handle(),
+            self.config.benchmark_view,
+        )?;
         self.bridge.attach_window(&state)?;
         self.window_id = Some(window.id());
         self.window = Some(window);
@@ -346,6 +361,9 @@ impl App {
     }
 
     fn tick(&mut self, event_loop: &ActiveEventLoop) -> Result<()> {
+        if self.shutdown || event_loop.exiting() {
+            return Ok(());
+        }
         let now = Instant::now();
         let dt = if self.frame_parked {
             0.0
@@ -369,8 +387,34 @@ impl App {
         self.apply_commands()?;
         self.apply_image_commands()?;
         if let Some(graphics) = self.graphics.as_mut() {
-            let packet = self.bridge.render_packet()?;
-            graphics.render(&packet)?;
+            let packet = self.bridge.render_packet(graphics.scene_revision())?;
+            let submitted = graphics.render(&packet)?;
+            if self.config.benchmark_view && submitted {
+                if let Some((readback, total, fps)) = &self.stats_pending {
+                    if let Some(visible) = graphics.poll_drawn_instances(readback)? {
+                        if let Some(window) = &self.window {
+                            window.set_title(&format!("Tecs shapes | {visible}/{total} visible | {fps:.1} FPS | {:.2} ms | Wheel: zoom, WASD: pan, R: reset", 1000.0 / fps));
+                        }
+                        self.stats_pending = None;
+                    }
+                }
+                // Begin after the first rendered frame so spawning and pipeline
+                // setup cannot contaminate the interactive frame-rate display.
+                if let Some(started) = self.stats_started {
+                    self.stats_frames += 1;
+                    let elapsed = started.elapsed().as_secs_f64();
+                    if elapsed >= 0.5 && self.stats_pending.is_none() {
+                        let total = u32::from_ne_bytes(packet[36..40].try_into()?);
+                        let fps = f64::from(self.stats_frames) / elapsed;
+                        self.stats_pending =
+                            Some((graphics.request_drawn_instances()?, total, fps));
+                        self.stats_started = Some(Instant::now());
+                        self.stats_frames = 0;
+                    }
+                } else {
+                    self.stats_started = Some(Instant::now());
+                }
+            }
         }
         if let Some(failure) = self.bridge.crashed()? {
             return Err(anyhow!("Nupp application crashed: {failure}"));
@@ -380,6 +424,7 @@ impl App {
 
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: anyhow::Error) {
         eprintln!("tecs-winit-host: {error:#}");
+        self.failure = Some(format!("{error:#}"));
         event_loop.exit();
     }
 
@@ -402,6 +447,9 @@ impl App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.shutdown {
+            return;
+        }
         if let Err(error) = self.create_window(event_loop) {
             self.fail(event_loop, error);
         }
@@ -419,7 +467,7 @@ impl ApplicationHandler for App {
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        if Some(window_id) != self.window_id {
+        if self.shutdown || event_loop.exiting() || Some(window_id) != self.window_id {
             return;
         }
         let result = match event {
@@ -655,6 +703,10 @@ fn parse_config() -> Result<Config> {
     let mut debug = false;
     let mut headless = false;
     let mut max_frames = None;
+    let mut benchmark_path = None;
+    let mut benchmark_view = false;
+    let mut benchmark_samples = 60;
+    let mut benchmark_warmup = 10;
     let mut arguments = std::env::args_os().skip(1);
     while let Some(argument) = arguments.next() {
         match argument.to_string_lossy().as_ref() {
@@ -697,7 +749,29 @@ fn parse_config() -> Result<Config> {
                     .parse()
                     .context("--height must be a positive integer")?;
             }
+            "--benchmark-output" => {
+                benchmark_path = Some(PathBuf::from(
+                    arguments
+                        .next()
+                        .context("--benchmark-output needs a path")?,
+                ))
+            }
+            "--benchmark-samples" => {
+                benchmark_samples = arguments
+                    .next()
+                    .context("--benchmark-samples needs a count")?
+                    .to_string_lossy()
+                    .parse::<u32>()?
+            }
+            "--benchmark-warmup" => {
+                benchmark_warmup = arguments
+                    .next()
+                    .context("--benchmark-warmup needs a count")?
+                    .to_string_lossy()
+                    .parse::<u32>()?
+            }
             "--debug" => debug = true,
+            "--benchmark-view" => benchmark_view = true,
             "--headless" => headless = true,
             "--frames" => {
                 let frames = arguments
@@ -717,6 +791,19 @@ fn parse_config() -> Result<Config> {
     if width == 0 || height == 0 {
         return Err(anyhow!("window dimensions must be positive"));
     }
+    let benchmark = benchmark_path
+        .map(|path| benchmark::Run::new(path, benchmark_samples, benchmark_warmup))
+        .transpose()?;
+    if benchmark.is_some() && (headless || max_frames.is_some()) {
+        return Err(anyhow!(
+            "render benchmarks use an offscreen GPU target and own their frame limit"
+        ));
+    }
+    if benchmark_view && (benchmark.is_some() || headless) {
+        return Err(anyhow!(
+            "--benchmark-view needs a window and cannot be combined with --benchmark-output"
+        ));
+    }
     Ok(Config {
         component,
         entry,
@@ -726,6 +813,8 @@ fn parse_config() -> Result<Config> {
         debug,
         headless,
         max_frames,
+        benchmark,
+        benchmark_view,
     })
 }
 
@@ -741,6 +830,9 @@ fn run() -> Result<()> {
         return pack_shaders(arguments.collect());
     }
     let config = parse_config()?;
+    if config.benchmark.is_some() {
+        return run_render_benchmark(config);
+    }
     if config.headless {
         return run_headless(config);
     }
@@ -749,7 +841,11 @@ fn run() -> Result<()> {
     let mut app = App::new(config)?;
     event_loop
         .run_app(&mut app)
-        .context("run the winit event loop")
+        .context("run the winit event loop")?;
+    if let Some(failure) = &app.failure {
+        return Err(anyhow!(failure.clone()));
+    }
+    Ok(())
 }
 
 /// Assembles the material dispatch into a shader pack a release loads.
@@ -770,6 +866,58 @@ fn pack_shaders(arguments: Vec<std::ffi::OsString>) -> Result<()> {
         pack.materials().join(", ")
     );
     Ok(())
+}
+
+fn run_render_benchmark(mut config: Config) -> Result<()> {
+    let executable = std::env::current_exe()?;
+    let mut bridge = Bridge::load(&SessionOptions {
+        executable: &executable,
+        component: &config.component,
+        entry: &config.entry,
+        title: &config.title,
+        width: config.width,
+        height: config.height,
+        debug: false,
+        max_frames: None,
+    })?;
+    let mut graphics = Graphics::offscreen(config.width, config.height)?;
+    let run = config.benchmark.as_mut().expect("benchmark configured");
+    bridge.init()?;
+    loop {
+        let started = Instant::now();
+        match bridge.iterate(1.0 / 60.0)? {
+            FrameState::Parked => continue,
+            FrameState::Stopped => break,
+            FrameState::Continue => {}
+        }
+        if let Some(failure) = bridge.crashed()? {
+            return Err(anyhow!("Nupp application crashed: {failure}"));
+        }
+        let updated = Instant::now();
+        while let Some(command) = bridge.next_image_command()? {
+            apply_image_command(&mut graphics, &command)?;
+            bridge.report_image_result(command.image, command.serial, None)?;
+        }
+        let packet = bridge.render_packet(graphics.scene_revision())?;
+        let extracted = Instant::now();
+        graphics.render(&packet)?;
+        graphics.finish_frame()?;
+        let times = [
+            updated.duration_since(started).as_secs_f64() * 1000.0,
+            extracted.duration_since(updated).as_secs_f64() * 1000.0,
+            extracted.elapsed().as_secs_f64() * 1000.0,
+        ];
+        let drawn = if run.finishing_next() {
+            Some(graphics.drawn_instances()?)
+        } else {
+            None
+        };
+        if run.record(&packet, times, drawn)? {
+            break;
+        }
+    }
+    bridge.shutdown()?;
+    run.require_complete()
 }
 
 fn run_headless(config: Config) -> Result<()> {

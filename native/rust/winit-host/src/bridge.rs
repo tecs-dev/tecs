@@ -259,9 +259,12 @@ impl Bridge {
         optional_text(&values, 0, "tecs.host.crashed")
     }
 
-    pub fn render_packet(&mut self) -> Result<Vec<u8>> {
-        let values = self.call(self.exports.render_packet, &[])?;
-        one_bytes(&values, "tecs.host.renderPacket")
+    pub fn render_packet(&mut self, resident_revision: u32) -> Result<Vec<u8>> {
+        let values = self.call(
+            self.exports.render_packet,
+            &[ManagedValue::Number(f64::from(resident_revision))],
+        )?;
+        one_bytes(values, "tecs.host.renderPacket")
     }
 
     pub fn set_suspended(&mut self, suspended: bool) -> Result<()> {
@@ -671,9 +674,12 @@ fn one_text(values: &[ManagedValue], operation: &str) -> Result<String> {
     }
 }
 
-fn one_bytes(values: &[ManagedValue], operation: &str) -> Result<Vec<u8>> {
-    match values {
-        [ManagedValue::Bytes(bytes)] => Ok(bytes.clone()),
+fn one_bytes(mut values: Vec<ManagedValue>, operation: &str) -> Result<Vec<u8>> {
+    if values.len() != 1 {
+        bail!("{operation} returned an unexpected value shape");
+    }
+    match values.pop() {
+        Some(ManagedValue::Bytes(bytes)) => Ok(bytes),
         _ => bail!("{operation} returned an unexpected value shape"),
     }
 }

@@ -1,0 +1,62 @@
+---
+description: "Sprite sheets, fixed-step playback, Aseprite slices, pivots, and reloads."
+---
+
+# Animation
+
+Sprite sheets, fixed-step playback, Aseprite slices, pivots, and reloads.
+
+A [`Sheet`](tecs.gfx.sheet.Sheet) divides one image into frames and
+names frame ranges with tags. An
+[`Animation`](tecs.gfx.animation.Animation) selects a sheet tag and
+carries speed, loop, and playback state.
+
+```nupp
+local hero = tecs.gfx.sheet.grid({
+    name = "hero",
+    imageWidth = 256,
+    imageHeight = 32,
+    frameWidth = 32,
+    frameHeight = 32,
+    tags = {
+        idle = {from = 1, to = 4},
+        run = {from = 5, to = 8},
+    },
+})
+
+hero:bind(tecs.gfx.images.id("sprites/hero"))
+tecs.gfx.animation.plugin(world)
+
+world:spawn(
+    tecs.ecs.Transform2D(64, 64, 0, 1, 0, 32, 32),
+    hero:sprite(),
+    tecs.gfx.animation.of(hero, "run"),
+    tecs.gfx.Renderable2D
+)
+```
+
+Playback advances in fixed steps. Machines that replay the same simulation
+therefore select the same frames. `frameOf` and `timeOf` report playback on
+the same fixed-step clock.
+
+## Sheet sources
+
+Use `tecs.gfx.sheet.grid` for uniform cells, `rects` for an explicit frame
+list, `build` for a custom sheet, or `fromAseprite` for an
+Aseprite JSON export. Frames count from one. Tags name inclusive frame spans
+and may play forward, reverse, or ping-pong.
+
+Bind a sheet to a resident image ID before drawing it. Every entity playing that
+sheet shares its frame and timing data.
+
+## Slices and pivots
+
+Aseprite slices may move between frames. `sheet:pivotOf(sliceId, frame)` returns the pivot for a slice and frame. A game can
+use that position for hands, muzzles, and feet; the renderer does not apply a
+pivot component automatically.
+
+## Reloads
+
+`tecs.gfx.sheet.replace` can replace its frame, tag, slice, and
+timing data in place. Existing entities retain the sheet id and continue from
+their playback state. A replacement must preserve the bound image dimensions.

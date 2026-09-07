@@ -40,8 +40,8 @@ use crate::graph::{
     MAX_OUTPUTS,
 };
 use crate::packet::{
-    parse_packet, Batch, CAST_FANOUT, INSTANCE_STRIDE, LANE_BLEND, LANE_COUNT, LANE_OPAQUE,
-    LIGHT_STRIDE, MAX_LIGHTS, SAMPLER_COUNT, SCENE_FLOATS,
+    parse_frame, Batch, RetainedScene, CAST_FANOUT, INSTANCE_STRIDE, LANE_BLEND, LANE_COUNT,
+    LANE_OPAQUE, LIGHT_STRIDE, MAX_LIGHTS, SAMPLER_COUNT, SCENE_FLOATS,
 };
 use crate::shaderpack::ShaderPack;
 
@@ -390,8 +390,15 @@ impl Layouts {
     }
 }
 
+/// A pending read of a submitted frame's GPU culling result.
+pub struct DrawCountReadback {
+    buffer: Buffer,
+    ready: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+}
+
 pub struct Graphics {
-    surface: Surface<'static>,
+    surface: Option<Surface<'static>>,
+    offscreen: Option<wgpu::Texture>,
     device: Device,
     queue: Queue,
     config: SurfaceConfiguration,
@@ -442,14 +449,24 @@ pub struct Graphics {
 
     scratch: Option<Scratch>,
     batches: Vec<Batch>,
+    resident_scene: Option<RetainedScene>,
     /// What a device-lost callback reported, checked before every frame.
     lost: Arc<Mutex<Option<String>>>,
     /// What an uncaptured validation error reported.
     failed: Arc<Mutex<Option<String>>>,
 }
 
+fn benchmark_present_mode(supported: &[wgpu::PresentMode]) -> Result<wgpu::PresentMode> {
+    [wgpu::PresentMode::Immediate, wgpu::PresentMode::Mailbox]
+        .into_iter()
+        .find(|mode| supported.contains(mode))
+        .context(
+            "this surface has no uncapped presentation mode; use the offscreen render benchmark",
+        )
+}
+
 impl Graphics {
-    pub fn new(window: Arc<Window>, display: OwnedDisplayHandle) -> Result<Self> {
+    pub fn new(window: Arc<Window>, display: OwnedDisplayHandle, benchmark: bool) -> Result<Self> {
         let size = window.inner_size();
         let instance = Instance::new(InstanceDescriptor {
             display: Some(Box::new(display)),
@@ -467,16 +484,74 @@ impl Graphics {
         .context("select a wgpu adapter for the window")?;
         let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor {
             label: Some("tecs device"),
+            required_limits: wgpu::Limits {
+                max_storage_buffer_binding_size: adapter.limits().max_storage_buffer_binding_size,
+                max_buffer_size: adapter.limits().max_buffer_size,
+                ..Default::default()
+            },
             ..Default::default()
         }))
         .context("create the wgpu device")?;
-        let config = surface
+        let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .context("choose a supported wgpu surface configuration")?;
+        if benchmark {
+            config.present_mode =
+                benchmark_present_mode(&surface.get_capabilities(&adapter).present_modes)?;
+        }
         surface.configure(&device, &config);
 
+        eprintln!(
+            "tecs GPU: {} ({:?}), storage binding limit {} bytes",
+            adapter.get_info().name,
+            adapter.get_info().backend,
+            device.limits().max_storage_buffer_binding_size
+        );
+        if benchmark {
+            eprintln!(
+                "tecs benchmark presentation: {:?} (uncapped)",
+                config.present_mode
+            );
+        }
         let pack = load_pack()?;
-        Self::assemble(surface, device, queue, config, pack)
+        Self::assemble(Some(surface), device, queue, config, pack)
+    }
+
+    /// Uses the production frame graph on a fixed GPU target without a desktop surface.
+    pub fn offscreen(width: u32, height: u32) -> Result<Self> {
+        let instance = Instance::new(InstanceDescriptor::new_without_display_handle());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        }))?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor {
+            label: Some("tecs benchmark device"),
+            required_limits: wgpu::Limits {
+                max_storage_buffer_binding_size: adapter.limits().max_storage_buffer_binding_size,
+                max_buffer_size: adapter.limits().max_buffer_size,
+                ..Default::default()
+            },
+            ..Default::default()
+        }))?;
+        eprintln!(
+            "tecs GPU: {} ({:?}), storage binding limit {} bytes",
+            adapter.get_info().name,
+            adapter.get_info().backend,
+            device.limits().max_storage_buffer_binding_size
+        );
+        let config = SurfaceConfiguration {
+            usage: TextureUsages::RENDER_ATTACHMENT,
+            format: TextureFormat::Bgra8UnormSrgb,
+            width,
+            height,
+            // No surface is created, so presentation settings are never used.
+            present_mode: wgpu::PresentMode::Immediate,
+            desired_maximum_frame_latency: 2,
+            alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+            view_formats: vec![],
+            color_space: Default::default(),
+        };
+        Self::assemble(None, device, queue, config, load_pack()?)
     }
 
     /// Builds everything that does not depend on the graph.
@@ -484,7 +559,7 @@ impl Graphics {
     /// Split out so a test can hand in a headless device and the same code
     /// answers.
     fn assemble(
-        surface: Surface<'static>,
+        surface: Option<Surface<'static>>,
         device: Device,
         queue: Queue,
         config: SurfaceConfiguration,
@@ -691,8 +766,25 @@ impl Graphics {
         // never became resident both draw their tint unchanged.
         let fallback = create_image(&device, &queue, 0, 1, 1, &[255, 255, 255, 255])?;
 
+        let offscreen = surface.is_none().then(|| {
+            device.create_texture(&TextureDescriptor {
+                label: Some("tecs benchmark output"),
+                size: Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: config.format,
+                usage: TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            })
+        });
         Ok(Self {
             surface,
+            offscreen,
             device,
             queue,
             config,
@@ -726,6 +818,7 @@ impl Graphics {
             bound_generation: 0,
             scratch: None,
             batches: Vec::new(),
+            resident_scene: None,
             lost,
             failed,
         })
@@ -740,7 +833,9 @@ impl Graphics {
         }
         self.config.width = width;
         self.config.height = height;
-        self.surface.configure(&self.device, &self.config);
+        if let Some(surface) = &self.surface {
+            surface.configure(&self.device, &self.config);
+        }
     }
 
     /// Makes one image resident, replacing whatever already lived under its id.
@@ -1083,8 +1178,81 @@ impl Graphics {
         });
     }
 
-    /// Draws one frame from one packet.
-    pub fn render(&mut self, bytes: &[u8]) -> Result<()> {
+    /// Enqueues a small copy without waiting for the GPU on the event thread.
+    pub fn request_drawn_instances(&self) -> Result<DrawCountReadback> {
+        let scratch = self.scratch.as_ref().context("no rendered frame")?;
+        let size = self.batches.len() as u64 * 16;
+        anyhow::ensure!(size > 0, "no draw batches to read");
+        let readback = self.device.create_buffer(&BufferDescriptor {
+            label: Some("tecs benchmark draw counts"),
+            size,
+            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor::default());
+        encoder.copy_buffer_to_buffer(&scratch.draw_args, 0, &readback, 0, size);
+        self.queue.submit([encoder.finish()]);
+        let (send, receive) = std::sync::mpsc::channel();
+        readback
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = send.send(result);
+            });
+        Ok(DrawCountReadback {
+            buffer: readback,
+            ready: receive,
+        })
+    }
+
+    /// Returns the completed count, or None while the copy is in flight.
+    pub fn poll_drawn_instances(&self, readback: &DrawCountReadback) -> Result<Option<u32>> {
+        self.device.poll(wgpu::PollType::Poll)?;
+        match readback.ready.try_recv() {
+            Ok(result) => result?,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return Ok(None),
+            Err(error) => return Err(error.into()),
+        }
+        let bytes = readback.buffer.slice(..).get_mapped_range()?;
+        let count = bytes
+            .chunks_exact(16)
+            .map(|args| u32::from_ne_bytes(args[4..8].try_into().expect("draw args")))
+            .sum();
+        drop(bytes);
+        readback.buffer.unmap();
+        Ok(Some(count))
+    }
+
+    /// Reads the GPU's indirect instance counts once after a benchmark run.
+    pub fn drawn_instances(&self) -> Result<u32> {
+        if self.batches.is_empty() {
+            return Ok(0);
+        }
+        let readback = self.request_drawn_instances()?;
+        self.device.poll(wgpu::PollType::wait_indefinitely())?;
+        self.poll_drawn_instances(&readback)?
+            .context("GPU draw count did not complete")
+    }
+
+    /// Waits for completed GPU work; benchmark samples include submission and execution.
+    pub fn finish_frame(&self) -> Result<()> {
+        self.device.poll(wgpu::PollType::wait_indefinitely())?;
+        if let Some(reason) = self.failed.lock().expect("mutex").take() {
+            bail!("wgpu reported an error while drawing: {reason}");
+        }
+        Ok(())
+    }
+
+    /// The generation a new frame may reference; zero requests a complete upload.
+    pub fn scene_revision(&self) -> u32 {
+        self.resident_scene
+            .as_ref()
+            .map_or(0, |scene| scene.revision)
+    }
+
+    /// Returns true when a frame was submitted, false when the surface skipped it.
+    pub fn render(&mut self, bytes: &[u8]) -> Result<bool> {
         if let Some(reason) = self.lost.lock().expect("mutex").take() {
             // Everything held belonged to a device that no longer exists, so it
             // is dropped rather than submitted to. A frame after this one
@@ -1092,6 +1260,7 @@ impl Graphics {
             // every time for exactly this reason.
             self.targets.clear();
             self.scratch = None;
+            self.resident_scene = None;
             self.images.clear();
             self.bind_groups.clear();
             self.graph_revision = None;
@@ -1101,17 +1270,23 @@ impl Graphics {
         let mut batches = std::mem::take(&mut self.batches);
         let outcome = self.render_inner(bytes, &mut batches);
         self.batches = batches;
-        outcome?;
+        let submitted = outcome?;
 
         if let Some(reason) = self.failed.lock().expect("mutex").take() {
             bail!("wgpu reported an error while drawing: {reason}");
         }
-        Ok(())
+        Ok(submitted)
     }
 
-    fn render_inner(&mut self, bytes: &[u8], batches: &mut Vec<Batch>) -> Result<()> {
-        let packet = parse_packet(bytes, batches, self.pack.material_count())?;
+    fn render_inner(&mut self, bytes: &[u8], batches: &mut Vec<Batch>) -> Result<bool> {
+        let packet = parse_frame(
+            bytes,
+            batches,
+            self.pack.material_count(),
+            self.resident_scene.as_ref(),
+        )?;
         let header = packet.header;
+        validate_instance_capacity(packet.instance_count, &self.device.limits())?;
 
         if self.graph_revision != Some(header.graph_revision)
             || self.pipeline_format != Some(self.config.format)
@@ -1139,6 +1314,28 @@ impl Graphics {
             .expect("a graph is built before the first frame is drawn");
         let outcome = self.draw(&graph, &packet, batches);
         self.graph = Some(graph);
+        if outcome.is_ok() {
+            if packet.delta {
+                let scene = self.resident_scene.as_mut().expect("validated delta");
+                for update in &packet.updates {
+                    let first = update.offset as usize / INSTANCE_STRIDE;
+                    scene.flags[first..first + update.flags.len()].copy_from_slice(&update.flags);
+                }
+                scene.revision = packet.scene_revision;
+                scene.casters = packet.caster_count;
+            } else if !packet.retained {
+                self.resident_scene = Some(RetainedScene {
+                    revision: packet.scene_revision,
+                    instances: packet.instance_count,
+                    casters: packet.caster_count,
+                    batches: batches.clone(),
+                    flags: packet
+                        .updates
+                        .first()
+                        .map_or_else(Vec::new, |update| update.flags.clone()),
+                });
+            }
+        }
         outcome
     }
 
@@ -1186,7 +1383,7 @@ impl Graphics {
         graph: &Graph,
         packet: &crate::packet::Packet<'_>,
         batches: &[Batch],
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let width = self.config.width.max(1);
         let height = self.config.height.max(1);
         let (held_width, held_height) = self.targets.size();
@@ -1238,19 +1435,17 @@ impl Graphics {
             packet.caster_count,
         );
         let scratch = self.scratch.as_ref().expect("just ensured");
-        if !packet.instances.is_empty() {
+        for update in &packet.updates {
             self.queue
-                .write_buffer(&scratch.instances, 0, packet.instances);
+                .write_buffer(&scratch.instances, update.offset, update.bytes);
         }
-        if !packet.batch_bytes.is_empty() {
+        if !packet.retained && !packet.delta && !packet.batch_bytes.is_empty() {
             self.queue
                 .write_buffer(&scratch.batches, 0, packet.batch_bytes);
         }
         let blocks = packet.instance_count.div_ceil(WORKGROUP);
-        // A frame with the shadow lane off keeps no caster at all, so the cast
-        // dispatch runs over an empty list rather than being skipped: it is the
-        // only thing that writes the list, and skipping it would leave the
-        // previous frame's entries standing.
+        // argsMain resets shadow draw counts to zero when the lane is off;
+        // stale cast-list entries are therefore unreachable without expansion.
         let cast_capacity = if shadows { scratch.cast_capacity } else { 0 };
         let uniform: [u32; 16] = [
             view[0].to_bits(),
@@ -1279,22 +1474,37 @@ impl Graphics {
             let _ = self.image_bind_group(batch.image, batch.sampler);
         }
 
-        let (frame, reconfigure) = match self.surface.get_current_texture() {
-            CurrentSurfaceTexture::Success(frame) => (frame, false),
-            CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
-            CurrentSurfaceTexture::Timeout | CurrentSurfaceTexture::Occluded => return Ok(()),
-            CurrentSurfaceTexture::Outdated | CurrentSurfaceTexture::Lost => {
-                // Both mean the surface no longer matches the window. Rebuilt
-                // here and drawn next frame, which is one dropped frame rather
-                // than a dead window.
-                self.surface.configure(&self.device, &self.config);
-                return Ok(());
+        let (frame, reconfigure) = if let Some(surface) = &self.surface {
+            match surface.get_current_texture() {
+                CurrentSurfaceTexture::Success(frame) => (Some(frame), false),
+                CurrentSurfaceTexture::Suboptimal(frame) => (Some(frame), true),
+                CurrentSurfaceTexture::Timeout | CurrentSurfaceTexture::Occluded => {
+                    return Ok(false)
+                }
+                CurrentSurfaceTexture::Outdated | CurrentSurfaceTexture::Lost => {
+                    // Both mean the surface no longer matches the window. Rebuilt
+                    // here and drawn next frame, which is one dropped frame rather
+                    // than a dead window.
+                    if let Some(surface) = &self.surface {
+                        surface.configure(&self.device, &self.config);
+                    }
+                    return Ok(false);
+                }
+                CurrentSurfaceTexture::Validation => {
+                    bail!("wgpu rejected presentation surface acquisition")
+                }
             }
-            CurrentSurfaceTexture::Validation => {
-                bail!("wgpu rejected presentation surface acquisition")
-            }
+        } else {
+            (None, false)
         };
-        let swapchain = frame.texture.create_view(&TextureViewDescriptor::default());
+        let swapchain = match &frame {
+            Some(frame) => frame.texture.create_view(&TextureViewDescriptor::default()),
+            None => self
+                .offscreen
+                .as_ref()
+                .expect("offscreen output")
+                .create_view(&TextureViewDescriptor::default()),
+        };
         let mut encoder = self
             .device
             .create_command_encoder(&CommandEncoderDescriptor {
@@ -1335,9 +1545,13 @@ impl Graphics {
             // lanes and the shadow lane both.
             pass.set_pipeline(&self.cull_pipelines[3]);
             pass.dispatch_workgroups((batches.len() as u32).div_ceil(ARGS_WORKGROUP), 1, 1);
-            // The shadow lane's own expansion, after the compaction it reads.
-            pass.set_pipeline(&self.cull_pipelines[4]);
-            pass.dispatch_workgroups(blocks, 1, 1);
+            // Like the original SpriteBackend, expand the shadow lane only
+            // when this frame actually draws casters. argsMain still resets
+            // its indirect counts when the previous frame had shadows.
+            if shadows && packet.caster_count > 0 {
+                pass.set_pipeline(&self.cull_pipelines[4]);
+                pass.dispatch_workgroups(blocks, 1, 1);
+            }
         }
 
         for (index, spec) in graph.passes().iter().enumerate() {
@@ -1475,11 +1689,15 @@ impl Graphics {
         }
 
         self.queue.submit([encoder.finish()]);
-        self.queue.present(frame);
-        if reconfigure {
-            self.surface.configure(&self.device, &self.config);
+        if let Some(frame) = frame {
+            self.queue.present(frame);
         }
-        Ok(())
+        if reconfigure {
+            if let Some(surface) = &self.surface {
+                surface.configure(&self.device, &self.config);
+            }
+        }
+        Ok(true)
     }
 }
 
@@ -1946,6 +2164,16 @@ fn dynamic_uniform_entry(binding: u32, visibility: ShaderStages) -> BindGroupLay
     }
 }
 
+/// Rejects a scene whose rounded instance buffer exceeds the device's limits.
+fn validate_instance_capacity(count: u32, limits: &wgpu::Limits) -> Result<()> {
+    let required = u64::from(capacity(count.max(1))) * INSTANCE_STRIDE as u64;
+    let limit = u64::from(limits.max_storage_buffer_binding_size).min(limits.max_buffer_size);
+    if required > limit {
+        bail!("{count} instances need a {required} byte GPU buffer; this adapter allows {limit} bytes");
+    }
+    Ok(())
+}
+
 /// Rounds a count up to the next power of two, so a scene that oscillates in
 /// size does not reallocate every frame.
 fn capacity(count: u32) -> u32 {
@@ -2080,6 +2308,70 @@ fn create_image(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keeps_gpu_instances_across_camera_frames_and_partial_uploads() {
+        use crate::packet::tests::{delta, retained, PacketBuilder};
+        let probe = Instance::new(InstanceDescriptor::new_without_display_handle());
+        if pollster::block_on(probe.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .is_err()
+        {
+            return;
+        }
+        let mut graphics = Graphics::offscreen(640, 360).expect("offscreen renderer");
+        let mut fixture = PacketBuilder::new()
+            .graph(crate::graph::tests::deferred())
+            .instances(3, LANE_OPAQUE)
+            .batch(0, 0, LANE_OPAQUE, 0, 3);
+        fixture.counts[3] = 1;
+        let full = fixture.build();
+        assert!(graphics.render(&full).unwrap());
+        graphics.finish_frame().unwrap();
+        assert_eq!(graphics.drawn_instances().unwrap(), 3);
+        let mut moved = retained(&full, 1);
+        moved[48..52].copy_from_slice(&1000_f32.to_ne_bytes());
+        graphics.render(&moved).unwrap();
+        graphics.finish_frame().unwrap();
+        assert_eq!(graphics.drawn_instances().unwrap(), 0);
+        let mut instance = full[full.len() - INSTANCE_STRIDE..].to_vec();
+        instance[0..4].copy_from_slice(&1000_f32.to_ne_bytes());
+        let patch = delta(&full, 2, 1, 0, &instance);
+        graphics.render(&patch).unwrap();
+        graphics.finish_frame().unwrap();
+        assert_eq!(graphics.drawn_instances().unwrap(), 2);
+        graphics.render(&retained(&full, 2)).unwrap();
+        graphics.finish_frame().unwrap();
+        assert_eq!(graphics.drawn_instances().unwrap(), 2);
+        assert_eq!(graphics.scene_revision(), 2);
+    }
+
+    #[test]
+    fn benchmarks_never_fall_back_to_fifo() {
+        use wgpu::PresentMode::{Fifo, Immediate, Mailbox};
+        assert_eq!(
+            benchmark_present_mode(&[Fifo, Mailbox, Immediate]).unwrap(),
+            Immediate
+        );
+        assert_eq!(benchmark_present_mode(&[Fifo, Mailbox]).unwrap(), Mailbox);
+        assert!(benchmark_present_mode(&[Fifo]).is_err());
+    }
+
+    #[test]
+    fn full_entity_capacity_requires_explicit_gpu_limits() {
+        let defaults = wgpu::Limits::default();
+        assert!(validate_instance_capacity(4_194_303, &defaults).is_err());
+        let supported = wgpu::Limits {
+            max_storage_buffer_binding_size: 335_544_320,
+            max_buffer_size: 335_544_320,
+            ..defaults
+        };
+        assert!(validate_instance_capacity(4_194_303, &supported).is_ok());
+        let too_small = wgpu::Limits {
+            max_buffer_size: 335_544_319,
+            ..supported
+        };
+        assert!(validate_instance_capacity(4_194_303, &too_small).is_err());
+    }
 
     #[test]
     fn rounds_capacities_up_to_a_power_of_two() {

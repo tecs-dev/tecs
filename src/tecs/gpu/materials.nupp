@@ -127,6 +127,7 @@ local extra: {[string]: boolean} = {}
 local order: {string} = {}
 local idByName: {[string]: integer} = {}
 local installed = false
+local version: integer = 0
 
 --- Adds a directory to search before the ones already known.
 ---
@@ -156,6 +157,7 @@ export function install(): nil
         return
     end
     installed = true
+    version = version + 1
 
     local found: {[string]: boolean} = {}
     for index = 1, #BUILTINS do
@@ -194,6 +196,13 @@ export function install(): nil
     for index = 1, #order do
         idByName[order[index]] = index - 1
     end
+end
+
+--- Returns the installed material numbering revision.
+--- @return A monotonic count that changes whenever the registry is rebuilt.
+export function revision(): integer
+    install()
+    return version
 end
 
 --- Registers a material name that no root supplies.

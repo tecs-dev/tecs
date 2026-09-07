@@ -188,8 +188,13 @@ end
 --- size, because the camera projects into target pixels and the swapchain the
 --- packet is drawn into is that size on every display.
 --- @return the packet consumed by the Rust renderer after a completed frame
-export function renderPacket(exclusive session: Session): string
+--- @param residentRevision The host's resident instance generation, or nil for an
+---     independent full snapshot.
+export function renderPacket(exclusive session: Session, residentRevision: integer?): string
     local width, height = session.app.window:getPixelSize()
+    if residentRevision ~= nil then
+        return session.extractor:frame(width, height, residentRevision)
+    end
 
     return session.extractor:packet(width, height)
 end

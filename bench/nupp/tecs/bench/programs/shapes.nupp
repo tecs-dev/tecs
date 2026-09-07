@@ -6,12 +6,11 @@
 --- rectangles use their actual material ids, matching the Teal scene. Both
 --- halves share an archetype and remain contiguous in spawn order.
 ---
---- What is measured is narrower than the Teal benchmark, and the difference is
---- the point rather than an omission. `bench/shapes.tl` runs a window: its
---- `frame` row is a presented frame and includes acquire, record and submit
---- against a live GPU. Nothing in the Nupp tree can present a frame from a
---- headless process, so this measures the two stages that do exist and names
---- them after the Teal stages they correspond to:
+--- What is measured is narrower than the Teal benchmark, and the difference is the
+--- point rather than an omission. `bench/shapes.tl` runs a window: its `frame` row is a
+--- presented frame and includes acquire, record and submit against a live GPU. This
+--- fixture measures CPU work only. `nupp task bench render` measures the production GPU
+--- pipeline separately. These stages correspond to the old CPU stages:
 ---
 ---   update   `world:update(dt)`, which is the Teal `simulate` stage.
 ---   extract  `extractor:packet(width, height)`, which produces the bytes the
@@ -54,7 +53,8 @@ const WIDTH = 1280
 const HEIGHT = 720
 const STEP = 1.0 / 60.0
 
-const world = ecs.newWorld({maxEntities = COUNT + 1024})
+assert(COUNT <= ecs.MAX_ENTITIES, "benchmark shape count exceeds the entity limit")
+const world = ecs.newWorld({maxEntities = COUNT as integer})
 
 --- Fills the area, centered on the viewport so the visible fraction matches
 --- the Teal scene's.

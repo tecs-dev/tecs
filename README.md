@@ -139,6 +139,22 @@ exact equality converges the same way.
 The hierarchy resolver detects a `ChildOf` cycle and raises rather than
 overflowing the stack.
 
+## Retained rendering
+
+Rendering keeps the original `SpriteExtractor` / `SpriteBackend` design:
+packed archetype runs, persistent instance buffers, monotonic write counters
+and bounded dirty byte ranges. Frame-local dirty bits alone cannot serve the
+host, which extracts after `world:update` has cleared them. Unchanged runs
+therefore compare write counters and preserve their packed bytes; camera-only
+movement changes the view without repacking world-space geometry.
+
+The managed Nupp/Rust boundary carries only changed ranges once both sides
+agree on the resident generation. A new receiver requests a complete scene,
+and layout changes replace it. This preserves validation at the host boundary
+without rescanning or copying every resident instance each frame. The GPU
+still culls and draws the current view. See the [rendering benchmark](docs/gfx/benchmarks.md)
+for measured frame times and workload limits.
+
 ## Async design
 
 Asynchronous operations return their values directly. A system does not choose

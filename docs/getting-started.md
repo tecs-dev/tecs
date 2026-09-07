@@ -36,7 +36,7 @@ nupp task ex-lighting --frames 120
 
 `nupp tasks` lists the configured commands. Example build and run tasks use the
 `ex-` prefix: `ex-flatcolor`, `ex-sprites`, `ex-lighting`, `ex-tiled`, `ex-ui`,
-`ex-uistandalone` and `ex-nativesmoke`. `ex-host` runs the blank host, and
+`ex-uistandalone`, `ex-shapes` and `ex-nativesmoke`. `ex-host` runs the blank host, and
 `ex-physicssmoke` runs the bounded native-physics script.
 
 `--frames N` stops after N frames and exits zero, which is what makes a
@@ -268,3 +268,11 @@ loader-relative run path and ships the pack, and only a release install passes
 unrelated working directory and every `TECS_*`, `DYLD_*`, `LD_LIBRARY_PATH` and
 `NUPP_SDK` override removed, so it proves the package rather than the build
 tree.
+
+## More guides
+
+Continue with [Worlds and entities](ecs/world.md), [Components](ecs/components/index.md),
+[Queries](ecs/queries/index.md) and [Systems](ecs/systems.md).
+[Shapes](gfx/shapes.md) covers the built-in geometry; [Materials](gfx/materials.md)
+covers custom shaders. Run `nupp task ex-shapes` for the shape gallery or
+`nupp task bench render` for the [native rendering benchmark](gfx/benchmarks.md).

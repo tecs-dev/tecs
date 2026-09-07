@@ -18,7 +18,17 @@ for name, description in pairs(descriptions) do
         argv = { "nupp", "run", "tools/run.nupp", name },
     }
 end
-for _, name in ipairs({ "host", "flatcolor", "sprites", "lighting", "nativesmoke", "tiled", "ui", "uistandalone" }) do
+for _, name in ipairs({
+    "host",
+    "flatcolor",
+    "sprites",
+    "lighting",
+    "nativesmoke",
+    "tiled",
+    "ui",
+    "uistandalone",
+    "shapes",
+}) do
     developmentTasks["ex-" .. name] = {
         description = "Build and run the " .. name .. " component",
         build = "ex-" .. name,
@@ -26,6 +36,7 @@ for _, name in ipairs({ "host", "flatcolor", "sprites", "lighting", "nativesmoke
     }
 end
 developmentTasks["ex-nativesmoke"].description = "Run the native library loading smoke test"
+developmentTasks["ex-shapes"].description = "Show the built-in shape gallery"
 developmentTasks["ex-uistandalone"].argv = {
     "nupp",
     "run",
@@ -109,6 +120,12 @@ for index = 1, #hostExports do
 end
 lightingExports[#lightingExports + 1] = "lighting.create"
 
+local shapesExports = {}
+for index = 1, #hostExports do
+    shapesExports[index] = hostExports[index]
+end
+shapesExports[#shapesExports + 1] = "shapes.create"
+
 local nativesmokeExports = {}
 for index = 1, #hostExports do
     nativesmokeExports[index] = hostExports[index]
@@ -190,6 +207,7 @@ return {
                     "tecs.internal.events",
                     "tecs.internal.framepump",
                     "tecs.internal.framepacket",
+                    "tecs.internal.dirtyranges",
                     "tecs.internal.hostcancellation",
                     "tecs.internal.idallocator",
                     "tecs.internal.inverseindex",
@@ -267,6 +285,13 @@ return {
                 description = "Build the retained Taffy UI example",
                 entries = { "tecs.host", "ui" },
                 exports = uiExports,
+            },
+            ["ex-shapes"] = {
+                kind = "component",
+                output = "out/nupp/shapes.nuppc",
+                description = "Build the built-in shape gallery and rendering benchmark",
+                entries = { "tecs.host", "shapes" },
+                exports = shapesExports,
             },
             -- The component `nupp task test-package` runs against an
             -- installed release. It is a component rather than a script

@@ -301,6 +301,7 @@ pub fn install(root: &Path, preset: Preset, components: &[String]) -> Result<Pat
             "ex-tiled".to_owned(),
             "ex-ui".to_owned(),
             "ex-uistandalone".to_owned(),
+            "ex-shapes".to_owned(),
         ]
     } else {
         components.to_vec()
@@ -500,6 +501,7 @@ pub fn test(root: &Path, preset: Preset) -> Result<()> {
         println!("the relocated install ran {SHOWCASE} headless");
     }
     for (name, sentinel) in [
+        ("shapes", "shapes:"),
         (
             "tiled",
             "tiled: TMX, TSX, sprites, animation and collision ready",

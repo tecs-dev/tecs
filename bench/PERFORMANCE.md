@@ -91,3 +91,14 @@ window still pays presentation time, so its full frame is deliberately absent
 from the comparison. Both physics fixtures now share the spawn geometry,
 random-number consumption and wave timing; ECS representations, public call
 boundaries and compiler builds remain different.
+
+## GPU rendering capacity
+
+`nupp task bench render` measures serial completed offscreen GPU frames through
+the production renderer. Set `BENCH_COUNT` and `BENCH_SHAPE` to select the
+workload. This is separate from the CPU acceptance thresholds above.
+
+The [rendering benchmark guide](../docs/gfx/benchmarks.md) defines the workload
+and reports rectangle/circle scaling plus all eleven geometric shapes at the
+4,194,303-entity limit. [Raw measurements](results/render-macos-arm64-2026-09-06.json)
+retain per-frame observations, GPU-verified draw counts and provenance.

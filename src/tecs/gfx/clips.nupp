@@ -33,10 +33,9 @@ process drives one renderer.
 # Reach
 
 `culls` and `contains` answer against the table this module holds, so a game,
-an input layer, and a debug tool all test the same rectangles. Extraction does
-not drop a clipped entity because packet version 2 carries no clip index. A
-`Clip` reaching the backend therefore selects nothing there, and callers use
-the region table for clipping tests.
+an input layer, and a debug tool all test the same rectangles. Extraction packs the selected region's pixel bounds into each clipped
+instance, and the fragment shader rejects pixels outside them. Region changes
+invalidate retained render data as well as updating the CPU clipping tests.
 ]]
 
 local ecs = require("tecs.ecs")
@@ -44,8 +43,8 @@ local ecs = require("tecs.ecs")
 --- The number of clip slots the table holds.
 ---
 --- Regions run from one to `MAX - 1`, because zero is the entity saying it
---- wants no clipping. A renderer packs the whole table into one uniform, so
---- this is the size of that uniform rather than a soft limit.
+--- wants no clipping. Extraction copies selected bounds into the instance;
+--- this limit bounds the CPU registry.
 export const MAX: integer = 256
 
 --- Half the extent a cleared region reaches, which is far enough that no

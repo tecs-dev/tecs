@@ -12,7 +12,7 @@
 use anyhow::{bail, Context, Result};
 
 pub const PACKET_MAGIC: u32 = 0x5445_4353;
-pub const PACKET_VERSION: u32 = 5;
+pub const PACKET_VERSION: u32 = 6;
 pub const PACKET_HEADER_SIZE: usize = 128;
 pub const BATCH_STRIDE: usize = 20;
 pub const INSTANCE_STRIDE: usize = 80;
@@ -59,7 +59,9 @@ const FLAG_ALL: u32 = FLAG_BLENDED | FLAG_OCCLUDER | FLAG_DROP_SHADOW | FLAG_CLI
 /// Bit 0 of the header's flags runs the shadow lane, bit 1 the bloom chain.
 pub const FRAME_SHADOWS: u32 = 1;
 pub const FRAME_BLOOM: u32 = 2;
-const FRAME_ALL: u32 = FRAME_SHADOWS | FRAME_BLOOM;
+pub const FRAME_RETAINED: u32 = 4;
+pub const FRAME_DELTA: u32 = 8;
+const FRAME_ALL: u32 = FRAME_SHADOWS | FRAME_BLOOM | FRAME_RETAINED | FRAME_DELTA;
 
 /// Byte offset of an instance's flags word.
 const INSTANCE_FLAGS_OFFSET: usize = 68;
@@ -217,6 +219,10 @@ impl Header {
 #[derive(Debug)]
 pub struct Packet<'a> {
     pub header: Header,
+    pub scene_revision: u32,
+    pub retained: bool,
+    pub delta: bool,
+    pub updates: Vec<InstanceUpdate<'a>>,
     /// The encoded graph declaration, parsed only when the revision changes.
     pub graph: &'a [u8],
     /// The light table, as bytes, for the buffer the binning and the resolve
@@ -225,24 +231,52 @@ pub struct Packet<'a> {
     pub light_count: u32,
     /// Instances carrying a cast flag, which is what sizes the cast list.
     pub caster_count: u32,
-    pub instances: &'a [u8],
     pub instance_count: u32,
     /// The batch table, as bytes, for the buffer the cull binds.
     pub batch_bytes: &'a [u8],
 }
 
+/// Bytes to copy into the persistent instance buffer, with validated flags.
+#[derive(Debug)]
+pub struct InstanceUpdate<'a> {
+    pub offset: u64,
+    pub bytes: &'a [u8],
+    pub flags: Vec<u8>,
+}
+
+/// Identity and layout of instance bytes already validated and uploaded.
+#[derive(Clone, Debug)]
+pub struct RetainedScene {
+    pub revision: u32,
+    pub instances: u32,
+    pub casters: u32,
+    pub batches: Vec<Batch>,
+    pub flags: Vec<u8>,
+}
+
 /// Parses one packet and fills `batches` with its table.
 ///
-/// `batches` is the caller's, cleared and refilled, so a steady scene parses
-/// without allocating.
+/// `batches` is the caller's, cleared and refilled for a full snapshot.
 ///
 /// `material_count` is how many materials the loaded dispatch answers to. An
 /// instance naming an id past it is refused rather than drawn through whatever
 /// the dispatch happens to have at that number.
+#[cfg(test)]
 pub fn parse_packet<'a>(
     bytes: &'a [u8],
     batches: &mut Vec<Batch>,
     material_count: u32,
+) -> Result<Packet<'a>> {
+    parse_frame(bytes, batches, material_count, None)
+}
+
+/// Validates full scenes or dirty ranges against the receiver's resident layout.
+/// Retained frames preserve the batch table and never walk instance data.
+pub fn parse_frame<'a>(
+    bytes: &'a [u8],
+    batches: &mut Vec<Batch>,
+    material_count: u32,
+    resident: Option<&RetainedScene>,
 ) -> Result<Packet<'a>> {
     if bytes.len() < PACKET_HEADER_SIZE {
         bail!(
@@ -306,8 +340,17 @@ pub fn parse_packet<'a>(
         bail!("render packet carries {light_count} lights, and one frame resolves {MAX_LIGHTS}");
     }
     let caster_count = read_u32(bytes, 72);
-    if read_u32(bytes, 76) != 0 {
-        bail!("render packet sets a reserved header word");
+    let scene_revision = read_u32(bytes, 76);
+    let retained = flags & FRAME_RETAINED != 0;
+    let delta = flags & FRAME_DELTA != 0;
+    let partial = retained || delta;
+    if retained && delta {
+        bail!("render packet cannot retain and patch instances together");
+    }
+    if retained
+        && (scene_revision == 0 || resident.is_none_or(|scene| scene.revision != scene_revision))
+    {
+        bail!("render packet references an instance generation that is not resident");
     }
     let ambient = [
         read_f32(bytes, 80),
@@ -364,25 +407,30 @@ pub fn parse_packet<'a>(
     let light_table_bytes = (light_count as usize)
         .checked_mul(light_stride)
         .context("render packet light byte count overflowed")?;
-    let batch_table_bytes = (batch_count as usize)
-        .checked_mul(batch_stride)
-        .context("render packet batch byte count overflowed")?;
+    let batch_table_bytes = if partial {
+        0
+    } else {
+        (batch_count as usize)
+            .checked_mul(batch_stride)
+            .context("render packet batch byte count overflowed")?
+    };
     let instance_bytes = (instance_count as usize)
         .checked_mul(instance_stride)
         .context("render packet instance byte count overflowed")?;
-    let expected = PACKET_HEADER_SIZE
+    let prefix = PACKET_HEADER_SIZE
         .checked_add(graph_bytes)
         .and_then(|size| size.checked_add(light_table_bytes))
         .and_then(|size| size.checked_add(batch_table_bytes))
-        .and_then(|size| size.checked_add(instance_bytes))
         .context("render packet size overflowed")?;
-    if bytes.len() != expected {
+    let expected = prefix
+        .checked_add(if partial { 0 } else { instance_bytes })
+        .context("render packet size overflowed")?;
+    if bytes.len() < expected || (!delta && bytes.len() != expected) {
         bail!(
             "render packet is {} bytes; header declares {expected}",
             bytes.len()
         );
     }
-
     let graph = &bytes[PACKET_HEADER_SIZE..PACKET_HEADER_SIZE + graph_bytes];
     let light_start = PACKET_HEADER_SIZE + graph_bytes;
     let table_start = light_start + light_table_bytes;
@@ -405,118 +453,142 @@ pub fn parse_packet<'a>(
         }
     }
 
-    batches.clear();
-    batches.reserve(batch_count as usize);
-    let mut covered = 0_u32;
-    for index in 0..batch_count as usize {
-        let base = table_start + index * batch_stride;
-        let batch = Batch {
-            image: read_u32(bytes, base),
-            sampler: read_u32(bytes, base + 4),
-            lane: read_u32(bytes, base + 8),
-            first: read_u32(bytes, base + 12),
-            count: read_u32(bytes, base + 16),
-        };
-        if batch.sampler >= SAMPLER_COUNT {
-            bail!(
-                "render packet batch {index} selects unknown sampler {}",
-                batch.sampler
-            );
+    if partial {
+        let scene = resident.context("render packet patches a scene that is not resident")?;
+        // The caller retains this table alongside the resident generation.
+        // Partial packets cannot supply or change its contents.
+        if scene.instances != instance_count
+            || scene.casters != caster_count
+            || scene.flags.len() != instance_count as usize
+            || scene.batches.len() != batch_count as usize
+            || batches.len() != scene.batches.len()
+        {
+            bail!("render packet changes the layout of retained instances");
         }
-        if batch.lane >= DRAW_LANE_COUNT {
-            bail!(
-                "render packet batch {index} selects unknown lane {}",
-                batch.lane
-            );
-        }
-        if batch.count == 0 {
-            bail!("render packet batch {index} draws no instances");
-        }
-        // The batches have to partition the instances in order, because the
-        // draw order is the picture and a gap or an overlap is neither, and
-        // because a batch's survivors are only a contiguous run of its lane's
-        // visible list while that holds.
-        if batch.first != covered {
-            bail!(
-                "render packet batch {index} starts at {} rather than {covered}",
-                batch.first
-            );
-        }
-        covered = covered
-            .checked_add(batch.count)
-            .context("render packet batch coverage overflowed")?;
-        if covered > instance_count {
-            bail!("render packet batches cover more than {instance_count} instances");
-        }
-        batches.push(batch);
-    }
-    if covered != instance_count {
-        bail!("render packet batches cover {covered} of {instance_count} instances");
-    }
-
-    for (index, batch) in batches.iter().enumerate() {
-        for slot in batch.first..batch.first + batch.count {
-            let base = slot as usize * instance_stride;
-            let material = read_u32(instances, base + INSTANCE_MATERIAL_OFFSET);
-            if material >= material_count {
+    } else {
+        batches.clear();
+        batches.reserve(batch_count as usize);
+        let mut covered = 0_u32;
+        for index in 0..batch_count as usize {
+            let base = table_start + index * batch_stride;
+            let batch = Batch {
+                image: read_u32(bytes, base),
+                sampler: read_u32(bytes, base + 4),
+                lane: read_u32(bytes, base + 8),
+                first: read_u32(bytes, base + 12),
+                count: read_u32(bytes, base + 16),
+            };
+            if batch.sampler >= SAMPLER_COUNT {
                 bail!(
-                    "render packet instance {slot} selects material {material}, and the loaded \
-                     dispatch carries {material_count}"
+                    "render packet batch {index} selects unknown sampler {}",
+                    batch.sampler
                 );
             }
-            let instance_flags = read_u32(instances, base + INSTANCE_FLAGS_OFFSET);
-            if instance_flags & !FLAG_ALL != 0 {
-                bail!("render packet instance {slot} sets reserved flag bits");
-            }
-            if instance_flags & FLAG_CASTS == FLAG_CASTS {
+            if batch.lane >= DRAW_LANE_COUNT {
                 bail!(
-                    "render packet instance {slot} is both an occluder and a drop-shadow caster, \
-                     and an entity carrying both is an occluder"
-                );
-            }
-            if instance_flags & FLAG_BLENDED != 0 && instance_flags & FLAG_CASTS != 0 {
-                bail!("render packet instance {slot} is blended and casts, and a blended entity casts nothing");
-            }
-            let blended = u32::from(instance_flags & FLAG_BLENDED != 0);
-            // The cull routes an instance by its own flag and the draw finds it
-            // through its batch, so the two have to agree or a survivor lands in
-            // a list nothing draws.
-            if blended != batch.lane {
-                bail!(
-                    "render packet instance {slot} is in lane {blended} and batch {index} is in \
-                     lane {}",
+                    "render packet batch {index} selects unknown lane {}",
                     batch.lane
                 );
             }
+            if batch.count == 0 {
+                bail!("render packet batch {index} draws no instances");
+            }
+            // The batches have to partition the instances in order, because the
+            // draw order is the picture and a gap or an overlap is neither, and
+            // because a batch's survivors are only a contiguous run of its lane's
+            // visible list while that holds.
+            if batch.first != covered {
+                bail!(
+                    "render packet batch {index} starts at {} rather than {covered}",
+                    batch.first
+                );
+            }
+            covered = covered
+                .checked_add(batch.count)
+                .context("render packet batch coverage overflowed")?;
+            if covered > instance_count {
+                bail!("render packet batches cover more than {instance_count} instances");
+            }
+            batches.push(batch);
+        }
+        if covered != instance_count {
+            bail!("render packet batches cover {covered} of {instance_count} instances");
         }
     }
 
-    // Only the leading sixteen floats of an instance reach arithmetic; the four
-    // trailing words are the material, the flags and two packed clip bounds, and
-    // reading those as floats would reject an ordinary id as a denormal.
-    for index in 0..instance_count as usize {
-        let base = index * instance_stride;
-        for lane in 0..16 {
-            let value = read_f32(instances, base + lane * 4);
-            if !value.is_finite() {
-                bail!("render packet instance {index} holds a value that is not finite");
-            }
+    let mut updates = Vec::new();
+    let mut casters = if partial {
+        resident.expect("checked resident").casters
+    } else {
+        0
+    };
+    if delta {
+        if instances.len() < 8 {
+            bail!("render packet omits its delta header");
         }
-        let min = read_u32(instances, base + 72);
-        let max = read_u32(instances, base + 76);
-        if read_u32(instances, base + INSTANCE_FLAGS_OFFSET) & FLAG_CLIPPED != 0 {
-            if min & 65535 > max & 65535 || min >> 16 > max >> 16 {
-                bail!("render packet instance {index} has inverted clip bounds");
-            }
-        } else if min != 0 || max != 0 {
-            bail!("render packet instance {index} sets a reserved word");
+        let base = read_u32(instances, 0);
+        let scene = resident.expect("checked resident");
+        if base == 0 || base != scene.revision || scene_revision <= base {
+            bail!("render packet delta does not follow its resident generation");
         }
-    }
-
-    let mut casters = 0_u32;
-    for index in 0..instance_count as usize {
-        if read_u32(instances, index * instance_stride + INSTANCE_FLAGS_OFFSET) & FLAG_CASTS != 0 {
-            casters += 1;
+        let ranges = read_u32(instances, 4) as usize;
+        if ranges == 0 || ranges > 64 {
+            bail!("render packet delta range count is outside one to 64");
+        }
+        let mut cursor = 8 + ranges * 8;
+        if cursor > instances.len() {
+            bail!("render packet truncates its delta ranges");
+        }
+        let mut previous_end = 0;
+        for index in 0..ranges {
+            let offset = read_u32(instances, 8 + index * 8) as usize;
+            let length = read_u32(instances, 12 + index * 8) as usize;
+            let end = offset
+                .checked_add(length)
+                .context("delta range overflowed")?;
+            if length == 0
+                || offset % INSTANCE_STRIDE != 0
+                || length % INSTANCE_STRIDE != 0
+                || offset < previous_end
+                || end > instance_bytes
+            {
+                bail!("render packet has an invalid or overlapping delta range");
+            }
+            previous_end = end;
+            let data_end = cursor
+                .checked_add(length)
+                .context("delta payload overflowed")?;
+            let data = instances
+                .get(cursor..data_end)
+                .context("render packet truncates a delta payload")?;
+            cursor = data_end;
+            let first = offset / INSTANCE_STRIDE;
+            let flags = validate_instances(data, first as u32, batches, material_count)?;
+            for (at, flag) in flags.iter().enumerate() {
+                casters -= u32::from(scene.flags[first + at] & FLAG_CASTS as u8 != 0);
+                casters += u32::from(flag & FLAG_CASTS as u8 != 0);
+            }
+            updates.push(InstanceUpdate {
+                offset: offset as u64,
+                bytes: data,
+                flags,
+            });
+        }
+        if cursor != instances.len() {
+            bail!("render packet has trailing delta bytes");
+        }
+    } else if !retained {
+        let flags = validate_instances(instances, 0, batches, material_count)?;
+        casters = flags
+            .iter()
+            .filter(|flag| **flag & FLAG_CASTS as u8 != 0)
+            .count() as u32;
+        if !instances.is_empty() {
+            updates.push(InstanceUpdate {
+                offset: 0,
+                bytes: instances,
+                flags,
+            });
         }
     }
     if casters != caster_count {
@@ -524,6 +596,10 @@ pub fn parse_packet<'a>(
     }
 
     Ok(Packet {
+        scene_revision,
+        retained,
+        delta,
+        updates,
         header: Header {
             graph_revision,
             flags,
@@ -543,10 +619,63 @@ pub fn parse_packet<'a>(
         light_bytes,
         light_count,
         caster_count,
-        instances,
         instance_count,
         batch_bytes,
     })
+}
+
+fn validate_instances(
+    bytes: &[u8],
+    first: u32,
+    batches: &[Batch],
+    material_count: u32,
+) -> Result<Vec<u8>> {
+    let mut flags = Vec::with_capacity(bytes.len() / INSTANCE_STRIDE);
+    let mut batch = batches.partition_point(|batch| batch.first + batch.count <= first);
+    for (at, instance) in bytes.chunks_exact(INSTANCE_STRIDE).enumerate() {
+        let slot = first + at as u32;
+        while batch < batches.len() && slot >= batches[batch].first + batches[batch].count {
+            batch += 1;
+        }
+        let lane = batches
+            .get(batch)
+            .context("instance lies outside the batch table")?
+            .lane;
+        let material = read_u32(instance, INSTANCE_MATERIAL_OFFSET);
+        if material >= material_count {
+            bail!("render packet instance {slot} selects material {material}, and the loaded dispatch carries {material_count}");
+        }
+        let flag = read_u32(instance, INSTANCE_FLAGS_OFFSET);
+        if flag & !FLAG_ALL != 0 {
+            bail!("render packet instance {slot} sets reserved flag bits");
+        }
+        if flag & FLAG_CASTS == FLAG_CASTS {
+            bail!("render packet instance {slot} is both an occluder and a drop-shadow caster, and an entity carrying both is an occluder");
+        }
+        if flag & FLAG_BLENDED != 0 && flag & FLAG_CASTS != 0 {
+            bail!("render packet instance {slot} is blended and casts, and a blended entity casts nothing");
+        }
+        if u32::from(flag & FLAG_BLENDED != 0) != lane {
+            let blended = u32::from(flag & FLAG_BLENDED != 0);
+            bail!("render packet instance {slot} is in lane {blended} and batch {batch} is in lane {lane}");
+        }
+        for channel in 0..16 {
+            if !read_f32(instance, channel * 4).is_finite() {
+                bail!("render packet instance {slot} holds a value that is not finite");
+            }
+        }
+        let min = read_u32(instance, 72);
+        let max = read_u32(instance, 76);
+        if flag & FLAG_CLIPPED != 0 {
+            if min & 65535 > max & 65535 || min >> 16 > max >> 16 {
+                bail!("render packet instance {slot} has inverted clip bounds");
+            }
+        } else if min != 0 || max != 0 {
+            bail!("render packet instance {slot} sets a reserved word");
+        }
+        flags.push(flag as u8);
+    }
+    Ok(flags)
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> u32 {
@@ -727,12 +856,96 @@ pub mod tests {
             .to_string()
     }
 
+    pub fn retained(full: &[u8], revision: u32) -> Vec<u8> {
+        let prefix = PACKET_HEADER_SIZE
+            + read_u32(full, 20) as usize
+            + read_u32(full, 68) as usize * LIGHT_STRIDE;
+        let mut bytes = full[..prefix].to_vec();
+        let flags = read_u32(full, 12) | FRAME_RETAINED;
+        bytes[12..16].copy_from_slice(&flags.to_ne_bytes());
+        bytes[76..80].copy_from_slice(&revision.to_ne_bytes());
+        bytes
+    }
+
+    pub fn delta(full: &[u8], revision: u32, base: u32, offset: u32, data: &[u8]) -> Vec<u8> {
+        let mut bytes = retained(full, revision);
+        let flags = (read_u32(&bytes, 12) & !FRAME_RETAINED) | FRAME_DELTA;
+        bytes[12..16].copy_from_slice(&flags.to_ne_bytes());
+        for word in [base, 1, offset, data.len() as u32] {
+            bytes.extend_from_slice(&word.to_ne_bytes());
+        }
+        bytes.extend_from_slice(data);
+        bytes
+    }
+
+    fn resident_fixture() -> (Vec<u8>, Vec<Batch>, RetainedScene) {
+        let mut fixture =
+            PacketBuilder::new()
+                .instances(3, LANE_OPAQUE)
+                .batch(0, 0, LANE_OPAQUE, 0, 3);
+        fixture.counts[3] = 1;
+        let bytes = fixture.build();
+        let mut batches = Vec::new();
+        let packet = parse_packet(&bytes, &mut batches, 16).unwrap();
+        let resident = RetainedScene {
+            revision: 1,
+            instances: 3,
+            casters: 0,
+            batches: batches.clone(),
+            flags: packet.updates[0].flags.clone(),
+        };
+        (bytes, batches, resident)
+    }
+
+    #[test]
+    fn retains_validated_instances_without_a_payload() {
+        let (full, mut batches, scene) = resident_fixture();
+        let bytes = retained(&full, 1);
+        let packet = parse_frame(&bytes, &mut batches, 16, Some(&scene)).unwrap();
+        assert_eq!(packet.instance_count, 3);
+        assert!(packet.updates.is_empty());
+        assert!(packet.batch_bytes.is_empty());
+        assert!(parse_frame(&bytes, &mut batches, 16, None).is_err());
+        assert!(parse_frame(&retained(&full, 2), &mut batches, 16, Some(&scene)).is_err());
+        let mut smuggled = bytes;
+        smuggled.extend_from_slice(&[0; INSTANCE_STRIDE]);
+        assert!(parse_frame(&smuggled, &mut batches, 16, Some(&scene)).is_err());
+    }
+
+    #[test]
+    fn validates_only_a_delta_against_its_resident_generation() {
+        let (full, mut batches, scene) = resident_fixture();
+        let mut data = full[full.len() - INSTANCE_STRIDE..].to_vec();
+        data[0..4].copy_from_slice(&42_f32.to_ne_bytes());
+        let bytes = delta(&full, 2, 1, INSTANCE_STRIDE as u32, &data);
+        let packet = parse_frame(&bytes, &mut batches, 16, Some(&scene)).unwrap();
+        assert!(packet.delta);
+        assert_eq!(packet.updates.len(), 1);
+        assert_eq!(packet.updates[0].offset, INSTANCE_STRIDE as u64);
+        assert_eq!(packet.updates[0].bytes, data);
+        for (offset, value) in [(128, 9_u32), (132, 65), (136, 1), (140, 0), (72, 1)] {
+            let mut invalid = bytes.clone();
+            invalid[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
+            assert!(
+                parse_frame(&invalid, &mut batches, 16, Some(&scene)).is_err(),
+                "offset {offset}"
+            );
+        }
+        let mut invalid = bytes.clone();
+        invalid[144..148].copy_from_slice(&f32::NAN.to_ne_bytes());
+        assert!(parse_frame(&invalid, &mut batches, 16, Some(&scene)).is_err());
+        let mut invalid = bytes;
+        invalid[144 + INSTANCE_MATERIAL_OFFSET..148 + INSTANCE_MATERIAL_OFFSET]
+            .copy_from_slice(&999_u32.to_ne_bytes());
+        assert!(parse_frame(&invalid, &mut batches, 16, Some(&scene)).is_err());
+    }
+
     #[test]
     fn parses_a_complete_scene() {
         let bytes = valid().build();
         let (packet, batches) = parse(&bytes).expect("valid packet");
         assert_eq!(packet.instance_count, 3);
-        assert_eq!(packet.instances.len(), INSTANCE_STRIDE * 3);
+        assert_eq!(packet.updates[0].bytes.len(), INSTANCE_STRIDE * 3);
         assert_eq!(packet.graph.len(), 0);
         assert_eq!(packet.header.graph_revision, 1);
         assert_eq!(packet.header.target, [640.0, 360.0]);
@@ -765,7 +978,7 @@ pub mod tests {
     fn parses_an_empty_scene() {
         let bytes = PacketBuilder::new().build();
         let (packet, batches) = parse(&bytes).expect("valid empty packet");
-        assert!(packet.instances.is_empty());
+        assert!(packet.updates.is_empty());
         assert!(batches.is_empty());
     }
 

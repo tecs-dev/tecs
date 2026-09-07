@@ -1,0 +1,225 @@
+local test = require("nupp.test")
+local framepacket = require("tecs.internal.framepacket")
+local ranges = require("tecs.internal.dirtyranges")
+local ecs = require("tecs.ecs")
+local Other = ecs.newScalarComponent({name = "test.RetainedOther", kind = "number", default = 0})
+local suite = {}
+
+local function word(bytes: string, offset: integer): integer
+    local reader = nupp.io.newScalarReader(bytes)
+    reader:skip(offset)
+    const value = reader:readUint32() as integer
+    reader:drop()
+
+    return value
+end
+
+local function base(bytes: string): integer
+    return 128 + word(bytes, 20) + word(bytes, 68) * 32
+end
+
+local function body(bytes: string): string
+    return bytes:sub(base(bytes) + word(bytes, 28) * 20 + 1)
+end
+
+local function fixture(): ecs.World, framepacket.Extractor, integer, integer
+    tecs.gfx.layers.configure(1, {sort = "z"})
+    const world = ecs.newWorld({maxEntities = 64})
+    for index = 1, 10 do
+        world:spawn(ecs.Transform2D(index, 20, 0, 1), tecs.gfx.Tint(), tecs.gfx.Renderable2D)
+    end
+    const actor = world:spawn(ecs.Transform2D(20, 20, 0, 1), tecs.gfx.Tint(), tecs.gfx.Renderable2D, Other(0))
+    const camera = world:spawn(tecs.gfx.Camera2D(320, 180), tecs.gfx.ActiveCamera)
+    world:commit()
+
+    return world, framepacket.new(world), actor, camera
+end
+
+local function apply(previous: string, patch: string): string
+    const start = base(patch)
+    local reader = nupp.io.newScalarReader(patch)
+    reader:skip(start + 4)
+    const count = reader:readUint32() as integer
+    local offsets, sizes = {} as {integer}, {} as {integer}
+    for index = 1, count do
+        offsets[index], sizes[index] = reader:readUint32() as integer, reader:readUint32() as integer
+    end
+    local result = previous
+    for index = 1, count do
+        const value = reader:readBytes(sizes[index])
+        result = result:sub(1, offsets[index]) .. value .. result:sub(offsets[index] + sizes[index] + 1)
+    end
+    reader:drop()
+
+    return result
+end
+
+function suite.cleanAndCameraFramesCarryNoInstanceOrBatchBytes(): nil
+    const world, extractor, actor, camera = fixture()
+    const first = extractor:frame(640, 360, 0)
+    const revision = word(first, 76)
+    test.equal(#body(first), 11 * 80)
+    world:update(0)
+    const clean = extractor:frame(640, 360, revision)
+    test.equal(word(clean, 12), framepacket.FRAME_RETAINED)
+    test.equal(#clean, base(clean))
+    test.equal(word(clean, 76), revision)
+    const eye = assert(world:getMut(camera, tecs.gfx.Camera2D))
+    eye.x, eye.zoom = 999, 2
+    const moved = extractor:frame(640, 360, revision)
+    test.equal(word(moved, 12), framepacket.FRAME_RETAINED)
+    test.equal(#moved, base(moved))
+    test.notEqual(moved, clean)
+    world:set(actor, Other(1))
+    world:commit()
+    test.equal(word(extractor:frame(640, 360, revision), 12), framepacket.FRAME_RETAINED)
+end
+
+function suite.writesOneDirtyRunAfterFrameDirtyBitsAreCleared(): nil
+    const world, extractor, actor = fixture()
+    const first = extractor:frame(640, 360, 0)
+    assert(world:getMut(actor, tecs.gfx.Tint)).r = 0.25
+    world:update(0)
+    const patch = extractor:frame(640, 360, word(first, 76))
+    test.equal(word(patch, 12), framepacket.FRAME_DELTA)
+    test.equal(word(patch, base(patch) + 4), 1)
+    test.equal(word(patch, base(patch) + 8), 10 * 80)
+    test.equal(word(patch, base(patch) + 12), 80)
+    test.equal(#patch, base(patch) + 16 + 80)
+    test.equal(apply(body(first), patch), body(extractor:packet(640, 360)))
+end
+
+function suite.movingOneRunPreservesTheCleanInstances(): nil
+    const world, extractor, actor = fixture()
+    const first = extractor:frame(640, 360, 0)
+    assert(world:getMut(actor, ecs.Transform2D)).x = 123
+    const patch = extractor:frame(640, 360, word(first, 76))
+    test.equal(word(patch, 12), framepacket.FRAME_DELTA)
+    test.equal(apply(body(first), patch), body(extractor:packet(640, 360)))
+end
+
+function suite.rebuildsAfterRelayoutOrAReceiverRestart(): nil
+    const world, extractor = fixture()
+    const first = extractor:frame(640, 360, 0)
+    const restarted = extractor:frame(640, 360, 0)
+    test.equal(word(restarted, 12), 0)
+    test.equal(body(restarted), body(first))
+    world:spawn(ecs.Transform2D(), tecs.gfx.Tint(), tecs.gfx.Renderable2D)
+    world:commit()
+    const changed = extractor:frame(640, 360, word(first, 76))
+    test.equal(word(changed, 12), 0)
+    test.equal(word(changed, 36), 12)
+    test.equal(#body(changed), 12 * 80)
+    world:clearEntities()
+    const cleared = extractor:frame(640, 360, word(changed, 76))
+    test.equal(word(cleared, 36), 0)
+    test.equal(#body(cleared), 0)
+end
+
+function suite.rebuildsWhenAlphaChangesTheBatchLane(): nil
+    const world, extractor, actor = fixture()
+    const first = extractor:frame(640, 360, 0)
+    assert(world:getMut(actor, tecs.gfx.Tint)).a = 0.5
+    const changed = extractor:frame(640, 360, word(first, 76))
+    test.equal(word(changed, 12), 0)
+    test.equal(word(changed, 28), 2)
+    test.equal(body(changed), body(extractor:packet(640, 360)))
+end
+
+function suite.imageCompletionInvalidatesUnchangedSpriteComponents(): nil
+    const world = ecs.newWorld()
+    const image = tecs.gfx.images.upload({
+        name = "retained-test",
+        width = 1,
+        height = 1,
+        pixels = string.rep("\255", 4)
+    })
+    const commands = tecs.gfx.images.drain()
+    world:spawn(ecs.Transform2D(), tecs.gfx.Tint(), tecs.gfx.Sprite(image), tecs.gfx.Renderable2D)
+    world:commit()
+    const extractor = framepacket.new(world)
+    const pending = extractor:frame(640, 360, 0)
+    test.equal(word(pending, base(pending)), 0)
+    for _, command in ipairs(commands) do
+        tecs.gfx.images.complete(command.image, command.serial, true, nil)
+    end
+    const ready = extractor:frame(640, 360, word(pending, 76))
+    test.equal(word(ready, 12), 0)
+    test.equal(word(ready, base(ready)), image)
+    tecs.gfx.images.release("retained-test")
+    const released = extractor:frame(640, 360, word(ready, 76))
+    test.equal(word(released, base(released)), 0)
+end
+
+function suite.screenSpaceGeometryTracksCameraAndClipChanges(): nil
+    const world, extractor, actor, camera = fixture()
+    tecs.gfx.layers.configure(16, {sort = "z", screenSpace = true, overlay = true})
+    tecs.gfx.clips.setRegion(249, {x = 0, y = 0, width = 200, height = 100})
+    world:spawn(ecs.Transform2D(40, 20, 0, 16), tecs.gfx.Tint(), tecs.gfx.Renderable2D, tecs.gfx.Clip(249))
+    world:commit()
+    const first = extractor:frame(640, 360, 0)
+    assert(world:getMut(actor, tecs.gfx.Tint)).r = 0.4
+    const patch = extractor:frame(640, 360, word(first, 76))
+    assert(world:getMut(camera, tecs.gfx.Camera2D)).zoom = 2
+    const moved = extractor:frame(640, 360, word(patch, 76))
+    test.equal(word(moved, 12), 0)
+    test.notEqual(body(moved), body(first))
+    tecs.gfx.clips.setRegion(249, {x = 10, y = 0, width = 100, height = 100})
+    const clipped = extractor:frame(640, 360, word(moved, 76))
+    test.equal(word(clipped, 12), 0)
+    test.notEqual(body(clipped), body(moved))
+end
+
+function suite.rebuildsAfterDepthReorderingAndDespawn(): nil
+    const world, extractor, actor = fixture()
+    const first = extractor:frame(640, 360, 0)
+    assert(world:getMut(actor, ecs.Transform2D)).z = 10
+    const reordered = extractor:frame(640, 360, word(first, 76))
+    test.equal(word(reordered, 12), 0)
+    test.notEqual(body(reordered), body(first))
+    world:despawn(actor)
+    world:commit()
+    const removed = extractor:frame(640, 360, word(reordered, 76))
+    test.equal(word(removed, 12), 0)
+    test.equal(word(removed, 36), 10)
+    test.equal(body(removed), body(extractor:packet(640, 360)))
+end
+
+function suite.interpolationAdvancesWithoutComponentWrites(): nil
+    const world = ecs.newWorld({timestep = 0.125})
+    world:spawn(ecs.Transform2D(), tecs.gfx.Tint(), tecs.gfx.Renderable2D)
+    world:spawn(ecs.Transform2D(100, 20), ecs.PreviousTransform2D(0, 20), tecs.gfx.Tint(), tecs.gfx.Renderable2D)
+    world:commit()
+    const extractor = framepacket.new(world)
+    const first = extractor:frame(640, 360, 0)
+    world:update(0.0625)
+    const patch = extractor:frame(640, 360, word(first, 76))
+    test.equal(word(patch, 12), framepacket.FRAME_DELTA)
+    test.equal(word(patch, base(patch) + 12), 80)
+    test.notEqual(apply(body(first), patch), body(first))
+    test.equal(apply(body(first), patch), body(extractor:packet(640, 360)))
+end
+
+function suite.coalescesAndBoundsThePortedDirtyRanges(): nil
+    const list = ranges.new()
+    list:mark(80, 80)
+    list:mark(160, 80)
+    test.equal(list.count, 1)
+    test.equal(select(2, list:at(0)), 160)
+    list:mark(0, 80)
+    list:sort()
+    test.equal(list.count, 1)
+    test.equal(select(1, list:at(0)), 0)
+    test.equal(select(2, list:at(0)), 240)
+    list:clear()
+    for index = 0, 64 do
+        list:mark(index * 160, 80)
+    end
+    test.equal(list.count, 1)
+    test.equal(select(2, list:at(0)), 64 * 160 + 80)
+    list:clear()
+    test.equal(list.count, 0)
+    test.equal(list.bytes, 0)
+end
+
+return suite
