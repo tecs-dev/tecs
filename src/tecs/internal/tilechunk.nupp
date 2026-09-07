@@ -1,6 +1,6 @@
 module tecs.internal.tilechunk
 
---[[Native 16 by 16 tile grids, extracted into retained GPU instances without
+--[[Native 16 by 16 tile grids, uploaded as compact GPU tile IDs without
 creating an ECS entity for each tile. Tile IDs are one-based atlas indices;
 zero is empty. Bits 31, 30 and 29 retain Tiled's H, V and diagonal flips.]]
 
@@ -152,63 +152,43 @@ export function count(value: TileChunk): integer
     return total
 end
 
---- Places one occupied tile using the chunk's top-left pose.
---- @param value the atlas and grid
---- @param index the one-based cell
---- @param pose the mutable output pose, initially the chunk pose
---- @return the tile's atlas region
-export function place(value: TileChunk, index: integer, pose: rendercomponents.Transform2D): rendercomponents.Sprite
-    local encoded: integer = 0
-    unsafe do
-        encoded = value.tiles[index] as integer
-    end
-    const id = encoded % 536870912 - 1
-    const h = math.floor(encoded / 2147483648) % 2 ~= 0
-    const v = math.floor(encoded / 1073741824) % 2 ~= 0
-    const d = math.floor(encoded / 536870912) % 2 ~= 0
-    const x = ((index - 1) % 16) * value.cellWidth + value.tileWidth * 0.5 + value.offsetX
-    const y = (math.floor((index - 1) / 16) + 1) * value.cellHeight - value.tileHeight * 0.5 + value.offsetY
-    const c, s = math.cos(pose.rotation), math.sin(pose.rotation)
-    pose.x, pose.y = pose.x
-        + x
-        * pose.scaleX
-        * c
-        - y
-        * pose.scaleY
-        * s, pose.y
-        + x
-        * pose.scaleX
-        * s
-        + y
-        * pose.scaleY
-        * c
-    pose.scaleX, pose.scaleY = pose.scaleX * value.tileWidth, pose.scaleY * value.tileHeight
-    if d then
-        pose.rotation = pose.rotation + math.pi * 0.5
-        pose.scaleY = -pose.scaleY
-        if h then
-            pose.scaleY = -pose.scaleY
-        end
-        if v then
-            pose.scaleX = -pose.scaleX
-        end
-    else
-        if h then
-            pose.scaleX = -pose.scaleX
-        end
-        if v then
-            pose.scaleY = -pose.scaleY
-        end
-    end
+--- Encodes the atlas geometry followed by 256 packed tile IDs for the GPU.
+export function packed(value: TileChunk): string
+    local buffer = nupp.io.newBuffer()
+    local writer = nupp.io.newScalarWriter(buffer)
     const width, height = images.sizeOf(value.tileset)
-    const u = value.margin + (id % value.columns) * (value.tileWidth + value.spacing)
-    const w = value.margin + math.floor(id / value.columns) * (value.tileHeight + value.spacing)
+    for _, number in ipairs({
+        value.tileWidth,
+        value.tileHeight,
+        value.columns,
+        value.spacing,
+        value.margin,
+        value.cellWidth,
+        value.cellHeight,
+        value.offsetX,
+        value.offsetY,
+        math.max(1, width),
+        math.max(1, height),
+        0
+    }) do
+        writer:writeFloat32(nupp.math.f32.narrow(number))
+    end
+    unsafe do
+        for index = 1, 256 do
+            writer:writeUint32(value.tiles[index])
+        end
+    end
+    writer:drop()
+    const bytes = buffer:getString()
+    buffer:drop()
 
-    return new rendercomponents.Sprite(
-        value.tileset,
-        u / math.max(1, width),
-        w / math.max(1, height),
-        (u + value.tileWidth) / math.max(1, width),
-        (w + value.tileHeight) / math.max(1, height)
-    )
+    return bytes
+end
+
+--- Gives a conservative radius including oversized and diagonally flipped tiles.
+export function radius(value: TileChunk, pose: rendercomponents.Transform2D): number
+    const sx, sy = math.abs(pose.scaleX), math.abs(pose.scaleY)
+    return (
+        16 * value.cellWidth + math.abs(value.offsetX) + value.tileWidth
+    ) * sx + (16 * value.cellHeight + math.abs(value.offsetY) + value.tileHeight) * sy
 end

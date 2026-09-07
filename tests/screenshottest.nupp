@@ -1,0 +1,45 @@
+local test = require("nupp.test")
+local screenshot = require("tecs.gfx.screenshot")
+local suite = {}
+
+function suite.pendingAndFailedCapturesReturnTheirReason(): nil
+    local capture = screenshot.request()
+    test.equal(capture.ready, false)
+    local bytes, reason = screenshot.encode(capture)
+    test.equal(bytes, nil)
+    test.equal(reason, "screenshot is pending")
+    local id = assert(screenshot.nextRequest())
+    screenshot.complete(id, 0, 0, "", "", "GPU readback failed")
+    test.equal(capture.ready, true)
+    bytes, reason = screenshot.encode(capture)
+    test.equal(bytes, nil)
+    test.equal(reason, "GPU readback failed")
+end
+
+function suite.completedCapturesReturnPixelsAndPngAndSaveThem(): nil
+    local capture = screenshot.request()
+    local id = assert(screenshot.nextRequest())
+    screenshot.complete(id, 1, 1, "rgba", "png bytes", nil)
+    const rgba, width, height, reason = screenshot.pixels(capture)
+    test.equal(rgba, "rgba")
+    test.equal(width, 1)
+    test.equal(height, 1)
+    test.equal(reason, nil)
+    test.equal(screenshot.encode(capture), "png bytes")
+    local file = assert(nupp.io.files.createTemporaryFile())
+    const path = file:toString()
+    test.equal(screenshot.save(capture, path), true)
+    test.equal(nupp.io.files.read(path), "png bytes")
+end
+
+function suite.shutdownCompletesPendingRequestsWithCancellation(): nil
+    local capture = screenshot.request()
+    screenshot.cancelPending()
+    test.equal(capture.ready, true)
+    test.equal(screenshot.nextRequest(), nil)
+    const bytes, reason = screenshot.encode(capture)
+    test.equal(bytes, nil)
+    test.equal(reason, "screenshot cancelled: host session closed")
+end
+
+return suite

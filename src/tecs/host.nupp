@@ -173,6 +173,7 @@ end
 
 --- Runs application shutdown once.
 export function shutdown(exclusive session: Session): boolean
+    tecs.gfx.screenshot.cancelPending()
     framepump.cancel(session.pump)
     return session.app:shutdown()
 end
@@ -202,15 +203,15 @@ end
 --- Returns and consumes the next pending image residency command.
 ---
 --- The result is a scalar tagged tuple for the managed embedding ABI. `kind`
---- is `"uploadImage"` or `"releaseImage"`, and a release leaves every field
+--- selects upload, release, or material-map association. A release leaves every field
 --- after `image` nil. `pixels` carries eight-bit RGBA texels with unassociated
 --- alpha, four bytes per texel, in rows running top to bottom.
 --- @param session the host session draining the process-wide image registry
 --- @return the command kind, the serial, the image id, the width, the height,
----     the sampler index, the pixel format, and the texel bytes
+---     the sampler index, pixel format, texel bytes, normal, emission and ORM IDs
 export function nextImageCommand(
     exclusive session: Session
-): string?, integer?, integer?, integer?, integer?, integer?, string?, string?
+): string?, integer?, integer?, integer?, integer?, integer?, string?, string?, integer?, integer?, integer?
     if session.imageCommandIndex > #session.imageCommands then
         session.imageCommands = images.drain()
         session.imageCommandIndex = 1
@@ -222,7 +223,9 @@ export function nextImageCommand(
     session.imageCommandIndex = session.imageCommandIndex + 1
 
     if command is images.UploadImageCommand then
-        return command.kind, command.serial, command.image, command.width, command.height, command.sampler, command.format, command.pixels
+        return command.kind, command.serial, command.image, command.width, command.height, command.sampler, command.format, command.pixels, nil, nil, nil
+    elseif command is images.MaterialMapsCommand then
+        return command.kind, command.serial, command.image, nil, nil, nil, nil, nil, command.normalMap, command.emissionMap, command.ormMap
     elseif command is images.ReleaseImageCommand then
         return command.kind, command.serial, command.image, nil, nil, nil, nil, nil
     end
@@ -584,4 +587,22 @@ end
 --- Reports one rejected command to the game-facing window.
 export function windowCommandFailed(exclusive session: Session, serial: integer, reason: string): nil
     window.reportFailure(session.app.window, serial, reason)
+end
+
+--- Consumes the next explicit frame capture request.
+export function nextCapture(exclusive session: Session): integer
+    return tecs.gfx.screenshot.nextRequest() or 0
+end
+
+--- Delivers one completed frame readback to its requester.
+export function captureResult(
+    exclusive session: Session,
+    id: integer,
+    width: integer,
+    height: integer,
+    rgba: string,
+    png: string,
+    reason: string?
+): nil
+    tecs.gfx.screenshot.complete(id, width, height, rgba, png, reason)
 end

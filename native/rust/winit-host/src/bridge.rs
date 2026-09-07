@@ -27,6 +27,8 @@ const EXPORT_NAMES: &[&str] = &[
     "tecs.host.renderPacket",
     "tecs.host.nextImageCommand",
     "tecs.host.imageCommandResult",
+    "tecs.host.nextCapture",
+    "tecs.host.captureResult",
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -72,6 +74,7 @@ pub struct ImageCommand {
     pub sampler: u32,
     pub format: String,
     pub pixels: Vec<u8>,
+    pub maps: [u32; 3],
 }
 
 /// One finger crossing into Nupp.
@@ -137,6 +140,8 @@ struct Exports {
     render_packet: ManagedHandle,
     next_image_command: ManagedHandle,
     image_command_result: ManagedHandle,
+    next_capture: ManagedHandle,
+    capture_result: ManagedHandle,
 }
 
 pub struct Bridge {
@@ -507,6 +512,44 @@ impl Bridge {
         }))
     }
 
+    pub fn next_capture(&mut self) -> Result<Option<u64>> {
+        let values = self.call(self.exports.next_capture, &[])?;
+        let id = exact_u64(
+            required_number(&values, 0, "capture request")?,
+            "capture id",
+        )?;
+        Ok((id != 0).then_some(id))
+    }
+
+    pub fn capture_result(
+        &mut self,
+        id: u64,
+        capture: &Result<crate::graphics::Capture>,
+    ) -> Result<()> {
+        let (width, height, rgba, png, reason) = match capture {
+            Ok(frame) => (
+                frame.width,
+                frame.height,
+                frame.rgba.clone(),
+                frame.png.clone(),
+                None,
+            ),
+            Err(error) => (0, 0, Vec::new(), Vec::new(), Some(format!("{error:#}"))),
+        };
+        self.call(
+            self.exports.capture_result,
+            &[
+                unsigned(id),
+                number(width),
+                number(height),
+                ManagedValue::Bytes(rgba),
+                ManagedValue::Bytes(png),
+                optional_text_value(reason.as_deref()),
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn next_image_command(&mut self) -> Result<Option<ImageCommand>> {
         let values = self.call(self.exports.next_image_command, &[])?;
         let Some(kind) = optional_text(&values, 0, "tecs.host.nextImageCommand kind")? else {
@@ -524,6 +567,11 @@ impl Bridge {
             sampler: optional_u32(&values, 5, "tecs.host.nextImageCommand sampler")?,
             format: optional_text(&values, 6, "tecs.host.nextImageCommand format")?
                 .unwrap_or_default(),
+            maps: [
+                optional_u32(&values, 8, "normal map")?,
+                optional_u32(&values, 9, "emission map")?,
+                optional_u32(&values, 10, "ORM map")?,
+            ],
             pixels: if release {
                 Vec::new()
             } else {
@@ -597,6 +645,8 @@ impl Exports {
             render_packet: handles[20],
             next_image_command: handles[21],
             image_command_result: handles[22],
+            next_capture: handles[23],
+            capture_result: handles[24],
         })
     }
 }

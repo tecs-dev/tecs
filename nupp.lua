@@ -100,6 +100,8 @@ local hostExports = {
     "tecs.host.windowCommandFailed",
     "tecs.host.nextImageCommand",
     "tecs.host.imageCommandResult",
+    "tecs.host.nextCapture",
+    "tecs.host.captureResult",
 }
 
 local flatcolorExports = {}
@@ -179,6 +181,7 @@ return {
                     "tecs.internal.tilechunk",
                     "tecs.gfx.fonts",
                     "tecs.gfx.images",
+                    "tecs.gfx.screenshot",
                     "tecs.gfx.layers",
                     "tecs.gfx.lighting",
                     "tecs.gfx.sheet",

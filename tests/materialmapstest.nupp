@@ -1,0 +1,35 @@
+local test = require("nupp.test")
+local images = require("tecs.gfx.images")
+local suite = {}
+
+function suite.queuesMaterialMapsAfterTheirUploads(): nil
+    images.drain()
+    local base = images.upload({name = "test/maps/base", width = 1, height = 1, pixels = "rgba"})
+    local normal = images.upload({name = "test/maps/normal", width = 1, height = 1, pixels = "rgba"})
+    images.setMaterialMaps(base, {normalMap = normal})
+    local commands = images.drain()
+    test.equal(#commands, 3)
+    const command = commands[3] as images.MaterialMapsCommand
+    test.equal(command.kind, "setMaterialMaps")
+    test.equal(command.normalMap, normal)
+    test.equal(command.emissionMap, 0)
+    test.equal(command.ormMap, 0)
+    for _, value in ipairs(commands) do
+        images.complete(value.image, value.serial, true, nil)
+    end
+    test.equal(images.stateOf(base), "resident")
+    images.complete(base, command.serial, false, "map upload failed")
+    test.equal(images.failureOf(base), "map upload failed")
+end
+
+function suite.rejectsMismatchedMaterialMapDimensions(): nil
+    local base = images.upload({name = "test/maps/a", width = 1, height = 1, pixels = "rgba"})
+    local map = images.upload({name = "test/maps/b", width = 2, height = 1, pixels = "rgbargba"})
+    const ok = pcall(function(): nil
+        images.setMaterialMaps(base, {ormMap = map})
+    end)
+    test.equal(ok, false)
+    images.drain()
+end
+
+return suite

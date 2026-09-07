@@ -137,3 +137,38 @@ when adding or removing files, because the sorted set determines numbering.
 
 See [Shapes](shapes.md) for the built-in geometry and [the material reference](tecs.gpu.materials)
 for registration and lookup.
+
+
+## Image material maps
+
+The default `textured` material can read normal, emission and packed ORM maps
+alongside its albedo image. This restores the tileset material channels from
+the original renderer, and works for both sprites and TileChunks.
+
+```nupp
+const atlas = tecs.gfx.images.load("assets/terrain.png")
+const normal = tecs.gfx.images.load("assets/terrain_n.png")
+const emission = tecs.gfx.images.load("assets/terrain_e.png")
+const orm = tecs.gfx.images.load("assets/terrain_orm.png")
+tecs.gfx.images.setMaterialMaps(atlas, {
+    normalMap = normal,
+    emissionMap = emission,
+    ormMap = orm
+})
+```
+
+Maps share the albedo image's dimensions, UVs and sampler. Normals and ORM are
+sampled as linear data; albedo and emission are sampled as sRGB colors. ORM
+stores ambient occlusion, roughness and metallic in red, green and blue.
+Emission alpha scales the emitted color. Omitted maps use a flat normal,
+zero emission, full occlusion visibility, medium roughness and no metallic.
+Calling `setMaterialMaps(atlas, {})` clears all three associations.
+
+Replacing an image keeps its associations and invalidates the affected GPU
+bindings. Releasing a companion image restores that channel's fallback;
+uploading it again restores the map. `failureOf(atlas)` reports backend errors.
+Tiled detects the `_n.png`, `_e.png` and `_orm.png` companions automatically.
+
+Custom shaders can sample `normalMap`, `emissionMap`, and `ormMap` using
+`imageSampler` and `frag.uv`. Procedural built-in shapes retain their own
+material response.

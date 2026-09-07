@@ -189,7 +189,7 @@ fn castVertexMain(
         }
     }
 
-    let instance = instances[entry >> CAST_LIGHT_BITS];
+    let instance = tileInstance(instances[entry >> CAST_LIGHT_BITS], vertexIndex / 6u);
     let angle = instance.position.z;
     let scaleX = instance.scale.x;
     let scaleY = instance.scale.y;
@@ -200,7 +200,7 @@ fn castVertexMain(
         vec2<f32>(-0.5, -0.5), vec2<f32>(0.5, -0.5), vec2<f32>(-0.5, 0.5),
         vec2<f32>(-0.5, 0.5), vec2<f32>(0.5, -0.5), vec2<f32>(0.5, 0.5),
     );
-    let corner = corners[vertexIndex];
+    let corner = corners[vertexIndex % 6u];
     let height = instance.scale.w;
 
     var world: vec2<f32>;

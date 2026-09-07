@@ -14,6 +14,7 @@ contributes one quad; a TileChunk contributes a grid of static tiles.
 - [Animation](animation.md): sprite sheets, tags, fixed-step playback and pivots.
 - [TileChunks](../tiled/tile-chunks.md): static 16×16 grids and chunk-local edits.
 - [Text](text.md): font atlases, glyph entities and layout.
+- [Screenshots](screenshots.md): PNG capture and RGBA pixel readback.
 - [Rendering benchmarks](benchmarks.md): capacity and measured completed-frame costs.
 
 Continue with [Tiled maps](../tiled/index.md), [Building interfaces](../ui/index.md),

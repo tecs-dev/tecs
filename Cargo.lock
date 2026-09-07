@@ -2808,6 +2808,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
+ "image",
  "pollster",
  "serde_json",
  "wgpu",

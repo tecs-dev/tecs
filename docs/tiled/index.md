@@ -17,6 +17,8 @@ Run the complete example from the checkout:
 nupp task ex-tiled
 ```
 
+Press **F12** to save the presented frame as `tiled.png`.
+
 Arrow keys pan the camera. Space replaces a wall tile with a path and restores
 it on the next press. The water animates from TSX frames, and the bouncing
 circles collide with the wall outlines authored in that tileset. Close the

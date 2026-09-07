@@ -7,6 +7,9 @@ fn material(frag: MaterialInput) -> MaterialOutput {
     var result = materialDefaults();
     let texel = textureSample(image, imageSampler, frag.uv);
     result.albedo = texel * frag.color;
+    result.normal = normalize(textureSample(normalMap, imageSampler, frag.uv).rgb * 2.0 - vec3<f32>(1.0));
+    result.orm = textureSample(ormMap, imageSampler, frag.uv);
+    result.emission = textureSample(emissionMap, imageSampler, frag.uv);
 
     // Membership is the texture's silhouette, not the quad's. This pass writes
     // depth, so a fragment that survives rejects whatever is behind it: a

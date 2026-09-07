@@ -90,13 +90,13 @@ fn vertexMain(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) 
     // survivors. The compaction preserves packet order, so a single-lane batch
     // is one contiguous run and the draw's own instance index indexes into it.
     let source = visible[batchBase[batch.value] + drawIndex];
-    let instance = instances[source];
+    let instance = tileInstance(instances[source], vertexIndex / 6u);
 
     var corners = array<vec2<f32>, 6>(
         vec2<f32>(-0.5, -0.5), vec2<f32>(0.5, -0.5), vec2<f32>(-0.5, 0.5),
         vec2<f32>(-0.5, 0.5), vec2<f32>(0.5, -0.5), vec2<f32>(0.5, 0.5),
     );
-    let corner = corners[vertexIndex];
+    let corner = corners[vertexIndex % 6u];
     let local = corner * instance.scale.xy;
     let sine = sin(instance.position.z);
     let cosine = cos(instance.position.z);

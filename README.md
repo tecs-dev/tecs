@@ -519,7 +519,8 @@ See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for dependency notices.
 Static Tiled tiles use 16×16 native TileChunk grids, preserving the original
 engine's distinction between chunked scenery and individually animated sprites.
 One entity per static tile imposed ECS allocation and update costs for scenery
-that changes only on edits. Chunks retain their extracted GPU instances and
-patch changed ranges through the existing renderer. The compact tile-ID GPU
-buffer from the earlier renderer is not restored by this change; GPU storage
-still uses the shared instance layout.
+that changes only on edits. Chunks retain compact tile-ID grids on the GPU;
+compute culls chunks and shaders place their tiles through indirect draws.
+Edits upload changed chunks, and unchanged frames upload no instance or tile data.
+Tileset normal, emission and ORM companion maps are loaded automatically.
+See [TileChunks](docs/tiled/tile-chunks.md) and [Screenshots](docs/gfx/screenshots.md).

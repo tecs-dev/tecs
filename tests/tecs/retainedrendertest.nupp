@@ -15,7 +15,7 @@ local function word(bytes: string, offset: integer): integer
 end
 
 local function base(bytes: string): integer
-    return 128 + word(bytes, 20) + word(bytes, 68) * 32
+    return 128 + word(bytes, 20) + word(bytes, 68) * 32 + word(bytes, 124) * 1076
 end
 
 local function body(bytes: string): string
@@ -230,7 +230,7 @@ function suite.tileChunksRetainAndPatchIndependentlyWithinOneArchetype(): nil
     world:commit()
     const extractor = framepacket.new(world)
     local full = extractor:frame(640, 360, 0)
-    test.equal(word(full, 36), 4)
+    test.equal(word(full, 36), 2)
     test.equal(world.liveCount, 2)
     -- Consume the compatibility dirty tags and stabilize membership.
     world:commit()
@@ -244,8 +244,9 @@ function suite.tileChunksRetainAndPatchIndependentlyWithinOneArchetype(): nil
     end
     const patch = extractor:frame(640, 360, revision)
     test.equal(word(patch, 12), framepacket.FRAME_DELTA)
+    test.equal(word(patch, 124), 1)
     test.equal(word(patch, base(patch) + 4), 1)
-    test.equal(word(patch, base(patch) + 12), 2 * 80)
+    test.equal(word(patch, base(patch) + 12), 80)
     -- A shared nested edit can request synchronization through the old tag.
     unsafe do
         assert(world:get(first, tecs.gfx.TileChunk)).tiles[1] = 3
@@ -255,59 +256,23 @@ function suite.tileChunksRetainAndPatchIndependentlyWithinOneArchetype(): nil
     const marked = extractor:frame(640, 360, word(patch, 76))
     test.notEqual(word(marked, 12), framepacket.FRAME_RETAINED)
     const snapshot = extractor:packet(640, 360)
-    test.equal(word(snapshot, 36), 4)
+    test.equal(word(snapshot, 36), 2)
     unsafe do
         assert(world:getMut(first, tecs.gfx.TileChunk)).tiles[1] = 0
     end
-    test.equal(word(extractor:packet(640, 360), 36), 3)
+    test.equal(word(extractor:packet(640, 360), 36), 2)
     world:shutdown()
 end
 
-function suite.tileChunksMatchSpriteGeometryForEveryTiledFlip(): nil
-    tecs.gfx.layers.configure(1, {sort = "z"})
-    const chunkWorld, spriteWorld = ecs.newWorld(), ecs.newWorld()
-    const image = tecs.gfx.images.upload({
-        name = "test/chunk-atlas",
-        width = 64,
-        height = 32,
-        pixels = string.rep("\255", 64 * 32 * 4)
-    })
-    for _, command in ipairs(tecs.gfx.images.drain()) do
-        tecs.gfx.images.complete(command.image, command.serial, true, nil)
-    end
+function suite.tileChunksPreservePackedAtlasGeometryAndEveryFlip(): nil
+    const world = ecs.newWorld()
     local tiles: {integer} = {}
     for flags = 0, 7 do
-        const h, v, d = flags % 2 == 1, math.floor(flags / 2) % 2 == 1, math.floor(flags / 4) % 2 == 1
-        tiles[flags + 1] = 2 + (h and 2147483648 or 0) + (v and 1073741824 or 0) + (d and 536870912 or 0)
-        local sx, sy, angle = 32.0, 24.0, 0.3
-        if d then
-            angle, sy = angle + math.pi * 0.5, -sy
-            if h then
-                sy = -sy
-            end
-            if v then
-                sx = -sx
-            end
-        else
-            if h then
-                sx = -sx
-            end
-            if v then
-                sy = -sy
-            end
-        end
-        const x, y = flags * 12 + 8 + 3, 20 - 4 - 2
-        const c, q = math.cos(0.3), math.sin(0.3)
-        spriteWorld:spawn(
-            ecs.Transform2D(10 + x * 2 * c - y * 3 * q, 20 + x * 2 * q + y * 3 * c, 0, 1, angle, sx, sy),
-            tecs.gfx.Sprite(image, 19 / 64, 2 / 32, 35 / 64, 10 / 32),
-            tecs.gfx.Tint(),
-            tecs.gfx.Renderable2D
-        )
+        tiles[flags + 1] = 2 + flags * 536870912
     end
-    const id = chunkWorld:spawn(
+    const id = world:spawn(
         tecs.gfx.TileChunk({
-            tileset = image,
+            tileset = 0,
             tileWidth = 16,
             tileHeight = 8,
             columns = 3,
@@ -321,24 +286,31 @@ function suite.tileChunksMatchSpriteGeometryForEveryTiledFlip(): nil
         }),
         ecs.Transform2D(10, 20, 0, 1, 0.3, 2, 3)
     )
-    chunkWorld:commit();
-    spriteWorld:commit()
-    const chunkExtractor = framepacket.new(chunkWorld)
-    const spriteExtractor = framepacket.new(spriteWorld)
-    const chunks = chunkExtractor:packet(640, 360)
-    const sprites = spriteExtractor:packet(640, 360)
-    test.equal(word(chunks, 36), 8)
-    test.equal(body(chunks), body(sprites))
-    const saved = chunkWorld:saveSnapshot()
-    chunkWorld:loadSnapshot(saved)
-    unsafe do
-        test.equal(assert(chunkWorld:get(id, tecs.gfx.TileChunk)).tiles[8], tiles[8])
+    world:commit()
+    const extractor = framepacket.new(world)
+    const packet = extractor:packet(640, 360)
+    test.equal(word(packet, 36), 1)
+    test.equal(word(packet, 124), 1)
+    const start = 128 + word(packet, 20) + word(packet, 68) * 32
+    test.equal(word(packet, start), 0)
+    local reader = nupp.io.newScalarReader(packet)
+    reader:skip(start + 4)
+    for _, expected in ipairs({16, 8, 3, 1, 2, 12, 20, 3, -2, 1, 1, 0}) do
+        test.equal(reader:readFloat32(), expected)
     end
-    test.equal(assert(chunkWorld:get(id, tecs.gfx.TileChunk)).tileset, image)
-    const restoredExtractor = framepacket.new(chunkWorld)
-    test.equal(body(restoredExtractor:packet(640, 360)), body(sprites))
-    chunkWorld:shutdown();
-    spriteWorld:shutdown()
+    for index = 1, 8 do
+        test.equal(reader:readUint32(), tiles[index])
+    end
+    reader:drop()
+    const saved = world:saveSnapshot()
+    world:loadSnapshot(saved)
+    unsafe do
+        test.equal(assert(world:get(id, tecs.gfx.TileChunk)).tiles[8], tiles[8])
+    end
+    const restoredExtractor = framepacket.new(world)
+    const restored = restoredExtractor:packet(640, 360)
+    test.equal(body(restored), body(packet))
+    world:shutdown()
 end
 
 function suite.sparseTileChunksPreserveTheirLastCellAndEmptyChunksDrawNothing(): nil
@@ -349,9 +321,10 @@ function suite.sparseTileChunksPreserveTheirLastCellAndEmptyChunksDrawNothing():
     const extractor = framepacket.new(world)
     const bytes = extractor:packet(640, 640)
     test.equal(word(bytes, 36), 1)
+    test.equal(word(bytes, base(bytes) - 4), 1)
     const reader = nupp.io.newScalarReader(body(bytes))
-    test.equal(reader:readFloat32(), 496)
-    test.equal(reader:readFloat32(), 496)
+    test.equal(reader:readFloat32(), 0)
+    test.equal(reader:readFloat32(), 0)
     reader:drop()
     world:shutdown()
 end

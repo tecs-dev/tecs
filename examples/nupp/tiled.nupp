@@ -1,7 +1,7 @@
 module tiled
 
 --[[An editable TMX map with TSX animation, Rapier boundaries and a moving camera.
-Run with `nupp task ex-tiled`. Arrow keys pan; Space toggles a wall tile.
+Run with `nupp task ex-tiled`. Arrow keys pan; Space toggles a wall tile; F12 saves tiled.png.
 ]]
 
 local function install(exclusive app: tecs.application.Application): nil
@@ -20,10 +20,20 @@ local function install(exclusive app: tecs.application.Application): nil
     end
     local input = app.input
     local wall = true
+    local capture: tecs.gfx.screenshot.Capture? = nil
     app.world:addSystem({
         name = "example.tiled.controls",
         phase = tecs.ecs.phases.Update,
         run = function(dt: number, exclusive world: tecs.ecs.World): nil
+            if input:keyPressed("F12") and capture == nil then
+                capture = tecs.gfx.screenshot.request()
+            end
+            const ready = capture
+            if ready ~= nil and ready.ready then
+                const ok, reason = tecs.gfx.screenshot.save(ready, "tiled.png")
+                print(ok and "Saved tiled.png" or tostring(reason))
+                capture = nil
+            end
             local dx, dy = 0, 0
             if input:keyDown("ArrowLeft") then
                 dx = dx - 1

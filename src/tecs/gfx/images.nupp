@@ -112,7 +112,23 @@ export record ReleaseImageCommand
 end
 
 --- One queued residency request.
-export type Command = UploadImageCommand | ReleaseImageCommand
+export record MaterialMapsCommand
+    kind: string
+    serial: integer
+    image: integer
+    normalMap: integer
+    emissionMap: integer
+    ormMap: integer
+end
+
+--- Optional companion images; omitted channels use neutral material values.
+export type MaterialMaps = {
+    normalMap: integer?,
+    emissionMap: integer?,
+    ormMap: integer?
+}
+
+export type Command = UploadImageCommand | ReleaseImageCommand | MaterialMapsCommand
 
 --- The number of distinct samplers a backend must create.
 ---
@@ -132,6 +148,7 @@ local record Entry
     sampler: integer
     reason: string?
     serial: integer
+    mapSerial: integer = 0
 end
 
 local byName: {[string]: Entry} = {}
@@ -363,7 +380,7 @@ export function complete(image: integer, serial: integer, ok: boolean, reason: s
         error("gfx.images.complete: a rejection must carry a reason", 2)
     end
     local entry = lookup(image)
-    if entry == nil or entry.serial ~= serial then
+    if entry == nil or (entry.serial ~= serial and entry.mapSerial ~= serial) then
         return
     end
     if not ok then
@@ -371,6 +388,9 @@ export function complete(image: integer, serial: integer, ok: boolean, reason: s
         entry.state = "failed"
         entry.reason = reason
 
+        return
+    end
+    if entry.mapSerial == serial then
         return
     end
     if entry.state == "pending" then
@@ -393,4 +413,33 @@ export function load(path: string, name: string?): integer
     local pixels, width, height = native.load(path, 1)
 
     return upload({name = name or path, width = width, height = height, pixels = pixels})
+end
+
+--- Associates normal, emission and packed occlusion/roughness/metallic images.
+--- All supplied maps must have the albedo image dimensions. Applies to sprites
+--- and TileChunks using that image; replacement pixels keep the association.
+export function setMaterialMaps(image: integer, maps: MaterialMaps): nil
+    const entry = assert(lookup(image), "gfx.images.setMaterialMaps: unknown image")
+    assert(entry.width > 0, "gfx.images.setMaterialMaps: upload the image first")
+    for _, mapId in ipairs({maps.normalMap or 0, maps.emissionMap or 0, maps.ormMap or 0}) do
+        if mapId ~= 0 then
+            const map = assert(lookup(mapId), "gfx.images.setMaterialMaps: unknown map")
+            assert(
+                map.width == entry.width and map.height == entry.height,
+                "gfx.images.setMaterialMaps: map dimensions must match the image"
+            )
+        end
+    end
+    nextSerial = nextSerial + 1
+    entry.mapSerial = nextSerial
+    pending[
+        #pending + 1
+    ] = new MaterialMapsCommand(
+        kind = "setMaterialMaps",
+        serial = nextSerial,
+        image = image,
+        normalMap = maps.normalMap or 0,
+        emissionMap = maps.emissionMap or 0,
+        ormMap = maps.ormMap or 0
+    )
 end

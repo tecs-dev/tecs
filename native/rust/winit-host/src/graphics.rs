@@ -79,6 +79,7 @@ const CAST_MODE_SHADOW: u32 = 1;
 const CAST_MODE_STAMP: u32 = 2;
 
 const MATERIAL_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/material.wgsl");
+const TILECHUNK_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/tilechunk.wgsl");
 const INSTANCE_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/instance.wgsl");
 const CULL_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/cull.wgsl");
 const RESOLVE_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/resolve.wgsl");
@@ -295,6 +296,46 @@ impl Layouts {
                     ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: ShaderStages::VERTEX,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let cull = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -396,9 +437,18 @@ pub struct DrawCountReadback {
     ready: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
 }
 
+pub struct Capture {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+    pub png: Vec<u8>,
+}
+
 pub struct Graphics {
     surface: Option<Surface<'static>>,
     offscreen: Option<wgpu::Texture>,
+    capture_requested: bool,
+    captured: Option<Result<Capture>>,
     device: Device,
     queue: Queue,
     config: SurfaceConfiguration,
@@ -411,6 +461,10 @@ pub struct Graphics {
     samplers: Vec<Sampler>,
     fallback: TextureView,
     images: HashMap<u32, TextureView>,
+    linear_images: HashMap<u32, TextureView>,
+    tile_chunks: Buffer,
+    material_maps: HashMap<u32, [u32; 3]>,
+    map_fallbacks: [TextureView; 3],
     bind_groups: HashMap<(u32, u32), BindGroup>,
 
     pass_sampler: Sampler,
@@ -495,6 +549,13 @@ impl Graphics {
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .context("choose a supported wgpu surface configuration")?;
+        if surface
+            .get_capabilities(&adapter)
+            .usages
+            .contains(TextureUsages::COPY_SRC)
+        {
+            config.usage |= TextureUsages::COPY_SRC;
+        }
         if benchmark {
             config.present_mode =
                 benchmark_present_mode(&surface.get_capabilities(&adapter).present_modes)?;
@@ -540,7 +601,7 @@ impl Graphics {
             device.limits().max_storage_buffer_binding_size
         );
         let config = SurfaceConfiguration {
-            usage: TextureUsages::RENDER_ATTACHMENT,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
             format: TextureFormat::Bgra8UnormSrgb,
             width,
             height,
@@ -749,6 +810,12 @@ impl Graphics {
         }
         queue.write_buffer(&cast_modes, 0, &modes);
 
+        let tile_chunks = device.create_buffer(&BufferDescriptor {
+            label: Some("tecs tile grids"),
+            size: super::packet::TILE_STRIDE as u64,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let samplers = create_samplers(&device);
         // Nearest and clamped, because a graph target is read at the resolution
         // it was written.
@@ -764,6 +831,13 @@ impl Graphics {
         });
         // One opaque white texel, so an untextured instance and one whose image
         // never became resident both draw their tint unchanged.
+        let mut map_fallbacks = [
+            create_image(&device, &queue, 0, 1, 1, &[128, 128, 255, 255])?,
+            create_image(&device, &queue, 0, 1, 1, &[0, 0, 0, 255])?,
+            create_image(&device, &queue, 0, 1, 1, &[255, 128, 0, 255])?,
+        ];
+        map_fallbacks[0] = linear_view(&map_fallbacks[0]);
+        map_fallbacks[2] = linear_view(&map_fallbacks[2]);
         let fallback = create_image(&device, &queue, 0, 1, 1, &[255, 255, 255, 255])?;
 
         let offscreen = surface.is_none().then(|| {
@@ -778,13 +852,18 @@ impl Graphics {
                 sample_count: 1,
                 dimension: TextureDimension::D2,
                 format: config.format,
-                usage: TextureUsages::RENDER_ATTACHMENT,
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
                 view_formats: &[],
             })
         });
         Ok(Self {
             surface,
             offscreen,
+            capture_requested: false,
+            captured: None,
+            tile_chunks,
+            material_maps: HashMap::new(),
+            map_fallbacks,
             device,
             queue,
             config,
@@ -795,6 +874,7 @@ impl Graphics {
             samplers,
             fallback,
             images: HashMap::new(),
+            linear_images: HashMap::new(),
             bind_groups: HashMap::new(),
             pass_sampler,
             cull_pipelines,
@@ -844,9 +924,16 @@ impl Graphics {
             bail!("image id 0 is the backend's own fallback and cannot be replaced");
         }
         let view = create_image(&self.device, &self.queue, id, width, height, pixels)?;
+        self.linear_images.insert(id, linear_view(&view));
         self.images.insert(id, view);
         // A replacement invalidates every bind group holding the old view.
-        self.bind_groups.retain(|(image, _), _| *image != id);
+        self.bind_groups.retain(|(image, _), _| {
+            *image != id
+                && !self
+                    .material_maps
+                    .get(image)
+                    .is_some_and(|maps| maps.contains(&id))
+        });
         Ok(())
     }
 
@@ -855,10 +942,36 @@ impl Graphics {
         if id == 0 {
             bail!("image id 0 is the backend's own fallback and cannot be released");
         }
-        self.bind_groups.retain(|(image, _), _| *image != id);
+        self.bind_groups.retain(|(image, _), _| {
+            *image != id
+                && !self
+                    .material_maps
+                    .get(image)
+                    .is_some_and(|maps| maps.contains(&id))
+        });
+        self.linear_images.remove(&id);
         if self.images.remove(&id).is_none() {
             bail!("image {id} is not resident");
         }
+        Ok(())
+    }
+
+    pub fn set_material_maps(&mut self, image: u32, maps: [u32; 3]) -> Result<()> {
+        let parent = self
+            .images
+            .get(&image)
+            .context("material albedo is not resident")?;
+        for id in maps.into_iter().filter(|id| *id != 0) {
+            let map = self
+                .images
+                .get(&id)
+                .context("material map is not resident")?;
+            if map.texture().size() != parent.texture().size() {
+                bail!("material map dimensions differ from albedo");
+            }
+        }
+        self.material_maps.insert(image, maps);
+        self.bind_groups.retain(|(id, _), _| *id != image);
         Ok(())
     }
 
@@ -869,6 +982,20 @@ impl Graphics {
             // than failing the frame, which is what makes a missing asset a
             // visible untextured quad instead of a dead window.
             let view = self.images.get(&image).unwrap_or(&self.fallback);
+            let maps = self.material_maps.get(&image).copied().unwrap_or([0; 3]);
+            let views: Vec<_> = maps
+                .iter()
+                .enumerate()
+                .map(|(i, id)| {
+                    (if i == 1 {
+                        &self.images
+                    } else {
+                        &self.linear_images
+                    })
+                    .get(id)
+                    .unwrap_or(&self.map_fallbacks[i])
+                })
+                .collect();
             let group = self.device.create_bind_group(&BindGroupDescriptor {
                 label: Some("tecs image bind group"),
                 layout: &self.layouts.image,
@@ -880,6 +1007,22 @@ impl Graphics {
                     BindGroupEntry {
                         binding: 1,
                         resource: BindingResource::Sampler(&self.samplers[sampler as usize]),
+                    },
+                    BindGroupEntry {
+                        binding: 2,
+                        resource: BindingResource::TextureView(views[0]),
+                    },
+                    BindGroupEntry {
+                        binding: 3,
+                        resource: BindingResource::TextureView(views[1]),
+                    },
+                    BindGroupEntry {
+                        binding: 4,
+                        resource: BindingResource::TextureView(views[2]),
+                    },
+                    BindGroupEntry {
+                        binding: 5,
+                        resource: self.tile_chunks.as_entire_binding(),
                     },
                 ],
             });
@@ -1225,6 +1368,61 @@ impl Graphics {
         Ok(Some(count))
     }
 
+    /// Requests readback of the next rendered presentation image.
+    pub fn request_capture(&mut self) {
+        self.capture_requested = true;
+        self.captured = None;
+    }
+
+    pub fn take_capture(&mut self) -> Result<Capture> {
+        self.capture_requested = false;
+        self.captured
+            .take()
+            .context("the requested frame was not rendered")?
+    }
+
+    fn read_capture(&self, buffer: &Buffer, pitch: u32) -> Result<Capture> {
+        use image::ImageEncoder;
+        let (send, receive) = std::sync::mpsc::channel();
+        buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = send.send(result);
+            });
+        self.device.poll(wgpu::PollType::wait_indefinitely())?;
+        receive.recv()??;
+        let mapped = buffer.slice(..).get_mapped_range()?;
+        let mut rgba = Vec::with_capacity((self.config.width * self.config.height * 4) as usize);
+        for row in mapped.chunks_exact(pitch as usize) {
+            rgba.extend_from_slice(&row[..self.config.width as usize * 4]);
+        }
+        drop(mapped);
+        buffer.unmap();
+        let bgra = matches!(
+            self.config.format,
+            TextureFormat::Bgra8Unorm | TextureFormat::Bgra8UnormSrgb
+        );
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            if bgra {
+                pixel.swap(0, 2);
+            }
+            pixel[3] = 255;
+        }
+        let mut png = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut png).write_image(
+            &rgba,
+            self.config.width,
+            self.config.height,
+            image::ExtendedColorType::Rgba8,
+        )?;
+        Ok(Capture {
+            width: self.config.width,
+            height: self.config.height,
+            rgba,
+            png,
+        })
+    }
+
     /// Reads the GPU's indirect instance counts once after a benchmark run.
     pub fn drawn_instances(&self) -> Result<u32> {
         if self.batches.is_empty() {
@@ -1326,6 +1524,7 @@ impl Graphics {
                 scene.casters = packet.caster_count;
             } else if !packet.retained {
                 self.resident_scene = Some(RetainedScene {
+                    tile_count: packet.tile_count,
                     revision: packet.scene_revision,
                     instances: packet.instance_count,
                     casters: packet.caster_count,
@@ -1430,6 +1629,30 @@ impl Graphics {
         self.queue
             .write_buffer(&self.bin_uniform, 0, bytemuck::cast_slice(&bin));
 
+        let tile_size = u64::from(packet.tile_count.max(1).next_power_of_two())
+            * super::packet::TILE_STRIDE as u64;
+        if tile_size > self.device.limits().max_storage_buffer_binding_size {
+            bail!("tile grids exceed adapter capacity");
+        }
+        if tile_size > self.tile_chunks.size() {
+            if packet.delta || packet.retained {
+                bail!("partial frame cannot grow tile storage");
+            }
+            self.tile_chunks = self.device.create_buffer(&BufferDescriptor {
+                label: Some("tecs tile grids"),
+                size: tile_size,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.bind_groups.clear();
+        }
+        for (slot, data) in &packet.tile_updates {
+            self.queue.write_buffer(
+                &self.tile_chunks,
+                u64::from(*slot) * super::packet::TILE_STRIDE as u64,
+                data,
+            );
+        }
         self.ensure_scratch(
             packet.instance_count,
             batches.len() as u32,
@@ -1689,7 +1912,52 @@ impl Graphics {
             }
         }
 
+        let capture_buffer = if self.capture_requested {
+            self.capture_requested = false;
+            let texture = frame
+                .as_ref()
+                .map(|frame| &frame.texture)
+                .or(self.offscreen.as_ref())
+                .expect("frame output");
+            if !texture.usage().contains(TextureUsages::COPY_SRC) {
+                self.captured = Some(Err(anyhow::anyhow!(
+                    "this surface does not support screenshot readback"
+                )));
+                None
+            } else {
+                let pitch = (self.config.width * 4).div_ceil(256) * 256;
+                let buffer = self.device.create_buffer(&BufferDescriptor {
+                    label: Some("tecs screenshot"),
+                    size: u64::from(pitch) * u64::from(self.config.height),
+                    usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                });
+                encoder.copy_texture_to_buffer(
+                    TexelCopyTextureInfo {
+                        texture,
+                        mip_level: 0,
+                        origin: Origin3d::ZERO,
+                        aspect: TextureAspect::All,
+                    },
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: &buffer,
+                        layout: TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(pitch),
+                            rows_per_image: Some(self.config.height),
+                        },
+                    },
+                    texture.size(),
+                );
+                Some((buffer, pitch))
+            }
+        } else {
+            None
+        };
         self.queue.submit([encoder.finish()]);
+        if let Some((buffer, pitch)) = capture_buffer {
+            self.captured = Some(self.read_capture(&buffer, pitch));
+        }
         if let Some(frame) = frame {
             self.queue.present(frame);
         }
@@ -1979,7 +2247,10 @@ fn input_layout(device: &Device, count: usize) -> BindGroupLayout {
 /// the dispatch the pack assembled, and the vertex and fragment halves that
 /// call into it.
 pub fn instance_source(pack: &ShaderPack) -> String {
-    format!("{MATERIAL_WGSL}\n{}\n{INSTANCE_WGSL}", pack.dispatch())
+    format!(
+        "{MATERIAL_WGSL}\n{}\n{INSTANCE_WGSL}\n{TILECHUNK_WGSL}",
+        pack.dispatch()
+    )
 }
 
 /// The module the three shadow draws go through.
@@ -1989,7 +2260,10 @@ pub fn instance_source(pack: &ShaderPack) -> String {
 /// decided: a circle, a rounded box or a glyph casts for nothing, and a caster
 /// needs no alpha threshold of its own.
 pub fn cast_source(pack: &ShaderPack) -> String {
-    format!("{MATERIAL_WGSL}\n{}\n{CAST_WGSL}", pack.dispatch())
+    format!(
+        "{MATERIAL_WGSL}\n{}\n{CAST_WGSL}\n{TILECHUNK_WGSL}",
+        pack.dispatch()
+    )
 }
 
 /// Returns what this backend does for a pass of a given name.
@@ -2287,7 +2561,7 @@ fn create_image(
         dimension: TextureDimension::D2,
         format: TextureFormat::Rgba8UnormSrgb,
         usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-        view_formats: &[],
+        view_formats: &[TextureFormat::Rgba8Unorm],
     });
     queue.write_texture(
         TexelCopyTextureInfo {
@@ -2306,6 +2580,13 @@ fn create_image(
     );
     // The view keeps the texture alive, so the texture itself is not retained.
     Ok(texture.create_view(&TextureViewDescriptor::default()))
+}
+
+fn linear_view(view: &TextureView) -> TextureView {
+    view.texture().create_view(&TextureViewDescriptor {
+        format: Some(TextureFormat::Rgba8Unorm),
+        ..Default::default()
+    })
 }
 
 #[cfg(test)]
@@ -2346,6 +2627,178 @@ mod tests {
         graphics.finish_frame().unwrap();
         assert_eq!(graphics.drawn_instances().unwrap(), 2);
         assert_eq!(graphics.scene_revision(), 2);
+    }
+
+    #[test]
+    fn compact_tiles_match_quads_and_capture_exact_png_pixels() {
+        use crate::packet::tests::PacketBuilder;
+        let probe = Instance::new(InstanceDescriptor::new_without_display_handle());
+        if pollster::block_on(probe.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .is_err()
+        {
+            return;
+        }
+        let mut graphics = Graphics::offscreen(640, 360).unwrap();
+        let mut pixels = vec![0_u8; 64 * 32 * 4];
+        for y in 0..32 {
+            for x in 0..64 {
+                let i = (y * 64 + x) * 4;
+                pixels[i..i + 4].copy_from_slice(&[
+                    (x * 4) as u8,
+                    (y * 8) as u8,
+                    if x % 3 == 0 { 255 } else { 0 },
+                    255,
+                ]);
+            }
+        }
+        graphics.upload_image(1, 64, 32, &pixels).unwrap();
+        let fixture = |n| {
+            PacketBuilder::new()
+                .graph(crate::graph::tests::deferred())
+                .instances(n, 0)
+                .batch(1, 0, 0, 0, n)
+        };
+        let mut chunk = fixture(1);
+        let mut tile = vec![0_u8; crate::packet::TILE_STRIDE];
+        for (i, value) in [16_f32, 8., 3., 1., 2., 40., 20., 3., -2., 64., 32., 0.]
+            .into_iter()
+            .enumerate()
+        {
+            tile[i * 4..i * 4 + 4].copy_from_slice(&value.to_ne_bytes());
+        }
+        let mut quads = fixture(8);
+        let c = 0.3_f32.cos();
+        let s = 0.3_f32.sin();
+        let base = &mut chunk.instances[0];
+        for (i, v) in [
+            10_f32, 20., 0.3, 0.5, 2., 3., 0.25, 0., 0., 3000., 0., 0., 1., 1., 1., 1.,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            base[i] = v.to_bits();
+        }
+        base[17] = 16;
+        for flags in 0..8_u32 {
+            let h = flags & 1 != 0;
+            let v = flags & 2 != 0;
+            let d = flags & 4 != 0;
+            let encoded: u32 = 2
+                | if h { 0x80000000 } else { 0 }
+                | if v { 0x40000000 } else { 0 }
+                | if d { 0x20000000 } else { 0 };
+            let offset = 48 + flags as usize * 4;
+            tile[offset..offset + 4].copy_from_slice(&encoded.to_ne_bytes());
+            let x = flags as f32 * 40. + 11.;
+            let y = 14.;
+            let mut sx = 32_f32;
+            let mut sy = 24_f32;
+            let mut angle = 0.3;
+            if d {
+                angle += std::f32::consts::FRAC_PI_2;
+                sy *= if h { 1. } else { -1. };
+                sx *= if v { -1. } else { 1. };
+            } else {
+                sx *= if h { -1. } else { 1. };
+                sy *= if v { -1. } else { 1. };
+            }
+            let quad = &mut quads.instances[flags as usize];
+            for (i, value) in [
+                10. + x * 2. * c - y * 3. * s,
+                20. + x * 2. * s + y * 3. * c,
+                angle,
+                0.5,
+                sx,
+                sy,
+                0.25,
+                0.,
+                19. / 64.,
+                2. / 32.,
+                35. / 64.,
+                10. / 32.,
+                1.,
+                1.,
+                1.,
+                1.,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                quad[i] = value.to_bits();
+            }
+        }
+        chunk.tiles.push((0, tile));
+        graphics.request_capture();
+        graphics.render(&chunk.build()).unwrap();
+        let compact = graphics.take_capture().unwrap();
+        assert_eq!(graphics.drawn_instances().unwrap(), 1);
+        graphics.request_capture();
+        graphics.render(&quads.build()).unwrap();
+        let expanded = graphics.take_capture().unwrap();
+        assert_eq!(
+            compact.rgba, expanded.rgba,
+            "GPU chunk placement differs from individual quads"
+        );
+        let decoded = image::load_from_memory(&compact.png).unwrap().into_rgba8();
+        assert_eq!(decoded.as_raw(), &compact.rgba);
+        assert_eq!(decoded.dimensions(), (640, 360));
+        assert!(compact
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel[3] == 255));
+        assert!(compact
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[0] != 0 || pixel[1] != 0));
+    }
+
+    #[test]
+    fn material_maps_survive_replacement_and_release() {
+        use crate::packet::tests::PacketBuilder;
+        let probe = Instance::new(InstanceDescriptor::new_without_display_handle());
+        if pollster::block_on(probe.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .is_err()
+        {
+            return;
+        }
+        let mut graphics = Graphics::offscreen(641, 361).unwrap();
+        graphics.upload_image(1, 1, 1, &[0, 0, 0, 255]).unwrap();
+        graphics.upload_image(2, 1, 1, &[255, 0, 0, 255]).unwrap();
+        graphics.set_material_maps(1, [0, 2, 0]).unwrap();
+        let mut fixture = PacketBuilder::new()
+            .graph(crate::graph::tests::deferred())
+            .instances(1, 0)
+            .batch(1, 0, 0, 0, 1);
+        for (i, value) in [
+            320_f32, 180., 0., 0.5, 100., 100., 0.25, 0., 0., 0., 1., 1., 1., 1., 1., 1.,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            fixture.instances[0][i] = value.to_bits();
+        }
+        fixture.target = [641., 361.];
+        let packet = fixture.build();
+        let center = |graphics: &mut Graphics| {
+            graphics.request_capture();
+            graphics.render(&packet).unwrap();
+            let image = graphics.take_capture().unwrap();
+            image.rgba[(180 * 641 + 320) * 4..(180 * 641 + 320) * 4 + 4].to_vec()
+        };
+        let red = center(&mut graphics);
+        assert!(red[0] > 200 && red[1] < 5);
+        graphics.upload_image(2, 1, 1, &[0, 255, 0, 255]).unwrap();
+        let green = center(&mut graphics);
+        assert!(green[1] > 200 && green[0] < 5);
+        graphics.release_image(2).unwrap();
+        let dark = center(&mut graphics);
+        assert_eq!(dark, [0, 0, 0, 255]);
+        graphics.upload_image(3, 2, 1, &[255; 8]).unwrap();
+        assert!(graphics.set_material_maps(1, [3, 0, 0]).is_err());
     }
 
     #[test]

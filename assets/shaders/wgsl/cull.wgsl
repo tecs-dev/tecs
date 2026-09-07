@@ -166,7 +166,7 @@ fn markMain(
         let half = abs(instance.scale.xy) * 0.5;
         let c = abs(cos(instance.position.z));
         let s = abs(sin(instance.position.z));
-        let extent = vec2<f32>(half.x * c + half.y * s, half.x * s + half.y * c);
+        let extent = select(vec2<f32>(half.x * c + half.y * s, half.x * s + half.y * c), vec2<f32>(instance.uvRect.y), (instance.flags & 16u) != 0u);
         let center = instance.position.xy;
         // Tested in world space, so panning and zooming change what survives
         // rather than only what is drawn.
@@ -336,7 +336,7 @@ fn argsMain(@builtin(global_invocation_id) global: vec3<u32>) {
     // instances, then the first vertex and the first instance, both zero: the
     // base the vertex shader adds comes from `batchBase` rather than from a
     // first-instance offset, which is not core to every backend.
-    drawArgs[b * 4u + 0u] = 6u;
+    drawArgs[b * 4u + 0u] = select(6u, 1536u, (instances[batchValue.first].flags & 16u) != 0u);
     drawArgs[b * 4u + 1u] = stop - start;
     drawArgs[b * 4u + 2u] = 0u;
     drawArgs[b * 4u + 3u] = 0u;
@@ -350,7 +350,7 @@ fn argsMain(@builtin(global_invocation_id) global: vec3<u32>) {
     let castStop = min(laneOffsetAt(LANE_CAST, batchValue.first + batchValue.count), casters);
     batchBase[cull.extra.w + b] = castStart * CAST_FANOUT;
     let castAt = (cull.counts.w + b) * 4u;
-    drawArgs[castAt + 0u] = 6u;
+    drawArgs[castAt + 0u] = drawArgs[b * 4u];
     drawArgs[castAt + 1u] = (castStop - castStart) * CAST_FANOUT;
     drawArgs[castAt + 2u] = 0u;
     drawArgs[castAt + 3u] = 0u;

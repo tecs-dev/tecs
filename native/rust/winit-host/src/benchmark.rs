@@ -72,7 +72,8 @@ impl Run {
         } else if flags & crate::packet::FRAME_DELTA != 0 {
             let graph = u32::from_ne_bytes(packet[20..24].try_into()?) as usize;
             let lights = u32::from_ne_bytes(packet[68..72].try_into()?) as usize;
-            let start = 128 + graph + lights * 32;
+            let tiles = u32::from_ne_bytes(packet[124..128].try_into()?) as usize;
+            let start = 128 + graph + lights * 32 + tiles * (crate::packet::TILE_STRIDE + 4);
             let ranges = u32::from_ne_bytes(packet[start + 4..start + 8].try_into()?) as usize;
             packet.len() - start - 8 - ranges * 8
         } else {

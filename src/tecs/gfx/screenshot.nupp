@@ -1,0 +1,102 @@
+module tecs.gfx.screenshot
+
+--[[Capture the next presented frame, including UI and post-processing.
+
+`request()` queues one readback. Check `capture.ready` in a later update before
+calling `pixels`, `encode`, or `save`. Only requested frames allocate readback
+storage or wait for the GPU. RGBA pixels run top to bottom; captures are opaque,
+matching the displayed image rather than the composite target's internal alpha.
+]]
+
+--- A requested frame. The host completes it after rendering.
+export record Capture
+    --- Read-only to callers. True after completion, including failure.
+    ready: boolean
+
+    private width: integer
+    private height: integer
+    private rgba: string
+    private png: string
+    private reason: string?
+end
+
+local queue: {integer} = {}
+local pending: {[integer]: Capture} = {}
+local serial: integer = 0
+
+--- Requests the next rendered frame; poll `ready` from subsequent updates.
+export function request(): Capture
+    serial = serial + 1
+    const capture = new Capture(ready = false, width = 0, height = 0, rgba = "", png = "", reason = nil)
+    pending[serial] = capture
+    queue[#queue + 1] = serial
+
+    return capture
+end
+
+--- Returns top-to-bottom RGBA8 bytes, width, height and an optional failure.
+export function pixels(capture: Capture): string?, integer, integer, string?
+    if not capture.ready then
+        return nil, 0, 0, "screenshot is pending"
+    end
+    if capture.reason ~= nil then
+        return nil, 0, 0, capture.reason
+    end
+
+    return capture.rgba, capture.width, capture.height, nil
+end
+
+--- Returns PNG bytes, or nil and a pending/readback failure reason.
+export function encode(capture: Capture): string?, string?
+    if not capture.ready then
+        return nil, "screenshot is pending"
+    end
+    if capture.reason ~= nil then
+        return nil, capture.reason
+    end
+
+    return capture.png, nil
+end
+
+--- Writes the completed frame as PNG; returns false and a reason on failure.
+export function save(capture: Capture, path: string): boolean, string?
+    assert(path ~= "", "screenshot.save: path must not be empty")
+    const bytes, reason = encode(capture)
+    if bytes == nil then
+        return false, reason
+    end
+
+    return nupp.io.files.write(path, bytes)
+end
+
+--- Consumes a queued request for the rendering host.
+export function nextRequest(): integer?
+    return table.remove(queue, 1)
+end
+
+--- Completes a host readback and releases the registry's reference.
+export function complete(id: integer, width: integer, height: integer, rgba: string, png: string, reason: string?): nil
+    const capture = pending[id]
+    if capture == nil then
+        return
+    end
+    pending[id] = nil
+    if reason == nil then
+        assert(
+            width > 0 and height > 0 and #rgba == width * height * 4 and #png > 0,
+            "screenshot.complete: invalid frame data"
+        )
+    end
+    capture.width, capture.height, capture.rgba, capture.png, capture.reason = width, height, rgba, png, reason
+    capture.ready = true
+end
+
+--- Releases outstanding requests when the host session closes.
+export function cancelPending(): nil
+    for id, capture in pairs(pending) do
+        capture.reason = "screenshot cancelled: host session closed"
+        capture.ready = true
+        pending[id] = nil
+    end
+    queue = {}
+end

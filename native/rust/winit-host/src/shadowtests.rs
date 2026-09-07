@@ -374,6 +374,35 @@ fn cast_render(
                 binding: 1,
                 resource: BindingResource::Sampler(&sampler),
             },
+            BindGroupEntry {
+                binding: 2,
+                resource: BindingResource::TextureView(
+                    &fallback.create_view(&TextureViewDescriptor::default()),
+                ),
+            },
+            BindGroupEntry {
+                binding: 3,
+                resource: BindingResource::TextureView(
+                    &fallback.create_view(&TextureViewDescriptor::default()),
+                ),
+            },
+            BindGroupEntry {
+                binding: 4,
+                resource: BindingResource::TextureView(
+                    &fallback.create_view(&TextureViewDescriptor::default()),
+                ),
+            },
+            BindGroupEntry {
+                binding: 5,
+                resource: device
+                    .create_buffer(&BufferDescriptor {
+                        label: Some("test tiles"),
+                        size: 1072,
+                        usage: BufferUsages::STORAGE,
+                        mapped_at_creation: false,
+                    })
+                    .as_entire_binding(),
+            },
         ],
     });
 

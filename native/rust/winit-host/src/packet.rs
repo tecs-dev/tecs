@@ -12,7 +12,7 @@
 use anyhow::{bail, Context, Result};
 
 pub const PACKET_MAGIC: u32 = 0x5445_4353;
-pub const PACKET_VERSION: u32 = 6;
+pub const PACKET_VERSION: u32 = 7;
 pub const PACKET_HEADER_SIZE: usize = 128;
 pub const BATCH_STRIDE: usize = 20;
 pub const INSTANCE_STRIDE: usize = 80;
@@ -54,7 +54,10 @@ const FLAG_OCCLUDER: u32 = 2;
 const FLAG_DROP_SHADOW: u32 = 4;
 const FLAG_CASTS: u32 = FLAG_OCCLUDER | FLAG_DROP_SHADOW;
 const FLAG_CLIPPED: u32 = 8;
-const FLAG_ALL: u32 = FLAG_BLENDED | FLAG_OCCLUDER | FLAG_DROP_SHADOW | FLAG_CLIPPED;
+const FLAG_TILECHUNK: u32 = 16;
+pub const TILE_STRIDE: usize = 1072;
+const FLAG_ALL: u32 =
+    FLAG_TILECHUNK | FLAG_BLENDED | FLAG_OCCLUDER | FLAG_DROP_SHADOW | FLAG_CLIPPED;
 
 /// Bit 0 of the header's flags runs the shadow lane, bit 1 the bloom chain.
 pub const FRAME_SHADOWS: u32 = 1;
@@ -223,6 +226,8 @@ pub struct Packet<'a> {
     pub retained: bool,
     pub delta: bool,
     pub updates: Vec<InstanceUpdate<'a>>,
+    pub tile_updates: Vec<(u32, &'a [u8])>,
+    pub tile_count: u32,
     /// The encoded graph declaration, parsed only when the revision changes.
     pub graph: &'a [u8],
     /// The light table, as bytes, for the buffer the binning and the resolve
@@ -252,6 +257,7 @@ pub struct RetainedScene {
     pub casters: u32,
     pub batches: Vec<Batch>,
     pub flags: Vec<u8>,
+    pub tile_count: u32,
 }
 
 /// Parses one packet and fills `batches` with its table.
@@ -367,9 +373,23 @@ pub fn parse_frame<'a>(
         read_f32(bytes, 116),
         read_f32(bytes, 120),
     ];
-    if read_u32(bytes, 124) != 0 {
-        bail!("render packet sets a reserved header word");
+    let tile_updates_count = read_u32(bytes, 124);
+    if retained && tile_updates_count != 0 {
+        bail!("retained frame changes tile grids");
     }
+    let tile_count = if partial {
+        resident
+            .context("tile grids require resident scene")?
+            .tile_count
+    } else {
+        tile_updates_count
+    };
+    if tile_count > instance_count {
+        bail!("more tile grids than instances");
+    }
+    let tile_bytes = (tile_updates_count as usize)
+        .checked_mul(TILE_STRIDE + 4)
+        .context("tile bytes overflow")?;
     for value in ambient {
         if !value.is_finite() || value < 0.0 {
             bail!("render packet ambient channel {value} is not finite and at or above zero");
@@ -420,6 +440,7 @@ pub fn parse_frame<'a>(
     let prefix = PACKET_HEADER_SIZE
         .checked_add(graph_bytes)
         .and_then(|size| size.checked_add(light_table_bytes))
+        .and_then(|size| size.checked_add(tile_bytes))
         .and_then(|size| size.checked_add(batch_table_bytes))
         .context("render packet size overflowed")?;
     let expected = prefix
@@ -433,9 +454,42 @@ pub fn parse_frame<'a>(
     }
     let graph = &bytes[PACKET_HEADER_SIZE..PACKET_HEADER_SIZE + graph_bytes];
     let light_start = PACKET_HEADER_SIZE + graph_bytes;
-    let table_start = light_start + light_table_bytes;
+    let tile_start = light_start + light_table_bytes;
+    let table_start = tile_start + tile_bytes;
     let instance_start = table_start + batch_table_bytes;
-    let light_bytes = &bytes[light_start..table_start];
+    let light_bytes = &bytes[light_start..tile_start];
+    let mut tile_updates = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for record in bytes[tile_start..table_start]
+        .as_chunks::<{ TILE_STRIDE + 4 }>()
+        .0
+    {
+        let slot = read_u32(record, 0);
+        if slot >= tile_count || !seen.insert(slot) {
+            bail!("invalid or duplicate tile slot");
+        }
+        let data = &record[4..];
+        for i in 0..12 {
+            if !read_f32(data, i * 4).is_finite() {
+                bail!("tile layout is not finite");
+            }
+        }
+        for i in [0, 1, 2, 5, 6, 9, 10] {
+            if read_f32(data, i * 4) <= 0.0 {
+                bail!("tile dimensions must be positive");
+            }
+        }
+        let columns = read_f32(data, 8);
+        if columns.fract() != 0.0
+            || columns > 16777216.0
+            || read_f32(data, 12) < 0.0
+            || read_f32(data, 16) < 0.0
+            || read_f32(data, 44) != 0.0
+        {
+            bail!("invalid tile atlas layout");
+        }
+        tile_updates.push((slot, data));
+    }
     let batch_bytes = &bytes[table_start..instance_start];
     let instances = &bytes[instance_start..];
 
@@ -595,7 +649,48 @@ pub fn parse_frame<'a>(
         bail!("render packet declares {caster_count} casters and its instances hold {casters}");
     }
 
+    // A batch selects one vertex count, so mixing grids and quads is invalid.
+    for update in &updates {
+        let first = update.offset as usize / INSTANCE_STRIDE;
+        for (at, data) in update
+            .bytes
+            .as_chunks::<INSTANCE_STRIDE>()
+            .0
+            .iter()
+            .enumerate()
+        {
+            let flag = update.flags[at];
+            if flag & FLAG_TILECHUNK as u8 != 0 {
+                let slot = read_f32(data, 32);
+                if slot < 0.0
+                    || slot.fract() != 0.0
+                    || slot >= tile_count as f32
+                    || read_f32(data, 36) < 0.0
+                {
+                    bail!("instance selects invalid tile grid or bounds");
+                }
+            }
+            let index = first + at;
+            let batch = &batches[batches
+                .partition_point(|batch| batch.first as usize + batch.count as usize <= index)];
+            let batch_flag = if batch.first as usize >= first {
+                update.flags.get(batch.first as usize - first).copied()
+            } else {
+                None
+            }
+            .or_else(|| resident.and_then(|scene| scene.flags.get(batch.first as usize).copied()))
+            .context("missing batch kind")?;
+            if (flag ^ batch_flag) & FLAG_TILECHUNK as u8 != 0 {
+                bail!("batch mixes tile grids and quads");
+            }
+            if delta && (flag ^ resident.unwrap().flags[index]) & FLAG_TILECHUNK as u8 != 0 {
+                bail!("delta changes batch kind");
+            }
+        }
+    }
     Ok(Packet {
+        tile_count,
+        tile_updates,
         scene_revision,
         retained,
         delta,
@@ -713,6 +808,7 @@ pub mod tests {
         /// trailing reserved word read as a float.
         pub tuning: [f32; 12],
         pub graph: Vec<u8>,
+        pub tiles: Vec<(u32, Vec<u8>)>,
         pub lights: Vec<[f32; LIGHT_STRIDE / 4]>,
         pub batches: Vec<[u32; 5]>,
         pub instances: Vec<[u32; INSTANCE_STRIDE / 4]>,
@@ -741,6 +837,7 @@ pub mod tests {
                     1.0, 1.0, 1.0, 24.0, 64.0, 200.0, 0.4, 512.0, 0.8, 0.1, 0.7, 0.0,
                 ],
                 graph: Vec::new(),
+                tiles: Vec::new(),
                 lights: Vec::new(),
                 batches: Vec::new(),
                 instances: Vec::new(),
@@ -814,6 +911,7 @@ pub mod tests {
             for value in self.counts {
                 bytes.extend_from_slice(&value.to_ne_bytes());
             }
+            self.tuning[11] = f32::from_bits(self.tiles.len() as u32);
             for value in self.tuning {
                 bytes.extend_from_slice(&value.to_ne_bytes());
             }
@@ -822,6 +920,10 @@ pub mod tests {
                 for value in light {
                     bytes.extend_from_slice(&value.to_ne_bytes());
                 }
+            }
+            for (slot, tile) in &self.tiles {
+                bytes.extend_from_slice(&slot.to_ne_bytes());
+                bytes.extend_from_slice(tile);
             }
             for batch in &self.batches {
                 for value in batch {
@@ -889,6 +991,7 @@ pub mod tests {
         let mut batches = Vec::new();
         let packet = parse_packet(&bytes, &mut batches, 16).unwrap();
         let resident = RetainedScene {
+            tile_count: 0,
             revision: 1,
             instances: 3,
             casters: 0,
@@ -1235,13 +1338,35 @@ pub mod tests {
     }
 
     #[test]
+    fn validates_compact_tile_grids_before_upload() {
+        let mut tile = vec![0_u8; TILE_STRIDE];
+        for (i, value) in [16_f32, 8., 4., 0., 0., 16., 8., 0., 0., 64., 32., 0.]
+            .into_iter()
+            .enumerate()
+        {
+            tile[i * 4..i * 4 + 4].copy_from_slice(&value.to_ne_bytes());
+        }
+        let make = |tile: Vec<u8>, slot: u32, flag: u32| {
+            let mut builder = PacketBuilder::new().instances(1, 0).batch(1, 0, 0, 0, 1);
+            builder.instances[0][17] = flag;
+            builder.instances[0][9] = 100_f32.to_bits();
+            builder.tiles.push((slot, tile));
+            builder.build()
+        };
+        assert!(parse_packet(&make(tile.clone(), 0, 16), &mut Vec::new(), 1).is_ok());
+        assert!(rejection(&make(tile.clone(), 1, 16)).contains("tile slot"));
+        tile[8..12].copy_from_slice(&0_f32.to_ne_bytes());
+        assert!(rejection(&make(tile, 0, 16)).contains("positive"));
+    }
+
+    #[test]
     fn rejects_reserved_instance_words() {
         let mut builder = valid();
         builder.instances[0][19] = 1;
         assert!(rejection(&builder.build()).contains("reserved word"));
 
         let mut flagged = valid();
-        flagged.instances[0][INSTANCE_FLAGS_OFFSET / 4] = 16;
+        flagged.instances[0][INSTANCE_FLAGS_OFFSET / 4] = 32;
         assert!(rejection(&flagged.build()).contains("reserved flag bits"));
     }
 

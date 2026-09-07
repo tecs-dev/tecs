@@ -10,7 +10,7 @@ pipelines, culling, compaction, submission, and presentation. Image pixels
 never ride in a packet. They cross once through the residency commands
 `tecs.gfx.images` queues, so a frame carries only the id a batch binds.
 
-# Packet version 6
+# Packet version 7
 
 Every field is little or big endian to match the host, every integer is
 unsigned, and every real is a 32-bit float. Offsets are in bytes from the start
@@ -21,7 +21,7 @@ of the packet.
 | Offset | Type  | Field             | Contract                                             |
 | ------ | ----- | ----------------- | ---------------------------------------------------- |
 | 0      | `u32` | `magic`           | `0x54454353`, and nothing else is a Tecs packet.      |
-| 4      | `u32` | `version`         | `6`. A reader rejects every other value.              |
+| 4      | `u32` | `version`         | `7`. A reader rejects every other value.              |
 | 8      | `u32` | `headerSize`      | `128`. The graph section starts after it.             |
 | 12     | `u32` | `flags`           | Bits 0/1 enable shadows/bloom; bits 2/3 retain/patch instances.           |
 | 16     | `u32` | `graphRevision`   | A reader rebuilds its graph when this changes.        |
@@ -51,7 +51,7 @@ of the packet.
 | 112    | `f32` | `bloomThreshold`  | Brightness a pixel passes to be extracted.            |
 | 116    | `f32` | `bloomKnee`       | Width of the threshold's soft knee, above zero.       |
 | 120    | `f32` | `bloomIntensity`  | Scales the blurred contribution.                      |
-| 124    | `u32` | reserved          | Zero.                                                 |
+| 124    | `u32` | `tileUpdates`     | Number of compact grid updates after the lights.                                                 |
 
 The shadow and bloom fields are written whether or not their flag is set, so a
 backend reads one layout and the flag alone decides. A reader validates them
@@ -83,6 +83,19 @@ Lights are ordered by ascending entity id, so the same scene bins and casts the
 same way every frame however the archetypes are laid out. A world holding more
 than the ceiling keeps the lowest ids and drops the rest.
 
+## Compact tile grids
+
+After the lights, `tileUpdates` records each carry a `u32` slot and 1,072 bytes:
+twelve floats (tile width, height, atlas columns, spacing, margin, cell width,
+cell height, offset x, offset y, atlas width, atlas height, zero), then 256
+packed `u32` tile IDs. Full frames provide slots zero through count minus one;
+deltas update existing slots; retained frames provide none.
+
+Instance flag bit 4 selects a chunk. Its position/scale are the top-left chunk
+pose, `u0` selects its grid slot, and `v0` is a conservative world-space culling
+radius. Batches never mix chunks and ordinary quads. The GPU chooses 1,536
+vertices per chunk instance or six per quad, including the shadow lane.
+
 ## Retained and partial frames
 
 This is the old SpriteFramePacket dirty-range seam adapted to the managed ABI:
@@ -102,7 +115,7 @@ refresh after graphics reconstruction. `Extractor.packet` continues to return
 an independent complete snapshot. Neither dirty-bit clearing nor a skipped
 extraction loses a write: run comparisons use monotonic counters.
 
-## Batch table, `batchCount` entries of 20 bytes after the light table (full frames)
+## Batch table, `batchCount` entries of 20 bytes after the tile grid updates (full frames)
 
 | Offset | Type  | Field           | Contract                                                |
 | ------ | ----- | --------------- | ------------------------------------------------------- |
@@ -144,7 +157,7 @@ list and one indirect draw covers them.
 | 56     | `f32` | `b`        | Blue.                                                         |
 | 60     | `f32` | `a`        | Alpha, multiplied into the sampled alpha.                     |
 | 64     | `u32` | `material` | A `tecs.gpu.materials` id, below the build's material count.  |
-| 68     | `u32` | `flags`    | Bit 0 marks the blended lane and equals the batch's; bit 1 an occluder; bit 2 a drop-shadow caster; bit 3 enables clipping. |
+| 68     | `u32` | `flags`    | Bit 0 marks the blended lane and equals the batch's; bit 1 an occluder; bit 2 a drop-shadow caster; bit 3 enables clipping; bit 4 selects a tile grid. |
 | 72     | `u32` | `clipMin` | Left in low 16 bits, top in high 16 bits; zero without bit 3.                                                         |
 | 76     | `u32` | `clipMax` | Right in low 16 bits, bottom in high 16 bits; zero without bit 3.                                                         |
 
@@ -190,7 +203,7 @@ local ffi = require("ffi")
 export const MAGIC: uint32 = 0x54454353
 
 --- The packet layout this module writes.
-export const VERSION: uint32 = 6
+export const VERSION: uint32 = 7
 
 --- The byte length of the packet header.
 export const HEADER_SIZE: uint32 = 128
@@ -255,6 +268,8 @@ local record Run
     seen: boolean
     screenSpace: boolean
     signature: string
+    tileSlot: integer = 0
+    tileBytes: string = ""
 end
 
 local record View
@@ -286,6 +301,7 @@ export record Extractor
     private imageIds: {integer}
     private samplers: {integer}
     private lanes: {integer}
+    private chunkKinds: {boolean}
     private castFlags: {integer}
     private castHeights: {number}
     private materialIds: {integer}
@@ -388,6 +404,7 @@ export function new(exclusive value: world.World): Extractor
         imageIds = {},
         samplers = {},
         lanes = {},
+        chunkKinds = {},
         castFlags = {},
         castHeights = {},
         materialIds = {},
@@ -557,14 +574,24 @@ local function collect(exclusive self: Extractor): nil
                     if chunk ~= nil and archetype.has(active, tilechunk.DirtyTileChunk) then
                         self.world:remove(active.entities[index], tilechunk.DirtyTileChunk)
                     end
-                    for cell = 1, chunk ~= nil and 256 or 1 do
-                        if chunk ~= nil and (chunk.tiles[cell] as integer) % 536870912 == 0 then
+                    do
+                        if chunk ~= nil and run.length == 0 then
                             goto nextTile
                         end
                         rows = rows + 1
                         transforms[rows] = rowTransforms[index]
                         const transform = presented(transforms[rows], previous ~= nil and previous[index] or nil, alpha)
-                        const tileSprite = chunk ~= nil and tilechunk.place(chunk, cell, transform) or nil
+                        self.chunkKinds[rows] = chunk ~= nil
+                        const tileSprite = chunk ~= nil and new rendercomponents.Sprite(
+                            chunk.tileset,
+                            0,
+                            0,
+                            1,
+                            1
+                        ) or nil
+                        if chunk ~= nil then
+                            run.tileBytes = tilechunk.packed(chunk)
+                        end
                         self.clipIds[rows] = rowClips and rowClips[index].index or 0
                         if layers.isScreenSpace(transform.layer) then
                             run.screenSpace = true
@@ -643,6 +670,11 @@ local function collect(exclusive self: Extractor): nil
                             v0[rows] = sprite.v0
                             u1[rows] = sprite.u1
                             v1[rows] = sprite.v1
+                        end
+                        if chunk ~= nil then
+                            u0[
+                                rows
+                            ], v0[rows], u1[rows], v1[rows] = run.tileSlot, tilechunk.radius(chunk, transform), 0, 0
                         end
                         if oldImage ~= imageIds[
                             rows
@@ -781,6 +813,7 @@ local function sceneChanged(exclusive self: Extractor, eye: View, snapshot: bool
         run.seen = false
     end
     local total: integer = 0
+    local tileSlot: integer = 0
     local relayout = not self.cacheValid
     local changed = force
     local _, _, alpha = self.world:getFixedTiming()
@@ -837,9 +870,14 @@ local function sceneChanged(exclusive self: Extractor, eye: View, snapshot: bool
                 if chunks ~= nil then
                     length = 0
                     for index = assert(first), assert(last) do
-                        length = length + tilechunk.count(chunks[index])
+                        length = length + (tilechunk.count(chunks[index]) > 0 and 1 or 0)
                     end
                 end
+            end
+            if chunks ~= nil and length > 0 then
+                relayout = relayout or run.tileSlot ~= tileSlot
+                run.tileSlot = tileSlot
+                tileSlot = tileSlot + 1
             end
             relayout = relayout or run.offset ~= total or run.length ~= length
             run.offset, run.length, run.seen = total, length, true
@@ -874,6 +912,7 @@ local function rebuildBatches(exclusive self: Extractor): nil
     const imageIds, samplers, lanes = self.imageIds, self.samplers, self.lanes
     local runImage: integer = -1
     local runSampler: integer = -1
+    local runChunk = false
     local runLane: integer = -1
     local batchBuffer = nupp.io.newBuffer()
     local batchWriter = nupp.io.newScalarWriter(batchBuffer)
@@ -884,7 +923,9 @@ local function rebuildBatches(exclusive self: Extractor): nil
     local runLength: integer = 0
     for index = 1, rows do
         const row = order[index]
-        if imageIds[row] ~= runImage or samplers[row] ~= runSampler or lanes[row] ~= runLane then
+        if imageIds[
+            row
+        ] ~= runImage or samplers[row] ~= runSampler or lanes[row] ~= runLane or self.chunkKinds[row] ~= runChunk then
             if runLength > 0 then
                 batchWriter:writeUint32(wrap(runImage))
                     :writeUint32(wrap(runSampler))
@@ -892,6 +933,7 @@ local function rebuildBatches(exclusive self: Extractor): nil
                     :writeUint32(wrap(runFirst))
                     :writeUint32(wrap(runLength))
             end
+            runChunk = self.chunkKinds[row]
             runImage = imageIds[row]
             runSampler = samplers[row]
             runLane = lanes[row]
@@ -939,6 +981,19 @@ local function prefix(exclusive self: Extractor, eye: View, mode: integer, revis
     const ambientR, ambientG, ambientB = lighting.ambient()
     const lightCount = self.lightCount
 
+    local tileUpdates: {string} = {}
+    if mode ~= FRAME_RETAINED then
+        for _, run in pairs(self.runs) do
+            if run.length > 0 and run.tileBytes ~= "" and (mode == 0 or run.dirty) then
+                local tileBuffer = nupp.io.newBuffer()
+                local tileWriter = nupp.io.newScalarWriter(tileBuffer)
+                tileWriter:writeUint32(wrap(run.tileSlot)):writeBytes(run.tileBytes)
+                tileWriter:drop()
+                tileUpdates[#tileUpdates + 1] = tileBuffer:getString()
+                tileBuffer:drop()
+            end
+        end
+    end
     const graph = passes.section()
     local buffer = nupp.io.newBuffer()
     local writer = nupp.io.newScalarWriter(buffer)
@@ -973,7 +1028,7 @@ local function prefix(exclusive self: Extractor, eye: View, mode: integer, revis
         :writeFloat32(narrow(bloomTuning ~= nil and bloomTuning.threshold or 0.8))
         :writeFloat32(narrow(bloomTuning ~= nil and bloomTuning.knee or 0.1))
         :writeFloat32(narrow(bloomTuning ~= nil and bloomTuning.intensity or 0.7))
-        :writeUint32(0)
+        :writeUint32(wrap(#tileUpdates))
     writer:writeBytes(graph)
 
     const lightOrder = self.lightOrder
@@ -995,6 +1050,7 @@ local function prefix(exclusive self: Extractor, eye: View, mode: integer, revis
         end
     end
 
+    writer:writeBytes(table.concat(tileUpdates))
     if mode == 0 then
         writer:writeBytes(self.cachedBatchBytes)
     end
@@ -1065,7 +1121,11 @@ local function packInstances(exclusive self: Extractor, eye: View, full: boolean
                         floats[base + 6] = params[row] as float
                         floats[base + 7] = castHeights[row] as float
                         floats[base + 8] = u0[row] as float
-                        floats[base + 9] = v0[row] as float
+                        floats[
+                            base + 9
+                        ] = (
+                            self.chunkKinds[row] and layers.isScreenSpace(transform.layer) and v0[row] / zoom or v0[row]
+                        ) as float
                         floats[base + 10] = u1[row] as float
                         floats[base + 11] = v1[row] as float
                         floats[base + 12] = tint.r as float
@@ -1073,7 +1133,9 @@ local function packInstances(exclusive self: Extractor, eye: View, full: boolean
                         floats[base + 14] = tint.b as float
                         floats[base + 15] = tint.a as float
                         words[base + 16] = wrap(materialIds[row])
-                        local flag = (lanes[row] == LANE_BLEND and FLAG_BLENDED or 0) + castFlags[row]
+                        local flag = (
+                            lanes[row] == LANE_BLEND and FLAG_BLENDED or 0
+                        ) + castFlags[row] + (self.chunkKinds[row] and 16 or 0)
                         local leftTop, rightBottom = 0, 0
                         if self.clipIds[row] ~= 0 then
                             local left, top, right, bottom = clips.regionOf(self.clipIds[row])

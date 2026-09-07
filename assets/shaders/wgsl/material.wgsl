@@ -97,3 +97,7 @@ fn sdRoundedBox(p: vec2<f32>, extent: vec2<f32>, radius: f32) -> f32 {
 
 @group(1) @binding(0) var image: texture_2d<f32>;
 @group(1) @binding(1) var imageSampler: sampler;
+
+@group(1) @binding(2) var normalMap: texture_2d<f32>;
+@group(1) @binding(3) var emissionMap: texture_2d<f32>;
+@group(1) @binding(4) var ormMap: texture_2d<f32>;

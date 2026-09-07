@@ -101,15 +101,34 @@ tile metadata remains accessible through the loaded map.
 ## Rendering and chunk size
 
 `tecs.gfx.TILE_CHUNK_SIZE` is 16, matching the original engine's grid convention.
-Chunk tiles are expanded into retained GPU instances when their data changes.
-They use the existing GPU culling, compaction and indirect draw pipeline;
-compatible chunks can share a draw. There is no ECS sprite entity per static
-tile and no instance upload on unchanged frames.
+The GPU keeps each chunk as one instance and a compact 16×16 tile-ID grid.
+Compute shaders cull whole chunks and build indirect draws; the vertex shader
+places their tiles, including all Tiled flip combinations. Compatible chunks
+share a draw. Empty cells produce no pixels and empty chunks draw nothing.
 
-A same-size edit patches the changed chunk's instance range. Adding or removing
-occupied cells can change the packed layout and require a full instance upload.
-The GPU representation uses the shared 80-byte instance format per occupied
-tile; it does not yet use the old renderer's compact tile-ID GPU buffer.
+A tile edit patches its chunk's grid and instance. Adding or removing cells
+inside a nonempty chunk preserves the GPU layout. Creating or deleting a chunk,
+or changing draw order or batching, can require a full upload. Unchanged frames
+upload neither instances nor tile grids.
+
+A full grid occupies 1,072 bytes of atlas geometry and IDs plus one 80-byte
+instance: **1,152 bytes per chunk**, compared with 20,480 bytes for 256 expanded
+instances. This excludes shared culling and indirect-draw buffers. Sparse grids
+still reserve all 256 cells, and culling works at chunk granularity.
+
+## Material maps
+
+Tiled loads companion images next to each tileset atlas automatically:
+
+- `terrain_n.png`: tangent-space normals for `terrain.png`.
+- `terrain_e.png`: emission color and strength in alpha.
+- `terrain_orm.png`: occlusion in red, roughness in green, metallic in blue.
+
+Companion images must match the atlas dimensions and tile arrangement. Missing
+maps use neutral defaults. Animated tiles and image-collection sprites use the
+same image material maps. For manually created chunks, associate maps with the
+atlas using [`tecs.gfx.images.setMaterialMaps`](tecs.gfx.images.setMaterialMaps).
+See [Materials](../gfx/materials.md) for the explicit API.
 
 Standalone chunks preserve their tile arrays and atlas names in snapshots.
 Tiled-owned chunks are regenerated from saved map data when a world is restored.

@@ -407,6 +407,22 @@ local function imageOf(source: Image): integer
     local pixels, width, height = tecs.internal.assetnative.load(source.path, 1, source.transparent)
     id = tecs.gfx.images.upload({name = name, width = width, height = height, pixels = pixels})
     images[name] = id
+    const stem = source.path:gsub("%.[^./]+$", "")
+    local maps: tecs.gfx.images.MaterialMaps = {}
+    for _, suffix in ipairs({"_n", "_e", "_orm"}) do
+        const path = stem .. suffix .. ".png"
+        if nupp.io.files.exists(path) then
+            const map = tecs.gfx.images.load(path)
+            if suffix == "_n" then
+                maps.normalMap = map
+            elseif suffix == "_e" then
+                maps.emissionMap = map
+            else
+                maps.ormMap = map
+            end
+        end
+    end
+    tecs.gfx.images.setMaterialMaps(id, maps)
 
     return id
 end

@@ -387,8 +387,21 @@ impl App {
         self.apply_commands()?;
         self.apply_image_commands()?;
         if let Some(graphics) = self.graphics.as_mut() {
+            let mut captures = Vec::new();
+            while let Some(id) = self.bridge.next_capture()? {
+                captures.push(id);
+            }
+            if !captures.is_empty() {
+                graphics.request_capture();
+            }
             let packet = self.bridge.render_packet(graphics.scene_revision())?;
             let submitted = graphics.render(&packet)?;
+            if !captures.is_empty() {
+                let result = graphics.take_capture();
+                for id in captures {
+                    self.bridge.capture_result(id, &result)?;
+                }
+            }
             if self.config.benchmark_view && submitted {
                 if let Some((readback, total, fps)) = &self.stats_pending {
                     if let Some(visible) = graphics.poll_drawn_instances(readback)? {
@@ -628,6 +641,7 @@ fn apply_image_command(graphics: &mut Graphics, command: &ImageCommand) -> Resul
             )
         }
         "releaseImage" => graphics.release_image(command.image),
+        "setMaterialMaps" => graphics.set_material_maps(command.image, command.maps),
         kind => Err(anyhow!("unknown image command {kind}")),
     }
 }
