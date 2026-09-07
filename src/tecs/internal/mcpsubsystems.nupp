@@ -7,7 +7,6 @@ local schemas = require("tecs.internal.mcpschemas")
 local entityworld = require("tecs.internal.world")
 local cameraselection = require("tecs.internal.cameraselection")
 local rendercomponents = require("tecs.internal.rendercomponents")
-local snapshotvalue = require("tecs.internal.snapshotvalue")
 local ecs = require("tecs.ecs")
 local materials = require("tecs.gpu.materials")
 local layers = require("tecs.gfx.layers")
@@ -16,9 +15,9 @@ local audio = require("tecs.audio")
 local paths = require("tecs.files")
 local files = require("nupp.io.files")
 local path = require("nupp.io.path")
-local binary = require("nupp.data.binary")
 local json = require("nupp.data.json")
 local profile = require("nupp.profile")
+local buffer = require("string.buffer")
 
 local function register(
     name: string,
@@ -346,12 +345,13 @@ end
 
 register(
     "snapshot_save",
-    "Write the committed world as a versioned binary snapshot.",
+    "Write the committed world as a native binary snapshot.",
     function(args: {[string]: any}): {[string]: any}
         local destination = artifact(args.name or "snapshot.bin")
         local world = bindings.requireWorld()
-        local snapshot = world:saveSnapshot()
-        local bytes = "TECS-SNAPSHOT\1" .. binary.encode(snapshotvalue.clone(snapshot))
+        local output = buffer.new()
+        world:saveSnapshot({format = "binary", buffer = output})
+        local bytes = output:tostring()
         local ok, reason = files.writeAtomic(destination, bytes)
         assert(ok, reason)
 
@@ -361,7 +361,7 @@ register(
 )
 register(
     "snapshot_load",
-    "Replace the world from a TECS NVB snapshot; legacy Teal files require conversion.",
+    "Replace the world from a native binary snapshot.",
     function(args: {[string]: any}): {[string]: any}
         assert(path.newPath(args.path):isAbsolute(), "snapshot path must be absolute")
         local bytes: string
@@ -370,19 +370,14 @@ register(
             assert(input ~= nil, reason)
             local size, sizeReason = input:size()
             assert(size ~= nil, sizeReason)
-            assert(size <= 67108878, "snapshot exceeds the binary codec byte limit")
             local reader = input:newReader()
             local chunk, failure = reader:read(size + 1)
             assert(chunk ~= nil, failure)
             assert(#chunk == size, "snapshot changed during the read")
             bytes = chunk
         end
-        local magic = "TECS-SNAPSHOT\1"
-        assert(bytes:sub(1, #magic) == magic, "unsupported snapshot framing; legacy Teal snapshots require conversion")
-        local snapshot = binary.decode(bytes:sub(#magic + 1))
-        assert(type(snapshot) == "table", "snapshot must contain a world record")
         local world = bindings.requireWorld()
-        local prelude = world:loadSnapshot(snapshot as ecs.Snapshot)
+        local prelude = world:loadSnapshot(bytes)
 
         return {
             path = args.path,
