@@ -3,7 +3,8 @@ module tecs.tiled
 --[[
 Tiled TMX maps and TSX tilesets, loaded by the official Rust `tiled` crate.
 
-Maps draw through ordinary sprite entities. The loader retains tile metadata,
+Static atlas tiles draw through 16x16 TileChunks; animated and image-collection
+tiles use sprite entities. The loader retains tile metadata,
 object classes and properties, animations, nested layers and infinite-map
 chunks. Coordinates passed to `getTile` and `setTile` are zero-based tile
 coordinates, including negative coordinates in infinite maps. Tileset indices
@@ -290,7 +291,7 @@ export type Options = {
 --- The component value for one map instance.
 export type Tilemap = TilemapValue
 
---- Loads and displays a map through ordinary sprite entities.
+--- Loads a map as static TileChunks and animated sprite entities.
 export const Tilemap: tecs.ecs.TableComponent<TilemapValue> = tecs.ecs.newComponent({
     name = "Tilemap",
     requires = {tecs.ecs.Transform2D},
@@ -370,9 +371,18 @@ local record Row
     flipH: boolean
     flipV: boolean
 end
+local record Chunk
+    row: Row
+    value: tecs.internal.components.FFIInstance<tecs.gfx.TileChunk, tecs.ecs.FFIComponent<tecs.gfx.TileChunk>>
+    cells: {[string]: Cell}
+    tileset: integer
+    layerIndex: integer
+end
 local record Instance
     map: Map
     rows: {[string]: Row}
+    chunks: {[string]: Chunk}
+    cellChunks: {[string]: string}
     revision: integer
     clock: number
     scaleX: number
@@ -583,6 +593,128 @@ local function cellRow(
     )
 end
 
+-- The old Tiled path grouped static atlas tiles by layer, 16x16 region,
+-- and tileset. Animated and image-collection tiles keep their sprite entities.
+local function chunkable(map: Map, cell: Cell): boolean
+    const set = assert(map.tilesets[cell.tileset])
+    const tile = tileOf(set, cell.id)
+    return set.image ~= nil and set.columns > 0 and (tile == nil or (tile.image == nil and #tile.animation == 0))
+end
+
+local function chunkKey(layer: integer, cell: Cell): string
+    return "chunk:" .. layer .. ":" .. math.floor(cell.x / 16) .. ":" .. math.floor(cell.y / 16) .. ":" .. cell.tileset
+end
+
+local function chunkIndex(cell: Cell): integer
+    return (cell.y % 16) * 16 + cell.x % 16 + 1
+end
+
+local function addStatic(
+    exclusive world: tecs.ecs.World,
+    root: integer,
+    map: Map,
+    instance: Instance,
+    layerIndex: integer,
+    cell: Cell
+): nil
+    const group = chunkKey(layerIndex, cell)
+    const address = key(layerIndex, cell.x, cell.y)
+    local chunk = instance.chunks[group]
+    if chunk == nil then
+        const layer = map.layers[layerIndex]
+        const set = map.tilesets[cell.tileset]
+        const input = tecs.gfx.TileChunk({
+            tileset = imageOf(assert(set.image)),
+            tileWidth = set.tileWidth,
+            tileHeight = set.tileHeight,
+            columns = set.columns,
+            spacing = set.spacing,
+            margin = set.margin,
+            cellWidth = map.tileWidth,
+            cellHeight = map.tileHeight,
+            offsetX = set.x,
+            offsetY = set.y
+        })
+        const entity = world:spawn(
+            tecs.ecs.ChildOf(root),
+            TileVisual,
+            input,
+            tecs.gfx.Tint(
+                layer.tint[1] / 255,
+                layer.tint[2] / 255,
+                layer.tint[3] / 255,
+                layer.opacity * layer.tint[4] / 255
+            )
+        )
+        const row = new Row(
+            entity = entity,
+            collisions = {},
+            layer = layer,
+            x = layer.x + math.floor(cell.x / 16) * 16 * map.tileWidth,
+            y = layer.y + math.floor(cell.y / 16) * 16 * map.tileHeight,
+            width = 1,
+            height = 1,
+            rotation = 0,
+            sx = 1,
+            sy = 1,
+            z = layerIndex,
+            set = nil,
+            tile = nil,
+            currentFrame = 0,
+            flipH = false,
+            flipV = false
+        )
+        chunk = new Chunk(row = row, value = input, cells = {}, tileset = cell.tileset, layerIndex = layerIndex)
+        instance.chunks[group] = chunk
+        instance.rows[group] = row
+    end
+    chunk.cells[address] = cell
+    instance.cellChunks[address] = group
+    const encoded = cell.id + 1 + (
+        cell.flipH and 2147483648 or 0
+    ) + (cell.flipV and 1073741824 or 0) + (cell.flipD and 536870912 or 0)
+    unsafe do
+        chunk.value.value.tiles[chunkIndex(cell)] = encoded
+    end
+end
+
+local function syncChunk(
+    exclusive world: tecs.ecs.World,
+    root: integer,
+    map: Map,
+    instance: Instance,
+    group: string
+): nil
+    const chunk = assert(instance.chunks[group])
+    for _, body in ipairs(chunk.row.collisions) do
+        world:despawn(body)
+    end
+    chunk.row.collisions = {}
+    if next(chunk.cells) == nil then
+        world:despawn(chunk.row.entity)
+        instance.rows[group], instance.chunks[group] = nil, nil
+        return
+    end
+    world:set(chunk.row.entity, chunk.value)
+    if instance.collision then
+        const set = map.tilesets[chunk.tileset]
+        for _, cell in pairs(chunk.cells) do
+            const bodies = collisionBodies(
+                world,
+                root,
+                map,
+                map.layers[chunk.layerIndex],
+                cell,
+                set,
+                tileOf(set, cell.id)
+            )
+            for _, body in ipairs(bodies) do
+                chunk.row.collisions[#chunk.row.collisions + 1] = body
+            end
+        end
+    end
+end
+
 local function clear(exclusive world: tecs.ecs.World, root: integer): nil
     for _, child in ipairs(world:relationshipSources(tecs.ecs.ChildOf, root)) do
         if world:has(child, TileVisual) then
@@ -597,6 +729,8 @@ local function build(exclusive world: tecs.ecs.World, root: integer, value: Tile
     local result = new Instance(
         map = map,
         rows = {},
+        chunks = {},
+        cellChunks = {},
         revision = map.revision,
         clock = 0,
         scaleX = pose.scaleX,
@@ -607,9 +741,13 @@ local function build(exclusive world: tecs.ecs.World, root: integer, value: Tile
         if layer.visible then
             if layer.kind == "tiles" then
                 for _, cell in ipairs(layer.cells) do
-                    result.rows[
-                        key(index, cell.x, cell.y)
-                    ] = cellRow(world, root, map, layer, cell, index, value.collision)
+                    if chunkable(map, cell) then
+                        addStatic(world, root, map, result, index, cell)
+                    else
+                        result.rows[
+                            key(index, cell.x, cell.y)
+                        ] = cellRow(world, root, map, layer, cell, index, value.collision)
+                    end
                 end
             elseif layer.kind == "image" and layer.image and not layer.repeatX and not layer.repeatY then
                 local source = assert(layer.image)
@@ -738,6 +876,9 @@ local function build(exclusive world: tecs.ecs.World, root: integer, value: Tile
         end
     end
     value.objectsSpawned = true
+    for group in pairs(result.chunks) do
+        syncChunk(world, root, map, result, group)
+    end
     world:markComponentDirty(root, Tilemap)
 
     return result
@@ -860,12 +1001,23 @@ local function step(exclusive world: tecs.ecs.World, state: State, dt: number): 
             local active = assert(instance)
             local loaded = assert(map)
             if active.revision ~= loaded.revision then
+                local dirtyChunks: {[string]: boolean} = {}
                 for changed, version in pairs(loaded.changes) do
                     if version > active.revision then
                         local li, x, y = changed:match("^(%d+):([%-]?%d+):([%-]?%d+)$")
                         local layerIndex, tx, ty = assert(
                             tonumber(li)
                         ) as integer, assert(tonumber(x)) as integer, assert(tonumber(y)) as integer
+                        const oldGroup = active.cellChunks[changed]
+                        if oldGroup ~= nil then
+                            const oldChunk = assert(active.chunks[oldGroup])
+                            const oldCell = assert(oldChunk.cells[changed])
+                            unsafe do
+                                oldChunk.value.value.tiles[chunkIndex(oldCell)] = 0
+                            end
+                            oldChunk.cells[changed], active.cellChunks[changed] = nil, nil
+                            dirtyChunks[oldGroup] = true
+                        end
                         local old = active.rows[changed]
                         if old then
                             world:despawn(old.entity);
@@ -876,19 +1028,27 @@ local function step(exclusive world: tecs.ecs.World, state: State, dt: number): 
                         end
                         local cell = getTile(loaded, layerIndex, tx, ty)
                         if cell and loaded.layers[layerIndex].visible then
-                            active.rows[
-                                changed
-                            ] = cellRow(
-                                world,
-                                root,
-                                loaded,
-                                loaded.layers[layerIndex],
-                                cell,
-                                layerIndex,
-                                value.collision
-                            )
+                            if chunkable(loaded, cell) then
+                                addStatic(world, root, loaded, active, layerIndex, cell)
+                                dirtyChunks[chunkKey(layerIndex, cell)] = true
+                            else
+                                active.rows[
+                                    changed
+                                ] = cellRow(
+                                    world,
+                                    root,
+                                    loaded,
+                                    loaded.layers[layerIndex],
+                                    cell,
+                                    layerIndex,
+                                    value.collision
+                                )
+                            end
                         end
                     end
+                end
+                for group in pairs(dirtyChunks) do
+                    syncChunk(world, root, loaded, active, group)
                 end
                 active.revision = loaded.revision
             end

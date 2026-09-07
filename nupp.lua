@@ -176,6 +176,7 @@ return {
                     "tecs.gfx",
                     "tecs.gfx.animation",
                     "tecs.gfx.clips",
+                    "tecs.internal.tilechunk",
                     "tecs.gfx.fonts",
                     "tecs.gfx.images",
                     "tecs.gfx.layers",

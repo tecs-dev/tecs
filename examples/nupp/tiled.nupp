@@ -48,7 +48,7 @@ local function install(exclusive app: tecs.application.Application): nil
             end
         end
     })
-    print("tiled: TMX, TSX, sprites, animation and collision ready")
+    print("tiled: TMX, TSX, TileChunks, animated sprites and collision ready")
 end
 
 --- Creates the Tiled demonstration session.

@@ -178,6 +178,7 @@ local lighting = require("tecs.gfx.lighting")
 local materials = require("tecs.gpu.materials")
 local passes = require("tecs.gpu.passes")
 local query = require("tecs.internal.query")
+local tilechunk = require("tecs.internal.tilechunk")
 local cameraselection = require("tecs.internal.cameraselection")
 local rendercomponents = require("tecs.internal.rendercomponents")
 local world = require("tecs.internal.world")
@@ -253,6 +254,7 @@ local record Run
     dirty: boolean
     seen: boolean
     screenSpace: boolean
+    signature: string
 end
 
 local record View
@@ -345,6 +347,10 @@ export function new(exclusive value: world.World): Extractor
         if leftDepth ~= rightDepth then
             -- Farthest first, so the nearer instance is drawn over it.
             return leftDepth > rightDepth
+        end
+
+        if entities[left] == entities[right] then
+            return left < right
         end
 
         return entities[left] < entities[right]
@@ -464,10 +470,40 @@ local function presented(
     return current
 end
 
+-- Ordinary sprites retain archetype runs. A chunk owns one run so editing
+-- a tile uploads only that chunk's retained instances when its size is stable.
+local function sources(borrows self: Extractor): function(): (archetype.Archetype?, integer?, integer?, integer?)
+    const nextArchetype = self.drawables:iter()
+    local active: archetype.Archetype? = nil
+    local length: integer = 0
+    local row: integer = 0
+
+    return function(): (archetype.Archetype?, integer?, integer?, integer?)
+        if active ~= nil and row < length then
+            row = row + 1
+            return active, row, row, -active.entities[row]
+        end
+        const candidate, count = nextArchetype()
+        if candidate == nil then
+            return nil, nil, nil, nil
+        end
+        if archetype.has(candidate, tilechunk.TileChunkComponent) then
+            active, length, row = candidate, assert(count), 1
+            return candidate, 1, 1, -candidate.entities[1]
+        end
+        active = nil
+
+        return candidate, 1, count, candidate.id
+    end
+end
+
 --- Reads dirty archetype runs into the retained extraction arrays.
 --- @raises when an entity selects a material id this build does not carry
 local function collect(exclusive self: Extractor): nil
-    const needed = self.drawables:count()
+    local needed: integer = 0
+    for _, run in pairs(self.runs) do
+        needed = needed + run.length
+    end
     if needed > self.drawCapacity then
         const capacity = math.max(needed, self.drawCapacity * 2)
         const transforms = carray(rendercomponents.Transform2D, capacity + 1)
@@ -498,11 +534,11 @@ local function collect(exclusive self: Extractor): nil
     -- Keep an interrupted collection invalid until a complete sort succeeds.
     self.orderChanged = true
     unsafe do
-        for candidate, count in self.drawables:iter() do
+        for candidate, first, last, runKey in sources(self) do
             local active = candidate as archetype.Archetype
-            const run = assert(self.runs[active.id])
+            const run = assert(self.runs[assert(runKey)])
             if not run.dirty then
-                rows = rows + (count as integer)
+                rows = rows + run.length
             else
                 run.screenSpace = false
                 local rowTransforms: rendercomponents.Transform2D[
@@ -515,93 +551,105 @@ local function collect(exclusive self: Extractor): nil
                 local rowMaterials = active:get(materials.MaterialComponent) as materials.Material[?]?
                 local rowOccluders = active:get(lighting.Occluder2DComponent) as lighting.Occluder2D[?]?
                 local rowDropShadows = active:get(lighting.DropShadow2DComponent) as lighting.DropShadow2D[?]?
-                for index = 1, count as integer do
-                    rows = rows + 1
-                    transforms[rows] = rowTransforms[index]
-                    const transform = presented(transforms[rows], previous ~= nil and previous[index] or nil, alpha)
-                    self.clipIds[rows] = rowClips and rowClips[index].index or 0
-                    if layers.isScreenSpace(transform.layer) then
-                        run.screenSpace = true
+                const rowChunks = active:get(tilechunk.TileChunkComponent)
+                for index = assert(first), assert(last) do
+                    const chunk = rowChunks ~= nil and rowChunks[index] or nil
+                    if chunk ~= nil and archetype.has(active, tilechunk.DirtyTileChunk) then
+                        self.world:remove(active.entities[index], tilechunk.DirtyTileChunk)
                     end
-                    const oldImage, oldSampler, oldLane, oldFlag = imageIds[
-                        rows
-                    ], samplers[rows], lanes[rows], castFlags[rows]
-                    const tint = rowTints[index]
-                    const depth = layers.depthOf(transform.layer, transform.z, transform.x, transform.y)
-                    if entities[rows] ~= active.entities[index] or depths[rows] ~= depth then
-                        orderChanged = true
-                    end
-                    entities[rows] = active.entities[index]
-                    tints[rows] = tint
-                    depths[rows] = depth
-                    -- The lane is the tint's alpha and nothing else. The G-buffer pass
-                    -- writes with replace and has nowhere to put partial coverage, so
-                    -- an entity that is not fully opaque leaves for the forward pass,
-                    -- where the depth it already sorted by decides it against the
-                    -- opaque geometry in front of it.
-                    const blended = tint.a < 1.0 or layers.isOverlay(transform.layer)
-                    lanes[rows] = blended and LANE_BLEND or LANE_OPAQUE
-                    -- A blended entity casts nothing: it never reaches the G-buffer, so
-                    -- a hard silhouette of it would be a lie. An entity carrying both
-                    -- cast components is an occluder, because dropping that half would
-                    -- silently unblock a light.
-                    local flag: integer = 0
-                    local height: number = 0.0
-                    if not blended then
-                        if rowOccluders ~= nil then
-                            flag = FLAG_OCCLUDER
-                            height = rowOccluders[index].height
-                        elseif rowDropShadows ~= nil then
-                            flag = FLAG_DROP_SHADOW
-                            height = rowDropShadows[index].height
+                    for cell = 1, chunk ~= nil and 256 or 1 do
+                        if chunk ~= nil and (chunk.tiles[cell] as integer) % 536870912 == 0 then
+                            goto nextTile
                         end
-                    end
-                    castFlags[rows] = flag
-                    castHeights[rows] = flag == 0 and 0.0 or height
-                    if rowMaterials == nil then
-                        materialIds[rows] = 0
-                        params[rows] = 0.25
-                    else
-                        const material = rowMaterials[index]
-                        if material.id < 0 or material.id >= materialCount then
-                            error(
-                                "framepacket: material id " .. tostring(
-                                    material.id
-                                ) .. " is not one this build carries",
-                                3
-                            )
+                        rows = rows + 1
+                        transforms[rows] = rowTransforms[index]
+                        const transform = presented(transforms[rows], previous ~= nil and previous[index] or nil, alpha)
+                        const tileSprite = chunk ~= nil and tilechunk.place(chunk, cell, transform) or nil
+                        self.clipIds[rows] = rowClips and rowClips[index].index or 0
+                        if layers.isScreenSpace(transform.layer) then
+                            run.screenSpace = true
                         end
-                        materialIds[rows] = material.id
-                        params[rows] = material.param
-                    end
-                    if rowSprites == nil then
-                        imageIds[rows] = 0
-                        samplers[rows] = 0
-                        u0[rows] = 0.0
-                        v0[rows] = 0.0
-                        u1[rows] = 1.0
-                        v1[rows] = 1.0
-                    else
-                        const sprite = rowSprites[index]
-                        const image = sprite.image
-                        -- An image that never became resident draws against the
-                        -- backend's white fallback rather than dropping the entity.
-                        if image ~= 0 and images.stateOf(image) == "resident" then
-                            imageIds[rows] = image
-                            samplers[rows] = images.samplerOf(image)
+                        const oldImage, oldSampler, oldLane, oldFlag = imageIds[
+                            rows
+                        ], samplers[rows], lanes[rows], castFlags[rows]
+                        const tint = rowTints[index]
+                        const depth = layers.depthOf(transform.layer, transform.z, transform.x, transform.y)
+                        if entities[rows] ~= active.entities[index] or depths[rows] ~= depth then
+                            orderChanged = true
+                        end
+                        entities[rows] = active.entities[index]
+                        tints[rows] = tint
+                        depths[rows] = depth
+                        -- The lane is the tint's alpha and nothing else. The G-buffer
+                        -- pass writes with replace and has nowhere to put partial
+                        -- coverage, so an entity that is not fully opaque leaves for
+                        -- the forward pass, where the depth it already sorted by
+                        -- decides it against the opaque geometry in front of it.
+                        const blended = tint.a < 1.0 or layers.isOverlay(transform.layer)
+                        lanes[rows] = blended and LANE_BLEND or LANE_OPAQUE
+                        -- A blended entity casts nothing: it never reaches the
+                        -- G-buffer, so a hard silhouette of it would be a lie. An
+                        -- entity carrying both cast components is an occluder, because
+                        -- dropping that half would silently unblock a light.
+                        local flag: integer = 0
+                        local height: number = 0.0
+                        if not blended then
+                            if rowOccluders ~= nil then
+                                flag = FLAG_OCCLUDER
+                                height = rowOccluders[index].height
+                            elseif rowDropShadows ~= nil then
+                                flag = FLAG_DROP_SHADOW
+                                height = rowDropShadows[index].height
+                            end
+                        end
+                        castFlags[rows] = flag
+                        castHeights[rows] = flag == 0 and 0.0 or height
+                        if rowMaterials == nil then
+                            materialIds[rows] = 0
+                            params[rows] = 0.25
                         else
+                            const material = rowMaterials[index]
+                            if material.id < 0 or material.id >= materialCount then
+                                error(
+                                    "framepacket: material id " .. tostring(
+                                        material.id
+                                    ) .. " is not one this build carries",
+                                    3
+                                )
+                            end
+                            materialIds[rows] = material.id
+                            params[rows] = material.param
+                        end
+                        if rowSprites == nil and tileSprite == nil then
                             imageIds[rows] = 0
                             samplers[rows] = 0
+                            u0[rows] = 0.0
+                            v0[rows] = 0.0
+                            u1[rows] = 1.0
+                            v1[rows] = 1.0
+                        else
+                            const sprite = tileSprite or assert(rowSprites)[index]
+                            const image = sprite.image
+                            -- An image that never became resident draws against the
+                            -- backend's white fallback rather than dropping the entity.
+                            if image ~= 0 and images.stateOf(image) == "resident" then
+                                imageIds[rows] = image
+                                samplers[rows] = images.samplerOf(image)
+                            else
+                                imageIds[rows] = 0
+                                samplers[rows] = 0
+                            end
+                            u0[rows] = sprite.u0
+                            v0[rows] = sprite.v0
+                            u1[rows] = sprite.u1
+                            v1[rows] = sprite.v1
                         end
-                        u0[rows] = sprite.u0
-                        v0[rows] = sprite.v0
-                        u1[rows] = sprite.u1
-                        v1[rows] = sprite.v1
-                    end
-                    if oldImage ~= imageIds[
-                        rows
-                    ] or oldSampler ~= samplers[rows] or oldLane ~= lanes[rows] or oldFlag ~= castFlags[rows] then
-                        self.batchDirty = true
+                        if oldImage ~= imageIds[
+                            rows
+                        ] or oldSampler ~= samplers[rows] or oldLane ~= lanes[rows] or oldFlag ~= castFlags[rows] then
+                            self.batchDirty = true
+                        end
+                        ::nextTile::
                     end
                 end
             end
@@ -708,6 +756,7 @@ local watched: {
     lighting.Occluder2DComponent,
     lighting.DropShadow2DComponent,
     clips.ClipComponent,
+    tilechunk.TileChunkComponent,
 }
 
 -- Port of SpriteExtractor.layoutPacked and its clean-run gate. Length or
@@ -736,9 +785,10 @@ local function sceneChanged(exclusive self: Extractor, eye: View, snapshot: bool
     local changed = force
     local _, _, alpha = self.world:getFixedTiming()
     unsafe do
-        for candidate, count in self.drawables:iter() do
+        for candidate, first, last, runKey in sources(self) do
             const active = candidate as archetype.Archetype
-            local run = self.runs[active.id]
+            const count = assert(last) - assert(first) + 1
+            local run = self.runs[assert(runKey)]
             if run == nil or run.archetype ~= active then
                 run = new Run(
                     archetype = active,
@@ -748,14 +798,12 @@ local function sceneChanged(exclusive self: Extractor, eye: View, snapshot: bool
                     valueAt = {},
                     dirty = true,
                     seen = true,
-                    screenSpace = false
+                    screenSpace = false,
+                    signature = ""
                 )
-                self.runs[active.id] = run
+                self.runs[assert(runKey)] = run
                 relayout = true
             end
-            relayout = relayout or run.offset ~= total or run.length ~= count
-            run.offset, run.length, run.seen = total, count as integer, true
-            total = total + run.length
             const structural = active:structuralCount()
             run.dirty = force or run.structAt ~= structural or (
                 alpha ~= self.cachedAlpha and active:get(rendercomponents.PreviousTransform2DComponent) ~= nil
@@ -766,6 +814,36 @@ local function sceneChanged(exclusive self: Extractor, eye: View, snapshot: bool
                 run.dirty = run.dirty or run.valueAt[index] ~= writes
                 run.valueAt[index] = writes
             end
+            const chunks = active:get(tilechunk.TileChunkComponent)
+            if run.dirty and chunks ~= nil then
+                local parts: {string} = {}
+                for _, component in ipairs(watched) do
+                    -- Every watched drawable component has native struct storage.
+                    const column = active:get(component) as any
+                    if column ~= nil then
+                        const item = column[assert(first)]
+                        parts[#parts + 1] = ffi.string(ffi.cast("const char *", item), ffi.sizeof(item))
+                    end
+                end
+                const signature = table.concat(parts)
+                run.dirty = force or run.signature ~= signature or (
+                    alpha ~= self.cachedAlpha and active:get(rendercomponents.PreviousTransform2DComponent) ~= nil
+                )
+                run.signature = signature
+            end
+            local length = run.length
+            if run.dirty then
+                length = count as integer
+                if chunks ~= nil then
+                    length = 0
+                    for index = assert(first), assert(last) do
+                        length = length + tilechunk.count(chunks[index])
+                    end
+                end
+            end
+            relayout = relayout or run.offset ~= total or run.length ~= length
+            run.offset, run.length, run.seen = total, length, true
+            total = total + length
             changed = changed or run.dirty
         end
     end

@@ -1,0 +1,214 @@
+module tecs.internal.tilechunk
+
+--[[Native 16 by 16 tile grids, extracted into retained GPU instances without
+creating an ECS entity for each tile. Tile IDs are one-based atlas indices;
+zero is empty. Bits 31, 30 and 29 retain Tiled's H, V and diagonal flips.]]
+
+local components = require("tecs.internal.components")
+local rendercomponents = require("tecs.internal.rendercomponents")
+local images = require("tecs.gfx.images")
+
+--- The number of cells along each chunk edge.
+export const SIZE: integer = 16
+
+--- A fixed tile grid stored inline in an archetype's native column.
+export struct TileChunk
+    --- Caller-writable. Selects the atlas image.
+    tileset: integer
+
+    --- Caller-writable. Sets atlas tile width in pixels.
+    tileWidth: number
+
+    --- Caller-writable. Sets atlas tile height in pixels.
+    tileHeight: number
+
+    --- Caller-writable. Sets atlas columns.
+    columns: integer
+
+    --- Caller-writable. Sets atlas tile spacing in pixels.
+    spacing: number
+
+    --- Caller-writable. Sets atlas edge margin in pixels.
+    margin: number
+
+    --- Caller-writable. Sets horizontal cell spacing in world units.
+    cellWidth: number
+
+    --- Caller-writable. Sets vertical cell spacing in world units.
+    cellHeight: number
+
+    --- Caller-writable. Offsets tile images horizontally within cells.
+    offsetX: number
+
+    --- Caller-writable. Offsets tile images vertically within cells.
+    offsetY: number
+
+    --- Caller-writable. Stores cells 1 through 256; element zero is unused.
+    tiles: uint32[257]
+end
+
+--- Supplies atlas geometry and a sparse one-based grid.
+export type Options = {
+    tileset: integer,
+    tileWidth: number?,
+    tileHeight: number?,
+    columns: integer?,
+    spacing: number?,
+    margin: number?,
+    cellWidth: number?,
+    cellHeight: number?,
+    offsetX: number?,
+    offsetY: number?,
+    tiles: {integer}?
+}
+
+local function make(options: Options): TileChunk
+    const value = new TileChunk()
+    value.tileset = options.tileset
+    value.tileWidth, value.tileHeight = options.tileWidth or 32, options.tileHeight or 32
+    value.columns = options.columns or 16
+    value.spacing, value.margin = options.spacing or 0, options.margin or 0
+    value.cellWidth, value.cellHeight = options.cellWidth or value.tileWidth, options.cellHeight or value.tileHeight
+    value.offsetX, value.offsetY = options.offsetX or 0, options.offsetY or 0
+    assert(
+        value.columns > 0 and value.tileWidth > 0 and value.tileHeight > 0,
+        "TileChunk requires positive atlas dimensions"
+    )
+    assert(
+        value.cellWidth > 0 and value.cellHeight > 0 and value.spacing >= 0 and value.margin >= 0,
+        "TileChunk requires positive cells and nonnegative spacing and margin"
+    )
+    const tiles = options.tiles or {}
+    unsafe do
+        for index = 1, 256 do
+            const id = tiles[index] or 0
+            assert(id >= 0 and id <= 4294967295 and id % 1 == 0, "TileChunk tile IDs must fit uint32")
+            value.tiles[index] = id
+        end
+    end
+
+    return value
+end
+
+--- Requests a resync after modifying the nested tile array through a shared view.
+export const DirtyTileChunk = components.newTagComponent({name = "DirtyTileChunk"})
+
+--- Constructs one chunk with a top-left transform and an optional tint.
+export const TileChunkComponent: components.FFIComponent<TileChunk> = components.newFFIComponent({
+    name = "TileChunk",
+    requires = {
+        rendercomponents.Transform2DComponent,
+        rendercomponents.TintComponent,
+        rendercomponents.Renderable2D,
+        DirtyTileChunk
+    },
+    construct = make,
+    default = function(): TileChunk
+        return make({tileset = 0})
+    end,
+    save = function(value: TileChunk): any
+        const tiles: {integer} = {}
+        unsafe do
+            for index = 1, 256 do
+                tiles[index] = value.tiles[index] as integer
+            end
+        end
+
+        return {
+            image = images.nameOf(value.tileset),
+            tileWidth = value.tileWidth,
+            tileHeight = value.tileHeight,
+            columns = value.columns,
+            spacing = value.spacing,
+            margin = value.margin,
+            cellWidth = value.cellWidth,
+            cellHeight = value.cellHeight,
+            offsetX = value.offsetX,
+            offsetY = value.offsetY,
+            tiles = tiles
+        }
+    end,
+    load = function(stored: any): TileChunk
+        const options = stored as Options
+        const image = stored.image as string?
+        options.tileset = image ~= nil and images.id(image) or 0
+        return make(options)
+    end
+})
+
+--- Counts occupied cells; called only when a chunk run changes.
+--- @param value the grid to inspect
+--- @return the number of drawable tiles
+export function count(value: TileChunk): integer
+    local total: integer = 0
+    unsafe do
+        for index = 1, 256 do
+            if (value.tiles[index] as integer) % 536870912 ~= 0 then
+                total = total + 1
+            end
+        end
+    end
+
+    return total
+end
+
+--- Places one occupied tile using the chunk's top-left pose.
+--- @param value the atlas and grid
+--- @param index the one-based cell
+--- @param pose the mutable output pose, initially the chunk pose
+--- @return the tile's atlas region
+export function place(value: TileChunk, index: integer, pose: rendercomponents.Transform2D): rendercomponents.Sprite
+    local encoded: integer = 0
+    unsafe do
+        encoded = value.tiles[index] as integer
+    end
+    const id = encoded % 536870912 - 1
+    const h = math.floor(encoded / 2147483648) % 2 ~= 0
+    const v = math.floor(encoded / 1073741824) % 2 ~= 0
+    const d = math.floor(encoded / 536870912) % 2 ~= 0
+    const x = ((index - 1) % 16) * value.cellWidth + value.tileWidth * 0.5 + value.offsetX
+    const y = (math.floor((index - 1) / 16) + 1) * value.cellHeight - value.tileHeight * 0.5 + value.offsetY
+    const c, s = math.cos(pose.rotation), math.sin(pose.rotation)
+    pose.x, pose.y = pose.x
+        + x
+        * pose.scaleX
+        * c
+        - y
+        * pose.scaleY
+        * s, pose.y
+        + x
+        * pose.scaleX
+        * s
+        + y
+        * pose.scaleY
+        * c
+    pose.scaleX, pose.scaleY = pose.scaleX * value.tileWidth, pose.scaleY * value.tileHeight
+    if d then
+        pose.rotation = pose.rotation + math.pi * 0.5
+        pose.scaleY = -pose.scaleY
+        if h then
+            pose.scaleY = -pose.scaleY
+        end
+        if v then
+            pose.scaleX = -pose.scaleX
+        end
+    else
+        if h then
+            pose.scaleX = -pose.scaleX
+        end
+        if v then
+            pose.scaleY = -pose.scaleY
+        end
+    end
+    const width, height = images.sizeOf(value.tileset)
+    const u = value.margin + (id % value.columns) * (value.tileWidth + value.spacing)
+    const w = value.margin + math.floor(id / value.columns) * (value.tileHeight + value.spacing)
+
+    return new rendercomponents.Sprite(
+        value.tileset,
+        u / math.max(1, width),
+        w / math.max(1, height),
+        (u + value.tileWidth) / math.max(1, width),
+        (w + value.tileHeight) / math.max(1, height)
+    )
+end

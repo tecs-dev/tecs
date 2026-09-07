@@ -50,9 +50,11 @@ world:spawn(
 )
 ```
 
-Tiles draw as ordinary sprite entities through Tecs batching and GPU culling.
-`TileSource` retains the local tile ID, tileset name, class and custom
-properties. Despawning the map cascades to its children. Removing `Tilemap`
+Static atlas tiles draw through 16×16 [TileChunks](tile-chunks.md), grouped
+by layer and tileset. Animated and image-collection tiles use sprite entities.
+Both use GPU instancing and culling. `TileSource` on tile sprites retains the
+local tile ID, tileset name, class and custom properties; static tile metadata
+remains in the loaded map. Despawning the map cascades to its children. Removing `Tilemap`
 removes its generated visuals while preserving gameplay objects.
 
 ## Layers, tilesets and animation
@@ -79,7 +81,7 @@ Atlas spacing and margins are respected.
 
 Other map orientations and non-normal layer blend modes raise an error.
 TMJ and TSJ JSON files are not input formats. Map loading currently creates
-all nonempty tile entities; infinite-map support is not an on-demand world
+all nonempty chunks and animated or image-collection sprites; infinite-map support is not an on-demand world
 streamer. Materials use the normal sprite material unless game code changes
 an entity's `Material`.
 
@@ -96,8 +98,9 @@ tecs.tiled.setTile(map, index, 10, 15, nil) -- clear the cell
 Layer and tileset indices are **one-based**. Tile IDs within a tileset and
 cell coordinates are **zero-based**. `getTile` returns nil for an empty cell.
 Use `setTile` for edits: it validates the coordinate and tile reference and
-rebuilds only that cell in every live instance sharing the map. The same edit
-updates its collision boundaries. Mutating `map.layers[].cells` directly does
+updates the affected chunk or sprite in every live instance sharing the map.
+The same edit rebuilds that chunk's collision boundaries. Transitions between
+static and animated tiles create or remove the corresponding sprite. Mutating `map.layers[].cells` directly does
 not notify instances.
 
 `worldToTile(map, x, y)` floors **local map pixels** to tile coordinates;

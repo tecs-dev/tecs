@@ -138,3 +138,15 @@ export type Material = materials.Material
 --- Constructs a material selection, defaulting to `textured` at parameter
 --- one quarter.
 export const Material = materials.MaterialComponent
+
+--- A native 16 by 16 grid of static atlas tiles.
+export type TileChunk = tecs.internal.tilechunk.TileChunk
+
+--- Constructs a tile chunk positioned by its top-left Transform2D.
+export const TileChunk = tecs.internal.tilechunk.TileChunkComponent
+
+--- Requests synchronization after a nested tile-array edit.
+export const DirtyTileChunk = tecs.internal.tilechunk.DirtyTileChunk
+
+--- The number of cells along a tile chunk edge.
+export const TILE_CHUNK_SIZE = tecs.internal.tilechunk.SIZE

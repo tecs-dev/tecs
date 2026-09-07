@@ -513,3 +513,13 @@ The Linux host uses a relative `DT_RPATH` so service loads originating in the
 shared Nupp runtime also find the packaged `lib/` directory.
 
 See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for dependency notices.
+
+## Static tile storage
+
+Static Tiled tiles use 16×16 native TileChunk grids, preserving the original
+engine's distinction between chunked scenery and individually animated sprites.
+One entity per static tile imposed ECS allocation and update costs for scenery
+that changes only on edits. Chunks retain their extracted GPU instances and
+patch changed ranges through the existing renderer. The compact tile-ID GPU
+buffer from the earlier renderer is not restored by this change; GPU storage
+still uses the shared instance layout.

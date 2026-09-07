@@ -19,18 +19,18 @@ function suite.rendersAnimatesAndEditsOneCell(): nil
     local root = tecs.tiled.spawn(world, map)
     world:update(0)
     local children = world:relationshipSources(tecs.ecs.ChildOf, root)
-    nupp.test.equal(#children, 5)
+    nupp.test.equal(#children, 2)
     local entity = children[1]
     local original = assert(world:get(entity, tecs.gfx.Sprite)).u0
     world:update(0.15)
     nupp.test.assert(assert(world:get(entity, tecs.gfx.Sprite)).u0 ~= original)
     tecs.tiled.setTile(map, 1, 2, 0, {tileset = 1, id = 1})
     world:update(0)
-    nupp.test.equal(#world:relationshipSources(tecs.ecs.ChildOf, root), 6)
+    nupp.test.equal(#world:relationshipSources(tecs.ecs.ChildOf, root), 2)
     nupp.test.assert(world:isAlive(entity))
     tecs.tiled.setTile(map, 1, 2, 0, nil)
     world:update(0)
-    nupp.test.equal(#world:relationshipSources(tecs.ecs.ChildOf, root), 5)
+    nupp.test.equal(#world:relationshipSources(tecs.ecs.ChildOf, root), 2)
     world:despawn(root)
     world:commit()
     nupp.test.equal(world.liveCount, 0)
@@ -97,6 +97,95 @@ function suite.rendersTileObjectsAndReusesRepeatingImages(): nil
     world:remove(root, tecs.tiled.Tilemap)
     world:update(0)
     nupp.test.equal(#world:relationshipSources(tecs.ecs.ChildOf, root), 0)
+    world:shutdown()
+end
+
+local function countComponent(world: tecs.ecs.World, component: tecs.ecs.Component): integer
+    return world:newQuery({include = {component}}):count()
+end
+
+function suite.groupsStaticTilesAndKeepsAnimatedSprites(): nil
+    const world = tecs.ecs.newWorld()
+    const map = tecs.tiled.load("tests/fixtures/tiled/maps/level.tmx")
+    const root = tecs.tiled.spawn(world, map)
+    world:update(0)
+    nupp.test.equal(countComponent(world, tecs.gfx.TileChunk), 1)
+    nupp.test.equal(countComponent(world, tecs.gfx.Sprite), 1)
+    nupp.test.equal(countComponent(world, tecs.tiled.TileSource), 1)
+    local chunkId: integer = 0
+    for _, id in ipairs(world:relationshipSources(tecs.ecs.ChildOf, root)) do
+        if world:has(id, tecs.gfx.TileChunk) then
+            chunkId = id
+        end
+    end
+    const chunk = assert(world:get(chunkId, tecs.gfx.TileChunk))
+    unsafe do
+        nupp.test.equal(chunk.tiles[2], 2)
+        nupp.test.equal(chunk.tiles[17], 2147483650)
+        nupp.test.equal(chunk.tiles[18], 1073741826)
+        nupp.test.equal(chunk.tiles[19], 536870914)
+    end
+    -- Move a cell from static to animated, then back, preserving its chunk.
+    tecs.tiled.setTile(map, 1, 1, 0, {tileset = 1, id = 0})
+    world:update(0)
+    nupp.test.equal(countComponent(world, tecs.gfx.Sprite), 2)
+    nupp.test.assert(world:isAlive(chunkId))
+    tecs.tiled.setTile(map, 1, 1, 0, {tileset = 1, id = 1})
+    world:update(0)
+    nupp.test.equal(countComponent(world, tecs.gfx.Sprite), 1)
+    nupp.test.assert(world:isAlive(chunkId))
+    world:shutdown()
+end
+
+function suite.groupsByTilesetAndRegionIncludingNegativeCells(): nil
+    const world = tecs.ecs.newWorld()
+    const map = tecs.tiled.load("tests/fixtures/tiled/maps/level.tmx")
+    map.infinite = true
+    map.layers[1].cells = {}
+    map.layers[2].objects = {}
+    map.tilesets[2] = map.tilesets[1]
+    for y = 0, 15 do
+        for x = 0, 15 do
+            tecs.tiled.setTile(map, 1, x, y, {tileset = 1, id = 1})
+        end
+    end
+    tecs.tiled.setTile(map, 1, -1, -1, {tileset = 1, id = 1})
+    tecs.tiled.setTile(map, 1, 16, 0, {tileset = 1, id = 1})
+    tecs.tiled.setTile(map, 1, 1, 1, {tileset = 2, id = 1})
+    const root = tecs.tiled.spawn(world, map)
+    world:update(0)
+    nupp.test.equal(countComponent(world, tecs.gfx.TileChunk), 4)
+    nupp.test.equal(countComponent(world, tecs.gfx.Sprite), 0)
+    nupp.test.equal(world.liveCount, 5)
+    tecs.tiled.setTile(map, 1, -1, -1, nil)
+    world:update(0)
+    nupp.test.equal(countComponent(world, tecs.gfx.TileChunk), 3)
+    world:remove(root, tecs.tiled.Tilemap)
+    world:update(0)
+    nupp.test.equal(world.liveCount, 1)
+    world:shutdown()
+end
+
+function suite.staticMapsUseChunkCapacityInsteadOfTileCapacity(): nil
+    const world = tecs.ecs.newWorld({maxEntities = 257})
+    const map = tecs.tiled.load("tests/fixtures/tiled/maps/level.tmx")
+    map.width, map.height = 256, 256
+    map.layers[1].cells = {}
+    map.layers[2].objects = {}
+    for y = 0, 255 do
+        for x = 0, 255 do
+            map.layers[
+                1
+            ].cells[
+                #map.layers[1].cells + 1
+            ] = {x = x, y = y, tileset = 1, id = 1, flipH = false, flipV = false, flipD = false}
+        end
+    end
+    tecs.tiled.spawn(world, map)
+    world:update(0)
+    nupp.test.equal(countComponent(world, tecs.gfx.TileChunk), 256)
+    nupp.test.equal(countComponent(world, tecs.gfx.Sprite), 0)
+    nupp.test.equal(world.liveCount, 257)
     world:shutdown()
 end
 

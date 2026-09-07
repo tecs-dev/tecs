@@ -164,6 +164,8 @@ function suite.renderComponentNames(): nil
     test.equal(gfx.Renderable2D.componentName, "Renderable2D")
     test.equal(gfx.Clip.componentName, "Clip")
     test.equal(gfx.Material.componentName, "Material")
+    test.equal(gfx.TileChunk.componentName, "TileChunk")
+    test.equal(gfx.DirtyTileChunk.componentName, "DirtyTileChunk")
 end
 
 function suite.graphicsComponentNames(): nil

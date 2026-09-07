@@ -52,10 +52,8 @@ executes fragment bodies only for built-in pass names. A custom pass can allocat
 and clear targets at a named seam; without a backend implementation for its name,
 it draws nothing.
 
-Tiled maps are not an engine subsystem. Instanced sprites can render tiles, but
-map parsing, tileset resolution, object metadata, tile editing, and chunked
-spatial indexes belong to game-specific content and spatial policy rather than
-this render-pass graph.
+The Tiled subsystem owns map parsing, tilesets, edits and static TileChunks.
+Its chunks and animated sprites draw through this render-pass graph.
 
 Rendering uses one camera. The packet header carries one view and the cull tests
 one rectangle. Multi-view rendering would require a view table in the packet, a
