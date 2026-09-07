@@ -440,7 +440,7 @@ end
 --- A world containing entity identities and staged structural work.
 ---
 --- A world is an event source: observers register against it by address and
---- receive the world itself as their second argument.
+--- receive only the event they observed.
 export record World is nupp.events.Source<integer>
     private allocator: idallocator.IdAllocator
     private archetypes: {archetype.Archetype}
@@ -854,21 +854,21 @@ export record World is nupp.events.Source<integer>
         exclusive self: World,
         address: integer,
         event: Type<E>,
-        callback: nupp.events.Observer<E, World>,
+        callback: nupp.events.Observer<E>,
         id: string?
     ): nil
     observeOnce: function<E is nupp.events.Emittable>(
         exclusive self: World,
         address: integer,
         event: Type<E>,
-        callback: nupp.events.Observer<E, World>,
+        callback: nupp.events.Observer<E>,
         id: string?
     ): nil
     stopObserving: function<E is nupp.events.Emittable>(
         exclusive self: World,
         address: integer,
         event: Type<E>,
-        callbackOrId: nupp.events.Observer<E, World> | string
+        callbackOrId: nupp.events.Observer<E> | string
     ): boolean
     hasObservers: function<E is nupp.events.Emittable>(borrows self: World, address: integer, event: Type<E>): boolean
     emit: function<E is nupp.events.Emittable>(
@@ -2499,9 +2499,9 @@ end
 
 --- Registers an addressed typed-event observer.
 ---
---- Observers run in registration order and receive this world as their second
---- argument. A name lets `stopObserving` remove the registration by name; a
---- name already observing this event at this address is an error.
+--- Observers run in registration order and receive only the borrowed event. A
+--- name lets `stopObserving` remove the registration by name; a name already
+--- observing this event at this address is an error.
 --- @param self the world that owns the observer
 --- @param address zero for the world or an entity id
 --- @param event the event declaration
@@ -2512,7 +2512,7 @@ function World.observe<E is nupp.events.Emittable>(
     exclusive self: World,
     address: integer,
     event: Type<E>,
-    callback: nupp.events.Observer<E, World>,
+    callback: nupp.events.Observer<E>,
     id: string?
 ): nil
     nuppevents.observe(self, address, event, callback, id)
@@ -2532,7 +2532,7 @@ function World.observeOnce<E is nupp.events.Emittable>(
     exclusive self: World,
     address: integer,
     event: Type<E>,
-    callback: nupp.events.Observer<E, World>,
+    callback: nupp.events.Observer<E>,
     id: string?
 ): nil
     nuppevents.observeOnce(self, address, event, callback, id)
@@ -2555,7 +2555,7 @@ function World.stopObserving<E is nupp.events.Emittable>(
     exclusive self: World,
     address: integer,
     event: Type<E>,
-    callbackOrId: nupp.events.Observer<E, World> | string
+    callbackOrId: nupp.events.Observer<E> | string
 ): boolean
     return nuppevents.stopObserving(self, address, event, callbackOrId)
 end
@@ -2984,6 +2984,18 @@ local function publishSpawn(exclusive world: World, pending: PendingSpawn): nil
     world:emit(0, events.OnSpawn, id)
 end
 
+local function publishDespawnEvents(exclusive world: World, id: integer, source: archetype.Archetype, row: integer): nil
+    if world.observers.count == 0 then
+        return
+    end
+    local requestedDespawns: {integer} = {}
+    world:emit(id, events.OnDespawn, id, source, row, requestedDespawns)
+    world:emit(0, events.OnDespawn, id, source, row, requestedDespawns)
+    for index = 1, #requestedDespawns do
+        world:despawn(requestedDespawns[index])
+    end
+end
+
 local publishDespawn: function(exclusive world: World, id: integer): nil
 publishDespawn = function(exclusive world: World, id: integer): nil
     if not world:isAlive(id) then
@@ -3026,8 +3038,7 @@ publishDespawn = function(exclusive world: World, id: integer): nil
     archetypeId, row = idallocator.placement(world.allocator, slot)
     source = assert(world.archetypeById[archetypeId])
     unlinkOutgoing(world, source, row, id)
-    world:emit(id, events.OnDespawn, id)
-    world:emit(0, events.OnDespawn, id)
+    publishDespawnEvents(world, id, source, row)
     world:clearObservers(id)
     notifyQueries(world, source, nil, row, 1, false)
     removeFromArchetype(world, source, row)
@@ -3069,8 +3080,7 @@ local function publishMutationBatch(exclusive world: World, batch: MutationBatch
         if world.observers.count > 0 then
             for row = 1, batch.count do
                 const id = source.entities[row]
-                world:emit(id, events.OnDespawn, id)
-                world:emit(0, events.OnDespawn, id)
+                publishDespawnEvents(world, id, source, row - 1)
                 world:clearObservers(id)
             end
         end

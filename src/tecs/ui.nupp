@@ -1556,6 +1556,12 @@ export function resize(exclusive world: tecs.ecs.World, width: number, height: n
     state.previous = ""
 end
 
+local function resizeState(exclusive state: State, width: number, height: number, density: number?): nil
+    assert(width > 0 and height > 0 and (density or 1) > 0, "ui viewport must be positive")
+    state.width, state.height, state.density = width, height, density or 1
+    state.previous = ""
+end
+
 --- Runs layout, geometry and pending interaction for the current world state.
 --- @param world the installed world
 export function update(exclusive world: tecs.ecs.World): nil
@@ -1681,10 +1687,7 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
         state.pending[#state.pending + 1] = event
     end
 
-    world:observe(0, tecs.platform.events.MouseMotion, function(
-        event: tecs.platform.events.MouseMotion,
-        exclusive _running: tecs.ecs.World
-    ): nil
+    world:observe(0, tecs.platform.events.MouseMotion, function(event: tecs.platform.events.MouseMotion): nil
         queue(
             tecs.platform.events.pointerMoved(
                 event.x,
@@ -1697,10 +1700,7 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
             )
         )
     end)
-    world:observe(0, tecs.platform.events.MouseDown, function(
-        event: tecs.platform.events.MouseDown,
-        exclusive _running: tecs.ecs.World
-    ): nil
+    world:observe(0, tecs.platform.events.MouseDown, function(event: tecs.platform.events.MouseDown): nil
         queue(
             tecs.platform.events.pointerButton(
                 true,
@@ -1714,10 +1714,7 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
             )
         )
     end)
-    world:observe(0, tecs.platform.events.MouseUp, function(
-        event: tecs.platform.events.MouseUp,
-        exclusive _running: tecs.ecs.World
-    ): nil
+    world:observe(0, tecs.platform.events.MouseUp, function(event: tecs.platform.events.MouseUp): nil
         queue(
             tecs.platform.events.pointerButton(
                 false,
@@ -1731,10 +1728,7 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
             )
         )
     end)
-    world:observe(0, tecs.platform.events.MouseWheel, function(
-        event: tecs.platform.events.MouseWheel,
-        exclusive _running: tecs.ecs.World
-    ): nil
+    world:observe(0, tecs.platform.events.MouseWheel, function(event: tecs.platform.events.MouseWheel): nil
         queue(
             tecs.platform.events.wheel(
                 event.wheelX,
@@ -1769,34 +1763,19 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
         )
     end
 
-    world:observe(0, tecs.platform.events.FingerDown, function(
-        event: tecs.platform.events.FingerDown,
-        exclusive _running: tecs.ecs.World
-    ): nil
+    world:observe(0, tecs.platform.events.FingerDown, function(event: tecs.platform.events.FingerDown): nil
         queueTouch(event)
     end)
-    world:observe(0, tecs.platform.events.FingerMotion, function(
-        event: tecs.platform.events.FingerMotion,
-        exclusive _running: tecs.ecs.World
-    ): nil
+    world:observe(0, tecs.platform.events.FingerMotion, function(event: tecs.platform.events.FingerMotion): nil
         queueTouch(event)
     end)
-    world:observe(0, tecs.platform.events.FingerUp, function(
-        event: tecs.platform.events.FingerUp,
-        exclusive _running: tecs.ecs.World
-    ): nil
+    world:observe(0, tecs.platform.events.FingerUp, function(event: tecs.platform.events.FingerUp): nil
         queueTouch(event)
     end)
-    world:observe(0, tecs.platform.events.FingerCanceled, function(
-        event: tecs.platform.events.FingerCanceled,
-        exclusive _running: tecs.ecs.World
-    ): nil
+    world:observe(0, tecs.platform.events.FingerCanceled, function(event: tecs.platform.events.FingerCanceled): nil
         queueTouch(event)
     end)
-    world:observe(0, tecs.platform.events.KeyDown, function(
-        event: tecs.platform.events.KeyDown,
-        exclusive _running: tecs.ecs.World
-    ): nil
+    world:observe(0, tecs.platform.events.KeyDown, function(event: tecs.platform.events.KeyDown): nil
         queue(
             tecs.platform.events.key(
                 true,
@@ -1812,31 +1791,21 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
         )
     end)
     world:observe(0, tecs.platform.events.GamepadButtonDown, function(
-        event: tecs.platform.events.GamepadButtonDown,
-        exclusive _running: tecs.ecs.World
+        event: tecs.platform.events.GamepadButtonDown
     ): nil
         queue(tecs.platform.events.gamepadButton(true, event.which, event.button, event.timestamp, event.sequence))
     end)
-    world:observe(0, tecs.platform.events.WindowFocusLost, function(
-        event: tecs.platform.events.WindowFocusLost,
-        exclusive _running: tecs.ecs.World
-    ): nil
+    world:observe(0, tecs.platform.events.WindowFocusLost, function(event: tecs.platform.events.WindowFocusLost): nil
         queue(tecs.platform.events.focused(false, event.window, event.timestamp, event.sequence))
     end)
-    world:observe(0, tecs.platform.events.WindowResized, function(
-        event: tecs.platform.events.ResizeEvent,
-        exclusive running: tecs.ecs.World
-    ): nil
+    world:observe(0, tecs.platform.events.WindowResized, function(event: tecs.platform.events.ResizeEvent): nil
         if event.width > 0 and event.height > 0 then
-            resize(running, event.width, event.height, event.scaleFactor)
+            resizeState(state, event.width, event.height, event.scaleFactor)
         end
     end)
-    world:observe(0, tecs.platform.events.WindowScaleChanged, function(
-        event: tecs.platform.events.ResizeEvent,
-        exclusive running: tecs.ecs.World
-    ): nil
+    world:observe(0, tecs.platform.events.WindowScaleChanged, function(event: tecs.platform.events.ResizeEvent): nil
         if event.width > 0 and event.height > 0 then
-            resize(running, event.width, event.height, event.scaleFactor)
+            resizeState(state, event.width, event.height, event.scaleFactor)
         end
     end)
     world:addSnapshotHandler({

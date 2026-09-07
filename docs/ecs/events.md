@@ -11,11 +11,16 @@ the world, and an entity ID addresses that entity. The world constructs the
 event into storage it already owns, and only when something is observing, then
 hands it to each observer as a borrow for the call.
 
+Observers receive only that event. Capture other state in the callback when it
+already belongs to the surrounding scope. `OnDespawn` also provides `get` and
+`despawn` operations for the narrow teardown work that must happen before the
+entity is removed.
+
 The entry plugin below watches every despawn at the world address:
 
 ```nupp
-world:observe(0, tecs.ecs.OnDespawn, function(event: tecs.ecs.OnDespawn, exclusive world: tecs.ecs.World): nil
-    local transform = world:get(event.entity, tecs.ecs.Transform2D)
+world:observe(0, tecs.ecs.OnDespawn, function(event: tecs.ecs.OnDespawn): nil
+    local transform = event:get(tecs.ecs.Transform2D)
     if transform then
         spawnDebrisAt(world, transform.x, transform.y)
     end

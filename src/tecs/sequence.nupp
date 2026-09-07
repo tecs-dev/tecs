@@ -930,8 +930,9 @@ export function signalOnEvent<E is events.Emittable>(exclusive world: ecs.World,
     if name == "" then
         error("sequence.signalOnEvent requires a non-empty signal name", 2)
     end
-    world:observe(0, event, function(_value: E, exclusive observing: ecs.World): nil
-        signal(observing, name)
+    local state = stateFor(world)
+    world:observe(0, event, function(_value: E): nil
+        state.pendingSignals[#state.pendingSignals + 1] = name
     end)
 end
 
@@ -1295,9 +1296,20 @@ export function plugin(exclusive world: ecs.World): nil
     })
 
     -- Owner lifetime: a despawned owner cancels the playbacks it governs.
-    world:observe(0, ecs.OnDespawn, function(value: ecs.OnDespawn, exclusive despawning: ecs.World): nil
+    world:observe(0, ecs.OnDespawn, function(value: ecs.OnDespawn): nil
         if state.ownerIndex[value.entity] ~= nil then
-            cancelOwnedBy(despawning, value.entity, "targetLost")
+            local owned = assert(state.ownerIndex[value.entity])
+            local slots: {integer} = {}
+            for slot in pairs(owned) do
+                slots[#slots + 1] = slot
+            end
+            table.sort(slots)
+            for index = 1, #slots do
+                local cursor = state.cursors[slots[index]]
+                if cursor ~= nil and cursor.alive then
+                    sequencecursors.retire(state, cursor, "canceled", "targetLost")
+                end
+            end
         end
     end)
 end

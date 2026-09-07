@@ -43,14 +43,11 @@ function suite.dispatchesOnlyTheMatchingTypedEvent(): nil
     local world = ecs.newWorld()
     local downs = 0
     local ups = 0
-    world:observe(0, platformevents.KeyDown, function(
-        event: platformevents.KeyEvent,
-        exclusive _running: ecs.World
-    ): nil
+    world:observe(0, platformevents.KeyDown, function(event: platformevents.KeyEvent): nil
         test.assert(event.down)
         downs = downs + 1
     end)
-    world:observe(0, platformevents.KeyUp, function(event: platformevents.KeyEvent, exclusive _running: ecs.World): nil
+    world:observe(0, platformevents.KeyUp, function(event: platformevents.KeyEvent): nil
         test.assert(not event.down)
         ups = ups + 1
     end)
@@ -76,16 +73,10 @@ function suite.routesPointerAndTextPayloads(): nil
     local world = ecs.newWorld()
     local pointerX = 0
     local typed = ""
-    world:observe(0, platformevents.MouseMotion, function(
-        event: platformevents.PointerMoveEvent,
-        exclusive _running: ecs.World
-    ): nil
+    world:observe(0, platformevents.MouseMotion, function(event: platformevents.PointerMoveEvent): nil
         pointerX = event.x
     end)
-    world:observe(0, platformevents.TextInput, function(
-        event: platformevents.TextEvent,
-        exclusive _running: ecs.World
-    ): nil
+    world:observe(0, platformevents.TextInput, function(event: platformevents.TextEvent): nil
         typed = event.text
     end)
 
@@ -196,28 +187,16 @@ end
 function suite.dispatchesTouchAndGamepadToTheirOwnObservers(): nil
     local world = ecs.newWorld()
     local seen: {string} = {}
-    world:observe(0, platformevents.FingerDown, function(
-        event: platformevents.TouchEvent,
-        exclusive _running: ecs.World
-    ): nil
+    world:observe(0, platformevents.FingerDown, function(event: platformevents.TouchEvent): nil
         seen[#seen + 1] = event.kind
     end)
-    world:observe(0, platformevents.FingerCanceled, function(
-        event: platformevents.TouchEvent,
-        exclusive _running: ecs.World
-    ): nil
+    world:observe(0, platformevents.FingerCanceled, function(event: platformevents.TouchEvent): nil
         seen[#seen + 1] = event.kind
     end)
-    world:observe(0, platformevents.GamepadRemoved, function(
-        event: platformevents.GamepadDeviceEvent,
-        exclusive _running: ecs.World
-    ): nil
+    world:observe(0, platformevents.GamepadRemoved, function(event: platformevents.GamepadDeviceEvent): nil
         seen[#seen + 1] = event.kind
     end)
-    world:observe(0, platformevents.GamepadAxis, function(
-        event: platformevents.GamepadAxisEvent,
-        exclusive _running: ecs.World
-    ): nil
+    world:observe(0, platformevents.GamepadAxis, function(event: platformevents.GamepadAxisEvent): nil
         seen[#seen + 1] = event.kind
     end)
 

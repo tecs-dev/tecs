@@ -2058,16 +2058,16 @@ export function install(exclusive world: ecs.World, options: Options?): contract
     world:observe(
         0,
         ecs.OnDespawn,
-        function(value: ecs.OnDespawn, exclusive running: ecs.World): nil
-            local shape = running:get(value.entity, ColliderShape)
+        function(value: ecs.OnDespawn): nil
+            local shape = value:get(ColliderShape)
             if shape ~= nil and shape.index1 ~= 0 and shape.world0 == state.simulation.id then
                 state.simulation.queueDestroyCollider(shape.index1, shape.generation)
             end
-            local joint = running:get(value.entity, JointLink)
+            local joint = value:get(JointLink)
             if joint ~= nil and joint.index1 ~= 0 and joint.world0 == state.simulation.id then
                 state.simulation.queueDestroyJoint(joint.index1, joint.generation)
             end
-            local body = running:get(value.entity, RigidBody)
+            local body = value:get(RigidBody)
             if body ~= nil and body.index1 ~= 0 and body.world0 == state.simulation.id then
                 state.simulation.queueDestroyBody(body.index1, body.generation)
             end

@@ -532,17 +532,17 @@ function suite.initializesTheWholeGlyphBatchBeforeSpawnObservers(): nil
     const world = newWorld()
     local observed: integer = 0
     local owner: integer = 0
-    world:observe(0, ecs.OnSpawn, function(event: ecs.OnSpawn, exclusive running: ecs.World): nil
-        if not running:has(event.entity, gfx.TextGlyph) then
+    world:observe(0, ecs.OnSpawn, function(event: ecs.OnSpawn): nil
+        if not world:has(event.entity, gfx.TextGlyph) then
             return
         end
         observed = observed + 1
-        const held = text.glyphsOf(running, owner)
+        const held = text.glyphsOf(world, owner)
         test.equal(#held, 12)
         for _, id in ipairs(held) do
-            test.assert(running:isAlive(id))
-            test.assert(assert(running:get(id, ecs.Transform2D)).scaleX > 0)
-            test.equal(assert(running:get(id, gfx.Sprite)).image, fonts.imageOf(font()))
+            test.assert(world:isAlive(id))
+            test.assert(assert(world:get(id, ecs.Transform2D)).scaleX > 0)
+            test.equal(assert(world:get(id, gfx.Sprite)).image, fonts.imageOf(font()))
         end
     end)
     owner = world:spawn(gfx.Text("abcdefghijkl", font(), 20), ecs.Transform2D(50, 80))

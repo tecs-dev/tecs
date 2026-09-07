@@ -948,8 +948,22 @@ export function install(exclusive world: ecs.World): nil
     world:observe(
         0,
         ecs.OnDespawn,
-        function(event: ecs.OnDespawn, exclusive running: ecs.World): nil
-            releaseGlyphs(running, state, event.entity)
+        function(event: ecs.OnDespawn): nil
+            const held = state.owned[event.entity]
+            if held == nil then
+                return
+            end
+            for index = 1, #held do
+                const glyph = held[index]
+                if state.resident[glyph] then
+                    state.resident[glyph] = nil
+                    state.residentCount = state.residentCount - 1
+                end
+                event:despawn(glyph)
+            end
+            state.owned[event.entity] = nil
+            state.built[event.entity] = nil
+            state.ownerCount = state.ownerCount - 1
         end,
         "tecs.TextLayout"
     )

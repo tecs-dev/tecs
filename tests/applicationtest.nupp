@@ -37,10 +37,7 @@ function suite.deliversASealedEventBatchBeforeTheFrame(): nil
             delivered[#delivered + 1] = event.kind
         end,
         plugin = function(exclusive running: application.Application): nil
-            running.world:observe(0, platformevents.WindowResized, function(
-                event: platformevents.ResizeEvent,
-                exclusive _world: ecs.World
-            ): nil
+            running.world:observe(0, platformevents.WindowResized, function(event: platformevents.ResizeEvent): nil
                 resizeWidth = event.width
             end)
             running.world:addSystem({

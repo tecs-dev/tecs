@@ -358,16 +358,16 @@ function suite.emitsContactAndSensorEventsFromTheDrainedBuffer(): nil
     world:update(STEP)
 
     local seen: {string} = {}
-    world:observe(0, physics.ContactBegin, function(value: physics.ContactBegin, exclusive _running: ecs.World): nil
+    world:observe(0, physics.ContactBegin, function(value: physics.ContactBegin): nil
         seen[#seen + 1] = ("contactBegin %d %d"):format(value.entityA, value.entityB)
     end)
-    world:observe(0, physics.ContactEnd, function(value: physics.ContactEnd, exclusive _running: ecs.World): nil
+    world:observe(0, physics.ContactEnd, function(value: physics.ContactEnd): nil
         seen[#seen + 1] = ("contactEnd %d %d"):format(value.entityA, value.entityB)
     end)
-    world:observe(0, physics.SensorBegin, function(value: physics.SensorBegin, exclusive _running: ecs.World): nil
+    world:observe(0, physics.SensorBegin, function(value: physics.SensorBegin): nil
         seen[#seen + 1] = ("sensorBegin %d %d"):format(value.sensor, value.visitor)
     end)
-    world:observe(0, physics.SensorEnd, function(value: physics.SensorEnd, exclusive _running: ecs.World): nil
+    world:observe(0, physics.SensorEnd, function(value: physics.SensorEnd): nil
         seen[#seen + 1] = ("sensorEnd %d %d"):format(value.sensor, value.visitor)
     end)
 

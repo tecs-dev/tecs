@@ -60,7 +60,7 @@ function suite.routesPointerActivationAndFocus(): nil
     local root = world:spawn(tecs.ui.Root(), tecs.ui.Style({width = 200, height = 100}))
     local button = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 80, height = 30}), tecs.ui.Interaction())
     local activated = 0
-    world:observe(button, tecs.ui.Event, function(event: tecs.ui.Event, exclusive _world: tecs.ecs.World): nil
+    world:observe(button, tecs.ui.Event, function(event: tecs.ui.Event): nil
         if event.kind == "activate" then
             activated = activated + 1
         end
@@ -154,7 +154,7 @@ function suite.restoresLayoutsAndCancelsHiddenInteractions(): nil
     local root = world:spawn(tecs.ui.Root(), tecs.ui.Style({width = "100%", height = "100%"}))
     local button = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 80, height = 30}), tecs.ui.Interaction())
     local activated = 0
-    world:observe(button, tecs.ui.Event, function(event: tecs.ui.Event, exclusive _world: tecs.ecs.World): nil
+    world:observe(button, tecs.ui.Event, function(event: tecs.ui.Event): nil
         if event.kind == "activate" then
             activated = activated + 1
         end

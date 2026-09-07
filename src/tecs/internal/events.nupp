@@ -132,12 +132,28 @@ end
 @event(name = "OnDespawn")
 export record OnDespawn
     entity: integer
+
+    --- Engine-owned. Identifies the entity's last committed archetype.
+    source: archetype.Archetype
+
+    --- Engine-owned. Identifies the entity's zero-based row before removal.
+    row: integer
+
+    --- Engine-owned. Collects dependent entities observers ask to despawn.
+    requestedDespawns: {integer}
+
+    --- Reads one of the entity's committed components before removal.
+    function get<C is components.Component>(borrows self: OnDespawn, component: C): C.Value?
+        return archetype.valueAt(self.source, self.row, component)
+    end
+
+    --- Stages another entity for despawn at the same commit barrier.
+    function despawn(self: OnDespawn, entity: integer): nil
+        self.requestedDespawns[#self.requestedDespawns + 1] = entity
+    end
 end
 
 --- The payload shared by entity spawn and despawn lifecycle events.
----
---- Either lifecycle event fits an observer written against this, since both
---- carry the same field.
 export type EntityLifecycle = OnSpawn | OnDespawn
 
 --- Fires at address zero after a state becomes active.

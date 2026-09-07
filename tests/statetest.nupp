@@ -83,16 +83,16 @@ function suite.emitsTypedStateTransitions(): nil
     local seen: {string} = {}
     world:createState("test.state.events.base")
     world:createState("test.state.events.top")
-    world:observe(0, ecs.StateEnter, function(event: ecs.StateChange, exclusive _running: ecs.World): nil
+    world:observe(0, ecs.StateEnter, function(event: ecs.StateChange): nil
         seen[#seen + 1] = "enter:" .. event.state
     end)
-    world:observe(0, ecs.StateBlur, function(event: ecs.StateBlurChange, exclusive _running: ecs.World): nil
+    world:observe(0, ecs.StateBlur, function(event: ecs.StateBlurChange): nil
         seen[#seen + 1] = "blur:" .. event.state .. ":" .. event.pushed
     end)
-    world:observe(0, ecs.StateExit, function(event: ecs.StateChange, exclusive _running: ecs.World): nil
+    world:observe(0, ecs.StateExit, function(event: ecs.StateChange): nil
         seen[#seen + 1] = "exit:" .. event.state
     end)
-    world:observe(0, ecs.StateFocus, function(event: ecs.StateFocusChange, exclusive _running: ecs.World): nil
+    world:observe(0, ecs.StateFocus, function(event: ecs.StateFocusChange): nil
         seen[#seen + 1] = "focus:" .. event.state .. ":" .. event.popped
     end)
     world:pushState("test.state.events.base")

@@ -18,8 +18,8 @@ function suite.constructsAndDeliversTypedAddressedEvents(): nil
     value:observe(
         0,
         Message,
-        function(event: Message, exclusive running: world.World): nil
-            test.assert(running == value)
+        function(event: Message): nil
+            test.equal(value.observers.count, 1)
             seen = event.text
         end,
         "listener"
@@ -38,10 +38,10 @@ function suite.keepsAddressesIndependent(): nil
     local entityCalls: integer = 0
     local entity = value:spawn()
     value:commit()
-    value:observe(0, Message, function(_event: Message, exclusive _running: world.World): nil
+    value:observe(0, Message, function(_event: Message): nil
         worldCalls = worldCalls + 1
     end)
-    value:observe(entity, Message, function(_event: Message, exclusive _running: world.World): nil
+    value:observe(entity, Message, function(_event: Message): nil
         entityCalls = entityCalls + 1
     end)
     value:emit(entity, Message, "entity")
@@ -60,16 +60,16 @@ function suite.stopsAnObserverNotYetReachedDuringDelivery(): nil
     value:observe(
         0,
         Message,
-        function(_event: Message, exclusive running: world.World): nil
+        function(_event: Message): nil
             firstCalls = firstCalls + 1
-            running:stopObserving(0, Message, "second")
+            value:stopObserving(0, Message, "second")
         end,
         "first"
     )
     value:observe(
         0,
         Message,
-        function(_event: Message, exclusive _running: world.World): nil
+        function(_event: Message): nil
             secondCalls = secondCalls + 1
         end,
         "second"
@@ -84,7 +84,7 @@ end
 function suite.removesEveryRegistrationOfACallback(): nil
     local value = world.new(2)
     local calls: integer = 0
-    local function count(borrows _event: Message, exclusive _running: world.World): nil
+    local function count(borrows _event: Message): nil
         calls = calls + 1
     end
 
@@ -102,9 +102,9 @@ end
 function suite.consumesAOnceObserverBeforeItRuns(): nil
     local value = world.new(2)
     local calls: integer = 0
-    value:observeOnce(0, Message, function(_event: Message, exclusive running: world.World): nil
+    value:observeOnce(0, Message, function(_event: Message): nil
         calls = calls + 1
-        running:emit(0, Message, "nested")
+        value:emit(0, Message, "nested")
     end)
     value:emit(0, Message, "first")
     value:emit(0, Message, "second")
@@ -115,10 +115,10 @@ end
 function suite.supportsNestedDelivery(): nil
     local value = world.new(2)
     local seen: {string} = {}
-    value:observe(0, Message, function(event: Message, exclusive running: world.World): nil
+    value:observe(0, Message, function(event: Message): nil
         seen[#seen + 1] = event.text
         if event.text == "outer" then
-            running:emit(0, Message, "inner")
+            value:emit(0, Message, "inner")
         end
     end)
     value:emit(0, Message, "outer")
@@ -127,7 +127,7 @@ end
 
 function suite.deliversAnInstanceTheCallerHoldsAndKeepsItsWrites(): nil
     local value = world.new(2)
-    value:observe(0, Message, function(event: Message, exclusive _running: world.World): nil
+    value:observe(0, Message, function(event: Message): nil
         event.text = event.text .. "!"
     end)
     local held = new Message(text = "hello")
@@ -138,10 +138,10 @@ end
 function suite.finishesCurrentDeliveryWhenItsAddressIsCleared(): nil
     local value = world.new(2)
     local secondRan: boolean = false
-    value:observe(0, Message, function(_event: Message, exclusive running: world.World): nil
-        running:clearObservers(0)
+    value:observe(0, Message, function(_event: Message): nil
+        value:clearObservers(0)
     end)
-    value:observe(0, Message, function(_event: Message, exclusive _running: world.World): nil
+    value:observe(0, Message, function(_event: Message): nil
         secondRan = true
     end)
     value:emit(0, Message, "first")
@@ -154,9 +154,9 @@ function suite.clearsEntityObserversButPreservesWorldObservers(): nil
     local value = world.new(2)
     local entity = value:spawn()
     value:commit()
-    value:observe(0, Message, function(_event: Message, exclusive _running: world.World): nil
+    value:observe(0, Message, function(_event: Message): nil
     end)
-    value:observe(entity, Message, function(_event: Message, exclusive _running: world.World): nil
+    value:observe(entity, Message, function(_event: Message): nil
     end)
     value:despawn(entity)
     value:commit()
@@ -170,11 +170,11 @@ function suite.clearingEveryEntityKeepsTheWorldsObservers(): nil
     local first = value:spawn()
     local second = value:spawn()
     value:commit()
-    value:observe(0, Message, function(_event: Message, exclusive _running: world.World): nil
+    value:observe(0, Message, function(_event: Message): nil
     end)
-    value:observe(first, Message, function(_event: Message, exclusive _running: world.World): nil
+    value:observe(first, Message, function(_event: Message): nil
     end)
-    value:observe(second, Message, function(_event: Message, exclusive _running: world.World): nil
+    value:observe(second, Message, function(_event: Message): nil
     end)
     value:clearEntities()
     test.assert(value:hasObservers(0, Message))
@@ -188,7 +188,7 @@ function suite.recoversEmitBookkeepingAfterAnObserverRaises(): nil
     value:observe(
         0,
         Message,
-        function(_event: Message, exclusive _running: world.World): nil
+        function(_event: Message): nil
             error("expected observer failure")
         end,
         "failing"
@@ -202,7 +202,7 @@ function suite.recoversEmitBookkeepingAfterAnObserverRaises(): nil
     test.assert(value:stopObserving(0, Message, "failing"))
     test.equal(value.observers.count, 0)
     local delivered: string = ""
-    value:observe(0, Message, function(event: Message, exclusive _running: world.World): nil
+    value:observe(0, Message, function(event: Message): nil
         delivered = event.text
     end)
     value:emit(0, Message, "after")
@@ -214,15 +214,15 @@ function suite.emitsLifecycleEventsAtPublication(): nil
     local spawned: integer = 0
     local entityDespawn: integer = 0
     local globalDespawn: integer = 0
-    value:observe(0, ecs.OnSpawn, function(event: ecs.OnSpawn, exclusive _running: world.World): nil
+    value:observe(0, ecs.OnSpawn, function(event: ecs.OnSpawn): nil
         spawned = event.entity
     end)
-    value:observe(0, ecs.OnDespawn, function(event: ecs.OnDespawn, exclusive _running: world.World): nil
+    value:observe(0, ecs.OnDespawn, function(event: ecs.OnDespawn): nil
         globalDespawn = event.entity
     end)
-    local entity = value:spawn()
-    value:observe(entity, ecs.OnDespawn, function(event: ecs.OnDespawn, exclusive running: world.World): nil
-        test.assert(running:isAlive(event.entity))
+    local entity = value:spawn(ecs.Name("alive"))
+    value:observe(entity, ecs.OnDespawn, function(event: ecs.OnDespawn): nil
+        test.equal(event:get(ecs.Name), "alive")
         entityDespawn = event.entity
     end)
     test.equal(spawned, 0)
@@ -237,19 +237,33 @@ end
 function suite.drainsMutationsStagedByLifecycleObservers(): nil
     local marked = components.newTagComponent({name = "test.EventLifecycleMarked"})
     local value = world.new(3)
-    value:observe(0, ecs.OnSpawn, function(event: ecs.OnSpawn, exclusive running: world.World): nil
-        running:set(event.entity, marked)
-        running:commit()
+    value:observe(0, ecs.OnSpawn, function(event: ecs.OnSpawn): nil
+        value:set(event.entity, marked)
+        value:commit()
     end)
     local entity = value:spawn()
     value:commit()
     test.assert(value:has(entity, marked))
 end
 
+function suite.despawnObserversCanRequestDependentTeardown(): nil
+    local value = world.new(3)
+    local owner = value:spawn()
+    local dependent = value:spawn()
+    value:commit()
+    value:observe(owner, ecs.OnDespawn, function(event: ecs.OnDespawn): nil
+        event:despawn(dependent)
+    end)
+    value:despawn(owner)
+    value:commit()
+    test.assert(not value:isAlive(owner))
+    test.assert(not value:isAlive(dependent))
+end
+
 function suite.doesNotEmitSpawnForACancelledReservation(): nil
     local value = world.new(2)
     local calls: integer = 0
-    value:observe(0, ecs.OnSpawn, function(_event: ecs.OnSpawn, exclusive _running: world.World): nil
+    value:observe(0, ecs.OnSpawn, function(_event: ecs.OnSpawn): nil
         calls = calls + 1
     end)
     local entity = value:spawn()

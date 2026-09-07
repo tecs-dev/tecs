@@ -31,10 +31,7 @@ local joint = world:spawn()
 tecs.physics.attachJoint(world, joint, floor, wheel, {kind = "revolute", anchorAX = 120, anchorAY = -300})
 
 local contacts: integer = 0
-world:observe(0, tecs.physics.ContactBegin, function(
-    _value: tecs.physics.ContactBegin,
-    exclusive _running: tecs.ecs.World
-): nil
+world:observe(0, tecs.physics.ContactBegin, function(_value: tecs.physics.ContactBegin): nil
     contacts = contacts + 1
 end)
 

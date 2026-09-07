@@ -143,11 +143,9 @@ function suite.applicationFoldsInputBeforeObserversAndFixedSystems(): nil
     local app = application.newApplication({
         world = {timestep = 0.1},
         plugin = function(exclusive running: application.Application): nil
-            running.world:observe(0, platformevents.KeyDown, function(
-                _event: platformevents.KeyEvent,
-                exclusive world: ecs.World
-            ): nil
-                observerSawHeld = assert(input.of(world)):keyDown("Space")
+            local inputState = running.input
+            running.world:observe(0, platformevents.KeyDown, function(_event: platformevents.KeyEvent): nil
+                observerSawHeld = inputState:keyDown("Space")
             end)
             running.world:addSystem({
                 phase = ecs.phases.FixedUpdate,

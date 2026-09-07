@@ -1161,7 +1161,7 @@ export function install(exclusive world: tecs.ecs.World): nil
         height = 720
     )
     world.resources:set(stateKey, state)
-    local function resized(borrows event: tecs.platform.events.ResizeEvent, exclusive _world: tecs.ecs.World): nil
+    local function resized(borrows event: tecs.platform.events.ResizeEvent): nil
         if event.width > 0 and event.height > 0 then
             state.width, state.height = event.width * event.scaleFactor, event.height * event.scaleFactor
         end
