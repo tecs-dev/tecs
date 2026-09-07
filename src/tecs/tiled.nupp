@@ -414,7 +414,7 @@ end
 local function sprite(
     set: Tileset,
     id: integer
-): tecs.internal.components.TableInstance<tecs.gfx.Sprite>, number, number
+): tecs.internal.components.FFIInstance<tecs.gfx.Sprite, tecs.ecs.FFIComponent<tecs.gfx.Sprite>>, number, number
     local tile = tileOf(set, id)
     local source = tile and tile.image or set.image
     assert(source, "tiled: tile has no image")

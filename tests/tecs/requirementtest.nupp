@@ -1,0 +1,343 @@
+local test = require("nupp.test")
+local components = require("tecs.internal.components")
+
+local suite = {}
+const health = tecs.ecs.newScalarComponent({name = "test.RequireHealth", kind = "number", default = 10})
+const flag = tecs.ecs.newScalarComponent({name = "test.RequireFlag", kind = "boolean", default = true})
+const label = tecs.ecs.newScalarComponent({name = "test.RequireLabel", kind = "string"})
+const unrelated = tecs.ecs.newTagComponent({name = "test.RequireUnrelated"})
+
+local record Point
+    x: number
+end
+
+const point = tecs.ecs.newComponent({
+    name = "test.RequirePoint",
+    construct = function(x: number): Point
+        return new Point(x = x)
+    end,
+    default = function(): Point
+        return new Point(x = 5)
+    end,
+    requires = {health(42)}
+})
+const shared = point(17)
+const marker = tecs.ecs.newTagComponent({
+    name = "test.RequireMarker",
+    requires = {shared, flag(false), label("required")}
+})
+const defaulted = tecs.ecs.newTagComponent({name = "test.RequireDefaulted", requires = {point}})
+
+local function check(borrows world: tecs.ecs.World, id: integer): nil
+    test.assert(world:has(id, marker))
+    test.assert(world:get(id, point) == shared.value)
+    test.equal(world:get(id, health), 42)
+    test.equal(world:get(id, flag), false)
+    test.equal(world:get(id, label), "required")
+end
+
+function suite.expandsInstancesTransitivelyAtPublication(): nil
+    const world = tecs.ecs.newWorld()
+    local notifications = 0
+    world:newQuery({
+        include = {marker, point, health, flag, label},
+        onEntitiesAdded = function(candidate: tecs.ecs.Archetype, first: integer): nil
+            check(world, candidate.entities[first])
+            notifications = notifications + 1
+        end
+    })
+    const id = world:spawn(marker)
+    test.assert(not world:isAlive(id))
+    world:enqueueCommit()
+    check(world, id)
+    test.equal(notifications, 1)
+end
+
+function suite.preservesExplicitAndAlreadyPresentValues(): nil
+    const world = tecs.ecs.newWorld()
+    const first = world:spawn(marker, point(91), health(92), flag(true))
+    const second = world:spawn(health(93), point(94), marker)
+    const third = world:spawn(point(95), health(96))
+    world:commit()
+    world:set(third, marker)
+    world:commit()
+    test.equal(assert(world:get(first, point)).x, 91)
+    test.equal(world:get(first, health), 92)
+    test.equal(world:get(first, flag), true)
+    test.equal(assert(world:get(second, point)).x, 94)
+    test.equal(world:get(second, health), 93)
+    test.equal(assert(world:get(third, point)).x, 95)
+    test.equal(world:get(third, health), 96)
+end
+
+function suite.constructsIndependentDefaultsButSharesDeclaredInstances(): nil
+    const world = tecs.ecs.newWorld()
+    const first = world:spawn(defaulted)
+    const second = world:spawn(defaulted)
+    const third = world:spawn(marker)
+    const fourth = world:spawn(marker)
+    world:commit()
+    test.assert(world:get(first, point) ~= world:get(second, point))
+    test.equal(assert(world:get(first, point)).x, 5)
+    test.assert(world:get(third, point) == world:get(fourth, point))
+    check(world, third)
+end
+
+function suite.supportsEveryScalarKindAndRecordRequirements(): nil
+    const number = tecs.ecs.newScalarComponent({name = "test.RequireNumberRoot", kind = "number", requires = {marker}})
+    const boolean = tecs.ecs.newScalarComponent({
+        name = "test.RequireBooleanRoot",
+        kind = "boolean",
+        requires = {marker}
+    })
+    const string = tecs.ecs.newScalarComponent({name = "test.RequireStringRoot", kind = "string", requires = {marker}})
+    const world = tecs.ecs.newWorld()
+    const ids = {world:spawn(number(1)), world:spawn(boolean(true)), world:spawn(string("root"))}
+    world:commit()
+    for _, id in ipairs(ids) do
+        check(world, id)
+    end
+end
+
+function suite.appliesOnlyTheNewlyAddedComponentsRequirements(): nil
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(defaulted)
+    world:commit()
+    world:remove(id, health)
+    world:set(id, unrelated)
+    world:set(id, point(21))
+    world:commit()
+    test.assert(not world:has(id, health))
+    world:remove(id, defaulted)
+    world:commit()
+    test.assert(world:has(id, point))
+    world:set(id, defaulted)
+    world:commit()
+    test.equal(world:get(id, health), 42)
+    test.equal(assert(world:get(id, point)).x, 21)
+end
+
+function suite.handlesStagedRemoveAndReadd(): nil
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(marker)
+    world:remove(id, health)
+    world:set(id, unrelated)
+    world:commit()
+    test.assert(not world:has(id, health))
+    world:remove(id, marker)
+    world:set(id, marker)
+    world:commit()
+    check(world, id)
+end
+
+function suite.expandsAllSpawnAndBundlePaths(): nil
+    const world = tecs.ecs.newWorld()
+    world:spawnAt(3, marker)
+    world:batchSpawnAt({5, 7}, {marker})
+    const first = assert(world:batchSpawn(2, {marker}))
+    const bundle = world:newBundle("requirements", {with = {[marker] = true}})
+    const bundled = bundle:spawn()
+    world:commit()
+    for _, id in ipairs({3, 5, 7, first, first + 1, bundled}) do
+        check(world, id)
+    end
+end
+
+function suite.keepsBulkDefaultFactoriesPerEntity(): nil
+    const world = tecs.ecs.newWorld()
+    const first = assert(world:batchSpawn(2, {defaulted}))
+    world:commit()
+    test.assert(world:get(first, point) ~= world:get(first + 1, point))
+    const id = world:spawn(unrelated)
+    world:commit()
+    world:batchSet(world:newQuery({include = {unrelated}}), defaulted)
+    world:commit()
+    test.equal(assert(world:get(id, point)).x, 5)
+    test.equal(world:get(id, health), 42)
+end
+
+function suite.expandsBulkSetBeforeItsWriterAndCallbacks(): nil
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(unrelated)
+    world:commit()
+    local written = false
+    world:newQuery({
+        include = {marker},
+        onEntitiesAdded = function(): nil
+            test.assert(written)
+            check(world, id)
+        end
+    })
+    world:batchSet(world:newQuery({include = {unrelated}}), marker, function(): nil
+        check(world, id)
+        written = true
+    end)
+    world:commit()
+    test.assert(written)
+end
+
+function suite.preservesBulkExistingAndStagedOverrides(): nil
+    const world = tecs.ecs.newWorld()
+    const first = world:spawn(unrelated, health(100))
+    const second = world:spawn(unrelated)
+    world:commit()
+    world:set(second, health(101))
+    world:batchSet(world:newQuery({include = {unrelated}}), marker)
+    world:commit()
+    test.equal(world:get(first, health), 100)
+    test.equal(world:get(second, health), 101)
+    test.assert(world:get(first, point) == shared.value)
+    test.assert(world:get(second, point) == shared.value)
+end
+
+function suite.supportsDenseAndSparseRelationshipRequirements(): nil
+    for _, sparse in ipairs({false, true}) do
+        const relation = tecs.ecs.newRelationship({
+            name = "test.RequireRelation." .. tostring(sparse),
+            sparse = sparse,
+            reverseIndex = true,
+            requires = {marker}
+        })
+        const world = tecs.ecs.newWorld()
+        const target = world:spawn()
+        const first = world:spawn(relation(target))
+        const second = world:spawn(unrelated)
+        const third = world:spawn()
+        world:commit()
+        world:set(third, relation(target))
+        world:batchSet(world:newQuery({include = {unrelated}}), relation(target))
+        world:commit()
+        for _, id in ipairs({first, second, third}) do
+            check(world, id)
+        end
+        world:remove(first, health)
+        world:set(first, relation(third))
+        world:commit()
+        test.assert(not world:has(first, health))
+    end
+end
+
+local record Edge
+    target: integer
+    weight: number
+end
+
+function suite.supportsDataRelationshipsAndRequiredEdges(): nil
+    const relation = tecs.ecs.newDataRelationship({
+        name = "test.RequireDataRelation",
+        reverseIndex = true,
+        requires = {marker},
+        construct = function(target: integer, weight: number): Edge
+            return new Edge(target = target, weight = weight)
+        end,
+        save = function(value: Edge): any
+            return {target = value.target, weight = value.weight}
+        end,
+        load = function(value: any): Edge
+            return new Edge(target = value.target, weight = value.weight)
+        end
+    })
+    const world = tecs.ecs.newWorld()
+    const target = world:spawn()
+    const requiredEdge = relation(target, 9)
+    const root = tecs.ecs.newTagComponent({name = "test.RequireEdgeRoot", requires = {requiredEdge}})
+    const first = world:spawn(root)
+    const second = world:spawn()
+    world:commit()
+    world:set(second, root)
+    world:commit()
+    for _, id in ipairs({first, second}) do
+        check(world, id)
+        test.assert(world:get(id, relation:targeting(target)) == requiredEdge.value)
+    end
+    test.equal(world:newQuery({include = {relation:targeting(target)}}):count(), 2)
+    test.equal(#world:relationshipSources(relation, target), 2)
+end
+
+function suite.copiesListsAndDeterministicallyDeduplicatesDiamonds(): nil
+    const list: {tecs.ecs.ComponentInput} = {health(20)}
+    const left = tecs.ecs.newTagComponent({name = "test.RequireLeft", requires = list})
+    list[1] = health(99)
+    const right = tecs.ecs.newTagComponent({name = "test.RequireRight", requires = {health(30)}})
+    const root = tecs.ecs.newTagComponent({name = "test.RequireDiamond", requires = {left, right, left}})
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(root)
+    world:commit()
+    test.equal(world:get(id, health), 20)
+end
+
+function suite.terminatesCyclesAndInvalidatesAncestorCaches(): nil
+    const first = components.newTagComponent({name = "test.RequireCycleFirst"})
+    const second = components.newTagComponent({name = "test.RequireCycleSecond", requires = {first}})
+    components.requiresClosure(second)
+    components.setRequires(first, {second, health(77)})
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(second)
+    world:commit()
+    test.assert(world:has(id, first))
+    test.equal(world:get(id, health), 77)
+end
+
+function suite.rejectsUntargetedRequirementsBeforeRegistration(): nil
+    const relation = tecs.ecs.newRelationship({name = "test.RequireUntargeted"})
+    test.raises(
+        function(): nil
+            tecs.ecs.newTagComponent({name = "test.RequireInvalid", requires = {relation}})
+        end,
+        "explicit target"
+    )
+    const valid = tecs.ecs.newTagComponent({name = "test.RequireInvalid", requires = {marker}})
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(valid)
+    world:commit()
+    check(world, id)
+end
+
+function suite.requiredEdgesParticipateInBulkPublicationAndCascade(): nil
+    for _, sparse in ipairs({false, true}) do
+        const world = tecs.ecs.newWorld()
+        const target = world:spawn()
+        const relation = tecs.ecs.newRelationship({
+            name = "test.RequireCascade." .. tostring(sparse),
+            sparse = sparse,
+            exclusive = true,
+            reverseIndex = true,
+            cascadeDelete = true,
+            requires = {marker}
+        })
+        const root = tecs.ecs.newTagComponent({
+            name = "test.RequireCascadeRoot." .. tostring(sparse),
+            requires = {relation(target)}
+        })
+        world:spawn(root)
+        world:batchSpawn(2, {root})
+        const added = world:spawn(unrelated)
+        world:commit()
+        world:batchSet(world:newQuery({include = {unrelated}}), root)
+        world:commit()
+        check(world, added)
+        test.equal(#world:relationshipSources(relation, target), 4)
+        world:despawn(target)
+        world:commit()
+        test.equal(world:newQuery({include = {root}}):count(), 0)
+    end
+end
+
+function suite.restoresMissingTransientRequirementsFromDefaults(): nil
+    const transient = tecs.ecs.newScalarComponent({
+        name = "test.RequireTransient",
+        kind = "number",
+        default = 6,
+        transient = true
+    })
+    const durable = tecs.ecs.newTagComponent({name = "test.RequireDurable", requires = {transient}})
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(durable, transient(99))
+    world:commit()
+    const restored = tecs.ecs.newWorld()
+    restored:loadSnapshot(world:saveSnapshot())
+    test.assert(restored:has(id, durable))
+    test.equal(restored:get(id, transient), 6)
+end
+
+return suite

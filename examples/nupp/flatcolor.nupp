@@ -30,10 +30,12 @@ local function install(exclusive app: tecs.application.Application): nil
         name = "example.flatcolor.rotate",
         phase = tecs.ecs.phases.Update,
         run = function(dt: number): nil
-            for candidate, count in moving:iter() do
-                local transforms: {tecs.ecs.Transform2D} = assert(candidate:getMut(tecs.ecs.Transform2D))
-                for index = 1, count as integer do
-                    transforms[index].rotation = transforms[index].rotation + dt * (0.35 + index * 0.1)
+            unsafe do
+                for candidate, count in moving:iter() do
+                    local transforms: tecs.ecs.Transform2D[?] = assert(candidate:getMut(tecs.ecs.Transform2D))
+                    for index = 1, count as integer do
+                        transforms[index].rotation = transforms[index].rotation + dt * (0.35 + index * 0.1)
+                    end
                 end
             end
         end,

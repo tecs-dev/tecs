@@ -11,10 +11,12 @@ primitives and use a small wrapper only at spawn and set boundaries.
 
 local componentids = require("tecs.internal.componentids")
 local snapshotvalue = require("tecs.internal.snapshotvalue")
+local ffistorage = require("tecs.internal.ffistorage")
 
 --- A registered component definition.
 export interface Component
     associated type Value = self
+    associated type Column = {self.Value}
 
     componentId: integer
     componentName: string
@@ -49,10 +51,10 @@ export record ScalarInstance<T>
     value: T
 end
 
---- A table component whose committed column stores record values.
+--- A record component whose column uses ordinary managed array storage.
 export interface TableComponent<T> is Component
     associated type Value == T
-
+    associated type Column == {T}
     componentId: integer
     componentName: string
     storageType: string
@@ -70,12 +72,143 @@ export record TableInstance<T>
     value: T
 end
 
+--- Carries a native value across a mutation boundary without losing its definition.
+export record FFIInstance<T, C>
+    --- Read-only. Preserves the exact component or relationship definition.
+    componentType: C
+
+    --- Caller-writable. Holds the struct supplied at the mutation boundary.
+    value: T
+end
+
+--- A component whose values occupy contiguous native struct rows.
+export interface FFIComponent<T> is Component
+    associated type Value == T
+    associated type Column == T[?]
+
+    --- Read-only. Identifies this definition uniquely within the process.
+    componentId: integer
+
+    --- Read-only. Names this component in snapshots and diagnostic tools.
+    componentName: string
+
+    --- Read-only. Reports the native storage kind, ffi.
+    storageType: string
+
+    --- Read-only. Reports whether snapshots omit this definition.
+    transient: boolean
+
+    --- Engine-owned. Exposes the constructor to mutation internals; games call the
+    --- definition.
+    construct: function(...: any): T
+
+    --- Engine-owned. Supplies default initialization; games use the component
+    --- definition.
+    defaultFactory: function(): T
+
+    --- Engine-owned. Encodes fields or invokes the custom codec; games save through the
+    --- world.
+    snapshotSave: function(value: T): any
+
+    --- Engine-owned. Reconstructs fields or invokes the custom codec; games restore
+    --- through the world.
+    snapshotLoad: function(value: any): T
+
+    metamethod __call: function(self, ...: any): FFIInstance<T, FFIComponent<T>>
+end
+
+--- Selects one native edge column by its dense relationship target.
+export interface FFIRelationshipTarget<T> is Component
+    associated type Value == T
+    associated type Column == T[?]
+end
+
+--- A relationship whose payload uses native structs and native dense columns.
+export interface FFIRelationship<T> is Component
+    associated type Value == T
+    associated type Column == {T}
+
+    --- Read-only. Identifies this definition uniquely within the process.
+    componentId: integer
+
+    --- Read-only. Names this component in snapshots and diagnostic tools.
+    componentName: string
+
+    --- Read-only. Reports the native storage kind, ffi.
+    storageType: string
+
+    --- Read-only. Reports whether snapshots omit this definition.
+    transient: boolean
+
+    --- Engine-owned. Exposes the constructor to mutation internals; games call the
+    --- definition.
+    construct: function(...: any): T
+
+    --- Engine-owned. Supplies default initialization; games use the component
+    --- definition.
+    defaultFactory: function(): T
+
+    --- Engine-owned. Encodes fields or invokes the custom codec; games save through the
+    --- world.
+    snapshotSave: function(value: T): any
+
+    --- Engine-owned. Reconstructs fields or invokes the custom codec; games restore
+    --- through the world.
+    snapshotLoad: function(value: any): T
+
+    metamethod __call: function(self, ...: any): FFIInstance<T, FFIRelationship<T>>
+
+    --- Returns the component selecting the edge to one dense target.
+    --- @param self The relationship definition.
+    --- @param target The packed target entity id.
+    --- @return Returns a stable, typed native target-column selector.
+    --- @raises Raises when the relationship is sparse or the target is invalid.
+    targeting: function(self: FFIRelationship<T>, target: integer): FFIRelationshipTarget<T>
+end
+
+--- Configures a relationship with an inline native target and payload.
+export type FFIRelationshipOptions<T> = {
+    --- Caller-writable. Sets the stable relationship name.
+    name: string,
+
+    --- Caller-writable. Supplies the struct layout once at registration.
+    default: function(): T,
+
+    --- Caller-writable. Constructs an edge with the supplied target.
+    construct: function(target: integer, ...: any): T,
+
+    --- Caller-writable. Limits each source to one target; defaults to false.
+    exclusive: boolean?,
+
+    --- Caller-writable. Stores edge lists by entity; defaults to dense target columns.
+    sparse: boolean?,
+
+    --- Caller-writable. Maintains target-to-source lookup.
+    reverseIndex: boolean?,
+
+    --- Caller-writable. Cascades deletion; requires exclusive and reverseIndex.
+    cascadeDelete: boolean?,
+
+    --- Caller-writable. Adds missing requirements to the edge's source entity.
+    requires: {Input}?,
+
+    --- Caller-writable. Omits this relationship from snapshots.
+    transient: boolean?,
+
+    --- Caller-writable. Replaces automatic field encoding; requires load too.
+    save: (function(value: T): any)?,
+
+    --- Caller-writable. Replaces automatic field decoding; requires save too.
+    load: (function(value: any): T)?
+}
+
 --- The committed value of an exclusive entity relationship.
 export record RelationshipValue
+    --- Read-only. Names the target; replace the edge through world:set to retarget it.
     target: integer
 end
 
---- A one-target-per-source relationship component.
+--- A relationship definition supporting one or multiple targets per source.
 export record RelationshipComponent is Component
     associated type Value = RelationshipValue
 
@@ -86,7 +219,82 @@ export record RelationshipComponent is Component
     exclusive: boolean
     reverseIndex: boolean
     cascadeDelete: boolean
+
+    --- Read-only. Selects entity-indexed edge storage; false selects target-specific
+    --- dense columns.
+    sparse: boolean
+
     metamethod __call: function(self, target: integer): RelationshipInstance
+
+    --- Returns a component matching one target of this dense relationship.
+    --- @param self The relationship definition.
+    --- @param target The packed target entity identifier.
+    --- @return Returns a stable target-specific component definition.
+    --- @raises Raises when the relationship uses sparse storage or the target is
+    ---     invalid.
+    targeting: function(self: RelationshipComponent, target: integer): RelationshipComponent
+end
+
+--- A typed component selecting the edge to one dense relationship target.
+export interface RelationshipTarget<T> is Component
+    associated type Value == T
+    associated type Column == {T}
+end
+
+--- A relationship whose edges carry typed record values, including a target field.
+export interface DataRelationship<T> is TableComponent<T>
+    associated type Value == T
+
+    --- Returns the typed component for one target of a dense relationship.
+    --- @param self The relationship definition.
+    --- @param target The packed target entity identifier.
+    --- @return Returns a component whose value is the edge record.
+    --- @raises Raises when the relationship uses sparse storage or the target is
+    ---     invalid.
+    targeting: function(self: DataRelationship<T>, target: integer): RelationshipTarget<T>
+end
+
+--- Configures typed edge payloads with an explicit target-bearing constructor.
+export type DataRelationshipOptions<T> = {
+    --- Caller-writable. Sets the stable process-wide relationship name.
+    name: string,
+
+    --- Caller-writable. Constructs an edge record whose target field equals its first
+    --- argument.
+    construct: function(target: integer, ...: any): T,
+
+    --- Caller-writable. Limits each source to one target when true; defaults to false.
+    exclusive: boolean?,
+
+    --- Caller-writable. Uses entity-indexed edge storage when true; defaults to false.
+    sparse: boolean?,
+
+    --- Caller-writable. Maintains target-to-source lookup when true.
+    reverseIndex: boolean?,
+
+    --- Caller-writable. Deletes sources with their target; requires exclusive and
+    --- reverseIndex.
+    cascadeDelete: boolean?,
+
+    --- Caller-writable. Adds missing definitions or shared instance values when an
+    --- edge first adds this relationship. Tecs copies the list at registration.
+    requires: {Input}?,
+
+    --- Caller-writable. Omits this relationship from snapshots when true.
+    transient: boolean?,
+
+    --- Caller-writable. Serializes each edge into detached snapshot data.
+    save: function(value: T): any,
+
+    --- Caller-writable. Restores each typed target-bearing edge, including its record
+    --- identity and methods.
+    load: function(value: any): T
+}
+
+--- Carries a complete edge set across the world's heterogeneous mutation seam.
+export record RelationshipBatch
+    componentType: Component
+    values: {any}
 end
 
 --- A relationship value carried across a spawn or set boundary.
@@ -96,13 +304,21 @@ export record RelationshipInstance
 end
 
 --- A component definition or value supplied at a mutation boundary.
-export type Input = Component | ScalarInstance<any> | TableInstance<any> | RelationshipInstance
+export type Input = Component
+    | ScalarInstance<any>
+    | TableInstance<any>
+    | FFIInstance<any, any>
+    | RelationshipInstance
+    | RelationshipBatch
 
 --- Options for a marker component with no per-entity value.
 export type TagComponentOptions = {
     name: string,
     transient: boolean?,
-    requires: {Component}?
+
+    --- Caller-writable. Adds missing definitions or shared instance values, including
+    --- transitive requirements. Tecs copies the list at registration.
+    requires: {Input}?
 }
 
 --- Options for a number-valued scalar component.
@@ -110,7 +326,11 @@ export type NumberComponentOptions = {
     name: string,
     kind: "number",
     default: number?,
-    transient: boolean?
+    transient: boolean?,
+
+    --- Caller-writable. Adds missing definitions or shared instance values when this
+    --- component is added. Tecs copies the list at registration.
+    requires: {Input}?
 }
 
 --- Options for a boolean-valued scalar component.
@@ -118,7 +338,11 @@ export type BooleanComponentOptions = {
     name: string,
     kind: "boolean",
     default: boolean?,
-    transient: boolean?
+    transient: boolean?,
+
+    --- Caller-writable. Adds missing definitions or shared instance values when this
+    --- component is added. Tecs copies the list at registration.
+    requires: {Input}?
 }
 
 --- Options for a string-valued scalar component.
@@ -126,7 +350,11 @@ export type StringComponentOptions = {
     name: string,
     kind: "string",
     default: string?,
-    transient: boolean?
+    transient: boolean?,
+
+    --- Caller-writable. Adds missing definitions or shared instance values when this
+    --- component is added. Tecs copies the list at registration.
+    requires: {Input}?
 }
 
 export type ScalarComponentOptions = NumberComponentOptions | BooleanComponentOptions | StringComponentOptions
@@ -144,21 +372,45 @@ export type TableComponentOptions<T> = {
     save: (function(value: T): any)?,
     load: (function(value: any): T)?,
     transient: boolean?,
-    requires: {Component}?
+
+    --- Caller-writable. Adds missing definitions or shared instance values, including
+    --- transitive requirements. Tecs copies the list at registration.
+    requires: {Input}?
 }
 
---- Options for an exclusive target relationship.
+--- Options for a target-only relationship.
 export type RelationshipOptions = {
+    --- Caller-writable. Sets the stable process-wide relationship name.
     name: string,
-    exclusive: boolean,
+
+    --- Caller-writable. Limits each source to one target when true; defaults to false.
+    exclusive: boolean?,
+
+    --- Caller-writable. Uses entity-indexed storage instead of target-specific
+    --- archetypes when true.
+    sparse: boolean?,
+
+    --- Caller-writable. Maintains target-to-source lookup when true.
     reverseIndex: boolean?,
+
+    --- Caller-writable. Deletes sources with their target; requires exclusive and
+    --- reverseIndex.
     cascadeDelete: boolean?,
+
+    --- Caller-writable. Adds missing definitions or shared instance values when an
+    --- edge first adds this relationship. Tecs copies the list at registration.
+    requires: {Input}?,
+
+    --- Caller-writable. Omits this relationship from snapshots when true.
     transient: boolean?
 }
 
 local registeredByName: {[string]: Component} = {}
 local registeredById: {[integer]: Component} = {}
 local registeredRelationships: {RelationshipComponent} = {}
+local relationshipById: {[integer]: RelationshipComponent} = {}
+local targetById: {[integer]: integer} = {}
+local targetedById: {[integer]: {[integer]: RelationshipComponent}} = {}
 
 local function validateName(name: string, caller: string): nil
     if name == "" then
@@ -180,28 +432,119 @@ ScalarComponent.__call = function<T>(self: ScalarComponent, value: T): ScalarIns
 end
 
 RelationshipComponent.__call = function(self: RelationshipComponent, target: integer): RelationshipInstance
+    if target < 1 or target > 9007199254740991 then
+        error("relationship target must be a packed entity id", 2)
+    end
     return new RelationshipInstance(componentType = self, value = new RelationshipValue(target = target))
 end
 
---- What each component pulls in with it, by component id.
----
---- A component may name others it cannot be meaningful without, and a mutation
---- that adds it adds those too. `RelativeTransform2D` names `Transform2D`
---- because a relative transform composes onto a local one, and an entity
---- carrying only the first would be silently skipped by the system that reads
---- both.
-local requiredBy: {[integer]: {Component}} = {}
+function RelationshipComponent.targeting(self: RelationshipComponent, target: integer): RelationshipComponent
+    const root = relationshipById[self.componentId]
+    if root ~= nil and root ~= self then
+        return root:targeting(target)
+    end
+    if self.sparse then
+        error("targeting requires a dense relationship", 2)
+    end
+    if target < 1 or target > 9007199254740991 or target ~= math.floor(target) then
+        error("relationship target must be a packed entity id", 2)
+    end
+    local cache = targetedById[self.componentId]
+    if cache == nil then
+        cache = {};
+        targetedById[self.componentId] = cache
+    end
+    local selected = cache[target]
+    if selected ~= nil then
+        return selected
+    end
+    selected = new RelationshipComponent(
+        componentId = componentids.allocate(),
+        componentName = self.componentName .. "->" .. tostring(target),
+        storageType = "relationship",
+        transient = self.transient,
+        exclusive = self.exclusive,
+        reverseIndex = self.reverseIndex,
+        cascadeDelete = self.cascadeDelete,
+        sparse = false
+    )
+    cache[target] = selected
+    relationshipById[selected.componentId] = self
+    targetById[selected.componentId] = target
+    const native = ffistorage.find(self.componentId)
+    if native ~= nil then
+        ffistorage.register(selected.componentId, native)
+        selected.storageType = "ffi"
+    end
+
+    return register(selected)
+end
+
+--- A pre-resolved requirement at the heterogeneous component storage seam.
+export record Requirement
+    --- Read-only. Identifies the required component.
+    component: Component
+
+    --- Read-only. Holds a shared payload, an edge list, or nil for a default.
+    value: any
+
+    --- Read-only. Distinguishes a shared value from per-entity default construction.
+    explicit: boolean
+end
+
+local requiredBy: {[integer]: {Requirement}} = {}
 
 --- The flattened transitive closure of each component's requirements, built on
 --- first use because most components have none and a spawn should not pay for
 --- the walk twice.
-local closureBy: {[integer]: {Component}} = {}
+local closureBy: {[integer]: {Requirement}} = {}
+
+local function prepareRequires(required: {Input}?): {Requirement}
+    const result: {Requirement} = {}
+    if required == nil then
+        return result
+    end
+    for index = 1, #required do
+        const input = required[index]
+        const component = definitionOf(input)
+        local value, explicit = explicitValue(input)
+        if registeredById[component.componentId] ~= component then
+            error("requires entries must name registered components or their instances", 3)
+        end
+        const relationship = relationshipById[component.componentId]
+        if relationship ~= nil then
+            if not explicit then
+                error("relationship requirements need an explicit target-bearing instance", 3)
+            end
+            if not (input is RelationshipBatch) then
+                value = {value}
+            else
+                value = table.clone(input.values)
+            end
+            const edges = value as {any}
+            if #edges == 0 or (relationship.exclusive and #edges > 1) then
+                error("relationship requirement has an invalid edge count", 3)
+            end
+            const targets: {[integer]: boolean} = {}
+            for edgeIndex = 1, #edges do
+                const target = edgeTarget(edges[edgeIndex])
+                if targets[target] then
+                    error("relationship requirement has a duplicate target", 3)
+                end
+                targets[target] = true
+            end
+        end
+        result[#result + 1] = new Requirement(component = component, value = value, explicit = explicit)
+    end
+
+    return result
+end
 
 --- Records what a component requires, replacing any earlier list.
 --- @param component the component that pulls the others in
 --- @param required what it pulls in, which may itself require more
-export function setRequires(component: Component, required: {Component}): nil
-    requiredBy[component.componentId] = required
+export function setRequires(component: Component, required: {Input}): nil
+    requiredBy[component.componentId] = prepareRequires(required)
     closureBy = {}
 end
 
@@ -212,12 +555,12 @@ end
 --- already visited is not walked again.
 --- @param component the component to resolve
 --- @return the components a mutation adding this one must also add
-export function requiresClosure(component: Component): {Component}
+export function requiresClosure(component: Component): {Requirement}
     local cached = closureBy[component.componentId]
     if cached ~= nil then
         return cached
     end
-    local entries: {Component} = {}
+    local entries: {Requirement} = {}
     local seen: {[integer]: boolean} = {[component.componentId] = true}
     local pending: {Component} = {component}
     local index: integer = 1
@@ -228,10 +571,10 @@ export function requiresClosure(component: Component): {Component}
         if direct ~= nil then
             for position = 1, #direct do
                 local required = direct[position]
-                if not seen[required.componentId] then
-                    seen[required.componentId] = true
+                if not seen[required.component.componentId] then
+                    seen[required.component.componentId] = true
                     entries[#entries + 1] = required
-                    pending[#pending + 1] = required
+                    pending[#pending + 1] = required.component
                 end
             end
         end
@@ -246,6 +589,7 @@ end
 --- @return the registered component
 --- @raises when the name is empty or already registered
 export function newTagComponent(options: TagComponentOptions): TagComponent
+    const requirements = prepareRequires(options.requires)
     local name = options.name
     validateName(name, "newTagComponent")
     local component = register(
@@ -256,10 +600,7 @@ export function newTagComponent(options: TagComponentOptions): TagComponent
             transient = options.transient == true
         )
     )
-    local required = options.requires
-    if required ~= nil then
-        setRequires(component, required)
-    end
+    requiredBy[component.componentId] = requirements
 
     return component
 end
@@ -284,6 +625,7 @@ local function createScalar<T>(
 end
 
 local function createScalarComponent(options: ScalarComponentOptions): ScalarComponent<any>
+    const requirements = prepareRequires(options.requires)
     local defaultValue: any = options.default
     if defaultValue == nil then
         if options.kind == "number" then
@@ -295,7 +637,10 @@ local function createScalarComponent(options: ScalarComponentOptions): ScalarCom
         end
     end
 
-    return createScalar(options.name, options.kind, defaultValue, options.transient == true)
+    const component = createScalar(options.name, options.kind, defaultValue, options.transient == true)
+    requiredBy[component.componentId] = requirements
+
+    return component
 end
 
 --- Creates and permanently registers a primitive-valued scalar component.
@@ -310,6 +655,7 @@ export const newScalarComponent: NewScalarComponent = createScalarComponent as N
 --- @return the registered table component
 --- @raises when the name is empty or already registered
 export function newComponent<T>(options: TableComponentOptions<T>): TableComponent<T>
+    const requirements = prepareRequires(options.requires)
     validateName(options.name, "newComponent")
     if (options.save == nil) ~= (options.load == nil) then
         error("newComponent: snapshot save and load must be provided together", 2)
@@ -352,44 +698,220 @@ export function newComponent<T>(options: TableComponentOptions<T>): TableCompone
     -- concrete implementor, so the registry erases only at this storage seam.
     registeredByName[component.componentName] = component as Component
     registeredById[component.componentId] = component as Component
-    local required = options.requires
-    if required ~= nil then
-        setRequires(component as Component, required)
-    end
+    requiredBy[component.componentId] = requirements
 
     return component
 end
 
---- Creates an exclusive entity relationship.
+--- Registers a Nupp struct as a contiguous native component column.
+--- @param options The constructor, default struct, and optional paired codecs.
+--- @return Returns the callable struct component definition.
+--- @raises Raises when the layout is unsupported or the codec pair is incomplete.
+--- @raises Raises when the name is empty or already registered.
+export function newFFIComponent<T>(options: TableComponentOptions<T>): FFIComponent<T>
+    if (options.save == nil) ~= (options.load == nil) then
+        error("newFFIComponent: snapshot save and load must be provided together", 2)
+    end
+    const storage = ffistorage.new(options.default())
+    const configured = table.clone(options)
+    if options.save == nil then
+        configured.save = function(value: T): any
+            return ffistorage.serialize(storage, value)
+        end
+        configured.load = function(value: any): T
+            return ffistorage.deserialize(storage, value) as T
+        end
+    else
+        storage.rawCodec = false
+    end
+    const component = newComponent(configured)
+    component.storageType = "ffi"
+    ffistorage.register(component.componentId, storage)
+    setmetatable(component as table, {
+        __call = function(self: FFIComponent<T>, ...: any): FFIInstance<T, FFIComponent<T>>
+            return new FFIInstance(componentType = self, value = self.construct(...))
+        end
+    })
+
+    return component as FFIComponent<T>
+end
+
+--- Creates a target-only entity relationship.
 --- @param options the relationship identity and reverse-index behavior
 --- @return the callable relationship component
---- @raises when cascade deletion lacks a reverse index
+--- @raises Raises when cascade deletion lacks exclusivity or a reverse index.
 export function newRelationship(options: RelationshipOptions): RelationshipComponent
+    const requirements = prepareRequires(options.requires)
     validateName(options.name, "newRelationship")
-    if not options.exclusive then
-        error("newRelationship: only exclusive relationships are implemented", 2)
-    end
     if options.cascadeDelete == true and options.reverseIndex ~= true then
         error("newRelationship: cascadeDelete requires reverseIndex = true", 2)
+    end
+    if options.cascadeDelete and not options.exclusive then
+        error("newRelationship: cascadeDelete requires exclusive = true", 2)
     end
     local relationship = new RelationshipComponent(
         componentId = componentids.allocate(),
         componentName = options.name,
         storageType = "relationship",
         transient = options.transient == true,
-        exclusive = true,
+        exclusive = options.exclusive == true,
         reverseIndex = options.reverseIndex == true,
-        cascadeDelete = options.cascadeDelete == true
+        cascadeDelete = options.cascadeDelete == true,
+        sparse = options.sparse == true
     )
     registeredRelationships[#registeredRelationships + 1] = relationship
+    relationshipById[relationship.componentId] = relationship
+    requiredBy[relationship.componentId] = requirements
 
     return register(relationship)
+end
+
+--- Registers a relationship with typed edge payloads.
+--- @param options The storage policy and constructor, which must return a record with
+---     the requested target.
+--- @return Returns the callable relationship; reading an edge returns its typed record.
+--- @raises Raises for invalid storage policy, duplicate names, or missing snapshot
+---     hooks.
+export function newDataRelationship<T>(options: DataRelationshipOptions<T>): DataRelationship<T>
+    if options.save == nil or options.load == nil then
+        error("data relationships require snapshot save and load functions", 2)
+    end
+    const metadata = newRelationship({
+        name = options.name,
+        exclusive = options.exclusive,
+        sparse = options.sparse,
+        reverseIndex = options.reverseIndex,
+        cascadeDelete = options.cascadeDelete,
+        transient = options.transient,
+        requires = options.requires
+    })
+    const component = setmetatable(
+        {
+            componentId = metadata.componentId,
+            componentName = metadata.componentName,
+            storageType = "table",
+            transient = metadata.transient,
+            construct = options.construct,
+            defaultFactory = function(): T
+                error("relationship requires an explicit target", 2)
+            end,
+            snapshotSave = options.save,
+            snapshotLoad = options.load,
+            targeting = function(self: DataRelationship<T>, target: integer): RelationshipTarget<T>
+                return metadata:targeting(target) as RelationshipTarget<T>
+            end
+        },
+        {
+            __call = function(self: DataRelationship<T>, target: integer, ...: any): TableInstance<T>
+                const value = options.construct(target, ...)
+                if edgeTarget(value) ~= target then
+                    error("relationship constructor changed its target", 2)
+                end
+
+                return new TableInstance(componentType = self as TableComponent<T>, value = value)
+            end
+        }
+    ) as DataRelationship<T>
+    registeredByName[metadata.componentName] = component as Component
+    registeredById[metadata.componentId] = component as Component
+
+    return component
+end
+
+--- Registers typed native relationship payloads with automatic field codecs.
+--- @param options The struct layout, target-bearing constructor and edge policy.
+--- @return Returns the callable native relationship definition.
+--- @raises Raises for an invalid struct, target field, policy or codec pair.
+export function newFFIRelationship<T>(options: FFIRelationshipOptions<T>): FFIRelationship<T>
+    const storage = ffistorage.new(options.default())
+    local hasTarget = false
+    for index = 1, #storage.fields do
+        const field = storage.fields[index]
+        if field.name == "target" and field.spelling == "double" then
+            hasTarget = true
+        end
+    end
+    if not hasTarget then
+        error("FFI relationship requires a number target field", 2)
+    end
+    if (options.save == nil) ~= (options.load == nil) then
+        error("FFI relationship snapshot save and load must be provided together", 2)
+    end
+    local save = options.save
+    local load = options.load
+    if save == nil then
+        save = function(value: T): any
+            return ffistorage.serialize(storage, value)
+        end
+        load = function(value: any): T
+            return ffistorage.deserialize(storage, value) as T
+        end
+    else
+        storage.rawCodec = false
+    end
+    const component = newDataRelationship({
+        name = options.name,
+        construct = options.construct,
+        exclusive = options.exclusive,
+        sparse = options.sparse,
+        reverseIndex = options.reverseIndex,
+        cascadeDelete = options.cascadeDelete,
+        requires = options.requires,
+        transient = options.transient,
+        save = save,
+        load = assert(load)
+    })
+    component.storageType = "ffi"
+    ffistorage.register(component.componentId, storage)
+    setmetatable(component as table, {
+        __call = function(self: FFIRelationship<T>, target: integer, ...: any): FFIInstance<T, FFIRelationship<T>>
+            const value = options.construct(target, ...)
+            if edgeTarget(value) ~= target then
+                error("relationship constructor changed its target", 2)
+            end
+
+            return new FFIInstance(componentType = self, value = value)
+        end
+    })
+
+    return component as FFIRelationship<T>
+end
+
+--- Reads the validated target at the heterogeneous relationship storage seam.
+--- @param value The target-bearing edge record.
+--- @return Returns its packed target identifier.
+--- @raises Raises when a value has no valid integral target.
+export function edgeTarget(value: any): integer
+    if (
+        type(value) ~= "table" and type(value) ~= "cdata"
+    ) or type(
+        value.target
+    ) ~= "number" or value.target ~= math.floor(
+        value.target
+    ) or value.target < 1 or value.target > 9007199254740991 then
+        error("relationship value requires a packed target entity id", 2)
+    end
+
+    return value.target as integer
+end
+
+--- Reads a generated dense relationship component's target constraint.
+--- @param component The component to inspect.
+--- @return Returns nil for an ordinary definition or wildcard relationship.
+export function targetOf(component: Component): integer?
+    return targetById[component.componentId]
 end
 
 --- Returns the definition carried by a mutation input.
 --- @param input the component definition or scalar wrapper
 --- @return the registered component definition
 export function definitionOf(input: Input): Component
+    if input is FFIInstance<any, any> then
+        return input.componentType as Component
+    end
+    if input is RelationshipBatch then
+        return input.componentType
+    end
     if input is ScalarInstance<any> then
         return input.componentType
     end
@@ -407,6 +929,15 @@ end
 --- @param input the component definition or scalar wrapper
 --- @return the raw payload and whether the input was a wrapper
 export function explicitValue(input: Input): any, boolean
+    if input is FFIInstance<any, any> then
+        return ffistorage.capture(
+            assert(ffistorage.find(input.componentType.componentId as integer)),
+            input.value
+        ), true
+    end
+    if input is RelationshipBatch then
+        return input.values, true
+    end
     if input is ScalarInstance<any> then
         return input.value, true
     end
@@ -427,7 +958,7 @@ export function defaultValue<C is Component>(component: C): C.Value
     if component is ScalarComponent<any> then
         return component.scalarDefault as C.Value
     end
-    if component.storageType == "table" then
+    if component.storageType == "table" or component.storageType == "ffi" then
         local tableComponent = component as TableComponent<any>
         return tableComponent.defaultFactory() as C.Value
     end
@@ -442,10 +973,7 @@ end
 --- @param component the component to inspect
 --- @return the relationship component, or nil for another storage kind
 export function asRelationship(component: Component): RelationshipComponent?
-    if component.storageType == "relationship" then
-        return component as RelationshipComponent
-    end
-    return nil
+    return relationshipById[component.componentId]
 end
 
 --- Returns the process-wide relationship definitions.
@@ -487,6 +1015,7 @@ export const Name: ScalarComponent<string> = newScalarComponent({name = "Name", 
 --- parent despawns every descendant beneath it in the same barrier.
 export const ChildOf: RelationshipComponent = newRelationship({
     name = "ChildOf",
+    sparse = true,
     exclusive = true,
     reverseIndex = true,
     cascadeDelete = true,
@@ -517,7 +1046,9 @@ end
 export function declared(): {[string]: Component}
     local result: {[string]: Component} = {}
     for name, component in pairs(registeredByName) do
-        result[name] = component
+        if targetById[component.componentId] == nil then
+            result[name] = component
+        end
     end
 
     return result

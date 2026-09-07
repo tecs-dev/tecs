@@ -1,0 +1,207 @@
+local test = require("nupp.test")
+const tag = tecs.ecs.newTagComponent({name = "test.MaintenanceTag"})
+const score = tecs.ecs.newScalarComponent({name = "test.MaintenanceScore", kind = "number"})
+const follows = tecs.ecs.newRelationship({name = "test.MaintenanceFollows", reverseIndex = true})
+local suite = {}
+
+local function containing(borrows world: tecs.ecs.World, id: integer): tecs.ecs.Archetype
+    local found: tecs.ecs.Archetype? = nil
+    world:forEachArchetype(function(candidate: tecs.ecs.Archetype): nil
+        for row = 1, #candidate.entities do
+            if candidate.entities[row] == id then
+                found = candidate
+            end
+        end
+    end)
+
+    return assert(found)
+end
+
+function suite.prunesDeadTargetsWithoutRenumberingSurvivors(): nil
+    const world = tecs.ecs.newWorld()
+    const parent = world:spawn()
+    const child = world:spawn(follows(parent))
+    const survivor = world:spawn(tag, score(42))
+    world:commit()
+    const stable = containing(world, survivor)
+    const stableId = stable.id
+    world:despawn(child)
+    world:commit()
+    test.equal(world:compact(), 0)
+    world:despawn(parent)
+    world:commit()
+    const before = world:getStats().archetypes
+    const pruned = world:compact()
+    test.equal(pruned, 1)
+    test.equal(world:getStats().archetypes, before - 1)
+    test.equal(containing(world, survivor).id, stableId)
+    test.assert(containing(world, survivor) == stable)
+    test.equal(world:get(survivor, score), 42)
+    local sentinel = false
+    world:forEachArchetype(function(candidate: tecs.ecs.Archetype): nil
+        if candidate.id == 1 then
+            sentinel = true
+        end
+    end)
+    test.assert(sentinel)
+end
+
+function suite.releasesPrunedQueryGroupsAndReusesFreedIds(): nil
+    const world = tecs.ecs.newWorld()
+    const selection = world:newQuery({
+        include = {follows},
+        groupBy = function(candidate: tecs.ecs.Archetype): integer
+            return candidate.id
+        end
+    })
+    const parent = world:spawn()
+    const child = world:spawn(follows(parent))
+    world:commit()
+    const old = containing(world, child)
+    const oldId = old.id
+    const temporary = world:newQuery({include = {follows}, temp = true})
+    world:despawn(parent)
+    world:commit()
+    test.equal(selection:count(), 0)
+    world:compact()
+    test.assert(selection:getGroup(old) == nil)
+    const nextParent = world:spawn()
+    const nextChild = world:spawn(follows(nextParent))
+    world:commit()
+    test.equal(containing(world, nextChild).id, oldId)
+    test.equal(selection:count(), 1)
+    test.equal(selection:getGroupCount(oldId), 1)
+    test.equal(temporary:count(), 0)
+    test.assert(not world:has(child, follows))
+end
+
+function suite.rebuildsShrunkenColumnsWithoutChangingValuesOrDirtyFlags(): nil
+    const world = tecs.ecs.newWorld()
+    const first = assert(world:batchSpawn(100, {tag, score(7)}))
+    world:commit()
+    const candidate = containing(world, first)
+    const oldColumn = assert(candidate:get(score))
+    for index = 3, 99 do
+        world:despawn(first + index)
+    end
+    world:commit()
+    const pruned, rebuilt = world:compact()
+    test.equal(pruned, 0)
+    test.equal(rebuilt, 1)
+    test.assert(assert(candidate:get(score)) ~= oldColumn)
+    test.assert(candidate:isComponentDirty(score))
+    for index = 0, 2 do
+        test.equal(world:get(first + index, score), 7)
+    end
+    const againPruned, againRebuilt = world:compact()
+    test.equal(againPruned, 0)
+    test.equal(againRebuilt, 0)
+    world:batchSpawn(120, {tag, score(9)})
+    world:commit()
+    test.equal(world:newQuery({include = {tag}}):count(), 123)
+end
+
+function suite.retainsOrdinaryEmptyArchetypesAndWorldControls(): nil
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(tag)
+    world:commit()
+    const candidate = containing(world, id)
+    const selected = world:newQuery({include = {tag}})
+    local runs = 0
+    world:addSystem({
+        name = "maintenance.control",
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            runs = runs + 1
+        end
+    })
+    world:despawn(id)
+    world:commit()
+    test.equal(world:compact(), 0)
+    const nextId = world:spawn(tag)
+    world:commit()
+    test.assert(containing(world, nextId) == candidate)
+    test.equal(selected:count(), 1)
+    world:update(0)
+    test.equal(runs, 1)
+end
+
+function suite.iteratesDirtyAndDisabledArchetypesIndependently(): nil
+    const world = tecs.ecs.newWorld()
+    const first = world:spawn(tag)
+    const second = world:spawn(score(3), tecs.ecs.Disabled)
+    world:commit()
+    const one = world:dirtyArchetypes()
+    const two = world:dirtyArchetypes()
+    test.assert(one() == two())
+    test.assert(one() == two())
+    test.assert(one() == nil and two() == nil)
+    local entities = 0
+    world:forEachArchetype(function(candidate: tecs.ecs.Archetype): nil
+        entities = entities + #candidate.entities
+    end)
+    test.equal(entities, 2)
+    world:update(0)
+    test.assert(world:dirtyArchetypes()() == nil)
+    world:markComponentDirty(second, score)
+    test.assert(world:dirtyArchetypes()() == containing(world, second))
+    world:despawn(first)
+    world:commit()
+    local emptyDirty = false
+    for candidate in world:dirtyArchetypes() do
+        if #assert(candidate).entities == 0 then
+            emptyDirty = true
+        end
+    end
+    test.assert(emptyDirty)
+end
+
+function suite.rejectsNonQuietMaintenanceAndCancelsQueuedInitializersOnClear(): nil
+    const world = tecs.ecs.newWorld()
+    local callbacks = 0
+    world:batchSpawn(3, {tag}, function(): nil
+        callbacks = callbacks + 1
+    end)
+    test.raises(
+        function(): nil
+            world:compact()
+        end,
+        "quiet, committed world"
+    )
+    world:clearEntities()
+    world:commit()
+    test.equal(callbacks, 0)
+    world:addSystem({
+        name = "badMaintenance",
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            world:compact()
+        end
+    })
+    test.raises(
+        function(): nil
+            world:update(0)
+        end,
+        "quiet, committed world"
+    )
+    world:removeSystem("badMaintenance")
+    world:compact()
+    world:update(0)
+end
+
+function suite.restoresSnapshotsAfterDenseArchetypePruning(): nil
+    const world = tecs.ecs.newWorld()
+    const target = world:spawn()
+    const child = world:spawn(follows(target), score(19))
+    world:commit()
+    const saved = world:saveSnapshot()
+    const selected = world:newQuery({include = {follows}})
+    world:clearEntities()
+    world:compact()
+    world:loadSnapshot(saved)
+    test.equal(selected:count(), 1)
+    test.equal(world:get(child, score), 19)
+    test.equal(world:relationshipSources(follows, target)[1], child)
+end
+
+return suite

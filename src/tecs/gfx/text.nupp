@@ -528,7 +528,7 @@ local function stateFor(exclusive world: ecs.World): Install
             include = {TextComponent, rendercomponents.Transform2DComponent},
             exclude = {ecs.Disabled}
         }),
-        glyphs = world:newQuery({
+        glyphs = tecs.internal.world.newUnfilteredQuery(world, {
             include = {TextGlyph}
         }),
         owned = {},
@@ -782,54 +782,58 @@ local function run(exclusive world: ecs.World, state: Install): nil
     state.epoch = epoch
 
     local live: integer = 0
-    for candidate, count in state.texts:iter() do
-        const active = candidate as archetype.Archetype
-        const rows = count as integer
-        live = live + rows
-        if repacked or active:isComponentDirty(
-            TextComponent
-        ) or active:isComponentDirty(
-            rendercomponents.TintComponent
-        ) or active:isComponentDirty(rendercomponents.Transform2DComponent) then
-            const column: {Text} = assert(active:get(TextComponent))
-            const transforms: {rendercomponents.Transform2D} = assert(active:get(rendercomponents.Transform2DComponent))
-            -- Absent on a text nobody tinted, which is one test for the whole
-            -- archetype rather than one per row.
-            const tints = active:get(rendercomponents.TintComponent) as {rendercomponents.Tint}?
-            for index = 1, rows do
-                const entity = active.entities[index]
-                const item = column[index]
-                const transform = transforms[index]
-                const tint = tints ~= nil and tints[index] or nil
-                if repacked or stale(state.built[entity], item, transform, tint) then
-                    local r, g, b, a = 1.0, 1.0, 1.0, 1.0
-                    if tint ~= nil then
-                        r, g, b, a = tint.r, tint.g, tint.b, tint.a
+    unsafe do
+        for candidate, count in state.texts:iter() do
+            const active = candidate as archetype.Archetype
+            const rows = count as integer
+            live = live + rows
+            if repacked or active:isComponentDirty(
+                TextComponent
+            ) or active:isComponentDirty(
+                rendercomponents.TintComponent
+            ) or active:isComponentDirty(rendercomponents.Transform2DComponent) then
+                const column: {Text} = assert(active:get(TextComponent))
+                const transforms: rendercomponents.Transform2D[
+                    ?
+                ] = assert(active:get(rendercomponents.Transform2DComponent))
+                -- Absent on a text nobody tinted, which is one test for the whole
+                -- archetype rather than one per row.
+                const tints = active:get(rendercomponents.TintComponent) as rendercomponents.Tint[?]?
+                for index = 1, rows do
+                    const entity = active.entities[index]
+                    const item = column[index]
+                    const transform = transforms[index]
+                    const tint = tints ~= nil and tints[index] or nil
+                    if repacked or stale(state.built[entity], item, transform, tint) then
+                        local r, g, b, a = 1.0, 1.0, 1.0, 1.0
+                        if tint ~= nil then
+                            r, g, b, a = tint.r, tint.g, tint.b, tint.a
+                        end
+                        const font = item.font
+                        if font == nil then
+                            item.width = 0.0
+                            item.height = 0.0
+                            placedCount = 0
+                            publish(world, state, entity, 0, 0.0, 1, 0.0, r, g, b, a)
+                        else
+                            place(item, font, transform)
+                            publish(
+                                world,
+                                state,
+                                entity,
+                                fonts.imageOf(font),
+                                transform.z,
+                                transform.layer,
+                                transform.rotation,
+                                r,
+                                g,
+                                b,
+                                a
+                            )
+                        end
+                        remember(state, entity, item, transform, r, g, b, a)
+                        state.layouts = state.layouts + 1
                     end
-                    const font = item.font
-                    if font == nil then
-                        item.width = 0.0
-                        item.height = 0.0
-                        placedCount = 0
-                        publish(world, state, entity, 0, 0.0, 1, 0.0, r, g, b, a)
-                    else
-                        place(item, font, transform)
-                        publish(
-                            world,
-                            state,
-                            entity,
-                            fonts.imageOf(font),
-                            transform.z,
-                            transform.layer,
-                            transform.rotation,
-                            r,
-                            g,
-                            b,
-                            a
-                        )
-                    end
-                    remember(state, entity, item, transform, r, g, b, a)
-                    state.layouts = state.layouts + 1
                 end
             end
         end

@@ -64,7 +64,8 @@ export type StyleOptions = {
 --- Marks a retained UI node. The persisted name is UiNode.
 export const Node = tecs.ecs.newTagComponent({name = "UiNode"})
 
-local record LayoutValue
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+local struct LayoutValue
     --- Read-only. Reports the x value.
     x: number
 
@@ -98,22 +99,22 @@ export type LayoutOptions = {
 }
 
 --- Constructs Layout with its default values for omitted fields.
-export const Layout: tecs.ecs.TableComponent<LayoutValue> = tecs.ecs.newComponent({
+export const Layout: tecs.ecs.FFIComponent<LayoutValue> = tecs.ecs.newFFIComponent({
     name = "UiLayout",
     transient = true,
     construct = function(options: LayoutOptions?): LayoutValue
         local values = options or {}
         return new LayoutValue(
-            x = values.x ?? 0,
-            y = values.y ?? 0,
-            width = values.width ?? 0,
-            height = values.height ?? 0,
-            contentWidth = values.contentWidth ?? 0,
-            contentHeight = values.contentHeight ?? 0
+            values.x ?? 0,
+            values.y ?? 0,
+            values.width ?? 0,
+            values.height ?? 0,
+            values.contentWidth ?? 0,
+            values.contentHeight ?? 0
         )
     end,
     default = function(): LayoutValue
-        return new LayoutValue(x = 0, y = 0, width = 0, height = 0, contentWidth = 0, contentHeight = 0)
+        return new LayoutValue(0, 0, 0, 0, 0, 0)
     end,
 })
 
@@ -185,7 +186,8 @@ export const Root: tecs.ecs.TableComponent<RootValue> = tecs.ecs.newComponent({
     end,
 })
 
-local record PaintValue
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+local struct PaintValue
     --- Caller-writable. Sets the stretch value.
     stretch: boolean
 end
@@ -194,13 +196,13 @@ end
 export type Paint = PaintValue
 
 --- Constructs Paint with its default values for omitted fields.
-export const Paint: tecs.ecs.TableComponent<PaintValue> = tecs.ecs.newComponent({
+export const Paint: tecs.ecs.FFIComponent<PaintValue> = tecs.ecs.newFFIComponent({
     name = "UiPaint",
     construct = function(stretch: boolean?): PaintValue
-        return new PaintValue(stretch = stretch == true)
+        return new PaintValue(stretch == true)
     end,
     default = function(): PaintValue
-        return new PaintValue(stretch = false)
+        return new PaintValue(false)
     end,
 })
 
@@ -257,7 +259,8 @@ export const Intrinsic: tecs.ecs.TableComponent<IntrinsicValue> = tecs.ecs.newCo
     end,
 })
 
-local record ScrollValue
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+local struct ScrollValue
     --- Caller-writable. Sets the x value.
     x: number
 
@@ -283,20 +286,15 @@ export type ScrollOptions = {
 }
 
 --- Constructs Scroll with its default values for omitted fields.
-export const Scroll: tecs.ecs.TableComponent<ScrollValue> = tecs.ecs.newComponent({
+export const Scroll: tecs.ecs.FFIComponent<ScrollValue> = tecs.ecs.newFFIComponent({
     name = "UiScroll",
     requires = {Style},
     construct = function(options: ScrollOptions?): ScrollValue
         local values = options or {}
-        return new ScrollValue(
-            x = values.x ?? 0,
-            y = values.y ?? 0,
-            contentWidth = values.contentWidth ?? 0,
-            contentHeight = values.contentHeight ?? 0
-        )
+        return new ScrollValue(values.x ?? 0, values.y ?? 0, values.contentWidth ?? 0, values.contentHeight ?? 0)
     end,
     default = function(): ScrollValue
-        return new ScrollValue(x = 0, y = 0, contentWidth = 0, contentHeight = 0)
+        return new ScrollValue(0, 0, 0, 0)
     end,
 })
 
@@ -325,7 +323,8 @@ export type ScrollbarOptions = {
     minLength: (number)?
 }
 
-local record InteractionStateValue
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+local struct InteractionStateValue
     --- Read-only. Reports the hovered value.
     hovered: boolean
 
@@ -351,24 +350,25 @@ export type InteractionStateOptions = {
 }
 
 --- Constructs InteractionState with its default values for omitted fields.
-export const InteractionState: tecs.ecs.TableComponent<InteractionStateValue> = tecs.ecs.newComponent({
+export const InteractionState: tecs.ecs.FFIComponent<InteractionStateValue> = tecs.ecs.newFFIComponent({
     name = "UiInteractionState",
     transient = true,
     construct = function(options: InteractionStateOptions?): InteractionStateValue
         local values = options or {}
         return new InteractionStateValue(
-            hovered = values.hovered ?? false,
-            pressed = values.pressed ?? false,
-            focused = values.focused ?? false,
-            dragging = values.dragging ?? false
+            values.hovered ?? false,
+            values.pressed ?? false,
+            values.focused ?? false,
+            values.dragging ?? false
         )
     end,
     default = function(): InteractionStateValue
-        return new InteractionStateValue(hovered = false, pressed = false, focused = false, dragging = false)
+        return new InteractionStateValue(false, false, false, false)
     end,
 })
 
-local record InteractionValue
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+local struct InteractionValue
     --- Caller-writable. Sets the enabled value.
     enabled: boolean
 
@@ -398,21 +398,21 @@ export type InteractionOptions = {
 }
 
 --- Constructs Interaction with its default values for omitted fields.
-export const Interaction: tecs.ecs.TableComponent<InteractionValue> = tecs.ecs.newComponent({
+export const Interaction: tecs.ecs.FFIComponent<InteractionValue> = tecs.ecs.newFFIComponent({
     name = "UiInteraction",
     requires = {Style, InteractionState},
     construct = function(options: InteractionOptions?): InteractionValue
         local values = options or {}
         return new InteractionValue(
-            enabled = values.enabled ?? true,
-            focusable = values.focusable ?? true,
-            tabIndex = values.tabIndex ?? 0,
-            order = values.order ?? 0,
-            draggable = values.draggable ?? false
+            values.enabled ?? true,
+            values.focusable ?? true,
+            values.tabIndex ?? 0,
+            values.order ?? 0,
+            values.draggable ?? false
         )
     end,
     default = function(): InteractionValue
-        return new InteractionValue(enabled = true, focusable = true, tabIndex = 0, order = 0, draggable = false)
+        return new InteractionValue(true, true, 0, 0, false)
     end,
 })
 
@@ -1636,7 +1636,9 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
         cameras = world:newQuery({
             include = {tecs.gfx.Camera2D, tecs.gfx.ActiveCamera}
         }),
-        nodes = world:newQuery({
+        -- Retained nodes must remain visible to layout so a hidden scene can be
+        -- restored.
+        nodes = tecs.internal.world.newUnfilteredQuery(world, {
             include = {Node, Style, Layout}
         }),
         width = values.width or 800,

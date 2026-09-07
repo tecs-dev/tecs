@@ -120,16 +120,18 @@ local function install(exclusive app: tecs.application.Application): nil
             elapsed = elapsed + dt
             const middle = FIELD * 0.5
             local slot = 0
-            for candidate, count in lights:iter() do
-                const transforms: {tecs.ecs.Transform2D} = assert(candidate:getMut(tecs.ecs.Transform2D))
-                for index = 1, count as integer do
-                    slot = slot + 1
-                    -- Each light circles at its own rate and its own radius, so
-                    -- the shadows sweep rather than turning together.
-                    const turn = elapsed * (0.22 + slot * 0.07) + slot * 1.9
-                    const reach = 180.0 + slot * 45.0
-                    transforms[index].x = middle + math.cos(turn) * reach
-                    transforms[index].y = middle + math.sin(turn) * reach
+            unsafe do
+                for candidate, count in lights:iter() do
+                    const transforms: tecs.ecs.Transform2D[?] = assert(candidate:getMut(tecs.ecs.Transform2D))
+                    for index = 1, count as integer do
+                        slot = slot + 1
+                        -- Each light circles at its own rate and its own radius, so
+                        -- the shadows sweep rather than turning together.
+                        const turn = elapsed * (0.22 + slot * 0.07) + slot * 1.9
+                        const reach = 180.0 + slot * 45.0
+                        transforms[index].x = middle + math.cos(turn) * reach
+                        transforms[index].y = middle + math.sin(turn) * reach
+                    end
                 end
             end
         end,

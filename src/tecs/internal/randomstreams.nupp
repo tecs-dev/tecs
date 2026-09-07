@@ -1,0 +1,174 @@
+module tecs.internal.randomstreams
+
+--[[
+World ownership, stable name-derived seeds and snapshot state for Nupp generators.
+Generation and state transitions belong to `nupp.data.random`; this module owns
+only the Tecs stream naming and persistence contract.
+]]
+
+local random = require("nupp.data.random")
+
+-- This persisted key and seed derivation are compatibility surfaces from Teal.
+
+--- Names the reserved world snapshot participant.
+export const snapshotKey = "tecs.random"
+
+const defaultSeed = 0x5EED1234
+
+--- Owns the generators attached to one world.
+export record Registry
+    --- Engine-owned. Holds the world seed for stream creation and restart.
+    seed: integer
+
+    --- Engine-owned. Retains generators so captured references survive restoration.
+    streams: {[string]: random.Random}
+end
+
+--- Carries detached, validated state between snapshot preparation and restore.
+export record State
+    --- Read-only. Reports the saved world seed as a signed 32-bit word.
+    seed: integer
+
+    --- Read-only. Maps each saved stream name to its four state words.
+    streams: {[string]: {integer}}
+end
+
+-- The old stream-name mixer is retained, not the old generator implementation.
+local function mix32(value: int32): int32
+    local shifted = nupp.math.i32.fromU32(nupp.math.u32.shiftRightLogical(nupp.math.u32.fromI32(value), 16))
+    local mixed = nupp.math.i32.mul(nupp.math.i32.xorBits(value, shifted), nupp.math.i32.wrap(0x21F0AAAD))
+    shifted = nupp.math.i32.fromU32(nupp.math.u32.shiftRightLogical(nupp.math.u32.fromI32(mixed), 15))
+    mixed = nupp.math.i32.mul(nupp.math.i32.xorBits(mixed, shifted), nupp.math.i32.wrap(0x735A2D97))
+    shifted = nupp.math.i32.fromU32(nupp.math.u32.shiftRightLogical(nupp.math.u32.fromI32(mixed), 15))
+
+    return nupp.math.i32.xorBits(mixed, shifted)
+end
+
+local function streamSeed(seed: integer, name: string): integer
+    local hash = nupp.math.i32.wrap(0x811C9DC5)
+    for index = 1, #name do
+        hash = nupp.math.i32.mul(
+            nupp.math.i32.xorBits(hash, nupp.math.i32.wrap(string.byte(name, index))),
+            nupp.math.i32.wrap(0x01000193)
+        )
+    end
+
+    return mix32(nupp.math.i32.xorBits(hash, mix32(nupp.math.i32.wrap(seed)))) as integer
+end
+
+--- Creates an empty registry with the compatibility default seed.
+--- @return Returns a registry owned by the calling world.
+export function newRegistry(): Registry
+    return new Registry(seed = defaultSeed, streams = {})
+end
+
+--- Returns or creates a stream using only its name and the world seed.
+--- @param registry The world-owned stream registry.
+--- @param name The non-empty name validated by the public world method.
+--- @return Returns the cached Nupp generator.
+export function stream(exclusive registry: Registry, name: string): random.Random
+    const existing = registry.streams[name]
+    if existing ~= nil then
+        return assert(registry.streams[name])
+    end
+    const generator = random.newRandom(streamSeed(registry.seed, name))
+    registry.streams[name] = generator
+
+    return generator
+end
+
+--- Restarts existing streams in place and sets the seed for future streams.
+--- @param registry The world-owned registry to restart.
+--- @param seed The finite integer validated by the public world method.
+export function reseed(exclusive registry: Registry, seed: integer): nil
+    registry.seed = nupp.math.i32.wrap(seed) as integer
+    for name, generator in pairs(registry.streams) do
+        generator:reseed(streamSeed(registry.seed, name))
+    end
+end
+
+--- Copies a registry's state without advancing its generators.
+--- @param registry The world-owned registry to inspect.
+--- @return Returns detached seed and stream state.
+export function save(borrows registry: Registry): State
+    const streams: {[string]: {integer}} = {}
+    for name, generator in pairs(registry.streams) do
+        streams[name] = generator:state()
+    end
+
+    return new State(seed = registry.seed, streams = streams)
+end
+
+local function word(value: any): integer
+    if type(value) ~= "number" or value % 1 ~= 0 or value < -2147483648 or value > 4294967295 then
+        error("world.loadSnapshot: tecs.random requires 32-bit integer words", 3)
+    end
+    return nupp.math.i32.wrap(value as integer) as integer
+end
+
+-- Validate the dynamic snapshot boundary before the world discards live entities
+-- or changes any captured generator. All later restore operations are infallible.
+
+--- Validates and detaches a persisted random registry.
+--- @param value The dynamic payload saved under tecs.random.
+--- @return Returns validated signed words and non-empty stream names.
+--- @raises Raises for invalid seed, names, word counts or state values.
+export function prepare(value: any): State
+    if type(value) ~= "table" or type(value.streams) ~= "table" then
+        error("world.loadSnapshot: invalid tecs.random registry", 2)
+    end
+    const seed = word(value.seed)
+    const streams: {[string]: {integer}} = {}
+    for name, saved in pairs(value.streams as {[any]: any}) do
+        if type(name) ~= "string" or name == "" then
+            error("world.loadSnapshot: tecs.random needs non-empty stream names", 2)
+        end
+        if type(saved) ~= "table" then
+            error("world.loadSnapshot: tecs.random needs four state words", 2)
+        end
+        local count = 0
+        for key in pairs(saved as {[any]: any}) do
+            if type(key) ~= "number" or key % 1 ~= 0 or key < 1 or key > 4 then
+                error("world.loadSnapshot: tecs.random needs four state words", 2)
+            end
+            count = count + 1
+        end
+        if count ~= 4 then
+            error("world.loadSnapshot: tecs.random needs four state words", 2)
+        end
+        const words: {integer} = {}
+        local nonzero = false
+        for index = 1, 4 do
+            words[index] = word(saved[index])
+            nonzero = nonzero or words[index] ~= 0
+        end
+        if not nonzero then
+            error("world.loadSnapshot: tecs.random cannot restore all-zero state", 2)
+        end
+        streams[name as string] = words
+    end
+
+    return new State(seed = seed, streams = streams)
+end
+
+--- Restores saved streams and restarts unsaved streams without replacing objects.
+--- @param registry The world-owned registry to restore.
+--- @param state The state previously validated by prepare.
+export function restore(exclusive registry: Registry, borrows state: State): nil
+    registry.seed = state.seed
+    for name, generator in pairs(registry.streams) do
+        const words = state.streams[name]
+        if words ~= nil then
+            generator:setState(words)
+        else
+            generator:reseed(streamSeed(state.seed, name))
+        end
+    end
+    for name, words in pairs(state.streams) do
+        if registry.streams[name] == nil then
+            const generator = random.newRandom()
+            generator:setState(words)
+            registry.streams[name] = generator
+        end
+    end
+end

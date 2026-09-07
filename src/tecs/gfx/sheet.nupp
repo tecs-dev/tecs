@@ -238,7 +238,10 @@ export record Sheet
     pivotOf: function(self: Sheet, id: integer, frame: integer): (number, number)
     boundImage: function(self: Sheet): integer
     bind: function(self: Sheet, image: integer, u0: number?, v0: number?, u1: number?, v1: number?): Sheet
-    sprite: function(self: Sheet, frame: integer?): components.TableInstance<rendercomponents.Sprite>
+    sprite: function(
+        self: Sheet,
+        frame: integer?
+    ): components.FFIInstance<rendercomponents.Sprite, components.FFIComponent<rendercomponents.Sprite>>
 end
 
 --- Builds a sheet one frame, tag, and slice at a time.
@@ -679,7 +682,10 @@ end
 --- @return a fresh [`Sprite`](tecs.gfx.Sprite) value ready to spawn, which
 ---     the caller owns rather than a view onto the sheet
 --- @raises when the frame is outside the sheet
-function Sheet.sprite(self: Sheet, frame: integer?): components.TableInstance<rendercomponents.Sprite>
+function Sheet.sprite(
+    self: Sheet,
+    frame: integer?
+): components.FFIInstance<rendercomponents.Sprite, components.FFIComponent<rendercomponents.Sprite>>
     const index = frame ?? 1
     checkFrame(self, index, "sprite")
     const base = (index - 1) * 4

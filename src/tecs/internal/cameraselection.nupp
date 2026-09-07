@@ -8,14 +8,16 @@ local rendercomponents = require("tecs.internal.rendercomponents")
 export function pick(value: query.Query): rendercomponents.Camera2D?, integer?
     local chosen: rendercomponents.Camera2D? = nil
     local chosenEntity: integer = 0
-    for candidate, count in value:iter() do
-        local active = candidate as archetype.Archetype
-        local cameras: {rendercomponents.Camera2D} = assert(active:get(rendercomponents.Camera2DComponent))
-        for index = 1, count as integer do
-            const entity = active.entities[index]
-            if chosen == nil or entity < chosenEntity then
-                chosen = cameras[index]
-                chosenEntity = entity
+    unsafe do
+        for candidate, count in value:iter() do
+            local active = candidate as archetype.Archetype
+            local cameras: rendercomponents.Camera2D[?] = assert(active:get(rendercomponents.Camera2DComponent))
+            for index = 1, count as integer do
+                const entity = active.entities[index]
+                if chosen == nil or entity < chosenEntity then
+                    chosen = cameras[index]
+                    chosenEntity = entity
+                end
             end
         end
     end

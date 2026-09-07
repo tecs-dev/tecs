@@ -64,22 +64,23 @@ export type Region = {
 ---
 --- A component rather than a field on every renderable, because presence is
 --- the opt-in and absence is the common case.
-export record Clip
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct Clip
     --- Caller-writable. Selects a region set with `setRegion`, from one to
     --- `MAX - 1`. Zero, the default, means no clipping.
     index: integer
 end
 
 --- The process-wide `Clip` component definition.
-export const ClipComponent: ecs.TableComponent<Clip> = ecs.newComponent({
+export const ClipComponent: ecs.FFIComponent<Clip> = ecs.newFFIComponent({
     -- This persisted component name is a compatibility surface, and so is the
     -- `index` key the default snapshot codec writes under it.
     name = "Clip",
     construct = function(index: integer?): Clip
-        return new Clip(index = index ?? 0)
+        return new Clip(index ?? 0)
     end,
     default = function(): Clip
-        return new Clip(index = 0)
+        return new Clip(0)
     end,
 })
 

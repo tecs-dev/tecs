@@ -269,8 +269,8 @@ end
 --- it has already validated and uploaded.
 export record Extractor
     private world: world.World
-    private poses: {rendercomponents.Transform2D}
-    private lightPoses: {rendercomponents.Transform2D}
+    private drawCapacity: integer
+    private lightCapacity: integer
     private drawables: query.Query
     private activeCameras: query.Query
     private cameras: query.Query
@@ -278,8 +278,8 @@ export record Extractor
     private order: {integer}
     private entities: {integer}
     private depths: {number}
-    private transforms: {rendercomponents.Transform2D}
-    private tints: {rendercomponents.Tint}
+    private transforms: rendercomponents.Transform2D[?]
+    private tints: rendercomponents.Tint[?]
     private clipIds: {integer}
     private imageIds: {integer}
     private samplers: {integer}
@@ -317,8 +317,8 @@ export record Extractor
     private before: function(left: integer, right: integer): boolean
     private lightOrder: {integer}
     private lightEntities: {integer}
-    private lightTransforms: {rendercomponents.Transform2D}
-    private lightValues: {lighting.PointLight2D}
+    private lightTransforms: rendercomponents.Transform2D[?]
+    private lightValues: lighting.PointLight2D[?]
     private lightCount: integer
     private lightsSorted: integer
     private beforeLight: function(left: integer, right: integer): boolean
@@ -358,8 +358,8 @@ export function new(exclusive value: world.World): Extractor
 
     return new Extractor(
         world = value,
-        poses = {},
-        lightPoses = {},
+        drawCapacity = 64,
+        lightCapacity = 64,
         drawables = value:newQuery({
             exclude = {tecs.internal.components.Disabled},
             include = {
@@ -376,8 +376,8 @@ export function new(exclusive value: world.World): Extractor
         order = {},
         entities = entities,
         depths = depths,
-        transforms = {},
-        tints = {},
+        transforms = carray(rendercomponents.Transform2D, 65),
+        tints = carray(rendercomponents.Tint, 65),
         clipIds = {},
         imageIds = {},
         samplers = {},
@@ -415,8 +415,8 @@ export function new(exclusive value: world.World): Extractor
         before = before,
         lightOrder = {},
         lightEntities = lightEntities,
-        lightTransforms = {},
-        lightValues = {},
+        lightTransforms = carray(rendercomponents.Transform2D, 65),
+        lightValues = carray(lighting.PointLight2D, 65),
         lightCount = 0,
         lightsSorted = 0,
         beforeLight = beforeLight
@@ -448,37 +448,34 @@ local function view(borrows self: Extractor, width: number, height: number): num
     return camera.x, camera.y, camera.zoom, camera.rotation
 end
 
---- Reuses a detached pose for interpolation, leaving the simulation value untouched.
+--- Interpolates an extractor-owned native pose, never a borrowed simulation row.
 local function presented(
     current: rendercomponents.Transform2D,
     previous: rendercomponents.PreviousTransform2D?,
-    alpha: number,
-    poses: {rendercomponents.Transform2D},
-    row: integer
+    alpha: number
 ): rendercomponents.Transform2D
-    if previous == nil then
-        return current
+    if previous ~= nil then
+        current.x = previous.x + (current.x - previous.x) * alpha
+        current.y = previous.y + (current.y - previous.y) * alpha
+        const angle = (current.rotation - previous.rotation + math.pi) % (2 * math.pi) - math.pi
+        current.rotation = previous.rotation + angle * alpha
     end
-    local pose = poses[row]
-    if pose == nil then
-        pose = rendercomponents.Transform2DComponent.defaultFactory()
-        poses[row] = pose
-    end
-    pose.x = previous.x + (current.x - previous.x) * alpha
-    pose.y = previous.y + (current.y - previous.y) * alpha
-    const angle = (current.rotation - previous.rotation + math.pi) % (2 * math.pi) - math.pi
-    pose.rotation = previous.rotation + angle * alpha
-    pose.z = current.z
-    pose.layer = current.layer
-    pose.scaleX = current.scaleX
-    pose.scaleY = current.scaleY
 
-    return pose
+    return current
 end
 
 --- Reads dirty archetype runs into the retained extraction arrays.
 --- @raises when an entity selects a material id this build does not carry
 local function collect(exclusive self: Extractor): nil
+    const needed = self.drawables:count()
+    if needed > self.drawCapacity then
+        const capacity = math.max(needed, self.drawCapacity * 2)
+        const transforms = carray(rendercomponents.Transform2D, capacity + 1)
+        const tints = carray(rendercomponents.Tint, capacity + 1)
+        ffi.copy(transforms, self.transforms, (self.rowCount + 1) * ffi.sizeof(rendercomponents.Transform2D))
+        ffi.copy(tints, self.tints, (self.rowCount + 1) * ffi.sizeof(rendercomponents.Tint))
+        self.transforms, self.tints, self.drawCapacity = transforms, tints, capacity
+    end
     const entities = self.entities
     const depths = self.depths
     const transforms = self.transforms
@@ -500,114 +497,112 @@ local function collect(exclusive self: Extractor): nil
     local orderChanged = self.orderChanged
     -- Keep an interrupted collection invalid until a complete sort succeeds.
     self.orderChanged = true
-    for candidate, count in self.drawables:iter() do
-        local active = candidate as archetype.Archetype
-        const run = assert(self.runs[active.id])
-        if not run.dirty then
-            rows = rows + (count as integer)
-        else
-            run.screenSpace = false
-            local rowTransforms: {
-                rendercomponents.Transform2D
-            } = assert(active:get(rendercomponents.Transform2DComponent))
-            const previous = active:get(rendercomponents.PreviousTransform2DComponent)
-            local rowTints: {rendercomponents.Tint} = assert(active:get(rendercomponents.TintComponent))
-            local rowClips = active:get(clips.ClipComponent)
-            local rowSprites = active:get(rendercomponents.SpriteComponent) as {rendercomponents.Sprite}?
-            local rowMaterials = active:get(materials.MaterialComponent) as {materials.Material}?
-            local rowOccluders = active:get(lighting.Occluder2DComponent) as {lighting.Occluder2D}?
-            local rowDropShadows = active:get(lighting.DropShadow2DComponent) as {lighting.DropShadow2D}?
-            for index = 1, count as integer do
-                rows = rows + 1
-                const transform = presented(
-                    rowTransforms[index],
-                    previous ~= nil and previous[index] or nil,
-                    alpha,
-                    self.poses,
-                    rows
-                )
-                self.clipIds[rows] = rowClips and rowClips[index].index or 0
-                if layers.isScreenSpace(transform.layer) then
-                    run.screenSpace = true
-                end
-                const oldImage, oldSampler, oldLane, oldFlag = imageIds[
-                    rows
-                ], samplers[rows], lanes[rows], castFlags[rows]
-                const tint = rowTints[index]
-                const depth = layers.depthOf(transform.layer, transform.z, transform.x, transform.y)
-                if entities[rows] ~= active.entities[index] or depths[rows] ~= depth then
-                    orderChanged = true
-                end
-                entities[rows] = active.entities[index]
-                transforms[rows] = transform
-                tints[rows] = tint
-                depths[rows] = depth
-                -- The lane is the tint's alpha and nothing else. The G-buffer pass
-                -- writes with replace and has nowhere to put partial coverage, so
-                -- an entity that is not fully opaque leaves for the forward pass,
-                -- where the depth it already sorted by decides it against the
-                -- opaque geometry in front of it.
-                const blended = tint.a < 1.0 or layers.isOverlay(transform.layer)
-                lanes[rows] = blended and LANE_BLEND or LANE_OPAQUE
-                -- A blended entity casts nothing: it never reaches the G-buffer, so
-                -- a hard silhouette of it would be a lie. An entity carrying both
-                -- cast components is an occluder, because dropping that half would
-                -- silently unblock a light.
-                local flag: integer = 0
-                local height: number = 0.0
-                if not blended then
-                    if rowOccluders ~= nil then
-                        flag = FLAG_OCCLUDER
-                        height = rowOccluders[index].height
-                    elseif rowDropShadows ~= nil then
-                        flag = FLAG_DROP_SHADOW
-                        height = rowDropShadows[index].height
+    unsafe do
+        for candidate, count in self.drawables:iter() do
+            local active = candidate as archetype.Archetype
+            const run = assert(self.runs[active.id])
+            if not run.dirty then
+                rows = rows + (count as integer)
+            else
+                run.screenSpace = false
+                local rowTransforms: rendercomponents.Transform2D[
+                    ?
+                ] = assert(active:get(rendercomponents.Transform2DComponent))
+                const previous = active:get(rendercomponents.PreviousTransform2DComponent)
+                local rowTints: rendercomponents.Tint[?] = assert(active:get(rendercomponents.TintComponent))
+                local rowClips = active:get(clips.ClipComponent)
+                local rowSprites = active:get(rendercomponents.SpriteComponent) as rendercomponents.Sprite[?]?
+                local rowMaterials = active:get(materials.MaterialComponent) as materials.Material[?]?
+                local rowOccluders = active:get(lighting.Occluder2DComponent) as lighting.Occluder2D[?]?
+                local rowDropShadows = active:get(lighting.DropShadow2DComponent) as lighting.DropShadow2D[?]?
+                for index = 1, count as integer do
+                    rows = rows + 1
+                    transforms[rows] = rowTransforms[index]
+                    const transform = presented(transforms[rows], previous ~= nil and previous[index] or nil, alpha)
+                    self.clipIds[rows] = rowClips and rowClips[index].index or 0
+                    if layers.isScreenSpace(transform.layer) then
+                        run.screenSpace = true
                     end
-                end
-                castFlags[rows] = flag
-                castHeights[rows] = flag == 0 and 0.0 or height
-                if rowMaterials == nil then
-                    materialIds[rows] = 0
-                    params[rows] = 0.25
-                else
-                    const material = rowMaterials[index]
-                    if material.id < 0 or material.id >= materialCount then
-                        error(
-                            "framepacket: material id " .. tostring(material.id) .. " is not one this build carries",
-                            3
-                        )
+                    const oldImage, oldSampler, oldLane, oldFlag = imageIds[
+                        rows
+                    ], samplers[rows], lanes[rows], castFlags[rows]
+                    const tint = rowTints[index]
+                    const depth = layers.depthOf(transform.layer, transform.z, transform.x, transform.y)
+                    if entities[rows] ~= active.entities[index] or depths[rows] ~= depth then
+                        orderChanged = true
                     end
-                    materialIds[rows] = material.id
-                    params[rows] = material.param
-                end
-                if rowSprites == nil then
-                    imageIds[rows] = 0
-                    samplers[rows] = 0
-                    u0[rows] = 0.0
-                    v0[rows] = 0.0
-                    u1[rows] = 1.0
-                    v1[rows] = 1.0
-                else
-                    const sprite = rowSprites[index]
-                    const image = sprite.image
-                    -- An image that never became resident draws against the
-                    -- backend's white fallback rather than dropping the entity.
-                    if image ~= 0 and images.stateOf(image) == "resident" then
-                        imageIds[rows] = image
-                        samplers[rows] = images.samplerOf(image)
+                    entities[rows] = active.entities[index]
+                    tints[rows] = tint
+                    depths[rows] = depth
+                    -- The lane is the tint's alpha and nothing else. The G-buffer pass
+                    -- writes with replace and has nowhere to put partial coverage, so
+                    -- an entity that is not fully opaque leaves for the forward pass,
+                    -- where the depth it already sorted by decides it against the
+                    -- opaque geometry in front of it.
+                    const blended = tint.a < 1.0 or layers.isOverlay(transform.layer)
+                    lanes[rows] = blended and LANE_BLEND or LANE_OPAQUE
+                    -- A blended entity casts nothing: it never reaches the G-buffer, so
+                    -- a hard silhouette of it would be a lie. An entity carrying both
+                    -- cast components is an occluder, because dropping that half would
+                    -- silently unblock a light.
+                    local flag: integer = 0
+                    local height: number = 0.0
+                    if not blended then
+                        if rowOccluders ~= nil then
+                            flag = FLAG_OCCLUDER
+                            height = rowOccluders[index].height
+                        elseif rowDropShadows ~= nil then
+                            flag = FLAG_DROP_SHADOW
+                            height = rowDropShadows[index].height
+                        end
+                    end
+                    castFlags[rows] = flag
+                    castHeights[rows] = flag == 0 and 0.0 or height
+                    if rowMaterials == nil then
+                        materialIds[rows] = 0
+                        params[rows] = 0.25
                     else
+                        const material = rowMaterials[index]
+                        if material.id < 0 or material.id >= materialCount then
+                            error(
+                                "framepacket: material id " .. tostring(
+                                    material.id
+                                ) .. " is not one this build carries",
+                                3
+                            )
+                        end
+                        materialIds[rows] = material.id
+                        params[rows] = material.param
+                    end
+                    if rowSprites == nil then
                         imageIds[rows] = 0
                         samplers[rows] = 0
+                        u0[rows] = 0.0
+                        v0[rows] = 0.0
+                        u1[rows] = 1.0
+                        v1[rows] = 1.0
+                    else
+                        const sprite = rowSprites[index]
+                        const image = sprite.image
+                        -- An image that never became resident draws against the
+                        -- backend's white fallback rather than dropping the entity.
+                        if image ~= 0 and images.stateOf(image) == "resident" then
+                            imageIds[rows] = image
+                            samplers[rows] = images.samplerOf(image)
+                        else
+                            imageIds[rows] = 0
+                            samplers[rows] = 0
+                        end
+                        u0[rows] = sprite.u0
+                        v0[rows] = sprite.v0
+                        u1[rows] = sprite.u1
+                        v1[rows] = sprite.v1
                     end
-                    u0[rows] = sprite.u0
-                    v0[rows] = sprite.v0
-                    u1[rows] = sprite.u1
-                    v1[rows] = sprite.v1
-                end
-                if oldImage ~= imageIds[
-                    rows
-                ] or oldSampler ~= samplers[rows] or oldLane ~= lanes[rows] or oldFlag ~= castFlags[rows] then
-                    self.batchDirty = true
+                    if oldImage ~= imageIds[
+                        rows
+                    ] or oldSampler ~= samplers[rows] or oldLane ~= lanes[rows] or oldFlag ~= castFlags[rows] then
+                        self.batchDirty = true
+                    end
                 end
             end
         end
@@ -624,38 +619,44 @@ end
 --- @raises when a light holds a radius that is not greater than zero, or any
 ---     value that is not finite
 local function collectLights(exclusive self: Extractor): nil
+    const needed = self.lights:count()
+    if needed > self.lightCapacity then
+        const capacity = math.max(needed, self.lightCapacity * 2)
+        self.lightTransforms = carray(rendercomponents.Transform2D, capacity + 1)
+        self.lightValues = carray(lighting.PointLight2D, capacity + 1)
+        self.lightCapacity = capacity
+    end
     const lightEntities = self.lightEntities
     const lightTransforms = self.lightTransforms
     const lightValues = self.lightValues
     local _, _, alpha = self.world:getFixedTiming()
     local found: integer = 0
-    for candidate, count in self.lights:iter() do
-        local active = candidate as archetype.Archetype
-        local rowTransforms: {rendercomponents.Transform2D} = assert(active:get(rendercomponents.Transform2DComponent))
-        const previous = active:get(rendercomponents.PreviousTransform2DComponent)
-        local rowLights: {lighting.PointLight2D} = assert(active:get(lighting.PointLight2DComponent))
-        for index = 1, count as integer do
-            const light = rowLights[index]
-            if not (light.radius > 0.0) or not finite(light.radius) then
-                error("framepacket: a PointLight2D radius must be greater than zero", 3)
+    unsafe do
+        for candidate, count in self.lights:iter() do
+            local active = candidate as archetype.Archetype
+            local rowTransforms: rendercomponents.Transform2D[
+                ?
+            ] = assert(active:get(rendercomponents.Transform2DComponent))
+            const previous = active:get(rendercomponents.PreviousTransform2DComponent)
+            local rowLights: lighting.PointLight2D[?] = assert(active:get(lighting.PointLight2DComponent))
+            for index = 1, count as integer do
+                const light = rowLights[index]
+                if not (light.radius > 0.0) or not finite(light.radius) then
+                    error("framepacket: a PointLight2D radius must be greater than zero", 3)
+                end
+                if not finite(
+                    light.height
+                ) or not finite(
+                    light.r
+                ) or not finite(light.g) or not finite(light.b) or not finite(light.intensity) then
+                    error("framepacket: a PointLight2D holds a value that is not finite", 3)
+                end
+                found = found + 1
+                lightEntities[found] = active.entities[index]
+                lightTransforms[found] = rowTransforms[index]
+                presented(lightTransforms[found], previous ~= nil and previous[index] or nil, alpha)
+                lightValues[found] = light
             end
-            if not finite(
-                light.height
-            ) or not finite(light.r) or not finite(light.g) or not finite(light.b) or not finite(light.intensity) then
-                error("framepacket: a PointLight2D holds a value that is not finite", 3)
-            end
-            found = found + 1
-            lightEntities[found] = active.entities[index]
-            lightTransforms[
-                found
-            ] = presented(
-                rowTransforms[index],
-                previous ~= nil and previous[index] or nil,
-                alpha,
-                self.lightPoses,
-                found
-            )
-            lightValues[found] = light
         end
     end
     self.lightCount = found
@@ -734,37 +735,39 @@ local function sceneChanged(exclusive self: Extractor, eye: View, snapshot: bool
     local relayout = not self.cacheValid
     local changed = force
     local _, _, alpha = self.world:getFixedTiming()
-    for candidate, count in self.drawables:iter() do
-        const active = candidate as archetype.Archetype
-        local run = self.runs[active.id]
-        if run == nil or run.archetype ~= active then
-            run = new Run(
-                archetype = active,
-                offset = total,
-                length = count as integer,
-                structAt = -1,
-                valueAt = {},
-                dirty = true,
-                seen = true,
-                screenSpace = false
+    unsafe do
+        for candidate, count in self.drawables:iter() do
+            const active = candidate as archetype.Archetype
+            local run = self.runs[active.id]
+            if run == nil or run.archetype ~= active then
+                run = new Run(
+                    archetype = active,
+                    offset = total,
+                    length = count as integer,
+                    structAt = -1,
+                    valueAt = {},
+                    dirty = true,
+                    seen = true,
+                    screenSpace = false
+                )
+                self.runs[active.id] = run
+                relayout = true
+            end
+            relayout = relayout or run.offset ~= total or run.length ~= count
+            run.offset, run.length, run.seen = total, count as integer, true
+            total = total + run.length
+            const structural = active:structuralCount()
+            run.dirty = force or run.structAt ~= structural or (
+                alpha ~= self.cachedAlpha and active:get(rendercomponents.PreviousTransform2DComponent) ~= nil
             )
-            self.runs[active.id] = run
-            relayout = true
+            run.structAt = structural
+            for index, component in ipairs(watched) do
+                const writes = active:writeCount(component)
+                run.dirty = run.dirty or run.valueAt[index] ~= writes
+                run.valueAt[index] = writes
+            end
+            changed = changed or run.dirty
         end
-        relayout = relayout or run.offset ~= total or run.length ~= count
-        run.offset, run.length, run.seen = total, count as integer, true
-        total = total + run.length
-        const structural = active:structuralCount()
-        run.dirty = force or run.structAt ~= structural or (
-            alpha ~= self.cachedAlpha and active:get(rendercomponents.PreviousTransform2DComponent) ~= nil
-        )
-        run.structAt = structural
-        for index, component in ipairs(watched) do
-            const writes = active:writeCount(component)
-            run.dirty = run.dirty or run.valueAt[index] ~= writes
-            run.valueAt[index] = writes
-        end
-        changed = changed or run.dirty
     end
     for id, run in pairs(self.runs) do
         if not run.seen then
@@ -898,18 +901,20 @@ local function prefix(exclusive self: Extractor, eye: View, mode: integer, revis
     const lightOrder = self.lightOrder
     const lightTransforms = self.lightTransforms
     const lightValues = self.lightValues
-    for index = 1, lightCount do
-        const slot = lightOrder[index]
-        const transform = lightTransforms[slot]
-        const light = lightValues[slot]
-        writer:writeFloat32(narrow(transform.x))
-            :writeFloat32(narrow(transform.y))
-            :writeFloat32(narrow(light.height))
-            :writeFloat32(narrow(light.radius))
-            :writeFloat32(narrow(light.r))
-            :writeFloat32(narrow(light.g))
-            :writeFloat32(narrow(light.b))
-            :writeFloat32(narrow(light.intensity))
+    unsafe do
+        for index = 1, lightCount do
+            const slot = lightOrder[index]
+            const transform = lightTransforms[slot]
+            const light = lightValues[slot]
+            writer:writeFloat32(narrow(transform.x))
+                :writeFloat32(narrow(transform.y))
+                :writeFloat32(narrow(light.height))
+                :writeFloat32(narrow(light.radius))
+                :writeFloat32(narrow(light.r))
+                :writeFloat32(narrow(light.g))
+                :writeFloat32(narrow(light.b))
+                :writeFloat32(narrow(light.intensity))
+        end
     end
 
     if mode == 0 then

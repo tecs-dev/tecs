@@ -982,7 +982,15 @@ local function install(exclusive app: tecs.application.Application): nil
     -- arrives.
     const window = app.window
     local rasterDensity = window:scaleFactor()
-    const textNodes = world:newQuery({include = {tecs.gfx.Text}})
+    -- Hidden labels need the new atlas too, before their scene is shown again.
+    const textQueries = {
+        world:newQuery({
+            include = {tecs.gfx.Text}
+        }),
+        world:newQuery({
+            include = {tecs.gfx.Text, tecs.ecs.Disabled}
+        }),
+    }
     world:addSystem({
         name = "example.UiRasterDensity",
         phase = tecs.ecs.phases.Update,
@@ -992,10 +1000,12 @@ local function install(exclusive app: tecs.application.Application): nil
                 return
             end
             rasterDensity = currentDensity
-            for candidate, count in textNodes:iter() do
-                const texts = assert(candidate:getMut(tecs.gfx.Text))
-                for row = 1, count as integer do
-                    texts[row].font = fontAt(texts[row].size, currentDensity)
+            for queryIndex = 1, #textQueries do
+                for candidate, count in textQueries[queryIndex]:iter() do
+                    const texts = assert(candidate:getMut(tecs.gfx.Text))
+                    for row = 1, count as integer do
+                        texts[row].font = fontAt(texts[row].size, currentDensity)
+                    end
                 end
             end
         end

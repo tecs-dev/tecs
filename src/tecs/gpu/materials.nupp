@@ -112,7 +112,8 @@ const BUILTINS: {
 }
 
 --- Selects one material for a renderable entity.
-export record Material
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct Material
     --- Caller-writable. Selects a material by an id `id` returned. Zero draws
     --- through `textured`.
     id: integer
@@ -290,16 +291,16 @@ export function reset(): nil
 end
 
 --- The process-wide `Material` component definition.
-export const MaterialComponent: components.TableComponent<Material> = components.newComponent({
+export const MaterialComponent: components.FFIComponent<Material> = components.newFFIComponent({
     -- This persisted component name is a compatibility surface, and so are the
     -- `material` and `param` keys the snapshot below writes. A snapshot stores
     -- the material by name because an id holds only for one build's file set.
     name = "Material",
     construct = function(value: integer?, param: number?): Material
-        return new Material(id = value or 0, param = param or 0.25)
+        return new Material(value or 0, param or 0.25)
     end,
     default = function(): Material
-        return new Material(id = 0, param = 0.25)
+        return new Material(0, 0.25)
     end,
     save = function(value: Material): any
         return {material = name(value.id), param = value.param}
@@ -319,6 +320,6 @@ export const MaterialComponent: components.TableComponent<Material> = components
             resolved = found
         end
 
-        return new Material(id = resolved, param = (stored.param as number?) or 0.25)
+        return new Material(resolved, (stored.param as number?) or 0.25)
     end,
 })

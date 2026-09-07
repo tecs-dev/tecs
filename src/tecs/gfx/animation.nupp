@@ -78,7 +78,8 @@ const CROSSED_COMPLETED: integer = 2
 --- cycle, so it neither grows without bound nor loses precision to its own age.
 --- The cycle's duration is the sum of the durations of the frames the tag
 --- visits, which `tecs.gfx.sheet.Sheet.cycle` reports.
-export record Animation
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct Animation
     --- Caller-writable. Selects a sheet by its registration index. Zero plays
     --- nothing.
     sheet: integer
@@ -122,7 +123,7 @@ export record Animation
 end
 
 --- The process-wide `Animation` component definition.
-export const AnimationComponent: ecs.TableComponent<Animation> = ecs.newComponent({
+export const AnimationComponent: ecs.FFIComponent<Animation> = ecs.newFFIComponent({
     -- This persisted component name is a compatibility surface.
     name = "Animation",
     construct = function(
@@ -135,27 +136,18 @@ export const AnimationComponent: ecs.TableComponent<Animation> = ecs.newComponen
         playing: boolean?
     ): Animation
         return new Animation(
-            sheet = sheetId ?? 0,
-            tag = tag ?? 0,
-            speed = speed ?? DEFAULT_SPEED,
-            time = time ?? 0.0,
-            frame = frame ?? 0,
-            loop = loop ?? true,
-            playing = playing ?? true,
-            crossed = 0
+            sheetId ?? 0,
+            tag ?? 0,
+            speed ?? DEFAULT_SPEED,
+            time ?? 0.0,
+            frame ?? 0,
+            loop ?? true,
+            playing ?? true,
+            0
         )
     end,
     default = function(): Animation
-        return new Animation(
-            sheet = 0,
-            tag = 0,
-            speed = DEFAULT_SPEED,
-            time = 0.0,
-            frame = 0,
-            loop = true,
-            playing = true,
-            crossed = 0
-        )
+        return new Animation(0, 0, DEFAULT_SPEED, 0.0, 0, true, true, 0)
     end,
     -- A sheet id and a tag id are this process's answers, decided by the order
     -- sheets were built in. What crosses a save is the pair of names, resolved
@@ -191,14 +183,14 @@ export const AnimationComponent: ecs.TableComponent<Animation> = ecs.newComponen
         end
 
         return new Animation(
-            sheet = id,
-            tag = tag,
-            speed = (stored.speed as number?) ?? DEFAULT_SPEED,
-            time = (stored.time as number?) ?? 0.0,
-            frame = 0,
-            loop = (stored.loop as boolean?) ?? true,
-            playing = (stored.playing as boolean?) ?? true,
-            crossed = 0
+            id,
+            tag,
+            (stored.speed as number?) ?? DEFAULT_SPEED,
+            (stored.time as number?) ?? 0.0,
+            0,
+            (stored.loop as boolean?) ?? true,
+            (stored.playing as boolean?) ?? true,
+            0
         )
     end,
 })
@@ -285,7 +277,11 @@ end
 ---     entity
 --- @raises when the sheet does not carry the named tag, because an author naming
 ---     a tag here has one in mind and the sheet is already in hand to check
-export function of(source: sheet.Sheet, tag: string?, options: PlayOptions?): components.TableInstance<Animation>
+export function of(
+    source: sheet.Sheet,
+    tag: string?,
+    options: PlayOptions?
+): components.FFIInstance<Animation, components.FFIComponent<Animation>>
     const id = tagIdFor(source, tag, 3)
 
     return AnimationComponent(
@@ -379,62 +375,64 @@ end
 --- frame actually changed, because a crowd holding one frame writes nothing and
 --- a dirty-gated consumer should not have to find that out per row.
 local function advance(query: ecs.Query, dt: number): nil
-    for candidate, count in query:iter() do
-        const active = candidate as archetype.Archetype
-        const animations: {Animation} = assert(active:get(AnimationComponent))
-        const sprites: {rendercomponents.Sprite} = assert(active:get(SpriteComponent))
-        local movedAnimation = false
-        local movedSprite = false
-        -- A crowd playing one cycle shares its sheet, and neighbouring rows
-        -- tend to as well.
-        local cachedId: integer = 0
-        local cached: sheet.Sheet? = nil
+    unsafe do
+        for candidate, count in query:iter() do
+            const active = candidate as archetype.Archetype
+            const animations: Animation[?] = assert(active:get(AnimationComponent))
+            const sprites: rendercomponents.Sprite[?] = assert(active:get(SpriteComponent))
+            local movedAnimation = false
+            local movedSprite = false
+            -- A crowd playing one cycle shares its sheet, and neighbouring rows
+            -- tend to as well.
+            local cachedId: integer = 0
+            local cached: sheet.Sheet? = nil
 
-        for row = 1, count as integer do
-            const instance = animations[row]
-            const sheetId = instance.sheet
-            if sheetId ~= cachedId then
-                cached = sheet.byId(sheetId)
-                cachedId = sheetId
-            end
-            const source = cached
-            if source ~= nil then
-                const cycle = source:cycle(instance.tag)
-                if instance.playing and instance.speed > 0.0 and cycle > 0.0 then
-                    if not movedAnimation then
-                        active:markComponentDirty(AnimationComponent)
-                        movedAnimation = true
-                    end
-                    local time = instance.time + dt * instance.speed
-                    if time >= cycle then
-                        if instance.loop then
-                            time = time % cycle
-                            instance.crossed = CROSSED_LOOPED
-                        else
-                            -- Held at the cycle's end, which is the last frame,
-                            -- rather than wrapped: a one-shot that finished
-                            -- shows what it finished on until something
-                            -- restarts it.
-                            time = cycle
-                            instance.playing = false
-                            instance.crossed = CROSSED_COMPLETED
-                        end
-                    end
-                    instance.time = time
+            for row = 1, count as integer do
+                const instance = animations[row]
+                const sheetId = instance.sheet
+                if sheetId ~= cachedId then
+                    cached = sheet.byId(sheetId)
+                    cachedId = sheetId
                 end
+                const source = cached
+                if source ~= nil then
+                    const cycle = source:cycle(instance.tag)
+                    if instance.playing and instance.speed > 0.0 and cycle > 0.0 then
+                        if not movedAnimation then
+                            active:markComponentDirty(AnimationComponent)
+                            movedAnimation = true
+                        end
+                        local time = instance.time + dt * instance.speed
+                        if time >= cycle then
+                            if instance.loop then
+                                time = time % cycle
+                                instance.crossed = CROSSED_LOOPED
+                            else
+                                -- Held at the cycle's end, which is the last frame,
+                                -- rather than wrapped: a one-shot that finished
+                                -- shows what it finished on until something
+                                -- restarts it.
+                                time = cycle
+                                instance.playing = false
+                                instance.crossed = CROSSED_COMPLETED
+                            end
+                        end
+                        instance.time = time
+                    end
 
-                const frame = source:frameAt(instance.tag, instance.time)
-                if frame ~= instance.frame then
-                    if not movedAnimation then
-                        active:markComponentDirty(AnimationComponent)
-                        movedAnimation = true
+                    const frame = source:frameAt(instance.tag, instance.time)
+                    if frame ~= instance.frame then
+                        if not movedAnimation then
+                            active:markComponentDirty(AnimationComponent)
+                            movedAnimation = true
+                        end
+                        if not movedSprite then
+                            active:markComponentDirty(SpriteComponent)
+                            movedSprite = true
+                        end
+                        instance.frame = frame
+                        showFrame(sprites[row], source, frame)
                     end
-                    if not movedSprite then
-                        active:markComponentDirty(SpriteComponent)
-                        movedSprite = true
-                    end
-                    instance.frame = frame
-                    showFrame(sprites[row], source, frame)
                 end
             end
         end
@@ -453,31 +451,33 @@ end
 --- observes, so `Completed` reports a stop that has already happened rather
 --- than causing one.
 local function report(exclusive world: ecs.World, query: ecs.Query): nil
-    for candidate, count in query:iter() do
-        const active = candidate as archetype.Archetype
-        const animations: {Animation} = assert(active:get(AnimationComponent))
-        const entities = active.entities
-        local moved = false
+    unsafe do
+        for candidate, count in query:iter() do
+            const active = candidate as archetype.Archetype
+            const animations: Animation[?] = assert(active:get(AnimationComponent))
+            const entities = active.entities
+            local moved = false
 
-        for row = 1, count as integer do
-            const instance = animations[row]
-            const crossed = instance.crossed
-            if crossed ~= 0 then
-                if not moved then
-                    active:markComponentDirty(AnimationComponent)
-                    moved = true
-                end
-                instance.crossed = 0
-                const source = sheet.byId(instance.sheet)
-                if source ~= nil then
-                    const name = source:tagName(instance.tag)
-                    -- An emit with nobody observing constructs nothing, so the
-                    -- crowd without observers costs the registration count and
-                    -- two lookups here.
-                    if crossed == CROSSED_COMPLETED then
-                        world:emit(0, Completed, entities[row], source, name)
-                    else
-                        world:emit(0, Looped, entities[row], source, name)
+            for row = 1, count as integer do
+                const instance = animations[row]
+                const crossed = instance.crossed
+                if crossed ~= 0 then
+                    if not moved then
+                        active:markComponentDirty(AnimationComponent)
+                        moved = true
+                    end
+                    instance.crossed = 0
+                    const source = sheet.byId(instance.sheet)
+                    if source ~= nil then
+                        const name = source:tagName(instance.tag)
+                        -- An emit with nobody observing constructs nothing, so the
+                        -- crowd without observers costs the registration count and
+                        -- two lookups here.
+                        if crossed == CROSSED_COMPLETED then
+                            world:emit(0, Completed, entities[row], source, name)
+                        else
+                            world:emit(0, Looped, entities[row], source, name)
+                        end
                     end
                 end
             end
@@ -558,7 +558,7 @@ export function plugin(exclusive world: ecs.World): nil
     -- A paused entity holds its frame, so it is left out rather than tested per
     -- row: moving in and out of `Paused` is an archetype move, which is what
     -- decides the query.
-    const playing = world:newQuery({include = {AnimationComponent, SpriteComponent}, exclude = {ecs.Paused},})
+    const playing = world:newQuery({type = "logic", include = {AnimationComponent, SpriteComponent}})
     const subscribed = world:newQuery({include = {AnimationComponent, SpriteComponent, AnimationEvents}})
 
     -- These two system names are a compatibility surface: the debug server

@@ -3,7 +3,8 @@ module shapes
 --[[Built-in shape gallery and the scene used by `nupp task bench render`.
 Run `nupp task ex-shapes` for the gallery. BENCH_COUNT selects the exact number
 of shapes; BENCH_SHAPE selects one material or `all`. BENCH_MOTION is
-`static` or `moving`. The grid initially fits inside the render target.
+`static` or `moving`. One batch initializes the shape columns directly.
+The grid initially fits inside the render target.
 BENCH_INTERACTIVE enables wheel zoom, WASD/arrow panning and R to reset.]]
 
 local function install(exclusive app: tecs.application.Application, interactive: boolean): nil
@@ -65,26 +66,32 @@ local function install(exclusive app: tecs.application.Application, interactive:
             const rows = math.ceil(total / columns)
             const cellWidth, cellHeight = width / columns, height / rows
             const size = math.min(cellWidth, cellHeight) * 0.8
-            for index = 0, total - 1 do
-                world:spawn(
-                    tecs.ecs.Transform2D(
-                        (index % columns + 0.5) * cellWidth,
-                        (math.floor(index / columns) + 0.5) * cellHeight,
-                        0,
-                        1,
-                        0,
-                        size,
-                        size
-                    ),
-                    tecs.gfx.Tint(0.2 + (index % 5) * 0.16, 0.3 + (index % 3) * 0.2, 0.8, 1),
-                    tecs.gfx.Material(selected == "all" and ids[index % #ids + 1] or fixed, 0.25),
-                    tecs.gfx.Renderable2D
-                )
-            end
-            print(
-                (
-                    "shapes: %d %s, %s, target %dx%d, quad %.3fpx, spawn %.0fms"
-                ):format(total, kind, motion, width, height, size, nupp.time.now() - started)
+            world:batchSpawn(
+                total,
+                {tecs.ecs.Transform2D, tecs.gfx.Tint, tecs.gfx.Material, tecs.gfx.Renderable2D},
+                function(candidate: tecs.ecs.Archetype, first: integer, last: integer): nil
+                    const transforms = assert(candidate:getMut(tecs.ecs.Transform2D))
+                    const tints = assert(candidate:getMut(tecs.gfx.Tint))
+                    const materials = assert(candidate:getMut(tecs.gfx.Material))
+                    unsafe do
+                        for row = first, last do
+                            const index = row - first
+                            transforms[row].x = (index % columns + 0.5) * cellWidth
+                            transforms[row].y = (math.floor(index / columns) + 0.5) * cellHeight
+                            transforms[row].scaleX = size
+                            transforms[row].scaleY = size
+                            tints[row].r = 0.2 + (index % 5) * 0.16
+                            tints[row].g = 0.3 + (index % 3) * 0.2
+                            tints[row].b = 0.8
+                            materials[row].id = selected == "all" and ids[index % #ids + 1] or fixed
+                        end
+                    end
+                    print(
+                        (
+                            "shapes: %d %s, %s, target %dx%d, quad %.3fpx, batch init %.0fms"
+                        ):format(total, kind, motion, width, height, size, nupp.time.now() - started)
+                    )
+                end
             )
         end
     })
@@ -143,8 +150,10 @@ local function install(exclusive app: tecs.application.Application, interactive:
             run = function(): nil
                 for candidate, amount in moving:iter() do
                     const transforms = assert(candidate:getMut(tecs.ecs.Transform2D))
-                    for row = 1, amount as integer do
-                        transforms[row].rotation = transforms[row].rotation + 0.01
+                    unsafe do
+                        for row = 1, amount as integer do
+                            transforms[row].rotation = transforms[row].rotation + 0.01
+                        end
                     end
                 end
             end

@@ -1,0 +1,126 @@
+-- Native ECS columns against the original direct FFI-array loop and managed rows.
+-- All three use the same two-double layout and arithmetic. Setup is untimed.
+local ffi = require("ffi")
+local buffer = require("string.buffer")
+local ffistorage = require("tecs.internal.ffistorage")
+local harness = require("tecs.bench.harness")
+
+const count = harness.count("BENCH_STORAGE_COUNT", 100000)
+const warmup = harness.optionalCount("BENCH_STORAGE_WARMUP", 120)
+const samples = harness.count("BENCH_STORAGE_SAMPLES", 301)
+
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+local struct NativePoint
+    x: number
+    y: number
+end
+local record ManagedPoint
+    x: number
+    y: number
+end
+const native = tecs.ecs.newFFIComponent({
+    name = "bench.NativePoint",
+    construct = function(): NativePoint
+        return new NativePoint(0, 1)
+    end,
+    default = function(): NativePoint
+        return new NativePoint(0, 1)
+    end
+})
+const managed = tecs.ecs.newComponent({
+    name = "bench.ManagedPoint",
+    construct = function(): ManagedPoint
+        return new ManagedPoint(x = 0, y = 1)
+    end,
+    default = function(): ManagedPoint
+        return new ManagedPoint(x = 0, y = 1)
+    end
+})
+const nativeWorld = tecs.ecs.newWorld({maxEntities = count + 64})
+const managedWorld = tecs.ecs.newWorld({maxEntities = count + 64})
+nativeWorld:batchSpawn(count, {native})
+managedWorld:batchSpawn(count, {managed})
+nativeWorld:commit()
+managedWorld:commit()
+const nativeQuery = nativeWorld:newQuery({include = {native}})
+const managedQuery = managedWorld:newQuery({include = {managed}})
+const baseline = carray(NativePoint, count + 1)
+unsafe do
+    for row = 1, count do
+        baseline[row].y = 1
+    end
+end
+
+local function directLoop(): nil
+    unsafe do
+        for row = 1, count do
+            baseline[row].x += baseline[row].y
+        end
+    end
+end
+
+local function nativeLoop(): nil
+    for candidate, rows in nativeQuery:iter() do
+        const column = assert(candidate:getMut(native))
+        unsafe do
+            for row = 1, assert(rows) do
+                column[row].x += column[row].y
+            end
+        end
+    end
+end
+
+local function managedLoop(): nil
+    for candidate, rows in managedQuery:iter() do
+        const column = assert(candidate:getMut(managed))
+        for row = 1, assert(rows) do
+            column[row].x += column[row].y
+        end
+    end
+end
+
+const direct = harness.newStage("direct FFI")
+const ecs = harness.newStage("native ECS")
+const tables = harness.newStage("managed ECS")
+harness.measure(direct, warmup, samples, directLoop)
+harness.measure(ecs, warmup, samples, nativeLoop)
+harness.measure(tables, warmup, samples, managedLoop)
+
+-- Compare the buffer-direct copy used by the old snapshot implementation with
+-- the bounded native-column copy. Neither materializes a string or row table.
+const bytes = buffer.new(count * 16)
+const storage = assert(ffistorage.find(native.componentId))
+local column: any
+for candidate in nativeQuery:iter() do
+    column = candidate:get(native)
+end
+const raw = harness.newStage("direct raw save")
+const nativeRaw = harness.newStage("native raw save")
+harness.measure(raw, warmup, samples, function(): nil
+    bytes:reset()
+    unsafe do
+        bytes:putcdata(ffi.cast<voidptr>(baseline[1]), (count * 16) as uint64)
+    end
+end)
+harness.measure(nativeRaw, warmup, samples, function(): nil
+    bytes:reset()
+    ffistorage.writeRows(storage, column, 1, count, bytes)
+end)
+
+collectgarbage("collect")
+collectgarbage("stop")
+for _ = 1, 20 do
+    nativeLoop()
+end
+const before = collectgarbage("count")
+for _ = 1, 100 do
+    nativeLoop()
+end
+const allocated = (collectgarbage("count") - before) * 1024
+collectgarbage("restart")
+print("Rows per window: " .. tostring(count))
+print(harness.format({direct, ecs, tables, raw, nativeRaw}))
+print("Native ECS allocations over 100 full query loops: " .. tostring(allocated) .. " bytes")
+unsafe do
+    assert(baseline[1].x == warmup + samples)
+end

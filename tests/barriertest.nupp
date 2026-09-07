@@ -1,0 +1,330 @@
+local test = require("nupp.test")
+
+const tag = tecs.ecs.newTagComponent({name = "test.ConditionalBarrier"})
+local suite = {}
+
+function suite.publishesSynchronouslyOutsideSystems(): nil
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(tag)
+    test.assert(not world:isAlive(id))
+    world:enqueueCommit()
+    test.assert(world:isAlive(id))
+    world:enqueueCommit()
+    world:despawn(id)
+    world:enqueueCommit()
+    test.assert(not world:isAlive(id))
+end
+
+function suite.coalescesRequestsUntilTheSystemReturns(): nil
+    const world = tecs.ecs.newWorld()
+    const query = world:newQuery({include = {tag}})
+    local returned = false
+    local notifications = 0
+    world:newQuery({
+        include = {tag},
+        onEntitiesAdded = function(): nil
+            test.assert(returned)
+            notifications = notifications + 1
+        end
+    })
+    world:addSystem({
+        phase = tecs.ecs.phases.Update,
+        commitAfter = true,
+        run = function(): nil
+            world:spawn(tag)
+            world:enqueueCommit()
+            world:enqueueCommit()
+            test.equal(query:count(), 0)
+            returned = true
+        end
+    })
+    world:addSystem({
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            test.equal(query:count(), 1)
+            test.equal(notifications, 1)
+        end
+    })
+    world:update(0)
+end
+
+function suite.onlyIntroducesRequestedBoundaries(): nil
+    const world = tecs.ecs.newWorld()
+    const query = world:newQuery({include = {tag}})
+    local request = false
+    world:addSystem({
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            world:spawn(tag)
+            if request then
+                world:enqueueCommit()
+            end
+        end
+    })
+    world:addSystem({
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            test.equal(query:count(), request and 2 or 0)
+        end
+    })
+    world:update(0)
+    test.equal(query:count(), 1)
+    request = true
+    world:update(0)
+end
+
+function suite.defersTrueAndFalsePredicateRequests(): nil
+    for _, allowed in ipairs({true, false}) do
+        const world = tecs.ecs.newWorld()
+        const query = world:newQuery({include = {tag}})
+        local bodyRan = false
+        world:addSystem({
+            phase = tecs.ecs.phases.Update,
+            runIf = function(): boolean
+                world:spawn(tag)
+                world:enqueueCommit()
+                test.equal(query:count(), 0)
+                return allowed
+            end,
+            run = function(): nil
+                bodyRan = true
+                test.equal(query:count(), 0)
+                world:enqueueCommit()
+            end
+        })
+        world:addSystem({
+            phase = tecs.ecs.phases.Update,
+            run = function(): nil
+                test.equal(bodyRan, allowed)
+                test.equal(query:count(), 1)
+            end
+        })
+        world:update(0)
+    end
+end
+
+function suite.keepsTheViewStableAcrossIterationAndSuspension(): nil
+    const world = tecs.ecs.newWorld()
+    const query = world:newQuery({include = {tag}})
+    world:batchSpawn(3, {tag})
+    world:commit()
+    world:addSystem({
+        phase = tecs.ecs.phases.Update,
+        run = function(_dt: number, exclusive _world: tecs.ecs.World, borrows scope: nupp.tasks.Scope): nil
+            local visited = 0
+            for candidate in query:iter() do
+                for _, id in ipairs(assert(candidate).entities) do
+                    world:despawn(id)
+                    world:enqueueCommit()
+                    visited = visited + 1
+                end
+            end
+            test.equal(visited, 3)
+            const child = scope:spawn(function(): integer
+                test.equal(query:count(), 3)
+                world:enqueueCommit()
+                return 42
+            end)
+            test.equal(child:await(), 42)
+            test.equal(query:count(), 3)
+        end
+    })
+    world:addSystem({
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            test.equal(query:count(), 0)
+        end
+    })
+    world:update(0)
+end
+
+function suite.explicitCommitRemainsSynchronousInsideSystems(): nil
+    const world = tecs.ecs.newWorld()
+    world:addSystem({
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            const id = world:spawn(tag)
+            world:enqueueCommit()
+            world:commit()
+            test.assert(world:isAlive(id))
+        end
+    })
+    world:update(0)
+end
+
+function suite.publishesChildWorkSettlingAfterDispatch(): nil
+    const world = tecs.ecs.newWorld()
+    local finished = false
+    world:addSystem({
+        phase = tecs.ecs.phases.Last,
+        run = function(_dt: number, exclusive _world: tecs.ecs.World, borrows scope: nupp.tasks.Scope): nil
+            scope:spawn(function(): nil
+                const id = world:spawn(tag)
+                world:enqueueCommit()
+                test.assert(world:isAlive(id))
+                finished = true
+            end)
+        end
+    })
+    world:update(0)
+    test.assert(finished)
+end
+
+function suite.clearsRequestsAfterAnAwaitedChildFailure(): nil
+    const world = tecs.ecs.newWorld()
+    const query = world:newQuery({include = {tag}})
+    world:addSystem({
+        phase = tecs.ecs.phases.Update,
+        run = function(_dt: number, exclusive _world: tecs.ecs.World, borrows scope: nupp.tasks.Scope): nil
+            world:spawn(tag)
+            world:enqueueCommit()
+            const child = scope:spawn(function(): nil
+                error("conditional child failure")
+            end)
+            child:await()
+        end
+    })
+    test.raises(
+        function(): nil
+            world:update(0)
+        end,
+        "conditional child failure"
+    )
+    test.equal(query:count(), 0)
+    world:enqueueCommit()
+    test.equal(query:count(), 1)
+end
+
+function suite.drainsObserverRequestsWithoutRecursing(): nil
+    const world = tecs.ecs.newWorld()
+    local inside = false
+    local notifications = 0
+    world:newQuery({
+        include = {tag},
+        onEntitiesAdded = function(): nil
+            test.assert(not inside)
+            inside = true
+            notifications = notifications + 1
+            if notifications == 1 then
+                const nextId = world:spawn(tag)
+                world:enqueueCommit()
+                world:enqueueCommit()
+                test.assert(not world:isAlive(nextId))
+            end
+            inside = false
+        end
+    })
+    world:spawn(tag)
+    world:enqueueCommit()
+    test.equal(notifications, 2)
+end
+
+local function dispatch(exclusive world: tecs.ecs.World, entry: string): nil
+    if entry == "startup" then
+        world:startup()
+    elseif entry == "shutdown" then
+        world:shutdown()
+    elseif entry == "phase" then
+        world:runPhase(tecs.ecs.phases.Update)
+    else
+        world:update(0)
+    end
+end
+
+function suite.recoversEveryDispatchAfterBodyAndPredicateFailures(): nil
+    for _, entry in ipairs({"startup", "shutdown", "phase", "update"}) do
+        for _, predicateFailure in ipairs({false, true}) do
+            const world = tecs.ecs.newWorld()
+            const query = world:newQuery({include = {tag}})
+            local phase = tecs.ecs.phases.Update
+            if entry == "startup" then
+                phase = tecs.ecs.phases.Startup
+            elseif entry == "shutdown" then
+                phase = tecs.ecs.phases.Shutdown
+            end
+            local failed = false
+            local consumed = false
+            local function failOnce(): nil
+                if not failed then
+                    failed = true
+                    world:spawn(tag)
+                    world:enqueueCommit()
+                    error("conditional barrier failure")
+                end
+            end
+
+            world:addSystem({
+                phase = phase,
+                runIf = function(): boolean
+                    if predicateFailure then
+                        failOnce()
+                    end
+                    return true
+                end,
+                run = function(): nil
+                    if not predicateFailure then
+                        failOnce()
+                    end
+                    world:spawn(tag)
+                    world:enqueueCommit()
+                    test.equal(query:count(), 1)
+                end
+            })
+            world:addSystem({
+                phase = phase,
+                run = function(): nil
+                    consumed = true
+                    test.equal(query:count(), 2)
+                end
+            })
+            test.raises(
+                function(): nil
+                    dispatch(world, entry)
+                end,
+                "conditional barrier failure"
+            )
+            test.equal(query:count(), 0)
+            test.assert(not consumed)
+            world:enqueueCommit()
+            test.equal(query:count(), 1)
+            dispatch(world, entry)
+            test.assert(consumed)
+        end
+    end
+end
+
+function suite.recoversAfterPublicationFailure(): nil
+    const world = tecs.ecs.newWorld()
+    local failed = false
+    world:newQuery({
+        include = {tag},
+        onEntitiesAdded = function(): nil
+            if not failed then
+                failed = true
+                world:spawn(tag)
+                world:enqueueCommit()
+                error("conditional publication failure")
+            end
+        end
+    })
+    world:addSystem({
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            world:spawn(tag)
+            world:enqueueCommit()
+        end
+    })
+    test.raises(
+        function(): nil
+            world:update(0)
+        end,
+        "conditional publication failure"
+    )
+    const id = world:spawn(tag)
+    world:enqueueCommit()
+    test.assert(world:isAlive(id))
+    world:update(0)
+    test.equal(world:newQuery({include = {tag}}):count(), 3)
+end
+
+return suite

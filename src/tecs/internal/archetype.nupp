@@ -9,6 +9,7 @@ zero-based. Swap removal updates every column in lockstep.
 ]]
 
 local components = require("tecs.internal.components")
+local ffistorage = require("tecs.internal.ffistorage")
 
 --- Dense storage for entities sharing one component signature.
 export record Archetype
@@ -17,13 +18,22 @@ export record Archetype
     componentIds: {[integer]: boolean}
     components: {components.Component}
     entities: {integer}
-    columns: {[integer]: {any}}
+
+    --- Engine-owned. Holds heterogeneous managed arrays or native C arrays. This
+    --- storage seam is public for world internals; game code uses get or getMut.
+    columns: {[integer]: any}
+
     private dirty: {[integer]: boolean}
     private structureVersion: integer
     private valueVersions: {[integer]: integer}
+    private sparseEdges: {[integer]: {[integer]: {any}}}
+    private storageHighWater: integer
+    private nativeCapacity: integer
+    private nativeColumns: {[integer]: ffistorage.Storage}?
+    private nativeAliases: {[integer]: integer}?
 
-    get: function<C is components.Component>(self: Archetype, component: C): {C.Value}?
-    getMut: function<C is components.Component>(self: Archetype, component: C): {C.Value}?
+    get: function<C is components.Component>(self: Archetype, component: C): C.Column?
+    getMut: function<C is components.Component>(self: Archetype, component: C): C.Column?
     isComponentDirty: function(self: Archetype, component: components.Component): boolean
     anyComponentDirty: function(self: Archetype): boolean
     markComponentDirty: function(self: Archetype, component: components.Component): nil
@@ -36,6 +46,25 @@ export record Archetype
 
     --- Returns one column's write count, which survives dirty-bit clearing.
     writeCount: function(self: Archetype, component: components.Component): integer
+
+    --- Iterates an entity row's edges in target order.
+    --- @param self The archetype containing the row.
+    --- @param relationship The relationship definition or a target-specific component.
+    --- @param row The one-based row to inspect.
+    --- @param callback The callback receiving each live edge value.
+    forEachRelationship: function<C is components.Component>(
+        self: Archetype,
+        relationship: C,
+        row: integer,
+        callback: function(value: C.Value)
+    ): nil
+
+    --- Returns the first edge in target order.
+    --- @param self The archetype containing the row.
+    --- @param relationship The relationship to inspect.
+    --- @param row The one-based entity row.
+    --- @return Returns the live edge value, or nil when no edge exists.
+    getFirstRelationship: function<C is components.Component>(self: Archetype, relationship: C, row: integer): C.Value?
 end
 
 --- Produces the canonical signature for a component collection.
@@ -69,13 +98,38 @@ end
 export function new(id: integer, values: {components.Component}): Archetype
     local membership: {[integer]: boolean} = {}
     local ordered: {components.Component} = {}
-    local columns: {[integer]: {any}} = {}
+    local columns: {[integer]: any} = {}
+    local nativeColumns: {[integer]: ffistorage.Storage}? = nil
+    local nativeAliases: {[integer]: integer}? = nil
+    local firstTargets: {[integer]: integer}? = nil
     for index = 1, #values do
         local component = values[index]
         membership[component.componentId] = true
         ordered[index] = component
         if component.storageType ~= "tag" then
-            columns[component.componentId] = {}
+            const native = ffistorage.find(component.componentId)
+            const relationship = components.asRelationship(component)
+            const target = components.targetOf(component)
+            if native ~= nil and (relationship == nil or target ~= nil) then
+                if nativeColumns == nil then
+                    nativeColumns = {}
+                end
+                nativeColumns[component.componentId] = native
+                columns[component.componentId] = ffistorage.allocate(native, 64)
+                if relationship ~= nil and target ~= nil then
+                    if nativeAliases == nil then
+                        nativeAliases = {};
+                        firstTargets = {}
+                    end
+                    const first = assert(firstTargets)[relationship.componentId]
+                    if first == nil or target < first then
+                        assert(firstTargets)[relationship.componentId] = target
+                        nativeAliases[relationship.componentId] = component.componentId
+                    end
+                end
+            else
+                columns[component.componentId] = {}
+            end
         end
     end
     table.sort(ordered, function(left: components.Component, right: components.Component): boolean
@@ -91,7 +145,12 @@ export function new(id: integer, values: {components.Component}): Archetype
         columns = columns,
         dirty = {},
         structureVersion = 0,
-        valueVersions = {}
+        valueVersions = {},
+        sparseEdges = {},
+        storageHighWater = 0,
+        nativeCapacity = 64,
+        nativeColumns = nativeColumns,
+        nativeAliases = nativeAliases
     )
 end
 
@@ -107,15 +166,15 @@ end
 --- @param value the archetype to inspect
 --- @param component the value-bearing component to find
 --- @return the dense raw-value column
-export function column<C is components.Component>(value: Archetype, component: C): {C.Value}?
-    return value.columns[component.componentId] as {C.Value}?
+export function column<C is components.Component>(value: Archetype, component: C): C.Column?
+    return value.columns[component.componentId] as C.Column?
 end
 
 --- Returns a component column from a queried archetype.
 --- @param self the archetype to inspect
 --- @param component the value-bearing component to find
 --- @return the dense raw-value column
-function Archetype.get<C is components.Component>(self: Archetype, component: C): {C.Value}?
+function Archetype.get<C is components.Component>(self: Archetype, component: C): C.Column?
     return column(self, component)
 end
 
@@ -123,7 +182,7 @@ end
 --- @param self the archetype to modify
 --- @param component the value-bearing component to find
 --- @return the dense raw-value column, or nil when absent or a tag
-function Archetype.getMut<C is components.Component>(self: Archetype, component: C): {C.Value}?
+function Archetype.getMut<C is components.Component>(self: Archetype, component: C): C.Column?
     local result = column(self, component)
     if result ~= nil then
         self:markComponentDirty(component)
@@ -154,6 +213,18 @@ function Archetype.markComponentDirty(self: Archetype, component: components.Com
     if has(self, component) then
         self.dirty[component.componentId] = true
         self.valueVersions[component.componentId] = (self.valueVersions[component.componentId] or 0) + 1
+        const relationship = components.asRelationship(component)
+        if relationship ~= nil then
+            self.dirty[relationship.componentId] = true
+            if not relationship.sparse then
+                for index = 1, #self.components do
+                    const sibling = self.components[index]
+                    if components.asRelationship(sibling) == relationship then
+                        self.dirty[sibling.componentId] = true
+                    end
+                end
+            end
+        end
     end
 end
 
@@ -215,28 +286,276 @@ export function valueAt<C is components.Component>(value: Archetype, row: intege
     return values[row + 1] as C.Value?
 end
 
---- Appends an entity and its scalar values.
---- @param value the archetype to modify
---- @param entity the packed entity id
---- @param supplied raw values keyed by component id
---- @return the zero-based row assigned to the entity
+local function refreshAliases(value: Archetype, first: integer, last: integer): nil
+    const aliasesByRoot = value.nativeAliases
+    if aliasesByRoot == nil then
+        return
+    end
+    for root, target in pairs(aliasesByRoot) do
+        const aliases = assert(value.columns[root])
+        const source = assert(value.columns[target])
+        for row = first, last do
+            aliases[row] = source[row]
+        end
+    end
+end
+
+--- Reserves native columns once for a whole publication batch.
+--- @param value The archetype owning the columns.
+--- @param needed The total required row capacity.
+export function reserveCapacity(value: Archetype, needed: integer): nil
+    if value.nativeColumns == nil or needed <= value.nativeCapacity then
+        return
+    end
+    const capacity = math.max(needed, value.nativeCapacity * 2)
+    for id, storage in pairs(assert(value.nativeColumns)) do
+        value.columns[id] = ffistorage.resize(storage, value.columns[id], #value.entities, capacity)
+    end
+    value.nativeCapacity = capacity
+    refreshAliases(value, 1, #value.entities)
+end
+
+--- Appends an entity and copies native values into their inline rows.
+--- @param value The archetype to modify.
+--- @param entity The packed entity id.
+--- @param supplied The raw values keyed by component id.
+--- @return Returns the zero-based row assigned to the entity.
 export function append(value: Archetype, entity: integer, supplied: {[integer]: any}): integer
     local row = #value.entities
+    reserveCapacity(value, row + 1)
+    value.storageHighWater = math.max(value.storageHighWater, row + 1)
     value.entities[row + 1] = entity
     for index = 1, #value.components do
         local component = value.components[index]
         if component.storageType ~= "tag" then
             local raw = supplied[component.componentId]
-            if raw == nil then
+            const relationship = components.asRelationship(component)
+            if relationship ~= nil then
+                const edges = assert(supplied[relationship.componentId]) as {any}
+                const selected = components.targetOf(component)
+                raw = edges[1]
+                if selected ~= nil then
+                    for edgeIndex = 1, #edges do
+                        if components.edgeTarget(edges[edgeIndex]) == selected then
+                            raw = edges[edgeIndex];
+                            break
+                        end
+                    end
+                elseif relationship.sparse then
+                    local byEntity = value.sparseEdges[relationship.componentId]
+                    if byEntity == nil then
+                        byEntity = {};
+                        value.sparseEdges[relationship.componentId] = byEntity
+                    end
+                    byEntity[entity] = edges
+                end
+            elseif raw == nil then
                 raw = components.defaultValue(component)
             end
             local stored = assert(value.columns[component.componentId])
             stored[row + 1] = raw
         end
     end
+    refreshAliases(value, row + 1, row + 1)
     value:markAllComponentsDirty()
 
     return row
+end
+
+--- Reports whether rows need no relationship or durable-key transition behavior.
+export function bulkSafe(value: Archetype, allowKeys: boolean?): boolean
+    for index = 1, #value.components do
+        const component = value.components[index]
+        if (component == components.Key and not allowKeys) or components.asRelationship(component) ~= nil then
+            return false
+        end
+    end
+
+    return true
+end
+
+-- Constants clone managed outer records; required defaults retain their sharing
+-- contract. Native assignment copies bytes and never needs a wrapper per row.
+local function fillColumn(
+    value: Archetype,
+    component: components.Component,
+    first: integer,
+    last: integer,
+    raw: any,
+    shared: boolean
+): nil
+    const stored = assert(value.columns[component.componentId])
+    if raw == nil then
+        for row = first, last do
+            stored[row] = components.defaultValue(component)
+        end
+    elseif not shared and type(raw) == "table" then
+        for row = first, last do
+            stored[row] = setmetatable(table.clone(raw), getmetatable(raw))
+        end
+    else
+        for row = first, last do
+            stored[row] = raw
+        end
+    end
+end
+
+--- Initializes a placed range column by column, without per-entity value maps.
+export function initializeRange(
+    value: Archetype,
+    first: integer,
+    last: integer,
+    supplied: {[integer]: any},
+    shared: {[integer]: boolean}
+): nil
+    for index = 1, #value.components do
+        const component = value.components[index]
+        if component.storageType ~= "tag" then
+            fillColumn(
+                value,
+                component,
+                first,
+                last,
+                supplied[component.componentId],
+                shared[component.componentId] or false
+            )
+        end
+    end
+    value.storageHighWater = math.max(value.storageHighWater, last)
+    value:markAllComponentsDirty()
+end
+
+--- Empties published rows while retaining allocated native storage for reuse.
+export function truncate(value: Archetype): nil
+    table.clear(value.entities)
+    for id, stored in pairs(value.columns) do
+        if value.nativeColumns == nil or value.nativeColumns[id] == nil then
+            table.clear(stored)
+        end
+    end
+    table.clear(value.sparseEdges)
+    value:markAllComponentsDirty()
+end
+
+--- Moves a plain whole archetype using column swaps or contiguous native copies.
+export function moveAll(
+    source: Archetype,
+    target: Archetype,
+    supplied: {[integer]: any},
+    shared: {[integer]: boolean},
+    resetComponent: components.Component?
+): integer
+    const count = #source.entities
+    const base = source == target and 0 or #target.entities
+    if source ~= target then
+        reserveCapacity(target, base + count)
+    end
+    for index = 1, #target.components do
+        const component = target.components[index]
+        const id = component.componentId
+        if component.storageType ~= "tag" then
+            const previous = source.columns[id]
+            if supplied[id] ~= nil or previous == nil or component == resetComponent then
+                fillColumn(target, component, base + 1, base + count, supplied[id], shared[id] or false)
+            end
+        end
+    end
+    -- Defaults and managed copies may raise. Finish them before exchanging any
+    -- live source storage, so an exception cannot strand its rows in empty columns.
+    if source ~= target then
+        for index = 1, #target.components do
+            const component = target.components[index]
+            const id = component.componentId
+            const previous = source.columns[id]
+            if component.storageType ~= "tag" and supplied[
+                id
+            ] == nil and previous ~= nil and component ~= resetComponent then
+                if base == 0 then
+                    source.columns[id], target.columns[id] = target.columns[id], previous
+                else
+                    const destination = assert(target.columns[id])
+                    const native = target.nativeColumns and target.nativeColumns[id] or nil
+                    if native ~= nil then
+                        ffistorage.copyRows(native, destination, base + 1, previous, 1, count)
+                    else
+                        for row = 1, count do
+                            destination[base + row] = previous[row]
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if source ~= target then
+        if base == 0 then
+            source.entities, target.entities = target.entities, source.entities
+            -- Only common columns exchanged owners. The shortest retained
+            -- allocation, not the largest exchanged one, bounds both stores.
+            const capacity = math.min(source.nativeCapacity, target.nativeCapacity)
+            source.nativeCapacity = capacity
+            target.nativeCapacity = capacity
+        else
+            for row = 1, count do
+                target.entities[base + row] = source.entities[row]
+            end
+        end
+        truncate(source)
+        target.storageHighWater = math.max(target.storageHighWater, base + count)
+        target:markAllComponentsDirty()
+    else
+        if resetComponent ~= nil then
+            target:markComponentDirty(resetComponent)
+        end
+        for id in pairs(supplied) do
+            target:markComponentDirty(assert(components.findById(id)))
+        end
+    end
+
+    return base + 1
+end
+
+--- Rebuilds row stores after occupancy has fallen, releasing unused table capacity.
+--- @param value The quiet archetype to maintain.
+--- @return Returns whether any row storage was rebuilt. Existing column views expire.
+export function compact(value: Archetype): boolean
+    const count = #value.entities
+    if value.storageHighWater <= count then
+        return false
+    end
+    const entities: {integer} = {}
+    for index = 1, count do
+        entities[index] = value.entities[index]
+    end
+    value.entities = entities
+    for id, stored in pairs(value.columns) do
+        const native = value.nativeColumns and value.nativeColumns[id] or nil
+        if native ~= nil then
+            value.columns[id] = ffistorage.resize(native, stored, count, math.max(64, count))
+        else
+            const fresh: {any} = {}
+            for index = 1, count do
+                fresh[index] = stored[index]
+            end
+            value.columns[id] = fresh
+        end
+    end
+    for id, byEntity in pairs(value.sparseEdges) do
+        const fresh: {[integer]: {any}} = {}
+        for index = 1, count do
+            fresh[entities[index]] = assert(byEntity[entities[index]])
+        end
+        value.sparseEdges[id] = fresh
+    end
+    value.storageHighWater = count
+    value.nativeCapacity = math.max(64, count)
+    refreshAliases(value, 1, count)
+    -- Native row references expire on relocation even when membership is unchanged.
+    -- Retained consumers must reacquire them before their next value read.
+    if value.nativeColumns ~= nil then
+        value.structureVersion = value.structureVersion + 1
+    end
+
+    return true
 end
 
 --- Collects the values required to move one row to a target signature.
@@ -256,14 +575,21 @@ export function valuesForMove(
         local component = target.components[index]
         if component.storageType ~= "tag" then
             local raw = overrides[component.componentId]
-            if raw == nil and has(source, component) then
-                local stored = assert(source.columns[component.componentId])
-                raw = stored[row + 1]
+            const relationship = components.asRelationship(component)
+            if relationship ~= nil then
+                if component.componentId == relationship.componentId then
+                    result[component.componentId] = raw or edgeValues(source, row, relationship)
+                end
+            else
+                if raw == nil and has(source, component) then
+                    local stored = assert(source.columns[component.componentId])
+                    raw = stored[row + 1]
+                end
+                if raw == nil then
+                    raw = components.defaultValue(component)
+                end
+                result[component.componentId] = raw
             end
-            if raw == nil then
-                raw = components.defaultValue(component)
-            end
-            result[component.componentId] = raw
         end
     end
 
@@ -276,6 +602,10 @@ end
 --- @return the id moved into the removed row, or nil when the row was last
 export function removeRow(value: Archetype, row: integer): integer?
     local index = row + 1
+    const removed = value.entities[index]
+    for _, byEntity in pairs(value.sparseEdges) do
+        byEntity[removed] = nil
+    end
     local lastIndex = #value.entities
     local movedId: integer? = nil
     if index < lastIndex then
@@ -287,7 +617,12 @@ export function removeRow(value: Archetype, row: integer): integer?
         if index < lastIndex then
             stored[index] = stored[lastIndex]
         end
-        stored[lastIndex] = nil
+        if value.nativeColumns == nil or value.nativeColumns[componentId] == nil then
+            stored[lastIndex] = nil
+        end
+    end
+    if index < lastIndex then
+        refreshAliases(value, index, index)
     end
     value:markAllComponentsDirty()
 
@@ -298,9 +633,111 @@ end
 --- @param value the archetype to clear
 export function clear(value: Archetype): nil
     value.structureVersion = value.structureVersion + 1
-    value.entities = {}
-    for componentId, _column in pairs(value.columns) do
-        value.columns[componentId] = {}
+    value.storageHighWater = 0
+    table.clear(value.entities)
+    table.clear(value.sparseEdges)
+    for componentId, stored in pairs(value.columns) do
+        const native = value.nativeColumns and value.nativeColumns[componentId] or nil
+        if native ~= nil then
+            ffistorage.clear(native, stored, value.nativeCapacity)
+        else
+            table.clear(stored)
+        end
     end
     value:clearDirtyComponents()
+end
+
+--- Reads all edges at the heterogeneous storage seam in target order.
+--- @param value The source archetype.
+--- @param row The zero-based entity row.
+--- @param relationship The root relationship metadata.
+--- @return Returns a live sparse list or a collected dense list; callers must not
+---     change membership.
+export function edgeValues(value: Archetype, row: integer, relationship: components.RelationshipComponent): {any}
+    if not has(value, relationship) then
+        return {}
+    end
+    if relationship.sparse then
+        const byEntity = value.sparseEdges[relationship.componentId]
+        return byEntity ~= nil and byEntity[value.entities[row + 1]] or {}
+    end
+    const result: {any} = {}
+    for index = 1, #value.components do
+        const component = value.components[index]
+        if components.targetOf(component) ~= nil and components.asRelationship(component) == relationship then
+            result[#result + 1] = assert(value.columns[component.componentId])[row + 1]
+        end
+    end
+    table.sort(result, function(left: any, right: any): boolean
+        return components.edgeTarget(left) < components.edgeTarget(right)
+    end)
+
+    return result
+end
+
+--- Replaces one relationship's values without changing its archetype signature.
+--- @param value The archetype to update.
+--- @param row The zero-based entity row.
+--- @param relationship The root relationship metadata.
+--- @param edges The complete replacement edge set in target order.
+export function setEdges(
+    value: Archetype,
+    row: integer,
+    relationship: components.RelationshipComponent,
+    edges: {any}
+): nil
+    assert(value.columns[relationship.componentId])[row + 1] = edges[1]
+    if relationship.sparse then
+        assert(value.sparseEdges[relationship.componentId])[value.entities[row + 1]] = edges
+    else
+        for index = 1, #value.components do
+            const component = value.components[index]
+            const target = components.targetOf(component)
+            if target ~= nil and components.asRelationship(component) == relationship then
+                for edgeIndex = 1, #edges do
+                    if components.edgeTarget(edges[edgeIndex]) == target then
+                        assert(value.columns[component.componentId])[row + 1] = edges[edgeIndex]
+                        value:markComponentDirty(component)
+                        break
+                    end
+                end
+            end
+        end
+    end
+    refreshAliases(value, row + 1, row + 1)
+    value:markComponentDirty(relationship)
+end
+
+function Archetype.getFirstRelationship<C is components.Component>(
+    self: Archetype,
+    relationship: C,
+    row: integer
+): C.Value?
+    if components.asRelationship(relationship) == nil then
+        error("expected a relationship", 2)
+    end
+    if row < 1 or row > #self.entities then
+        return nil
+    end
+
+    return valueAt(self, row - 1, relationship)
+end
+
+function Archetype.forEachRelationship<C is components.Component>(
+    self: Archetype,
+    relationship: C,
+    row: integer,
+    callback: function(value: C.Value)
+): nil
+    const metadata = assert(components.asRelationship(relationship), "expected a relationship")
+    if row < 1 or row > #self.entities then
+        return
+    end
+    const selected = components.targetOf(relationship)
+    const edges = edgeValues(self, row - 1, metadata)
+    for index = 1, #edges do
+        if selected == nil or components.edgeTarget(edges[index]) == selected then
+            callback(edges[index] as C.Value)
+        end
+    end
 end

@@ -77,7 +77,7 @@ local function valueOf(kind: ecs.Component, instance: any): {[string]: any}?
     if kind.storageType == "tag" then
         return nil
     end
-    if kind.storageType == "table" then
+    if (kind.storageType == "table" or kind.storageType == "ffi") then
         local table = kind as components.TableComponent<any>
         local ok, saved = pcall(table.snapshotSave, instance)
         if not ok or type(saved) ~= "table" then
@@ -141,7 +141,7 @@ local function construct(kind: ecs.Component, values: {[string]: any}?): compone
     if kind.storageType == "tag" then
         return kind
     end
-    if kind.storageType == "table" then
+    if (kind.storageType == "table" or kind.storageType == "ffi") then
         local definition = kind as components.TableComponent<any>
         local instance = definition.defaultFactory()
         if values ~= nil then
@@ -184,7 +184,7 @@ end
 --- than conflating them.
 local function presentIn(exclusive world: ecs.World): {[integer]: boolean}
     local present: {[integer]: boolean} = {}
-    local everything = world:newQuery()
+    local everything = tecs.internal.world.querySnapshot(world, {})
     for candidate, length in everything:iter() do
         local active = candidate as archetype.Archetype
         if (length as integer) > 0 then
@@ -219,7 +219,7 @@ registry.register({
             local fields: {string} = {}
             local built, sample = pcall(construct, kind, nil)
             local contents: {[string]: any}? = nil
-            if built and kind.storageType == "table" then
+            if built and (kind.storageType == "table" or kind.storageType == "ffi") then
                 contents = valueOf(kind, (sample as components.TableInstance<any>).value)
             end
             if contents ~= nil then
@@ -408,7 +408,7 @@ registry.register({
         -- getMut rather than get, so the column is marked dirty and whatever
         -- consumes it re-uploads. Writing through get would change the memory
         -- and leave a dirty-gated consumer showing the old value.
-        if kind.storageType == "table" then
+        if (kind.storageType == "table" or kind.storageType == "ffi") then
             local instance = world:getMut(entity, kind) as {[string]: any}
             for field, value in pairs(values) do
                 instance[field] = value

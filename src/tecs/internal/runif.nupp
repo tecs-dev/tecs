@@ -1,0 +1,145 @@
+module tecs.internal.runif
+
+--[[
+Composable predicates for ECS system dispatch.
+
+Each timer factory owns mutable elapsed time. Construct one predicate per
+system; reusing it shares that timer, including across worlds. Timers consume
+only the `dt` of calls that reach them, not wall time. A disabled system or
+phase pauses its timer. Fixed phases supply their fixed timestep.
+
+`both` and `either` short-circuit. Putting `inState` before `every` in `both`
+pauses the interval outside that state; reversing them keeps the interval
+advancing and spends ticks outside that state. `every` fires at most once per
+dispatch and retains excess elapsed time. `cooldown` discards excess time when
+it fires. `after` removes its system before its one allowed body call.
+
+Jitter uses a caller-supplied `nupp.data.random.Random`, not a hidden global
+generator. Pass `world:randomStream(name)` for automatic random-state snapshots,
+or preserve a standalone generator through Nupp's `state` and `setState`.
+Predicates are runtime closures, not snapshot data; loading an entity snapshot
+does not rewind their elapsed time.
+]]
+
+local random = require("nupp.data.random")
+local world = require("tecs.internal.world")
+
+local function validateDuration(value: number, name: string, positive: boolean): nil
+    if value ~= value or value == math.huge or value < 0 or (positive and value == 0) then
+        error(
+            "runif." .. name .. ": duration must be " .. (positive and "positive" or "non-negative") .. " and finite",
+            3
+        )
+    end
+end
+
+--- Allows one dispatch after a delay and removes the system before its body runs.
+--- @param delay The non-negative finite delay in seconds; zero fires on the first call.
+--- @return Returns a new stateful system predicate.
+--- @raises Raises when delay is negative or non-finite.
+export function after(delay: number): world.RunIf
+    validateDuration(delay, "after", false)
+    local elapsed: number = 0
+    local fired = false
+    return function(dt: number, exclusive value: world.World, name: string): boolean
+        if fired then
+            return false
+        end
+        elapsed = elapsed + dt
+        if elapsed < delay then
+            return false
+        end
+        fired = true
+        value:removeSystem(name)
+
+        return true
+    end
+end
+
+--- Allows repeated dispatches separated by an interval, retaining elapsed overshoot.
+--- @param interval The positive finite base interval in seconds.
+--- @param jitter The non-negative finite variance in seconds, defaulting to zero.
+--- @param generator The caller-owned random generator, required for nonzero jitter.
+--- @return Returns a new timer, firing at most once per call. The first interval is
+---     unjittered; later intervals clamp to at least one percent of the base interval.
+--- @raises Raises for invalid durations or nonzero jitter without a generator.
+export function every(interval: number, jitter: number?, generator: random.Random?): world.RunIf
+    validateDuration(interval, "every", true)
+    const variance = jitter or 0
+    validateDuration(variance, "every jitter", false)
+    if variance > 0 and generator == nil then
+        error("runif.every: nonzero jitter requires a nupp.data.random.Random", 2)
+    end
+    local elapsed: number = 0
+    local nextInterval = interval
+
+    return function(dt: number, exclusive _value: world.World, _name: string): boolean
+        elapsed = elapsed + dt
+        if elapsed < nextInterval then
+            return false
+        end
+        elapsed = elapsed - nextInterval
+        if variance > 0 then
+            nextInterval = math.max(interval * 0.01, interval + assert(generator):range(-1, 1) * variance)
+        end
+
+        return true
+    end
+end
+
+--- Allows the first dispatch immediately, then waits a cooldown between runs.
+--- @param duration The non-negative finite cooldown in seconds; zero always allows a
+---     run.
+--- @return Returns a new timer that discards elapsed overshoot after each run.
+--- @raises Raises when duration is negative or non-finite.
+export function cooldown(duration: number): world.RunIf
+    validateDuration(duration, "cooldown", false)
+    local elapsed = duration
+    return function(dt: number, exclusive _value: world.World, _name: string): boolean
+        elapsed = elapsed + dt
+        if elapsed < duration then
+            return false
+        end
+        elapsed = 0
+
+        return true
+    end
+end
+
+--- Allows dispatch only while the named state is on top of the world stack.
+--- @param name The state name to match; it need not be registered yet.
+--- @return Returns a predicate that reads the current state on each call.
+export function inState(name: string): world.RunIf
+    return function(_dt: number, exclusive value: world.World, _name: string): boolean
+        return value:peekState() == name
+    end
+end
+
+--- Allows dispatch only when both predicates allow it, evaluating left first.
+--- @param lhs The predicate that always receives the dispatch delta.
+--- @param rhs The predicate evaluated only when lhs returns true.
+--- @return Returns a short-circuiting conjunction.
+export function both(lhs: world.RunIf, rhs: world.RunIf): world.RunIf
+    return function(dt: number, exclusive value: world.World, name: string): boolean
+        return lhs(dt, value, name) and rhs(dt, value, name)
+    end
+end
+
+--- Allows dispatch when either predicate allows it, evaluating left first.
+--- @param lhs The predicate that always receives the dispatch delta.
+--- @param rhs The predicate evaluated only when lhs returns false.
+--- @return Returns a short-circuiting disjunction.
+export function either(lhs: world.RunIf, rhs: world.RunIf): world.RunIf
+    return function(dt: number, exclusive value: world.World, name: string): boolean
+        return lhs(dt, value, name) or rhs(dt, value, name)
+    end
+end
+
+--- Inverts whether a predicate allows dispatch.
+--- @param predicate The predicate to evaluate once per call.
+--- @return Returns its logical negation, preserving its timer and other side effects.
+export function negate(predicate: world.RunIf): world.RunIf
+    return function(dt: number, exclusive value: world.World, name: string): boolean
+        return not predicate(dt, value, name)
+    end
+end

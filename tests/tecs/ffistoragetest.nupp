@@ -1,0 +1,727 @@
+local test = require("nupp.test")
+local ffi = require("ffi")
+local buffer = require("string.buffer")
+local archetype = require("tecs.internal.archetype")
+local ffistorage = require("tecs.internal.ffistorage")
+local suite = {}
+
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+local struct Point
+    x: number
+    y: number
+end
+
+const point = tecs.ecs.newFFIComponent({
+    name = "test.FFI.Point",
+    construct = function(x: number, y: number): Point
+        return new Point(x, y)
+    end,
+    default = function(): Point
+        return new Point(3, 7)
+    end,
+    save = function(value: Point): any
+        return {x = value.x, y = value.y}
+    end,
+    load = function(value: any): Point
+        return new Point(value.x as number, value.y as number)
+    end
+})
+
+function suite.nativeColumnsAreContiguousAndCopyInputValues(): nil
+    const world = tecs.ecs.newWorld()
+    const shared = point(10, 20)
+    const first = world:spawn(shared)
+    const second = world:spawn(shared)
+    world:commit()
+    assert(world:getMut(first, point)).x = 33
+    test.equal(assert(world:get(second, point)).x, 10)
+    test.equal(shared.value.x, 10)
+    for candidate, count in world:newQuery({include = {point}}):iter() do
+        const column: Point[?] = assert(candidate:get(point))
+        test.equal(type(column), "cdata")
+        test.equal(count, 2)
+        unsafe do
+            const firstAddress = tonumber(ffi.cast("uintptr_t", ffi.cast("void *", column[1]))) as number
+            const secondAddress = tonumber(ffi.cast("uintptr_t", ffi.cast("void *", column[2]))) as number
+            test.equal(secondAddress - firstAddress, ffi.sizeof(Point))
+        end
+    end
+end
+
+function suite.growthPreservesRowsAndBatchWritersUseNativeMemory(): nil
+    const world = tecs.ecs.newWorld()
+    const firstId = assert(
+        world:batchSpawn(5000, {point}, function(candidate: tecs.ecs.Archetype, first: integer, last: integer): nil
+            const column = assert(candidate:getMut(point))
+            unsafe do
+                for row = first, last do
+                    test.equal(column[row].x, 3)
+                    column[row].x = row
+                end
+            end
+        end)
+    )
+    world:commit()
+    for index = 1, 5000 do
+        test.equal(assert(world:get((firstId + index - 1), point)).x, index)
+    end
+    world:spawn(point(5001, 0))
+    world:commit()
+    test.equal(assert(world:get((firstId + 5000 - 1), point)).x, 5000)
+end
+
+function suite.movesCopyBeforeSwapRemovalOverwritesTheSource(): nil
+    const world = tecs.ecs.newWorld()
+    const tag = tecs.ecs.newTagComponent({name = "test.FFI.Move"})
+    const first = world:spawn(point(11, 12))
+    const second = world:spawn(point(21, 22))
+    world:commit()
+    world:set(first, tag)
+    world:commit()
+    test.equal(assert(world:get(first, point)).x, 11)
+    test.equal(assert(world:get(second, point)).x, 21)
+    world:remove(first, tag)
+    world:commit()
+    test.equal(assert(world:get(first, point)).y, 12)
+    world:set(first, point(31, 32))
+    world:commit()
+    test.equal(assert(world:get(first, point)).x, 31)
+    world:despawn(second)
+    world:commit()
+    test.equal(assert(world:get(first, point)).y, 32)
+end
+
+function suite.stagedRowInputsOutliveSourceRelocation(): nil
+    const world = tecs.ecs.newWorld()
+    const tag = tecs.ecs.newTagComponent({name = "test.FFI.CapturedRow"})
+    const first = world:spawn(point(11, 12))
+    const second = world:spawn(point(21, 22))
+    world:spawn(point(31, 32))
+    world:commit()
+    world:set(first, tag)
+    world:set(second, point, assert(world:get(first, point)))
+    world:commit()
+    test.equal(assert(world:get(second, point)).x, 11)
+end
+
+function suite.sharedStructLayoutsKeepDistinctComponentIdentity(): nil
+    const twin = tecs.ecs.newFFIComponent({
+        name = "test.FFI.Twin",
+        construct = function(x: number): Point
+            return new Point(x, 0)
+        end,
+        default = function(): Point
+            return new Point()
+        end
+    })
+    const world = tecs.ecs.newWorld()
+    const input = point(13, 17)
+    const id = world:spawn(input, twin(19))
+    world:commit()
+    test.equal(assert(world:get(id, input.componentType)).x, 13)
+    test.equal(assert(world:get(id, twin)).x, 19)
+    for candidate in world:newQuery({include = {point}}):iter() do
+        const typed: Point[?] = assert(candidate:get(input.componentType))
+        unsafe do
+            test.equal(typed[1].y, 17)
+        end
+    end
+end
+
+local record Label
+    text: string
+end
+
+function suite.mixedColumnsAndRequiredTransientDefaultsSurviveMoves(): nil
+    const label = tecs.ecs.newComponent({
+        name = "test.FFI.Label",
+        construct = function(text: string): Label
+            return new Label(text = text)
+        end,
+        default = function(): Label
+            return new Label(text = "default")
+        end
+    })
+    const transient = tecs.ecs.newFFIComponent({
+        name = "test.FFI.Transient",
+        transient = true,
+        construct = function(): Point
+            return new Point(5, 9)
+        end,
+        default = function(): Point
+            return new Point(5, 9)
+        end
+    })
+    const required = tecs.ecs.newTagComponent({
+        name = "test.FFI.NativeRequirements",
+        requires = {transient, point(7, 11)}
+    })
+    const world = tecs.ecs.newWorld()
+    const first = world:spawn(required, label("first"))
+    const second = world:spawn(required, label("second"))
+    world:commit()
+    assert(world:getMut(first, point)).x = 17
+    assert(world:getMut(first, transient)).x = 19
+    test.equal(assert(world:get(second, point)).x, 7)
+    world:remove(first, label)
+    world:commit()
+    test.equal(assert(world:get(first, point)).x, 17)
+    test.equal(assert(world:get(second, label)).text, "second")
+    const snapshot = world:saveSnapshot()
+    world:loadSnapshot(snapshot)
+    test.equal(assert(world:get(first, transient)).x, 5)
+    test.equal(assert(world:get(first, point)).x, 17)
+end
+
+function suite.compactionAndClearRetainNativeStorage(): nil
+    const world = tecs.ecs.newWorld()
+    const firstId = assert(world:batchSpawn(200, {point}))
+    world:commit()
+    for index = 1, 199 do
+        world:despawn((firstId + index - 1))
+    end
+    world:commit()
+    world:compact()
+    for candidate in world:newQuery({include = {point}}):iter() do
+        test.equal(type(assert(candidate:get(point))), "cdata")
+        test.equal(assert(world:get((firstId + 200 - 1), point)).y, 7)
+        archetype.clear(assert(candidate))
+        test.equal(type(assert(candidate:get(point))), "cdata")
+        archetype.append(assert(candidate), 999, {})
+        unsafe do
+            test.equal(assert(candidate:get(point))[1].x, 3)
+        end
+    end
+end
+
+function suite.snapshotCodecsRestoreDetachedNativeValues(): nil
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(point(4, 8))
+    const snapshot = world:saveSnapshot()
+    assert(world:getMut(id, point)).x = 77
+    world:loadSnapshot(snapshot)
+    test.equal(assert(world:get(id, point)).x, 4)
+    for candidate in world:newQuery({include = {point}}):iter() do
+        test.equal(type(assert(candidate:get(point))), "cdata")
+    end
+end
+
+function suite.invalidFactoriesFailBeforeRegistration(): nil
+    test.raises(
+        function(): nil
+            tecs.ecs.newFFIComponent({
+                name = "test.FFI.Invalid",
+                construct = function(): any
+                    return {}
+                end,
+                default = function(): any
+                    return {}
+                end,
+                save = function(value: any): any
+                    return value
+                end,
+                load = function(value: any): any
+                    return value
+                end
+            })
+        end,
+        "Nupp struct"
+    )
+    test.raises(
+        function(): nil
+            tecs.ecs.newFFIComponent({
+                name = "test.FFI.NoCodec",
+                construct = function(): Point
+                    return new Point()
+                end,
+                default = function(): Point
+                    return new Point()
+                end,
+                save = function(value: Point): any
+                    return {value.x, value.y}
+                end
+            })
+        end,
+        "save and load"
+    )
+end
+
+function suite.rawStorageRelocatesWithABulkCopy(): nil
+    const storage = assert(ffistorage.find(point.componentId))
+    const source = ffistorage.allocate(storage, 2) as Point[?]
+    unsafe do
+        source[1] = new Point(13, 17)
+        source[2] = new Point(19, 23)
+    end
+    const target = ffistorage.resize(storage, source, 2, 100) as Point[?]
+    unsafe do
+        test.equal(target[1].x, 13)
+        test.equal(target[2].y, 23)
+        test.equal(target[100].x, 0)
+    end
+end
+
+local struct ArrayValue
+    values: float[3]
+    serial: uint64
+    enabled: boolean
+end
+
+const arrays = tecs.ecs.newFFIComponent({
+    name = "test.FFI.Arrays",
+    construct = function(): ArrayValue
+        return new ArrayValue()
+    end,
+    default = function(): ArrayValue
+        return new ArrayValue()
+    end
+})
+
+function suite.automaticCodecsPreserveArraysAndExactIntegers(): nil
+    const world = tecs.ecs.newWorld()
+    const instance = arrays()
+    instance.value.values[0] = 1
+    instance.value.values[1] = 2
+    instance.value.values[2] = 3
+    instance.value.serial = ffi.cast<uint64>(-1)
+    instance.value.enabled = true
+    const id = world:spawn(instance)
+    const snapshot = world:saveSnapshot()
+    world:loadSnapshot(snapshot)
+    const restored = assert(world:get(id, arrays))
+    test.equal(restored.values[0], 1)
+    test.equal(restored.values[1], 2)
+    test.equal(restored.values[2], 3)
+    test.assert(restored.serial == ffi.cast<uint64>(-1))
+    test.assert(restored.enabled)
+    const storage = assert(ffistorage.find(arrays.componentId))
+    const fromOne = ffistorage.deserialize(storage, {values = {4, 5, 6}}) as ArrayValue
+    const fromZero = ffistorage.deserialize(storage, {values = {[0] = 7, [1] = 8, [2] = 9}}) as ArrayValue
+    test.equal(fromOne.values[2], 6)
+    test.equal(fromZero.values[0], 7)
+    test.equal(fromZero.values[2], 9)
+    test.assert(storage.rawCodec)
+    test.assert(not assert(ffistorage.find(point.componentId)).rawCodec)
+end
+
+function suite.rawColumnIOIsBoundedAndDoesNotCopyPaddingRowZero(): nil
+    const storage = assert(ffistorage.find(arrays.componentId))
+    const source = ffistorage.allocate(storage, 3) as ArrayValue[?]
+    const target = ffistorage.allocate(storage, 3) as ArrayValue[?]
+    unsafe do
+        source[1].values[1] = 9;
+        source[2].values[2] = 11
+    end
+    const bytes = buffer.new()
+    ffistorage.writeRows(storage, source, 1, 2, bytes)
+    test.equal(#bytes, storage.width * 2)
+    ffistorage.readRows(storage, target, 2, 2, bytes)
+    test.equal(#bytes, 0)
+    unsafe do
+        test.equal(target[0].values[1], 0)
+        test.equal(target[2].values[1], 9)
+        test.equal(target[3].values[2], 11)
+    end
+    test.raises(
+        function(): nil
+            ffistorage.readRows(storage, target, 1, 1, bytes)
+        end,
+        "truncated"
+    )
+    test.raises(
+        function(): nil
+            ffistorage.writeRows(storage, source, 0, 1, bytes)
+        end,
+        "bounds"
+    )
+    test.raises(
+        function(): nil
+            ffistorage.writeRows(storage, source, 3, 2, bytes)
+        end,
+        "bounds"
+    )
+end
+
+local struct PointerValue
+    pointer: uint8*?
+end
+local struct NestedValue
+    point: Point
+end
+
+function suite.registrationRejectsPointerAndNestedLayouts(): nil
+    test.raises(
+        function(): nil
+            ffistorage.new(new PointerValue())
+        end,
+        "not pointers or nested objects"
+    )
+    test.raises(
+        function(): nil
+            ffistorage.new(new NestedValue())
+        end,
+        "not pointers or nested objects"
+    )
+end
+
+function suite.rawResizeAndIntegerDecodingRejectOverflow(): nil
+    const storage = assert(ffistorage.find(arrays.componentId))
+    const source = ffistorage.allocate(storage, 3)
+    test.raises(
+        function(): nil
+            ffistorage.resize(storage, source, 4, 10)
+        end,
+        "bounds"
+    )
+    test.raises(
+        function(): nil
+            ffistorage.resize(storage, source, 3, 2)
+        end,
+        "bounds"
+    )
+    test.raises(
+        function(): nil
+            ffistorage.clear(storage, source, 4)
+        end,
+        "bounds"
+    )
+    test.raises(
+        function(): nil
+            ffistorage.deserialize(storage, {serial = "18446744073709551616"})
+        end,
+        "out of range"
+    )
+end
+
+function suite.customBackingIsRootedAndUsedAgainOnGrowth(): nil
+    const storage = ffistorage.new(new Point())
+    local allocations: integer = 0
+    ffistorage.setAllocator(storage, function(bytes: integer, alignment: integer): (any, any)
+        allocations = allocations + 1
+        test.equal(alignment, ffi.alignof(Point))
+        const owner = ffi.new<uint8[?]>(bytes)
+        return ffi.cast<voidptr>(owner), owner
+    end)
+    const source = ffistorage.allocate(storage, 10) as Point[?]
+    unsafe do
+        source[1].x = 91
+    end
+    collectgarbage("collect")
+    test.assert(ffistorage.owner(source) ~= nil)
+    const target = ffistorage.resize(storage, source, 10, 100) as Point[?]
+    collectgarbage("collect")
+    test.equal(allocations, 2)
+    test.equal(ffistorage.capacity(target), 100)
+    unsafe do
+        test.equal(target[1].x, 91)
+    end
+    ffistorage.setAllocator(storage, nil)
+    test.assert(ffistorage.owner(ffistorage.allocate(storage, 10)) == nil)
+end
+
+local struct Edge
+    target: number
+    weight: number
+end
+
+function suite.nativeRelationshipsKeepWildcardAndTargetViewsAliased(): nil
+    const relationship = tecs.ecs.newFFIRelationship({
+        name = "test.FFI.DenseEdge",
+        default = function(): Edge
+            return new Edge()
+        end,
+        construct = function(target: integer, weight: number): Edge
+            return new Edge(target, weight)
+        end,
+        reverseIndex = true
+    })
+    const world = tecs.ecs.newWorld()
+    const a, b = world:spawn(), world:spawn()
+    const first = world:spawn(relationship(a, 11), relationship(b, 22))
+    const second = world:spawn(relationship(a, 33), relationship(b, 44))
+    world:commit()
+    assert(world:getMut(first, relationship)).weight = 17
+    test.equal(assert(world:get(first, relationship:targeting(a))).weight, 17)
+    assert(world:getMut(first, relationship:targeting(a))).weight = 19
+    test.equal(assert(world:get(first, relationship)).weight, 19)
+    world:despawn(first)
+    world:commit()
+    test.equal(assert(world:get(second, relationship)).weight, 33)
+    assert(world:getMut(second, relationship)).weight = 35
+    test.equal(assert(world:get(second, relationship:targeting(a))).weight, 35)
+    for index = 1, 100 do
+        world:spawn(relationship(a, index), relationship(b, index))
+    end
+    world:commit()
+    assert(world:getMut(second, relationship)).weight = 37
+    test.equal(assert(world:get(second, relationship:targeting(a))).weight, 37)
+    world:remove(second, relationship(a, 0))
+    world:commit()
+    test.equal(assert(world:get(second, relationship)).weight, 44)
+    const snapshot = world:saveSnapshot()
+    world:loadSnapshot(snapshot)
+    test.equal(assert(world:get(second, relationship)).weight, 44)
+end
+
+function suite.stagedNativeEdgesOutliveTheirSourceRow(): nil
+    const relationship = tecs.ecs.newFFIRelationship({
+        name = "test.FFI.CapturedEdges",
+        default = function(): Edge
+            return new Edge()
+        end,
+        construct = function(target: integer, weight: number): Edge
+            return new Edge(target, weight)
+        end
+    })
+    const tag = tecs.ecs.newTagComponent({name = "test.FFI.CapturedEdgesTag"})
+    const world = tecs.ecs.newWorld()
+    const a, b = world:spawn(), world:spawn()
+    const first = world:spawn(relationship(a, 11), relationship(b, 12))
+    const second = world:spawn(relationship(a, 21), relationship(b, 22))
+    const incoming = world:spawn(tag, relationship(a, 31), relationship(b, 32))
+    world:commit()
+    world:set(first, tag)
+    world:remove(incoming, tag)
+    world:remove(second, relationship(b, 0))
+    world:commit()
+    test.equal(assert(world:get(second, relationship)).weight, 21)
+    test.equal(assert(world:get(incoming, relationship)).weight, 31)
+    test.equal(assert(world:get(first, relationship)).weight, 11)
+end
+
+function suite.sparseNativeEdgesAndRequirementsSurviveRestore(): nil
+    const required = tecs.ecs.newTagComponent({name = "test.FFI.Required"})
+    const relationship = tecs.ecs.newFFIRelationship({
+        name = "test.FFI.SparseEdge",
+        sparse = true,
+        default = function(): Edge
+            return new Edge()
+        end,
+        construct = function(target: integer, weight: number): Edge
+            return new Edge(target, weight)
+        end,
+        requires = {required},
+        reverseIndex = true
+    })
+    const world = tecs.ecs.newWorld()
+    const target = world:spawn()
+    const id = world:spawn(relationship(target, 5))
+    world:commit()
+    assert(world:getMut(id, relationship)).weight = 7
+    local weight: number = 0
+    world:forEachRelationship(id, relationship, function(edge: Edge): nil
+        weight = edge.weight
+    end)
+    test.equal(weight, 7)
+    test.assert(world:has(id, required))
+    const snapshot = world:saveSnapshot()
+    world:loadSnapshot(snapshot)
+    test.equal(assert(world:get(id, relationship)).weight, 7)
+end
+
+function suite.derivesSurviveNativeStorageRelocationAndRestore(): nil
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(point(11, 23))
+    world:commit()
+    const codec = nupp.data.serde.json():prepare(nupp.data.serde.of(Point))
+    for _ = 1, 3 do
+        const value = assert(world:get(id, point))
+        test.equal(value:debug(), "Point { x = 11, y = 23 }")
+        const encoded = nupp.data.json.decode(codec:encode(value)) as {[string]: number}
+        test.equal(encoded.x, 11)
+        test.equal(encoded.y, 23)
+        const decoded = assert(codec:decode(codec:encode(value)))
+        test.equal(decoded:debug(), value:debug())
+        world:batchSpawn(500, {point})
+        world:commit()
+        world:loadSnapshot(world:saveSnapshot())
+    end
+end
+
+function suite.numericBuiltinsUseNativeColumnsAndPreserveSavedValues(): nil
+    const definitions: {
+        tecs.ecs.Component
+    } = {
+        tecs.ecs.Transform2D,
+        tecs.ecs.PreviousTransform2D,
+        tecs.ecs.RelativeTransform2D,
+        tecs.ecs.TTL,
+        tecs.gfx.Tint,
+        tecs.gfx.Sprite,
+        tecs.gfx.Camera2D,
+        tecs.gfx.PointLight2D,
+        tecs.gfx.Occluder2D,
+        tecs.gfx.DropShadow2D,
+        tecs.gfx.Clip,
+        tecs.gfx.Material,
+        tecs.gfx.animation.AnimationComponent,
+        tecs.audio.SoundComponent,
+        tecs.physics.Body,
+        tecs.physics.Collider,
+        tecs.physics.Motion,
+        tecs.physics.RigidBody,
+        tecs.physics.ColliderShape,
+        tecs.physics.JointLink,
+        tecs.physics.Joint,
+        tecs.ui.Layout,
+        tecs.ui.Paint,
+        tecs.ui.Scroll,
+        tecs.ui.InteractionState,
+        tecs.ui.Interaction,
+    }
+    const world = tecs.ecs.newWorld()
+    for _, definition in ipairs(definitions) do
+        test.equal(definition.storageType, "ffi", definition.componentName)
+        const id = world:spawn(definition)
+        world:commit()
+        test.equal(type(world:get(id, definition)), "cdata", definition.componentName)
+        const native = assert(ffistorage.find(definition.componentId))
+        test.assert(native.width > 0)
+    end
+    const id = world:spawn(tecs.ecs.Transform2D(17, 29, 3, 2, 0.25, 4, 5), tecs.physics.Collider())
+    world:commit()
+    const before = tecs.ecs.Transform2D.snapshotSave(assert(world:get(id, tecs.ecs.Transform2D)))
+    test.equal(before.layer, 2)
+    test.equal(type(before.layer), "number")
+    test.equal(before.scaleX, 4)
+    test.equal(assert(world:get(id, tecs.physics.Collider)).maskBits, 4294967295)
+    const handle = world:spawn(tecs.physics.RigidBody(2147483647, 65535, 4294967295))
+    world:commit()
+    test.equal(assert(world:get(handle, tecs.physics.RigidBody)).generation, 4294967295)
+    world:loadSnapshot(world:saveSnapshot())
+    const after = assert(world:get(id, tecs.ecs.Transform2D))
+    test.equal(after.x, 17)
+    test.equal(after.layer, 2)
+    test.equal(after.scaleY, 5)
+    test.equal(assert(world:get(id, tecs.physics.Collider)).maskBits, 4294967295)
+    test.assert(after:debug():find("Transform2D", 1, true) ~= nil)
+end
+
+function suite.compactionInvalidatesCachedNativeRowsWithoutMarkingValuesDirty(): nil
+    const world = tecs.ecs.newWorld()
+    const first = assert(world:batchSpawn(100, {point}))
+    world:commit()
+    for index = 1, 99 do
+        world:despawn(first + index)
+    end
+    world:commit()
+    for candidate in world:newQuery({include = {point}}):iter() do
+        const version = candidate:structuralCount()
+        const writes = candidate:writeCount(point)
+        world:compact()
+        test.assert(candidate:structuralCount() > version)
+        test.equal(candidate:writeCount(point), writes)
+        test.equal(assert(world:get(first, point)).x, 3)
+    end
+end
+
+function suite.bulkMovesExchangeNativeBuffersAndPublishOneRange(): nil
+    const world = tecs.ecs.newWorld()
+    const tag = tecs.ecs.newTagComponent({name = "test.FFI.BulkSwap"})
+    const first = assert(world:batchSpawn(300, {point(11, 12)}))
+    world:commit()
+    const selection = world:newQuery({include = {point}})
+    local before: any = nil
+    for candidate in selection:iter() do
+        before = candidate:get(point)
+    end
+    local notices = 0
+    world:newQuery({
+        include = {tag},
+        onEntitiesAdded = function(
+            candidate: tecs.ecs.Archetype,
+            firstRow: integer,
+            lastRow: integer,
+            count: integer
+        ): nil
+            notices += 1
+            test.equal(count, 300)
+            test.equal(firstRow, 1)
+            test.equal(lastRow, 300)
+            test.equal(candidate:get(point) as any, before)
+        end
+    })
+    world:batchSet(selection, tag)
+    world:commit()
+    test.equal(notices, 1)
+    world:batchRemove(selection, tag)
+    world:commit()
+    for candidate in selection:iter() do
+        if #assert(candidate).entities > 0 then
+            test.equal(candidate:get(point) as any, before)
+        end
+    end
+    test.equal(assert(world:get(first + 299, point)).y, 12)
+end
+
+function suite.bulkMovesCopyIntoPopulatedNativeColumnsWithoutLosingRows(): nil
+    const world = tecs.ecs.newWorld()
+    const tag = tecs.ecs.newTagComponent({name = "test.FFI.BulkCopy"})
+    const existing = assert(world:batchSpawn(80, {point(19, 20), tag}))
+    const moving = assert(world:batchSpawn(200, {point(31, 32)}))
+    world:commit()
+    world:batchSet(world:newQuery({include = {point}, exclude = {tag}}), tag)
+    world:commit()
+    for id = existing, existing + 79 do
+        test.equal(assert(world:get(id, point)).x, 19)
+    end
+    for id = moving, moving + 199 do
+        test.equal(assert(world:get(id, point)).x, 31)
+    end
+    world:batchRemove(world:newQuery({include = {tag}}), tag)
+    world:commit()
+    world:batchSpawn(500, {point(55, 56)})
+    world:commit()
+    test.equal(assert(world:get(existing, point)).y, 20)
+    test.equal(assert(world:get(moving, point)).y, 32)
+end
+
+function suite.rawBatchRestoreUsesZeroBasedIdsAndRegistersInitializedKeys(): nil
+    const ids = ffi.new("double[?]", 3) as number[?]
+    unsafe do
+        ids[0] = 11
+        ids[1] = 5
+        ids[2] = 7
+    end
+    const world = tecs.ecs.newWorld({maxEntities = 20})
+    world:batchSpawnAtRaw(
+        ids,
+        3,
+        {
+            point,
+            tecs.ecs.EntityKey
+        },
+        function(candidate: tecs.ecs.Archetype, first: integer, last: integer): nil
+            const keys = assert(candidate:getMut(tecs.ecs.EntityKey))
+            for row = first, last do
+                keys[row] = "restored-" .. tostring(candidate.entities[row])
+            end
+        end
+    )
+    world:commit()
+    test.equal(world:get(11, tecs.ecs.EntityKey), "restored-11")
+    test.equal(assert(world:get(5, point)).x, 3)
+    test.equal(world:getStats().entities, 3)
+    test.raises(
+        function(): nil
+            world:batchSpawnAtRaw(ids, 4, {})
+        end,
+        "native identity array"
+    )
+    const duplicate = ffi.new("double[?]", 2) as number[?]
+    unsafe do
+        duplicate[0] = 3
+        duplicate[1] = 3
+    end
+    test.raises(
+        function(): nil
+            world:batchSpawnAtRaw(duplicate, 2, {})
+        end,
+        "duplicate or occupied"
+    )
+    world:spawnAt(3)
+    world:commit()
+    test.assert(world:isAlive(3))
+end
+
+return suite

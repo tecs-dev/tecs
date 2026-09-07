@@ -1,0 +1,334 @@
+local test = require("nupp.test")
+
+local suite = {}
+
+local function noop(_dt: number, exclusive _world: tecs.ecs.World): nil
+end
+
+local function names(borrows world: tecs.ecs.World, phase: tecs.ecs.Phase): string
+    const result: {string} = {}
+    for _, info in ipairs(world:listSystems()) do
+        if info.phase == phase then
+            result[#result + 1] = info.name
+        end
+    end
+
+    return table.concat(result, ",")
+end
+
+function suite.ordersDependenciesWithRegistrationOrderTies(): nil
+    const world = tecs.ecs.newWorld()
+    const calls: {string} = {}
+    local function register(name: string, before: {string}?, after: {string}?): nil
+        world:addSystem({
+            name = name,
+            phase = tecs.ecs.phases.Update,
+            before = before,
+            after = after,
+            run = function(_dt: number, exclusive _world: tecs.ecs.World): nil
+                calls[#calls + 1] = name
+            end
+        })
+    end
+
+    register("A", nil, {"C"})
+    register("B", nil, {"A"})
+    register("C", {"A"})
+    register("D")
+    test.equal(names(world, tecs.ecs.phases.Update), "C,A,B,D")
+    world:update(0)
+    world:update(0)
+    test.equal(table.concat(calls, ","), "C,A,B,D,C,A,B,D")
+end
+
+function suite.deduplicatesEdgesAndKeepsSharedBodiesDistinct(): nil
+    const world = tecs.ecs.newWorld()
+    world:addSystem({name = "B", phase = tecs.ecs.phases.Update, after = {"A", "A", "B"}, run = noop})
+    world:addSystem({name = "A", phase = tecs.ecs.phases.Update, before = {"B", "B", "A"}, run = noop})
+    test.equal(names(world, tecs.ecs.phases.Update), "A,B")
+    world:update(0)
+end
+
+function suite.copiesConstraintsAndResolvesLateOptionalSystems(): nil
+    const world = tecs.ecs.newWorld()
+    const after = {"optional"}
+    world:addSystem({name = "consumer", phase = tecs.ecs.phases.Update, after = after, run = noop})
+    world:update(0)
+    after[1] = "missing"
+    world:addSystem({name = "optional", phase = tecs.ecs.phases.Update, run = noop})
+    test.equal(names(world, tecs.ecs.phases.Update), "optional,consumer")
+    world:update(0)
+    world:removeSystem("optional")
+    test.equal(names(world, tecs.ecs.phases.Update), "consumer")
+    world:addSystem({name = "optional", phase = tecs.ecs.phases.Update, run = noop})
+    test.equal(names(world, tecs.ecs.phases.Update), "optional,consumer")
+end
+
+function suite.ignoresCrossPhaseConstraints(): nil
+    const world = tecs.ecs.newWorld()
+    const calls: {string} = {}
+    world:addSystem({
+        name = "late",
+        phase = tecs.ecs.phases.PostUpdate,
+        before = {"early"},
+        run = function(): nil
+            calls[#calls + 1] = "late"
+        end
+    })
+    world:addSystem({
+        name = "early",
+        phase = tecs.ecs.phases.Update,
+        after = {"late"},
+        run = function(): nil
+            calls[#calls + 1] = "early"
+        end
+    })
+    world:update(0)
+    test.equal(table.concat(calls, ","), "early,late")
+end
+
+function suite.rejectsCyclesBeforeAnySystemOrInitialCommit(): nil
+    const world = tecs.ecs.newWorld()
+    local calls = 0
+    world:addSystem({name = "A", phase = tecs.ecs.phases.Update, after = {"B"}, run = noop})
+    world:addSystem({name = "B", phase = tecs.ecs.phases.Update, after = {"A"}, run = noop})
+    world:addSystem({
+        name = "first",
+        phase = tecs.ecs.phases.First,
+        run = function(): nil
+            calls = calls + 1
+        end
+    })
+    const staged = world:spawn()
+    test.raises(
+        function(): nil
+            world:update(0)
+        end,
+        "Cycle detected in system dependencies in phase Update"
+    )
+    test.raises(
+        function(): nil
+            world:listSystems()
+        end,
+        "A, B"
+    )
+    test.equal(calls, 0)
+    test.assert(not world:isAlive(staged))
+    world:removeSystem("B")
+    world:update(0)
+    test.equal(calls, 1)
+    test.assert(world:isAlive(staged))
+end
+
+function suite.disabledSystemsKeepTheirDependencyEdges(): nil
+    const world = tecs.ecs.newWorld()
+    const calls: {string} = {}
+    world:addSystem({
+        name = "C",
+        phase = tecs.ecs.phases.Update,
+        after = {"B"},
+        run = function(): nil
+            calls[#calls + 1] = "C"
+        end
+    })
+    world:addSystem({name = "B", phase = tecs.ecs.phases.Update, after = {"A"}, run = noop})
+    world:addSystem({
+        name = "A",
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            calls[#calls + 1] = "A"
+        end
+    })
+    world:setSystemEnabled("B", false)
+    world:update(0)
+    test.equal(names(world, tecs.ecs.phases.Update), "A,B,C")
+    test.equal(table.concat(calls, ","), "A,C")
+    world:removeSystem("B")
+    test.equal(names(world, tecs.ecs.phases.Update), "C,A")
+end
+
+function suite.defersAdditionsButHonorsRemovalsDuringDispatch(): nil
+    const world = tecs.ecs.newWorld()
+    const calls: {string} = {}
+    world:addSystem({
+        name = "replace",
+        phase = tecs.ecs.phases.Update,
+        before = {"victim"},
+        run = function(_dt: number, exclusive value: tecs.ecs.World): nil
+            value:removeSystem("replace")
+            value:removeSystem("victim")
+            value:addSystem({
+                name = "victim",
+                phase = tecs.ecs.phases.Update,
+                run = function(): nil
+                    calls[#calls + 1] = "new"
+                end
+            })
+            value:addSystem({
+                name = "later",
+                phase = tecs.ecs.phases.PostUpdate,
+                run = function(): nil
+                    calls[#calls + 1] = "later"
+                end
+            })
+            -- Inspection during dispatch must not replace its captured schedule.
+            test.equal(names(value, tecs.ecs.phases.Update), "victim")
+        end
+    })
+    world:addSystem({
+        name = "victim",
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            calls[#calls + 1] = "old"
+        end
+    })
+    world:update(0)
+    test.equal(#calls, 0)
+    world:update(0)
+    test.equal(table.concat(calls, ","), "new,later")
+end
+
+function suite.ordersFixedStepsAndPreservesDeclaredBarriers(): nil
+    const world = tecs.ecs.newWorld({timestep = 0.125})
+    const tag = tecs.ecs.newTagComponent({name = "test.SchedulingPublished"})
+    const query = world:newQuery({include = {tag}})
+    local consumed = 0
+    world:addSystem({
+        name = "consume",
+        phase = tecs.ecs.phases.FixedUpdate,
+        after = {"produce"},
+        commitBefore = true,
+        run = function(dt: number): nil
+            test.equal(dt, 0.125)
+            consumed = consumed + 1
+            test.equal(query:count(), consumed)
+        end
+    })
+    world:addSystem({
+        name = "produce",
+        phase = tecs.ecs.phases.FixedUpdate,
+        run = function(): nil
+            world:spawn(tag)
+        end
+    })
+    world:update(0.375)
+    test.equal(consumed, 3)
+end
+
+function suite.ordersLifecycleAndExplicitPhaseDispatch(): nil
+    const world = tecs.ecs.newWorld()
+    const calls: {string} = {}
+    const phases = {tecs.ecs.phases.Startup, tecs.ecs.phases.Shutdown, tecs.ecs.phases.Render}
+    for index = 1, #phases do
+        const phase = phases[index]
+        world:addSystem({
+            name = phase .. "B",
+            phase = phase,
+            after = {phase .. "A"},
+            run = function(): nil
+                calls[#calls + 1] = phase .. "B"
+            end
+        })
+        world:addSystem({
+            name = phase .. "A",
+            phase = phase,
+            run = function(): nil
+                calls[#calls + 1] = phase .. "A"
+            end
+        })
+    end
+    world:startup()
+    world:runPhase(tecs.ecs.phases.Render)
+    world:shutdown()
+    test.equal(table.concat(calls, ","), "StartupA,StartupB,RenderA,RenderB,ShutdownA,ShutdownB")
+end
+
+function suite.preservesDependencyOrderAcrossTaskWaits(): nil
+    const world = tecs.ecs.newWorld()
+    const calls: {string} = {}
+    world:addSystem({
+        name = "consumer",
+        phase = tecs.ecs.phases.Update,
+        after = {"producer"},
+        run = function(): nil
+            calls[#calls + 1] = "consumer"
+        end
+    })
+    world:addSystem({
+        name = "producer",
+        phase = tecs.ecs.phases.Update,
+        run = function(_dt: number, exclusive _world: tecs.ecs.World, borrows scope: nupp.tasks.Scope): nil
+            calls[#calls + 1] = "start"
+            const child = scope:spawn(function(): string
+                return "finish"
+            end)
+            calls[#calls + 1] = child:await()
+        end
+    })
+    world:update(0)
+    test.equal(table.concat(calls, ","), "start,finish,consumer")
+end
+
+function suite.validatesDisabledPhasesAndRecoversFromBodyFailure(): nil
+    const world = tecs.ecs.newWorld()
+    world:addSystem({name = "A", phase = tecs.ecs.phases.Update, before = {"B"}, run = noop})
+    world:addSystem({name = "B", phase = tecs.ecs.phases.Update, before = {"A"}, run = noop})
+    world:disablePhase(tecs.ecs.phases.AllGroups)
+    test.raises(
+        function(): nil
+            world:startup()
+        end,
+        "Cycle detected"
+    )
+    world:removeSystem("B")
+    world:enablePhase(tecs.ecs.phases.Update)
+    world:addSystem({
+        name = "failure",
+        phase = tecs.ecs.phases.Update,
+        before = {"A"},
+        run = function(): nil
+            error("scheduled failure")
+        end
+    })
+    test.raises(
+        function(): nil
+            world:update(0)
+        end,
+        "scheduled failure"
+    )
+    world:removeSystem("failure")
+    world:update(0)
+    test.equal(names(world, tecs.ecs.phases.Update), "A")
+end
+
+function suite.honorsRemovalFromABeforeBarrierCallback(): nil
+    const world = tecs.ecs.newWorld()
+    const tag = tecs.ecs.newTagComponent({name = "test.SchedulingBarrierRemoval"})
+    local calls = 0
+    world:newQuery({
+        include = {tag},
+        onEntitiesAdded = function(): nil
+            world:removeSystem("consumer")
+        end
+    })
+    world:addSystem({
+        name = "producer",
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            world:spawn(tag)
+        end
+    })
+    world:addSystem({
+        name = "consumer",
+        phase = tecs.ecs.phases.Update,
+        after = {"producer"},
+        commitBefore = true,
+        run = function(): nil
+            calls = calls + 1
+        end
+    })
+    world:update(0)
+    test.equal(calls, 0)
+end
+
+return suite

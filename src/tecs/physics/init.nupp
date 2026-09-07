@@ -64,7 +64,8 @@ export const pixelsPerMeter: number = 32.0
 ---
 --- Write its fields through `getMut`; physics applies the change during the
 --- next fixed update.
-local record BodyValue
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+local struct BodyValue
     --- Caller-writable. Selects 0 for static, 1 for kinematic or 2 for
     --- dynamic.
     kind: integer
@@ -94,7 +95,8 @@ end
 ---
 --- Write its fields through `getMut`; physics rebuilds the shape during the
 --- next fixed update.
-local record ColliderValue
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+local struct ColliderValue
     --- Caller-writable. Selects 0 for box, 1 for circle, 2 for capsule or 3 for
     --- segment.
     shape: integer
@@ -132,11 +134,11 @@ local record ColliderValue
 
     --- Caller-writable. Sets the shape's collision categories, in the low 32
     --- solver group bits.
-    categoryBits: integer
+    categoryBits: uint32
 
     --- Caller-writable. Sets the categories this shape may contact. Two
     --- shapes touch only when each mask names the other's category.
-    maskBits: integer
+    maskBits: uint32
 
     --- Caller-writable. Reports overlap events without a collision response
     --- when true.
@@ -148,7 +150,8 @@ end
 --- Physics writes it when a body pauses, when a snapshot is saved, and when
 --- one is loaded. It is not a live mirror: between those points a body's real
 --- velocity is what `velocity` and `angularVelocity` report.
-local record MotionValue
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+local struct MotionValue
     --- Read-only. Holds horizontal velocity in pixels per second. Use
     --- `velocity` for live state.
     vx: number
@@ -166,7 +169,8 @@ end
 --- all use this shape so debug tools can read an attachment without knowing
 --- which arena it names. Ordinary game code should use `Body`, `Motion` and
 --- the functions on this module.
-export record SolverHandle
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct SolverHandle
     --- Engine-owned. Identifies the slot, one-based, and zero when the entity
     --- has no live counterpart. Ordinary game code should ignore it.
     index1: integer
@@ -178,11 +182,12 @@ export record SolverHandle
 
     --- Engine-owned. Rejects a stale slot. Ordinary game code should ignore
     --- it.
-    generation: integer
+    generation: uint32
 end
 
 --- Declares a joint between the two bodies its entity relates to.
-local record JointValue
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+local struct JointValue
     --- Caller-writable. Selects 0 for fixed, 1 for revolute or 2 for
     --- prismatic.
     kind: integer
@@ -329,13 +334,13 @@ local function newBody(
     angularDamping: number?
 ): BodyValue
     return new BodyValue(
-        kind = kind or contract.BODY_DYNAMIC,
-        fixedRotation = fixedRotation == true,
-        isBullet = isBullet == true,
-        sleepEnabled = sleepEnabled ~= false,
-        gravityScale = gravityScale or 1.0,
-        linearDamping = linearDamping or 0.0,
-        angularDamping = angularDamping or 0.0
+        kind or contract.BODY_DYNAMIC,
+        fixedRotation == true,
+        isBullet == true,
+        sleepEnabled ~= false,
+        gravityScale or 1.0,
+        linearDamping or 0.0,
+        angularDamping or 0.0
     )
 end
 
@@ -344,7 +349,7 @@ export type Body = BodyValue
 
 --- Declares a body's simulation behavior.
 -- This persisted component name is a compatibility surface.
-export const Body: ecs.TableComponent<BodyValue> = ecs.newComponent({
+export const Body: ecs.FFIComponent<BodyValue> = ecs.newFFIComponent({
     name = "Body",
     construct = newBody,
     default = function(): BodyValue
@@ -368,19 +373,19 @@ local function newCollider(
     isSensor: boolean?
 ): ColliderValue
     return new ColliderValue(
-        shape = shape or contract.SHAPE_BOX,
-        halfWidth = halfWidth or 8.0,
-        halfHeight = halfHeight or 8.0,
-        radius = radius or 0.0,
-        length = length or 0.0,
-        offsetX = offsetX or 0.0,
-        offsetY = offsetY or 0.0,
-        density = density or 1.0,
-        friction = friction or 0.6,
-        restitution = restitution or 0.0,
-        categoryBits = categoryBits or 1,
-        maskBits = maskBits or 0xFFFFFFFF,
-        isSensor = isSensor == true
+        shape or contract.SHAPE_BOX,
+        halfWidth or 8.0,
+        halfHeight or 8.0,
+        radius or 0.0,
+        length or 0.0,
+        offsetX or 0.0,
+        offsetY or 0.0,
+        density or 1.0,
+        friction or 0.6,
+        restitution or 0.0,
+        (categoryBits or 1) as uint32,
+        (maskBits or 0xFFFFFFFF) as uint32,
+        isSensor == true
     )
 end
 
@@ -389,7 +394,7 @@ export type Collider = ColliderValue
 
 --- Declares a body's geometry, material and collision filtering.
 -- This persisted component name is a compatibility surface.
-export const Collider: ecs.TableComponent<ColliderValue> = ecs.newComponent({
+export const Collider: ecs.FFIComponent<ColliderValue> = ecs.newFFIComponent({
     name = "Collider",
     construct = newCollider,
     default = function(): ColliderValue
@@ -398,7 +403,7 @@ export const Collider: ecs.TableComponent<ColliderValue> = ecs.newComponent({
 })
 
 local function newMotion(vx: number?, vy: number?, omega: number?): MotionValue
-    return new MotionValue(vx = vx or 0.0, vy = vy or 0.0, omega = omega or 0.0)
+    return new MotionValue(vx or 0.0, vy or 0.0, omega or 0.0)
 end
 
 --- The value a `Motion` column holds.
@@ -406,7 +411,7 @@ export type Motion = MotionValue
 
 --- Preserves a body's saved velocity across pauses and snapshots.
 -- This persisted component name is a compatibility surface.
-export const Motion: ecs.TableComponent<MotionValue> = ecs.newComponent({
+export const Motion: ecs.FFIComponent<MotionValue> = ecs.newFFIComponent({
     name = "Motion",
     construct = newMotion,
     default = function(): MotionValue
@@ -415,7 +420,7 @@ export const Motion: ecs.TableComponent<MotionValue> = ecs.newComponent({
 })
 
 local function newHandle(index1: integer?, world0: integer?, generation: integer?): SolverHandle
-    return new SolverHandle(index1 = index1 or 0, world0 = world0 or 0, generation = generation or 0)
+    return new SolverHandle(index1 or 0, world0 or 0, (generation or 0) as uint32)
 end
 
 local function emptyHandle(): SolverHandle
@@ -427,7 +432,7 @@ end
 --- Engine-owned and transient. A snapshot never carries it, because the slot
 --- it names belongs to one run of one simulation.
 -- This component name is a compatibility surface.
-export const RigidBody: ecs.TableComponent<SolverHandle> = ecs.newComponent({
+export const RigidBody: ecs.FFIComponent<SolverHandle> = ecs.newFFIComponent({
     name = "RigidBody",
     construct = newHandle,
     default = emptyHandle,
@@ -438,7 +443,7 @@ export const RigidBody: ecs.TableComponent<SolverHandle> = ecs.newComponent({
 ---
 --- Engine-owned and transient.
 -- This component name is a compatibility surface.
-export const ColliderShape: ecs.TableComponent<SolverHandle> = ecs.newComponent({
+export const ColliderShape: ecs.FFIComponent<SolverHandle> = ecs.newFFIComponent({
     name = "ColliderShape",
     construct = newHandle,
     default = emptyHandle,
@@ -449,7 +454,7 @@ export const ColliderShape: ecs.TableComponent<SolverHandle> = ecs.newComponent(
 ---
 --- Engine-owned and transient.
 -- This component name is a compatibility surface.
-export const JointLink: ecs.TableComponent<SolverHandle> = ecs.newComponent({
+export const JointLink: ecs.FFIComponent<SolverHandle> = ecs.newFFIComponent({
     name = "JointLink",
     construct = newHandle,
     default = emptyHandle,
@@ -473,20 +478,20 @@ local function newJoint(
     contactsEnabled: boolean?
 ): JointValue
     return new JointValue(
-        kind = kind or contract.JOINT_FIXED,
-        anchorAX = anchorAX or 0.0,
-        anchorAY = anchorAY or 0.0,
-        anchorBX = anchorBX or 0.0,
-        anchorBY = anchorBY or 0.0,
-        axisX = axisX or 1.0,
-        axisY = axisY or 0.0,
-        limitsEnabled = limitsEnabled == true,
-        limitMin = limitMin or 0.0,
-        limitMax = limitMax or 0.0,
-        motorEnabled = motorEnabled == true,
-        motorTargetVelocity = motorTargetVelocity or 0.0,
-        motorMaxForce = motorMaxForce or 0.0,
-        contactsEnabled = contactsEnabled == true
+        kind or contract.JOINT_FIXED,
+        anchorAX or 0.0,
+        anchorAY or 0.0,
+        anchorBX or 0.0,
+        anchorBY or 0.0,
+        axisX or 1.0,
+        axisY or 0.0,
+        limitsEnabled == true,
+        limitMin or 0.0,
+        limitMax or 0.0,
+        motorEnabled == true,
+        motorTargetVelocity or 0.0,
+        motorMaxForce or 0.0,
+        contactsEnabled == true
     )
 end
 
@@ -495,7 +500,7 @@ export type Joint = JointValue
 
 --- Declares a joint between the two bodies its entity relates to.
 -- This persisted component name is a compatibility surface.
-export const Joint: ecs.TableComponent<JointValue> = ecs.newComponent({
+export const Joint: ecs.FFIComponent<JointValue> = ecs.newFFIComponent({
     name = "Joint",
     construct = newJoint,
     default = function(): JointValue
@@ -523,6 +528,7 @@ export const PhysicsDisabled: ecs.Component = ecs.newTagComponent({name = "Physi
 -- This relationship name is a compatibility surface.
 export const ColliderOf: ecs.Relationship = ecs.newRelationship({
     name = "ColliderOf",
+    sparse = true,
     exclusive = true,
     reverseIndex = true,
     cascadeDelete = true,
@@ -532,6 +538,7 @@ export const ColliderOf: ecs.Relationship = ecs.newRelationship({
 -- This relationship name is a compatibility surface.
 export const JointBodyA: ecs.Relationship = ecs.newRelationship({
     name = "JointBodyA",
+    sparse = true,
     exclusive = true,
     reverseIndex = true,
     cascadeDelete = true,
@@ -541,6 +548,7 @@ export const JointBodyA: ecs.Relationship = ecs.newRelationship({
 -- This relationship name is a compatibility surface.
 export const JointBodyB: ecs.Relationship = ecs.newRelationship({
     name = "JointBodyB",
+    sparse = true,
     exclusive = true,
     reverseIndex = true,
     cascadeDelete = true,
@@ -1387,30 +1395,34 @@ local function reconcileBodies(state: State, exclusive world: ecs.World): nil
 
     -- A body outlives its entity otherwise: the solver owns it until something
     -- says so, and nothing else knows the declaration is gone.
-    for candidate, matched in state.detachedBodies:iter() do
-        local archetype: ecs.Archetype = assert(candidate)
-        local length: integer = assert(matched)
-        local rows: {SolverHandle} = assert(archetype:get(RigidBody))
-        local entities = archetype.entities
-        for row = 1, length do
-            local handle = rows[row]
-            if handle.world0 == simulation.id then
-                simulation.queueDestroyBody(handle.index1, handle.generation)
+    unsafe do
+        for candidate, matched in state.detachedBodies:iter() do
+            local archetype: ecs.Archetype = assert(candidate)
+            local length: integer = assert(matched)
+            local rows: SolverHandle[?] = assert(archetype:get(RigidBody))
+            local entities = archetype.entities
+            for row = 1, length do
+                local handle = rows[row]
+                if handle.world0 == simulation.id then
+                    simulation.queueDestroyBody(handle.index1, handle.generation)
+                end
+                world:remove(entities[row], RigidBody)
             end
-            world:remove(entities[row], RigidBody)
         end
     end
-    for candidate, matched in state.detachedShapes:iter() do
-        local archetype: ecs.Archetype = assert(candidate)
-        local length: integer = assert(matched)
-        local rows: {SolverHandle} = assert(archetype:get(ColliderShape))
-        local entities = archetype.entities
-        for row = 1, length do
-            local handle = rows[row]
-            if handle.world0 == simulation.id then
-                simulation.queueDestroyCollider(handle.index1, handle.generation)
+    unsafe do
+        for candidate, matched in state.detachedShapes:iter() do
+            local archetype: ecs.Archetype = assert(candidate)
+            local length: integer = assert(matched)
+            local rows: SolverHandle[?] = assert(archetype:get(ColliderShape))
+            local entities = archetype.entities
+            for row = 1, length do
+                local handle = rows[row]
+                if handle.world0 == simulation.id then
+                    simulation.queueDestroyCollider(handle.index1, handle.generation)
+                end
+                world:remove(entities[row], ColliderShape)
             end
-            world:remove(entities[row], ColliderShape)
         end
     end
 
@@ -1426,17 +1438,19 @@ end
 
 local function reconcileJoints(state: State, exclusive world: ecs.World): nil
     local simulation = state.simulation
-    for candidate, matched in state.detachedJoints:iter() do
-        local archetype: ecs.Archetype = assert(candidate)
-        local length: integer = assert(matched)
-        local rows: {SolverHandle} = assert(archetype:get(JointLink))
-        local entities = archetype.entities
-        for row = 1, length do
-            local handle = rows[row]
-            if handle.world0 == simulation.id then
-                simulation.queueDestroyJoint(handle.index1, handle.generation)
+    unsafe do
+        for candidate, matched in state.detachedJoints:iter() do
+            local archetype: ecs.Archetype = assert(candidate)
+            local length: integer = assert(matched)
+            local rows: SolverHandle[?] = assert(archetype:get(JointLink))
+            local entities = archetype.entities
+            for row = 1, length do
+                local handle = rows[row]
+                if handle.world0 == simulation.id then
+                    simulation.queueDestroyJoint(handle.index1, handle.generation)
+                end
+                world:remove(entities[row], JointLink)
             end
-            world:remove(entities[row], JointLink)
         end
     end
     local pending = gather(state, state.pendingJoints)
@@ -1447,141 +1461,149 @@ end
 
 local function holdPausedBodies(state: State, exclusive world: ecs.World): nil
     local simulation = state.simulation
-    for candidate, matched in state.pausedBodies:iter() do
-        local archetype: ecs.Archetype = assert(candidate)
-        local length: integer = assert(matched)
-        local rows: {SolverHandle} = assert(archetype:get(RigidBody))
-        local motions: {MotionValue} = assert(archetype:getMut(Motion))
-        local entities = archetype.entities
-        for row = 1, length do
-            local handle = rows[row]
-            local motion = motions[row]
-            if handle.world0 == simulation.id then
-                local vx, vy, omega = simulation.velocityOf(handle.index1, handle.generation)
-                motion.vx = toPixels(vx)
-                motion.vy = toPixels(vy)
-                motion.omega = omega
-                simulation.queueAction(handle.index1, handle.generation, contract.ACTION_SET_VELOCITY, 0, 0, 0, 0)
-                simulation.queueAction(
-                    handle.index1,
-                    handle.generation,
-                    contract.ACTION_SET_ANGULAR_VELOCITY,
-                    0,
-                    0,
-                    0,
-                    0
-                )
-                simulation.queueAction(
-                    handle.index1,
-                    handle.generation,
-                    contract.ACTION_SET_BODY_TYPE,
-                    contract.BODY_STATIC,
-                    0,
-                    0,
-                    0
-                )
+    unsafe do
+        for candidate, matched in state.pausedBodies:iter() do
+            local archetype: ecs.Archetype = assert(candidate)
+            local length: integer = assert(matched)
+            local rows: SolverHandle[?] = assert(archetype:get(RigidBody))
+            local motions: MotionValue[?] = assert(archetype:getMut(Motion))
+            local entities = archetype.entities
+            for row = 1, length do
+                local handle = rows[row]
+                local motion = motions[row]
+                if handle.world0 == simulation.id then
+                    local vx, vy, omega = simulation.velocityOf(handle.index1, handle.generation)
+                    motion.vx = toPixels(vx)
+                    motion.vy = toPixels(vy)
+                    motion.omega = omega
+                    simulation.queueAction(handle.index1, handle.generation, contract.ACTION_SET_VELOCITY, 0, 0, 0, 0)
+                    simulation.queueAction(
+                        handle.index1,
+                        handle.generation,
+                        contract.ACTION_SET_ANGULAR_VELOCITY,
+                        0,
+                        0,
+                        0,
+                        0
+                    )
+                    simulation.queueAction(
+                        handle.index1,
+                        handle.generation,
+                        contract.ACTION_SET_BODY_TYPE,
+                        contract.BODY_STATIC,
+                        0,
+                        0,
+                        0
+                    )
+                end
+                world:set(entities[row], PhysicsHeld)
             end
-            world:set(entities[row], PhysicsHeld)
         end
     end
 end
 
 local function releasePausedBodies(state: State, exclusive world: ecs.World): nil
     local simulation = state.simulation
-    for candidate, matched in state.resumedBodies:iter() do
-        local archetype: ecs.Archetype = assert(candidate)
-        local length: integer = assert(matched)
-        local declarations: {BodyValue} = assert(archetype:get(Body))
-        local rows: {SolverHandle} = assert(archetype:get(RigidBody))
-        local motions: {MotionValue} = assert(archetype:get(Motion))
-        local entities = archetype.entities
-        for row = 1, length do
-            local handle = rows[row]
-            if handle.world0 == simulation.id then
-                local motion = motions[row]
-                simulation.queueAction(
-                    handle.index1,
-                    handle.generation,
-                    contract.ACTION_SET_BODY_TYPE,
-                    declarations[row].kind,
-                    0,
-                    0,
-                    0
-                )
-                simulation.queueAction(
-                    handle.index1,
-                    handle.generation,
-                    contract.ACTION_SET_VELOCITY,
-                    toMeters(motion.vx),
-                    toMeters(motion.vy),
-                    0,
-                    0
-                )
-                simulation.queueAction(
-                    handle.index1,
-                    handle.generation,
-                    contract.ACTION_SET_ANGULAR_VELOCITY,
-                    motion.omega,
-                    0,
-                    0,
-                    0
-                )
+    unsafe do
+        for candidate, matched in state.resumedBodies:iter() do
+            local archetype: ecs.Archetype = assert(candidate)
+            local length: integer = assert(matched)
+            local declarations: BodyValue[?] = assert(archetype:get(Body))
+            local rows: SolverHandle[?] = assert(archetype:get(RigidBody))
+            local motions: MotionValue[?] = assert(archetype:get(Motion))
+            local entities = archetype.entities
+            for row = 1, length do
+                local handle = rows[row]
+                if handle.world0 == simulation.id then
+                    local motion = motions[row]
+                    simulation.queueAction(
+                        handle.index1,
+                        handle.generation,
+                        contract.ACTION_SET_BODY_TYPE,
+                        declarations[row].kind,
+                        0,
+                        0,
+                        0
+                    )
+                    simulation.queueAction(
+                        handle.index1,
+                        handle.generation,
+                        contract.ACTION_SET_VELOCITY,
+                        toMeters(motion.vx),
+                        toMeters(motion.vy),
+                        0,
+                        0
+                    )
+                    simulation.queueAction(
+                        handle.index1,
+                        handle.generation,
+                        contract.ACTION_SET_ANGULAR_VELOCITY,
+                        motion.omega,
+                        0,
+                        0,
+                        0
+                    )
+                end
+                world:remove(entities[row], PhysicsHeld)
             end
-            world:remove(entities[row], PhysicsHeld)
         end
     end
 end
 
 local function applyColliderChanges(state: State, borrows _world: ecs.World): nil
     local simulation = state.simulation
-    for candidate, matched in state.primaryColliders:iter() do
-        local archetype: ecs.Archetype = assert(candidate)
-        local length: integer = assert(matched)
-        if archetype:isComponentDirty(Collider) then
-            local shapes: {ColliderValue} = assert(archetype:get(Collider))
-            local rows: {SolverHandle} = assert(archetype:get(RigidBody))
-            local entities = archetype.entities
-            for row = 1, length do
-                local handle = rows[row]
-                if handle.world0 == simulation.id and handle.index1 ~= 0 then
-                    local order = simulation.queueUpdateCollider(
-                        new contract.ColliderUpdate(
-                            def = colliderDefOf(entities[row], shapes[row]),
-                            index1 = 0,
-                            generation = 0,
-                            bodyIndex1 = handle.index1,
-                            bodyGeneration = handle.generation
+    unsafe do
+        for candidate, matched in state.primaryColliders:iter() do
+            local archetype: ecs.Archetype = assert(candidate)
+            local length: integer = assert(matched)
+            if archetype:isComponentDirty(Collider) then
+                local shapes: ColliderValue[?] = assert(archetype:get(Collider))
+                local rows: SolverHandle[?] = assert(archetype:get(RigidBody))
+                local entities = archetype.entities
+                for row = 1, length do
+                    local handle = rows[row]
+                    if handle.world0 == simulation.id and handle.index1 ~= 0 then
+                        local order = simulation.queueUpdateCollider(
+                            new contract.ColliderUpdate(
+                                def = colliderDefOf(entities[row], shapes[row]),
+                                index1 = 0,
+                                generation = 0,
+                                bodyIndex1 = handle.index1,
+                                bodyGeneration = handle.generation
+                            )
                         )
-                    )
-                    -- No component stores a primary collider's handle, so the
-                    -- replacement's identity has nothing to write back to.
-                    state.shapeUpdateOrder[order] = 0
-                    state.shapeUpdateCount = order
+                        -- No component stores a primary collider's handle, so the
+                        -- replacement's identity has nothing to write back to.
+                        state.shapeUpdateOrder[order] = 0
+                        state.shapeUpdateCount = order
+                    end
                 end
             end
         end
     end
-    for candidate, matched in state.secondaryColliders:iter() do
-        local archetype: ecs.Archetype = assert(candidate)
-        local length: integer = assert(matched)
-        if archetype:isComponentDirty(Collider) then
-            local shapes: {ColliderValue} = assert(archetype:get(Collider))
-            local rows: {SolverHandle} = assert(archetype:get(ColliderShape))
-            local entities = archetype.entities
-            for row = 1, length do
-                local handle = rows[row]
-                if handle.world0 == simulation.id and handle.index1 ~= 0 then
-                    local order = simulation.queueUpdateCollider(
-                        new contract.ColliderUpdate(
-                            def = colliderDefOf(entities[row], shapes[row]),
-                            index1 = handle.index1,
-                            generation = handle.generation,
-                            bodyIndex1 = 0,
-                            bodyGeneration = 0
+    unsafe do
+        for candidate, matched in state.secondaryColliders:iter() do
+            local archetype: ecs.Archetype = assert(candidate)
+            local length: integer = assert(matched)
+            if archetype:isComponentDirty(Collider) then
+                local shapes: ColliderValue[?] = assert(archetype:get(Collider))
+                local rows: SolverHandle[?] = assert(archetype:get(ColliderShape))
+                local entities = archetype.entities
+                for row = 1, length do
+                    local handle = rows[row]
+                    if handle.world0 == simulation.id and handle.index1 ~= 0 then
+                        local order = simulation.queueUpdateCollider(
+                            new contract.ColliderUpdate(
+                                def = colliderDefOf(entities[row], shapes[row]),
+                                index1 = handle.index1,
+                                generation = handle.generation,
+                                bodyIndex1 = 0,
+                                bodyGeneration = 0
+                            )
                         )
-                    )
-                    state.shapeUpdateOrder[order] = entities[row]
-                    state.shapeUpdateCount = order
+                        state.shapeUpdateOrder[order] = entities[row]
+                        state.shapeUpdateCount = order
+                    end
                 end
             end
         end
@@ -1590,27 +1612,29 @@ end
 
 local function applyBodyChanges(state: State, borrows _world: ecs.World): nil
     local simulation = state.simulation
-    for candidate, matched in state.declaredBodies:iter() do
-        local archetype: ecs.Archetype = assert(candidate)
-        local length: integer = assert(matched)
-        if archetype:isComponentDirty(Body) then
-            local declarations: {BodyValue} = assert(archetype:get(Body))
-            local rows: {SolverHandle} = assert(archetype:get(RigidBody))
-            for row = 1, length do
-                local handle = rows[row]
-                local declared = declarations[row]
-                if handle.world0 == simulation.id and handle.index1 ~= 0 then
-                    simulation.queueUpdateBody(
-                        handle.index1,
-                        handle.generation,
-                        declared.kind,
-                        declared.fixedRotation,
-                        declared.isBullet,
-                        declared.sleepEnabled,
-                        declared.gravityScale,
-                        declared.linearDamping,
-                        declared.angularDamping
-                    )
+    unsafe do
+        for candidate, matched in state.declaredBodies:iter() do
+            local archetype: ecs.Archetype = assert(candidate)
+            local length: integer = assert(matched)
+            if archetype:isComponentDirty(Body) then
+                local declarations: BodyValue[?] = assert(archetype:get(Body))
+                local rows: SolverHandle[?] = assert(archetype:get(RigidBody))
+                for row = 1, length do
+                    local handle = rows[row]
+                    local declared = declarations[row]
+                    if handle.world0 == simulation.id and handle.index1 ~= 0 then
+                        simulation.queueUpdateBody(
+                            handle.index1,
+                            handle.generation,
+                            declared.kind,
+                            declared.fixedRotation,
+                            declared.isBullet,
+                            declared.sleepEnabled,
+                            declared.gravityScale,
+                            declared.linearDamping,
+                            declared.angularDamping
+                        )
+                    end
                 end
             end
         end
@@ -1619,28 +1643,30 @@ end
 
 local function setEnablement(state: State, exclusive world: ecs.World, from: ecs.Query, enabled: boolean): nil
     local simulation = state.simulation
-    for candidate, matched in from:iter() do
-        local archetype: ecs.Archetype = assert(candidate)
-        local length: integer = assert(matched)
-        local rows: {SolverHandle} = assert(archetype:get(RigidBody))
-        local entities = archetype.entities
-        for row = 1, length do
-            local handle = rows[row]
-            if handle.world0 == simulation.id then
-                simulation.queueAction(
-                    handle.index1,
-                    handle.generation,
-                    contract.ACTION_SET_ENABLED,
-                    enabled and 1 or 0,
-                    0,
-                    0,
-                    0
-                )
-            end
-            if enabled then
-                world:remove(entities[row], PhysicsDisabled)
-            else
-                world:set(entities[row], PhysicsDisabled)
+    unsafe do
+        for candidate, matched in from:iter() do
+            local archetype: ecs.Archetype = assert(candidate)
+            local length: integer = assert(matched)
+            local rows: SolverHandle[?] = assert(archetype:get(RigidBody))
+            local entities = archetype.entities
+            for row = 1, length do
+                local handle = rows[row]
+                if handle.world0 == simulation.id then
+                    simulation.queueAction(
+                        handle.index1,
+                        handle.generation,
+                        contract.ACTION_SET_ENABLED,
+                        enabled and 1 or 0,
+                        0,
+                        0,
+                        0
+                    )
+                end
+                if enabled then
+                    world:remove(entities[row], PhysicsDisabled)
+                else
+                    world:set(entities[row], PhysicsDisabled)
+                end
             end
         end
     end
@@ -1721,30 +1747,32 @@ end
 
 local function syncBodyTransforms(state: State, exclusive world: ecs.World): nil
     local simulation = state.simulation
-    for candidate, matched in state.simulatedBodies:iter() do
-        local archetype: ecs.Archetype = assert(candidate)
-        local length: integer = assert(matched)
-        local rows: {SolverHandle} = assert(archetype:get(RigidBody))
+    unsafe do
+        for candidate, matched in state.simulatedBodies:iter() do
+            local archetype: ecs.Archetype = assert(candidate)
+            local length: integer = assert(matched)
+            local rows: SolverHandle[?] = assert(archetype:get(RigidBody))
 
-        -- Taken mutable on the first body that actually moved, and not at all
-        -- otherwise. Taking it up front would mark the column dirty every
-        -- frame for every archetype holding a body, which defeats every
-        -- consumer gated on that: a world whose bodies have gone to sleep
-        -- would still re-upload each of their instances.
-        local transforms: {ecs.Transform2D}? = nil
+            -- Taken mutable on the first body that actually moved, and not at all
+            -- otherwise. Taking it up front would mark the column dirty every
+            -- frame for every archetype holding a body, which defeats every
+            -- consumer gated on that: a world whose bodies have gone to sleep
+            -- would still re-upload each of their instances.
+            local transforms: ecs.Transform2D[?]? = nil
 
-        for row = 1, length do
-            local handle = rows[row]
-            if handle.world0 == simulation.id then
-                local px, py, cosine, sine = simulation.poseOf(handle.index1, handle.generation)
-                if px ~= nil then
-                    if transforms == nil then
-                        transforms = archetype:getMut(ecs.Transform2D)
+            for row = 1, length do
+                local handle = rows[row]
+                if handle.world0 == simulation.id then
+                    local px, py, cosine, sine = simulation.poseOf(handle.index1, handle.generation)
+                    if px ~= nil then
+                        if transforms == nil then
+                            transforms = archetype:getMut(ecs.Transform2D)
+                        end
+                        local transform = assert(transforms)[row]
+                        transform.x = toPixels(px)
+                        transform.y = toPixels(py)
+                        transform.rotation = vec2.angle(cosine, sine)
                     end
-                    local transform = assert(transforms)[row]
-                    transform.x = toPixels(px)
-                    transform.y = toPixels(py)
-                    transform.rotation = vec2.angle(cosine, sine)
                 end
             end
         end
@@ -1754,19 +1782,21 @@ end
 --- Copies live velocities into `Motion` so a snapshot carries them.
 local function captureMotion(state: State): nil
     local simulation = state.simulation
-    for candidate, matched in state.snapshotBodies:iter() do
-        local archetype: ecs.Archetype = assert(candidate)
-        local length: integer = assert(matched)
-        local rows: {SolverHandle} = assert(archetype:get(RigidBody))
-        local motions: {MotionValue} = assert(archetype:getMut(Motion))
-        for row = 1, length do
-            local handle = rows[row]
-            if handle.world0 == simulation.id then
-                local vx, vy, omega = simulation.velocityOf(handle.index1, handle.generation)
-                local motion = motions[row]
-                motion.vx = toPixels(vx)
-                motion.vy = toPixels(vy)
-                motion.omega = omega
+    unsafe do
+        for candidate, matched in state.snapshotBodies:iter() do
+            local archetype: ecs.Archetype = assert(candidate)
+            local length: integer = assert(matched)
+            local rows: SolverHandle[?] = assert(archetype:get(RigidBody))
+            local motions: MotionValue[?] = assert(archetype:getMut(Motion))
+            for row = 1, length do
+                local handle = rows[row]
+                if handle.world0 == simulation.id then
+                    local vx, vy, omega = simulation.velocityOf(handle.index1, handle.generation)
+                    local motion = motions[row]
+                    motion.vx = toPixels(vx)
+                    motion.vy = toPixels(vy)
+                    motion.omega = omega
+                end
             end
         end
     end
@@ -1852,32 +1882,61 @@ export function install(exclusive world: ecs.World, options: Options?): contract
 
     local state = new State(
         simulation = simulation,
-        poselessBodies = world:newQuery({
+        poselessBodies = tecs.internal.world.newUnfilteredQuery(world, {
             include = {Body},
             exclude = {ecs.Transform2D}
         }),
-        motionlessBodies = world:newQuery({
+        motionlessBodies = tecs.internal.world.newUnfilteredQuery(world, {
             include = {Body},
             exclude = {Motion}
         }),
-        pendingBodies = world:newQuery({
+        pendingBodies = tecs.internal.world.newUnfilteredQuery(world, {
             include = {ecs.Transform2D, Body, Collider},
             exclude = {RigidBody}
         }),
-        detachedBodies = world:newQuery({include = {RigidBody}, exclude = {Body}}),
-        detachedShapes = world:newQuery({include = {ColliderShape}, exclude = {Collider}}),
-        detachedJoints = world:newQuery({include = {JointLink}, exclude = {Joint}}),
-        pausedBodies = world:newQuery({include = {Body, Motion, RigidBody, ecs.Paused}, exclude = {PhysicsHeld},}),
-        resumedBodies = world:newQuery({include = {Body, Motion, RigidBody, PhysicsHeld}, exclude = {ecs.Paused},}),
-        disabledBodies = world:newQuery({include = {RigidBody, ecs.Disabled}, exclude = {PhysicsDisabled}}),
-        enabledBodies = world:newQuery({include = {RigidBody, PhysicsDisabled}, exclude = {ecs.Disabled}}),
-        declaredBodies = world:newQuery({include = {Body, RigidBody}, exclude = {PhysicsHeld, PhysicsDisabled},}),
-        primaryColliders = world:newQuery({include = {Collider, RigidBody}}),
-        pendingSecondary = world:newQuery({include = {Collider, ColliderOf}, exclude = {ColliderShape}}),
-        secondaryColliders = world:newQuery({include = {Collider, ColliderOf, ColliderShape}}),
-        pendingJoints = world:newQuery({include = {Joint, JointBodyA, JointBodyB}, exclude = {JointLink}}),
-        simulatedBodies = world:newQuery({include = {ecs.Transform2D, RigidBody}}),
-        snapshotBodies = world:newQuery({include = {Motion, RigidBody}, exclude = {PhysicsHeld}}),
+        detachedBodies = tecs.internal.world.newUnfilteredQuery(world, {include = {RigidBody}, exclude = {Body}}),
+        detachedShapes = tecs.internal.world.newUnfilteredQuery(world, {
+            include = {ColliderShape},
+            exclude = {Collider}
+        }),
+        detachedJoints = tecs.internal.world.newUnfilteredQuery(world, {include = {JointLink}, exclude = {Joint}}),
+        pausedBodies = tecs.internal.world.newUnfilteredQuery(world, {
+            include = {Body, Motion, RigidBody, ecs.Paused},
+            exclude = {PhysicsHeld},
+        }),
+        resumedBodies = tecs.internal.world.newUnfilteredQuery(world, {
+            include = {Body, Motion, RigidBody, PhysicsHeld},
+            exclude = {ecs.Paused},
+        }),
+        disabledBodies = tecs.internal.world.newUnfilteredQuery(world, {
+            include = {RigidBody, ecs.Disabled},
+            exclude = {PhysicsDisabled}
+        }),
+        enabledBodies = tecs.internal.world.newUnfilteredQuery(world, {
+            include = {RigidBody, PhysicsDisabled},
+            exclude = {ecs.Disabled}
+        }),
+        declaredBodies = tecs.internal.world.newUnfilteredQuery(world, {
+            include = {Body, RigidBody},
+            exclude = {PhysicsHeld, PhysicsDisabled},
+        }),
+        primaryColliders = tecs.internal.world.newUnfilteredQuery(world, {include = {Collider, RigidBody}}),
+        pendingSecondary = tecs.internal.world.newUnfilteredQuery(world, {
+            include = {Collider, ColliderOf},
+            exclude = {ColliderShape}
+        }),
+        secondaryColliders = tecs.internal.world.newUnfilteredQuery(world, {
+            include = {Collider, ColliderOf, ColliderShape}
+        }),
+        pendingJoints = tecs.internal.world.newUnfilteredQuery(world, {
+            include = {Joint, JointBodyA, JointBodyB},
+            exclude = {JointLink}
+        }),
+        simulatedBodies = tecs.internal.world.newUnfilteredQuery(world, {include = {ecs.Transform2D, RigidBody}}),
+        snapshotBodies = tecs.internal.world.newUnfilteredQuery(world, {
+            include = {Motion, RigidBody},
+            exclude = {PhysicsHeld}
+        }),
         gathered = {},
         createOrder = {},
         createX = {},

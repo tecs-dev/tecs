@@ -248,7 +248,8 @@ end
 --- into another group is setting `group` and clearing `voice`.
 ---
 --- Disabling an entity silences its sound and re-enabling starts it again.
-export record Sound
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct Sound
     --- Caller-writable. Selects a clip by its `clipId` index. Zero plays
     --- nothing.
     clip: integer
@@ -300,7 +301,7 @@ end
 --- carrying one would name whatever the next run interned in its place. The
 --- voice is not saved: a snapshot records that an entity has a sound, not how
 --- far through it the backend had got, so it starts again.
-export const SoundComponent: ecs.TableComponent<Sound> = ecs.newComponent({
+export const SoundComponent: ecs.FFIComponent<Sound> = ecs.newFFIComponent({
     -- This persisted component name is a compatibility surface.
     name = "Sound",
     construct = function(
@@ -316,33 +317,21 @@ export const SoundComponent: ecs.TableComponent<Sound> = ecs.newComponent({
         group: integer?
     ): Sound
         return new Sound(
-            clip = clip or 0,
-            playing = playing ~= false,
-            gain = gain or 1,
-            loop = loop == true,
-            pitch = pitch or 1,
-            spatial = spatial == true,
-            x = x or 0,
-            y = y or 0,
-            z = z or 0,
-            group = group or 0,
-            voice = 0
+            clip or 0,
+            playing ~= false,
+            gain or 1,
+            loop == true,
+            pitch or 1,
+            spatial == true,
+            x or 0,
+            y or 0,
+            z or 0,
+            group or 0,
+            0
         )
     end,
     default = function(): Sound
-        return new Sound(
-            clip = 0,
-            playing = true,
-            gain = 1,
-            loop = false,
-            pitch = 1,
-            spatial = false,
-            x = 0,
-            y = 0,
-            z = 0,
-            group = 0,
-            voice = 0
-        )
+        return new Sound(0, true, 1, false, 1, false, 0, 0, 0, 0, 0)
     end,
     save = function(value: Sound): any
         -- These saved keys are a compatibility surface: a file written by an
@@ -377,17 +366,17 @@ export const SoundComponent: ecs.TableComponent<Sound> = ecs.newComponent({
         -- one that matches what it recorded is that the sound was on.
 
         return new Sound(
-            clip = clip,
-            playing = saved.playing ~= false,
-            gain = (saved.gain as number?) or 1,
-            loop = saved.loop == true,
-            pitch = (saved.pitch as number?) or 1,
-            spatial = saved.spatial == true,
-            x = (saved.x as number?) or 0,
-            y = (saved.y as number?) or 0,
-            z = (saved.z as number?) or 0,
-            group = group,
-            voice = 0
+            clip,
+            saved.playing ~= false,
+            (saved.gain as number?) or 1,
+            saved.loop == true,
+            (saved.pitch as number?) or 1,
+            saved.spatial == true,
+            (saved.x as number?) or 0,
+            (saved.y as number?) or 0,
+            (saved.z as number?) or 0,
+            group,
+            0
         )
     end,
 })
@@ -2149,19 +2138,21 @@ local rowOptions: PlayOptions = {}
 --- Archetype-shaped rather than per-row: a disabled entity sits in an archetype
 --- of its own, so a world with nothing disabled matches nothing.
 local function hush(hushed: ecs.Query): nil
-    for source, length in hushed:iter() do
-        local rows = source:get(SoundComponent)
-        local total = length or 0
-        if rows ~= nil then
-            local mutable: {Sound}? = nil
-            for row = 1, total do
-                if rows[row].voice > 0 then
-                    if mutable == nil then
-                        mutable = source:getMut(SoundComponent)
+    unsafe do
+        for source, length in hushed:iter() do
+            local rows = source:get(SoundComponent)
+            local total = length or 0
+            if rows ~= nil then
+                local mutable: Sound[?]? = nil
+                for row = 1, total do
+                    if rows[row].voice > 0 then
+                        if mutable == nil then
+                            mutable = source:getMut(SoundComponent)
+                        end
+                        -- Zero rather than finished: a voice the sweep is about to
+                        -- take back is not one that ran to its end.
+                        assert(mutable)[row].voice = 0
                     end
-                    -- Zero rather than finished: a voice the sweep is about to
-                    -- take back is not one that ran to its end.
-                    assert(mutable)[row].voice = 0
                 end
             end
         end
@@ -2184,80 +2175,82 @@ local function reconcile(exclusive self: Audio, sounds: ecs.Query, hushed: ecs.Q
 
     hush(hushed)
 
-    for source, length in sounds:iter() do
-        local rows = source:get(SoundComponent)
-        local total = length or 0
-        if rows ~= nil then
-            -- Taken mutable on the first row that actually changes and not at
-            -- all otherwise, because taking it up front would mark the column
-            -- dirty every frame for every archetype holding a sound.
-            local mutable: {Sound}? = nil
+    unsafe do
+        for source, length in sounds:iter() do
+            local rows = source:get(SoundComponent)
+            local total = length or 0
+            if rows ~= nil then
+                -- Taken mutable on the first row that actually changes and not at
+                -- all otherwise, because taking it up front would mark the column
+                -- dirty every frame for every archetype holding a sound.
+                local mutable: Sound[?]? = nil
 
-            for row = 1, total do
-                local entry = rows[row]
-                local handle = entry.voice
+                for row = 1, total do
+                    local entry = rows[row]
+                    local handle = entry.voice
 
-                if not entry.playing then
-                    -- Asked for silence. The row goes back to zero rather than
-                    -- to finished, so setting the flag again starts it: a
-                    -- one-shot that has run out plays a second time instead of
-                    -- staying spent.
-                    if handle ~= 0 then
-                        if voiceOf(self, handle) ~= nil then
-                            queue(self, audiobackend.STOP, handle)
-                            release(self, slotOf(handle))
+                    if not entry.playing then
+                        -- Asked for silence. The row goes back to zero rather than
+                        -- to finished, so setting the flag again starts it: a
+                        -- one-shot that has run out plays a second time instead of
+                        -- staying spent.
+                        if handle ~= 0 then
+                            if voiceOf(self, handle) ~= nil then
+                                queue(self, audiobackend.STOP, handle)
+                                release(self, slotOf(handle))
+                            end
+                            if mutable == nil then
+                                mutable = source:getMut(SoundComponent)
+                            end
+                            assert(mutable)[row].voice = 0
                         end
-                        if mutable == nil then
-                            mutable = source:getMut(SoundComponent)
+                    elseif handle == 0 then
+                        rowOptions.gain = entry.gain
+                        rowOptions.loop = entry.loop
+                        rowOptions.pitch = entry.pitch
+                        rowOptions.spatial = entry.spatial
+                        rowOptions.x = entry.x
+                        rowOptions.y = entry.y
+                        rowOptions.z = entry.z
+                        -- Nil for index zero, which is what "no group" reads as.
+                        -- Only rows that are starting pay for the lookup: a
+                        -- sounding voice keeps the group it joined.
+                        rowOptions.group = groupNames[entry.group]
+                        local started = start(self, self.clipsById[entry.clip], rowOptions, true)
+                        if started ~= 0 then
+                            if mutable == nil then
+                                mutable = source:getMut(SoundComponent)
+                            end
+                            assert(mutable)[row].voice = started
+                            voices[slotOf(started)].referenced = true
                         end
-                        assert(mutable)[row].voice = 0
-                    end
-                elseif handle == 0 then
-                    rowOptions.gain = entry.gain
-                    rowOptions.loop = entry.loop
-                    rowOptions.pitch = entry.pitch
-                    rowOptions.spatial = entry.spatial
-                    rowOptions.x = entry.x
-                    rowOptions.y = entry.y
-                    rowOptions.z = entry.z
-                    -- Nil for index zero, which is what "no group" reads as.
-                    -- Only rows that are starting pay for the lookup: a
-                    -- sounding voice keeps the group it joined.
-                    rowOptions.group = groupNames[entry.group]
-                    local started = start(self, self.clipsById[entry.clip], rowOptions, true)
-                    if started ~= 0 then
-                        if mutable == nil then
-                            mutable = source:getMut(SoundComponent)
-                        end
-                        assert(mutable)[row].voice = started
-                        voices[slotOf(started)].referenced = true
-                    end
-                else
-                    local voice = voiceOf(self, handle)
-                    if voice == nil then
-                        if mutable == nil then
-                            mutable = source:getMut(SoundComponent)
-                        end
-                        assert(mutable)[row].voice = FINISHED
                     else
-                        voice.referenced = true
-                        local slot = slotOf(handle)
-                        -- Each of these is a load and a compare, and the call
-                        -- past it runs only on the frame the value moved.
-                        if voice.gain ~= entry.gain then
-                            voice.gain = entry.gain
-                            applyGain(self, slot)
-                        end
-                        if voice.pitch ~= entry.pitch then
-                            applyPitch(self, slot, entry.pitch)
-                        end
-                        if voice.loop ~= entry.loop then
-                            applyLoop(self, slot, entry.loop)
-                        end
-                        if entry.spatial then
-                            applyPosition(self, slot, entry.x, entry.y, entry.z)
-                        elseif voice.spatial then
-                            applyUnplaced(self, slot)
+                        local voice = voiceOf(self, handle)
+                        if voice == nil then
+                            if mutable == nil then
+                                mutable = source:getMut(SoundComponent)
+                            end
+                            assert(mutable)[row].voice = FINISHED
+                        else
+                            voice.referenced = true
+                            local slot = slotOf(handle)
+                            -- Each of these is a load and a compare, and the call
+                            -- past it runs only on the frame the value moved.
+                            if voice.gain ~= entry.gain then
+                                voice.gain = entry.gain
+                                applyGain(self, slot)
+                            end
+                            if voice.pitch ~= entry.pitch then
+                                applyPitch(self, slot, entry.pitch)
+                            end
+                            if voice.loop ~= entry.loop then
+                                applyLoop(self, slot, entry.loop)
+                            end
+                            if entry.spatial then
+                                applyPosition(self, slot, entry.x, entry.y, entry.z)
+                            elseif voice.spatial then
+                                applyUnplaced(self, slot)
+                            end
                         end
                     end
                 end
@@ -2353,6 +2346,9 @@ end
 ---
 --- Adds the system that plays [`Sound`](tecs.audio.Sound) components and the
 --- snapshot handler that carries master and group settings.
+--- Pitch variance uses the world's named tecs.audio random stream, so reseeding
+--- and snapshot restore also restart future pitch draws. Standalone mixers made
+--- with newAudio keep an independent Nupp generator.
 ---
 --- `update` is not added here. Reaping voices is not world work: it has to
 --- continue during a world pause, so an application drives it from the
@@ -2367,6 +2363,8 @@ export function install(exclusive world: ecs.World, config: Config?): Audio
         error("tecs.audio.install: the world already has a mixer installed", 2)
     end
     local mixer = newAudio(config)
+    -- This stream name is a compatibility surface from the old world registry.
+    mixer.variance = world:randomStream("tecs.audio")
     installed[world] = mixer
 
     local sounds = world:newQuery({include = {SoundComponent}, exclude = {ecs.Disabled}})

@@ -36,7 +36,8 @@ const sin, cos = math.sin, math.cos
 --- fixed time rather than wall time. A paused or disabled entity is left out of
 --- the countdown, which is what makes pausing a state hold a projectile in place
 --- rather than expiring it while nothing is drawing it.
-export record TTL
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct TTL
     --- Caller-writable. Sets the lifetime the entity started with, in seconds,
     --- which is what `percentComplete` measures against. Raising `remaining`
     --- past this value leaves `percentComplete` negative, so refresh both when a
@@ -56,24 +57,21 @@ export record TTL
     --- from having run out.
     --- @param self the lifetime to measure
     --- @return the completed fraction, clamped to the range zero through one
-    percentComplete: function(self: TTL): number
-end
+    function percentComplete(self: TTL): number
+        const total = self.startingTime
+        if total <= 0 then
+            return 1
+        end
+        const done = 1 - (self.remaining / total)
+        if done < 0 then
+            return 0
+        end
+        if done > 1 then
+            return 1
+        end
 
---- Returns elapsed lifetime as a fraction from zero at spawn to one at expiry.
-function TTL.percentComplete(self: TTL): number
-    const total = self.startingTime
-    if total <= 0 then
-        return 1
+        return done
     end
-    const done = 1 - (self.remaining / total)
-    if done < 0 then
-        return 0
-    end
-    if done > 1 then
-        return 1
-    end
-
-    return done
 end
 
 --- The process-wide `TTL` component definition.
@@ -82,7 +80,7 @@ end
 --- one that has already spent three seconds of a four second budget. Naming the
 --- component with no value spawns an already-expired lifetime, which the next
 --- fixed step despawns.
-export const TTLComponent: components.TableComponent<TTL> = components.newComponent({
+export const TTLComponent: components.FFIComponent<TTL> = components.newFFIComponent({
     -- This persisted component name is a compatibility surface.
     name = "TTL",
     construct = function(remaining: number?, startingTime: number?): TTL
@@ -95,10 +93,10 @@ export const TTLComponent: components.TableComponent<TTL> = components.newCompon
             error("TTL: startingTime must be at least remaining", 3)
         end
 
-        return new TTL(startingTime = total, remaining = left)
+        return new TTL(total, left)
     end,
     default = function(): TTL
-        return new TTL(startingTime = 0, remaining = 0)
+        return new TTL(0, 0)
     end,
 })
 
@@ -113,7 +111,8 @@ export const TTLComponent: components.TableComponent<TTL> = components.newCompon
 --- every consumer downstream keeps reading one transform and knows nothing about
 --- the hierarchy. An entity needs all three of `Transform2D`, `ChildOf` and this
 --- component before anything composes it.
-export record RelativeTransform2D
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct RelativeTransform2D
     --- Caller-writable. Sets the horizontal offset from the parent, in the
     --- parent's rotated and scaled space.
     x: number
@@ -149,7 +148,7 @@ export record RelativeTransform2D
 end
 
 --- The process-wide `RelativeTransform2D` component definition.
-export const RelativeTransform2DComponent: components.TableComponent<RelativeTransform2D> = components.newComponent({
+export const RelativeTransform2DComponent: components.FFIComponent<RelativeTransform2D> = components.newFFIComponent({
     -- This persisted component name is a compatibility surface.
     name = "RelativeTransform2D",
     -- A relative transform composes onto a local one, so an entity carrying
@@ -167,27 +166,18 @@ export const RelativeTransform2DComponent: components.TableComponent<RelativeTra
         originY: number?
     ): RelativeTransform2D
         return new RelativeTransform2D(
-            x = x or 0,
-            y = y or 0,
-            z = z or 0,
-            rotation = rotation or 0,
-            scaleX = scaleX or 1,
-            scaleY = scaleY or 1,
-            originX = originX or 0,
-            originY = originY or 0
+            x or 0,
+            y or 0,
+            z or 0,
+            rotation or 0,
+            scaleX or 1,
+            scaleY or 1,
+            originX or 0,
+            originY or 0
         )
     end,
     default = function(): RelativeTransform2D
-        return new RelativeTransform2D(
-            x = 0,
-            y = 0,
-            z = 0,
-            rotation = 0,
-            scaleX = 1,
-            scaleY = 1,
-            originX = 0,
-            originY = 0
-        )
+        return new RelativeTransform2D(0, 0, 0, 0, 1, 1, 0, 0)
     end,
 })
 
@@ -344,25 +334,25 @@ export function install(exclusive world: entityworld.World): nil
         name = "tecs.SnapshotTransforms",
         phase = phases.FixedFirst,
         run = function(): nil
-            for candidate, count in interpolated:iter() do
-                const active = candidate as archetype.Archetype
-                const current = assert(active:get(rendercomponents.Transform2DComponent))
-                const previous = assert(active:getMut(rendercomponents.PreviousTransform2DComponent))
-                for row = 1, count as integer do
-                    const source = current[row]
-                    const target = previous[row]
-                    target.x = source.x
-                    target.y = source.y
-                    target.rotation = source.rotation
+            unsafe do
+                for candidate, count in interpolated:iter() do
+                    const active = candidate as archetype.Archetype
+                    const current = assert(active:get(rendercomponents.Transform2DComponent))
+                    const previous = assert(active:getMut(rendercomponents.PreviousTransform2DComponent))
+                    for row = 1, count as integer do
+                        const source = current[row]
+                        const target = previous[row]
+                        target.x = source.x
+                        target.y = source.y
+                        target.rotation = source.rotation
+                    end
                 end
             end
         end,
     })
 
     -- A paused or disabled entity holds its lifetime rather than spending it.
-    -- Teal spelled this `type = "logic"`; the port has no automatic exclusion,
-    -- so the same two components are named here.
-    const expiring = world:newQuery({include = {TTLComponent}, exclude = {components.Paused, components.Disabled},})
+    const expiring = world:newQuery({type = "logic", include = {TTLComponent}})
 
     -- Compatibility surface: the debug server reports this system by name and an
     -- agent selects on it.
@@ -370,17 +360,19 @@ export function install(exclusive world: entityworld.World): nil
         name = "ttl",
         phase = phases.FixedUpdate,
         run = function(dt: number, exclusive running: entityworld.World): nil
-            for candidate, count in expiring:iter() do
-                const active = candidate as archetype.Archetype
-                -- Every row is written, so the column is dirty either way and
-                -- `getMut` is the honest read.
-                const lifetimes: {TTL} = assert(active:getMut(TTLComponent))
-                const entities = active.entities
-                for row = 1, count as integer do
-                    const lifetime = lifetimes[row]
-                    lifetime.remaining = lifetime.remaining - dt
-                    if lifetime.remaining <= 0 then
-                        running:despawn(entities[row])
+            unsafe do
+                for candidate, count in expiring:iter() do
+                    const active = candidate as archetype.Archetype
+                    -- Every row is written, so the column is dirty either way and
+                    -- `getMut` is the honest read.
+                    const lifetimes: TTL[?] = assert(active:getMut(TTLComponent))
+                    const entities = active.entities
+                    for row = 1, count as integer do
+                        const lifetime = lifetimes[row]
+                        lifetime.remaining = lifetime.remaining - dt
+                        if lifetime.remaining <= 0 then
+                            running:despawn(entities[row])
+                        end
                     end
                 end
             end

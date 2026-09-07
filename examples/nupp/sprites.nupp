@@ -114,20 +114,24 @@ local function install(exclusive app: tecs.application.Application): nil
         phase = tecs.ecs.phases.Update,
         run = function(dt: number): nil
             elapsed = elapsed + dt
-            for candidate, count in sprites:iter() do
-                const transforms: {tecs.ecs.Transform2D} = assert(candidate:getMut(tecs.ecs.Transform2D))
-                for index = 1, count as integer do
-                    transforms[index].rotation = transforms[index].rotation + dt * (0.2 + index % 5 * 0.06)
+            unsafe do
+                for candidate, count in sprites:iter() do
+                    const transforms: tecs.ecs.Transform2D[?] = assert(candidate:getMut(tecs.ecs.Transform2D))
+                    for index = 1, count as integer do
+                        transforms[index].rotation = transforms[index].rotation + dt * (0.2 + index % 5 * 0.06)
+                    end
                 end
             end
-            for candidate, count in eyes:iter() do
-                const cameras: {tecs.gfx.Camera2D} = assert(candidate:getMut(tecs.gfx.Camera2D))
-                for index = 1, count as integer do
-                    const camera = cameras[index]
-                    camera.x = FIELD_WIDTH * 0.5 + math.cos(elapsed * 0.35) * FIELD_WIDTH * 0.3
-                    camera.y = FIELD_HEIGHT * 0.5 + math.sin(elapsed * 0.27) * FIELD_HEIGHT * 0.3
-                    camera.zoom = 1.0 + math.sin(elapsed * 0.5) * 0.35
-                    camera.rotation = math.sin(elapsed * 0.2) * 0.15
+            unsafe do
+                for candidate, count in eyes:iter() do
+                    const cameras: tecs.gfx.Camera2D[?] = assert(candidate:getMut(tecs.gfx.Camera2D))
+                    for index = 1, count as integer do
+                        const camera = cameras[index]
+                        camera.x = FIELD_WIDTH * 0.5 + math.cos(elapsed * 0.35) * FIELD_WIDTH * 0.3
+                        camera.y = FIELD_HEIGHT * 0.5 + math.sin(elapsed * 0.27) * FIELD_HEIGHT * 0.3
+                        camera.zoom = 1.0 + math.sin(elapsed * 0.5) * 0.35
+                        camera.rotation = math.sin(elapsed * 0.2) * 0.15
+                    end
                 end
             end
         end,

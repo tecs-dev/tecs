@@ -21,6 +21,11 @@ export record InverseIndex
     --- Runs when a target loses its last source.
     onTargetRemoved: (function(integer): nil)?
 
+    --- Reports whether a target needs relationship-aware teardown without allocating.
+    function hasTarget(self, targetId: integer): boolean
+        return self.inverse[targetId] ~= nil
+    end
+
     --- Adds an idempotent source-to-target edge.
     function link(self, sourceId: integer, targetId: integer): nil
         local sources = self.inverse[targetId]

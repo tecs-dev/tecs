@@ -1,0 +1,70 @@
+-- Measures the complete public stage-and-publish boundary, including allocation.
+local harness = require("tecs.bench.harness")
+
+const count = harness.count("BENCH_BULK_COUNT", 10000)
+const warmup = harness.optionalCount("BENCH_BULK_WARMUP", 20)
+const samples = harness.count("BENCH_BULK_SAMPLES", 51)
+const world = tecs.ecs.newWorld({maxEntities = count + 64})
+const tag = tecs.ecs.newTagComponent({name = "bench.BulkTag"})
+const query = world:newQuery({include = {tecs.ecs.Transform2D}})
+local function spawn(): nil
+    world:batchSpawn(count, {tecs.ecs.Transform2D})
+    world:commit()
+end
+
+local function reset(): nil
+    world:clearEntities()
+end
+
+local function populated(): nil
+    reset()
+    spawn()
+end
+
+local function add(): nil
+    world:batchSet(query, tag)
+    world:commit()
+end
+
+local function remove(): nil
+    world:batchRemove(query, tag)
+    world:commit()
+end
+
+local function tagged(): nil
+    populated()
+    add()
+end
+
+local function despawn(): nil
+    world:batchDespawn(query)
+    world:commit()
+end
+
+const stages = {
+    harness.newStage("batchSpawn"),
+    harness.newStage("batchSet tag"),
+    harness.newStage("batchRemove tag"),
+    harness.newStage("batchDespawn")
+}
+harness.measure(stages[1], warmup, samples, spawn, reset)
+harness.measure(stages[2], warmup, samples, add, populated)
+harness.measure(stages[3], warmup, samples, remove, tagged)
+harness.measure(stages[4], warmup, samples, despawn, populated)
+print("Entities per batch: " .. tostring(count))
+print(harness.format(stages))
+local function allocation(name: string, prepare: function(): nil, run: function(): nil): nil
+    prepare()
+    collectgarbage("collect")
+    collectgarbage("stop")
+    const before = collectgarbage("count")
+    run()
+    const bytes = (collectgarbage("count") - before) * 1024
+    collectgarbage("restart")
+    print(name .. " allocated bytes: " .. tostring(bytes))
+end
+
+allocation("batchSpawn", reset, spawn)
+allocation("batchSet", populated, add)
+allocation("batchRemove", tagged, remove)
+allocation("batchDespawn", populated, despawn)

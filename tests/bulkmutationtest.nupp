@@ -1,0 +1,641 @@
+local test = require("nupp.test")
+
+local record Point
+    x: number
+end
+const position = tecs.ecs.newComponent({
+    name = "test.BulkPosition",
+    construct = function(x: number): Point
+        return new Point(x = x)
+    end,
+    default = function(): Point
+        return new Point(x = 0)
+    end
+})
+const tag = tecs.ecs.newTagComponent({name = "test.BulkTag"})
+const extra = tecs.ecs.newTagComponent({name = "test.BulkExtra"})
+const flag = tecs.ecs.newScalarComponent({name = "test.BulkFlag", kind = "boolean", default = true})
+local suite = {}
+
+function suite.initializesBatchesBeforeMembershipAndSpawnEvents(): nil
+    const world = tecs.ecs.newWorld()
+    local initialized = false
+    local notifications = 0
+    local spawned = 0
+    world:newQuery({
+        include = {position},
+        onEntitiesAdded = function(candidate: tecs.ecs.Archetype, first: integer, last: integer, count: integer): nil
+            test.assert(initialized)
+            notifications = notifications + 1
+            test.equal(count, 4)
+            for row = first, last do
+                test.equal(assert(candidate:get(position))[row].x, 17)
+            end
+        end
+    })
+    world:observe(0, tecs.ecs.OnSpawn, function(): nil
+        test.assert(initialized);
+        spawned = spawned + 1
+    end)
+    const first, ids = world:batchSpawn(
+        4,
+        {
+            position
+        },
+        function(candidate: tecs.ecs.Archetype, start: integer, last: integer, count: integer): nil
+            test.equal(count, 4)
+            const column = assert(candidate:getMut(position))
+            for row = start, last do
+                test.assert(world:isAlive(candidate.entities[row]))
+                column[row].x = 17
+            end
+            initialized = true
+        end
+    )
+    test.assert(first ~= nil and ids == nil)
+    test.assert(not initialized)
+    test.assert(not world:isAlive(assert(first)))
+    world:commit()
+    test.equal(notifications, 1)
+    test.equal(spawned, 4)
+    test.equal(world:getStats().entities, 4)
+end
+
+function suite.preservesLaterScalarWritesAndRemovalsOnBatchSpawns(): nil
+    const world = tecs.ecs.newWorld()
+    const first = assert(
+        world:batchSpawn(4, {position, tag}, function(candidate: tecs.ecs.Archetype, first: integer, last: integer): nil
+            const column = assert(candidate:getMut(position))
+            for row = first, last do
+                column[row].x = 5
+            end
+        end)
+    )
+    world:set(first, position(99))
+    world:remove(first + 1, position)
+    world:set(first + 2, extra)
+    world:despawn(first + 3)
+    world:commit()
+    test.equal(assert(world:get(first, position)).x, 99)
+    test.assert(not world:has(first + 1, position))
+    test.equal(assert(world:get(first + 2, position)).x, 5)
+    test.assert(world:has(first + 2, extra))
+    test.assert(not world:isAlive(first + 3))
+end
+
+function suite.reservesMixedGenerationAndRecycledHandles(): nil
+    const world = tecs.ecs.newWorld({maxEntities = 6})
+    const initial = assert(world:batchSpawn(3, {tag}))
+    world:commit()
+    world:clearEntities()
+    const first, ids = world:batchSpawn(6, {tag})
+    test.assert(first == nil and ids ~= nil)
+    world:commit()
+    for _, id in ipairs(assert(ids)) do
+        test.assert(world:isAlive(id))
+    end
+    test.assert(not world:isAlive(initial))
+    const saved = assert(ids)
+    world:despawn(saved[2])
+    world:despawn(saved[5])
+    world:commit()
+    const recycledFirst, recycledIds = world:batchSpawn(2, {tag})
+    test.assert(recycledFirst == nil)
+    world:commit()
+    for _, id in ipairs(assert(recycledIds)) do
+        test.assert(world:isAlive(id))
+    end
+    test.assert(not world:isAlive(saved[2]))
+end
+
+function suite.validatesAllExplicitIdsBeforeReservingAny(): nil
+    const world = tecs.ecs.newWorld({maxEntities = 10})
+    test.raises(
+        function(): nil
+            world:batchSpawnAt({3, 3}, {tag})
+        end,
+        "duplicate or occupied"
+    )
+    test.raises(
+        function(): nil
+            world:batchSpawnAt({3, 11}, {tag})
+        end,
+        "invalid packed"
+    )
+    world:batchSpawnAt({5, 3, 1}, {position(8)})
+    test.assert(not world:isAlive(5))
+    world:commit()
+    for _, id in ipairs({5, 3, 1}) do
+        test.equal(assert(world:get(id, position)).x, 8)
+    end
+    test.raises(
+        function(): nil
+            world:batchSpawnAt({2, 3}, {tag})
+        end,
+        "duplicate or occupied"
+    )
+    world:spawnAt(2, tag)
+    world:commit()
+    test.assert(world:isAlive(2))
+end
+
+function suite.bulkConstantsAreIndependentRecordsAndPreserveFalse(): nil
+    const world = tecs.ecs.newWorld()
+    const first = assert(world:batchSpawn(3, {position(1), tag}))
+    world:commit()
+    assert(world:getMut(first, position)).x = 8
+    test.equal(assert(world:get(first + 1, position)).x, 1)
+    const selection = world:newQuery({include = {tag}})
+    world:batchSet(selection, position(4))
+    world:batchSet(selection, flag(false))
+    world:commit()
+    assert(world:getMut(first, position)).x = 12
+    test.equal(assert(world:get(first + 1, position)).x, 4)
+    test.equal(world:get(first, flag), false)
+    world:batchRemove(selection, position)
+    world:commit()
+    test.assert(not world:has(first, position))
+    test.assert(world:has(first, tag))
+end
+
+function suite.capturesMembershipAtCallTimeAndHonorsAutomaticFilters(): nil
+    const world = tecs.ecs.newWorld()
+    const active = world:spawn(tag)
+    const disabled = world:spawn(tag, tecs.ecs.Disabled)
+    world:commit()
+    const selection = world:newQuery({include = {tag}})
+    world:batchSet(selection, extra)
+    const later = world:spawn(tag)
+    world:commit()
+    test.assert(world:has(active, extra))
+    test.assert(not world:has(disabled, extra))
+    test.assert(not world:has(later, extra))
+    world:batchDespawn(selection)
+    world:commit()
+    test.assert(not world:isAlive(active) and not world:isAlive(later))
+    test.assert(world:isAlive(disabled))
+end
+
+function suite.ordersMultipleWritersWithScalarWritesBetweenThem(): nil
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(tag, position(1))
+    world:commit()
+    const selection = world:newQuery({include = {tag}})
+    local calls = 0
+    local function increment(candidate: tecs.ecs.Archetype, first: integer, last: integer): nil
+        const column = assert(candidate:getMut(position))
+        for row = first, last do
+            column[row].x = column[row].x + 1
+        end
+        calls = calls + 1
+    end
+
+    world:batchSet(selection, position, increment)
+    world:set(id, position(10))
+    world:batchSet(selection, position, increment)
+    world:commit()
+    test.equal(calls, 2)
+    test.equal(assert(world:get(id, position)).x, 11)
+    world:batchSet(selection, position, increment)
+    world:set(id, position(30))
+    world:commit()
+    test.equal(assert(world:get(id, position)).x, 30)
+end
+
+function suite.writersInitializeNewColumnsBeforeEntryNotifications(): nil
+    const world = tecs.ecs.newWorld()
+    world:batchSpawn(3, {tag})
+    world:commit()
+    local calls = 0
+    world:newQuery({
+        include = {position},
+        onEntitiesAdded = function(candidate: tecs.ecs.Archetype, first: integer, last: integer): nil
+            for row = first, last do
+                test.equal(assert(candidate:get(position))[row].x, 33)
+            end
+        end
+    })
+    world:batchSet(
+        world:newQuery({
+            include = {tag}
+        }),
+        position,
+        function(candidate: tecs.ecs.Archetype, first: integer, last: integer, count: integer): nil
+            calls = calls + 1
+            test.equal(count, 3)
+            const column = assert(candidate:getMut(position))
+            for row = first, last do
+                column[row].x = 33
+            end
+        end
+    )
+    test.equal(calls, 0)
+    world:commit()
+    test.equal(calls, 1)
+end
+
+function suite.drainsCallbackStagedBatchesWithoutDroppingLaterWork(): nil
+    const world = tecs.ecs.newWorld()
+    const id = world:spawn(tag)
+    world:commit()
+    const selection = world:newQuery({include = {tag}})
+    world:batchSet(selection, position, function(): nil
+        world:batchSet(selection, extra)
+        world:batchSpawn(2, {position(18)})
+    end)
+    world:commit()
+    test.assert(world:has(id, extra))
+    test.equal(world:getStats().entities, 3)
+end
+
+function suite.preservesRelationshipEdgesAcrossWriterSegmentsAndCascades(): nil
+    const world = tecs.ecs.newWorld()
+    const follows = tecs.ecs.newRelationship({name = "test.BulkFollows", reverseIndex = true})
+    const parent = world:spawn()
+    const other = world:spawn()
+    const child = world:spawn(tag)
+    world:commit()
+    const selection = world:newQuery({include = {tag}})
+    world:batchSet(selection, follows(parent))
+    world:batchSet(selection, position, function(): nil
+    end)
+    world:set(child, extra)
+    world:set(child, follows(other))
+    world:commit()
+    test.equal(#world:relationshipSources(follows, parent), 1)
+    test.equal(#world:relationshipSources(follows, other), 1)
+    world:batchRemove(selection, follows(parent))
+    world:commit()
+    test.equal(#world:relationshipSources(follows, parent), 0)
+    test.equal(#world:relationshipSources(follows, other), 1)
+    const ancestor = assert(world:batchSpawn(1, {tag}))
+    const descendant = assert(world:batchSpawn(1, {tecs.ecs.ChildOf(ancestor)}))
+    world:despawn(ancestor)
+    world:commit()
+    test.assert(not world:isAlive(ancestor) and not world:isAlive(descendant))
+end
+
+function suite.rejectsForeignQueriesAndUnsafeCallbackShapes(): nil
+    const world = tecs.ecs.newWorld({maxEntities = 2})
+    const other = tecs.ecs.newWorld()
+    const selection = world:newQuery({})
+    test.raises(
+        function(): nil
+            world:batchSet(other:newQuery({}), tag)
+        end,
+        "query from this world"
+    )
+    test.raises(
+        function(): nil
+            world:batchSet(selection, position(1), function(): nil
+            end)
+        end,
+        "plain component definition"
+    )
+    test.raises(
+        function(): nil
+            world:batchSet(selection, tecs.ecs.ChildOf, function(): nil
+            end)
+        end,
+        "plain component definition"
+    )
+    test.raises(
+        function(): nil
+            world:batchSpawn(0, {})
+        end,
+        "positive integer"
+    )
+    test.raises(
+        function(): nil
+            world:batchSpawn(3, {})
+        end,
+        "exhaustion"
+    )
+    test.raises(
+        function(): nil
+            world:batchSpawn(1, {tecs.ecs.EntityKey("key")})
+        end,
+        "EntityKey"
+    )
+    test.raises(
+        function(): nil
+            world:batchSpawn(1, {tecs.ecs.ChildOf})
+        end,
+        "requires a target"
+    )
+    world:batchSpawn(2, {})
+    world:commit()
+    test.equal(world:getStats().entities, 2)
+end
+
+function suite.retainsAStagedChildRetargetedBeforeOldParentCancellation(): nil
+    const world = tecs.ecs.newWorld()
+    const oldParent = assert(world:batchSpawn(1, {}))
+    const nextParent = assert(world:batchSpawn(1, {}))
+    const child = assert(world:batchSpawn(1, {tecs.ecs.ChildOf(oldParent)}))
+    world:set(child, tecs.ecs.ChildOf(nextParent))
+    world:despawn(oldParent)
+    world:commit()
+    test.assert(world:isAlive(child))
+    test.equal(assert(world:get(child, tecs.ecs.ChildOf)).target, nextParent)
+    test.equal(#world:relationshipSources(tecs.ecs.ChildOf, nextParent), 1)
+end
+
+function suite.notifiesCorrectRowsWhenAnotherMoveSwapRemovesTheDestination(): nil
+    const world = tecs.ecs.newWorld()
+    const source = world:spawn(tag)
+    const destination = world:spawn(tag, position(7))
+    world:commit()
+    local observed: integer? = nil
+    world:newQuery({
+        include = {position},
+        onEntitiesAdded = function(candidate: tecs.ecs.Archetype, first: integer): nil
+            observed = candidate.entities[first]
+        end
+    })
+    world:set(source, position(1))
+    world:remove(destination, position)
+    world:batchSet(world:newQuery({include = {tag}}), tag, function(): nil
+    end)
+    world:commit()
+    test.equal(observed, source)
+    test.assert(world:has(source, position) and not world:has(destination, position))
+end
+
+function suite.releasesUnpublishedReservationsAfterInitializerFailure(): nil
+    const world = tecs.ecs.newWorld({maxEntities = 2})
+    world:batchSpawn(1, {tag}, function(): nil
+        error("batch initializer failed")
+    end)
+    const abandoned = assert(world:batchSpawn(1, {tag}))
+    test.raises(
+        function(): nil
+            world:commit()
+        end,
+        "batch initializer failed"
+    )
+    test.assert(not world:isAlive(abandoned))
+    const replacement = world:spawn(tag)
+    world:commit()
+    test.assert(world:isAlive(replacement))
+    test.assert(replacement ~= abandoned)
+end
+
+function suite.bulkTeardownFiresEventsAndUnlinksSparseEdges(): nil
+    const world = tecs.ecs.newWorld()
+    const parent = world:spawn()
+    const first = assert(world:batchSpawn(3, {tag, tecs.ecs.ChildOf(parent)}))
+    world:commit()
+    local global = 0
+    local addressed = 0
+    world:observe(0, tecs.ecs.OnDespawn, function(): nil
+        global = global + 1
+    end)
+    world:observe(first, tecs.ecs.OnDespawn, function(): nil
+        addressed = addressed + 1
+    end)
+    world:batchDespawn(world:newQuery({include = {tag}}))
+    world:commit()
+    test.equal(global, 3)
+    test.equal(addressed, 1)
+    test.assert(not world:hasObservers(first, tecs.ecs.OnDespawn))
+    test.equal(#world:relationshipSources(tecs.ecs.ChildOf, parent), 0)
+    test.assert(world:isAlive(parent))
+end
+
+function suite.recyclesSlotsWithinOneCommitWithoutCancellingNewGenerations(): nil
+    const world = tecs.ecs.newWorld({maxEntities = 2})
+    const old = world:spawn(tag)
+    const survivor = world:spawn(position(1))
+    world:commit()
+    world:despawn(old)
+    const selection = world:newQuery({include = {position}})
+    world:batchSet(selection, position, function(): nil
+    end)
+    -- A second writer runs in a later segment, after the queued despawn.
+    local replacement: integer? = nil
+    world:batchSet(selection, position, function(): nil
+        replacement = world:spawn(tag)
+    end)
+    world:commit()
+    test.assert(world:isAlive(survivor))
+    test.assert(world:isAlive(assert(replacement)))
+    test.assert(not world:isAlive(old))
+end
+
+function suite.initializerQueryRegistrationDoesNotDoubleReportBatchRows(): nil
+    const world = tecs.ecs.newWorld()
+    local entries = 0
+    world:batchSpawn(4, {tag}, function(): nil
+        world:newQuery({
+            include = {tag},
+            onEntitiesAdded = function(
+                _candidate: tecs.ecs.Archetype,
+                _first: integer,
+                _last: integer,
+                count: integer
+            ): nil
+                entries = entries + count
+            end
+        })
+    end)
+    world:commit()
+    test.equal(entries, 4)
+end
+
+function suite.deferredEntryNotificationsDoNotRepeatInitialQueryMembers(): nil
+    const world = tecs.ecs.newWorld()
+    world:batchSpawn(4, {tag})
+    world:commit()
+    local entries = 0
+    local registered = false
+    world:newQuery({
+        include = {position},
+        onEntitiesAdded = function(): nil
+            if not registered then
+                registered = true
+                world:newQuery({
+                    include = {position},
+                    onEntitiesAdded = function(
+                        _candidate: tecs.ecs.Archetype,
+                        _first: integer,
+                        _last: integer,
+                        count: integer
+                    ): nil
+                        entries = entries + count
+                    end
+                })
+            end
+        end
+    })
+    world:batchSet(world:newQuery({include = {tag}}), position, function(): nil
+    end)
+    world:commit()
+    test.equal(entries, 4)
+end
+
+function suite.recyclesExplicitIdGapsWithoutReissuingPendingReservations(): nil
+    const world = tecs.ecs.newWorld({maxEntities = 8})
+    const reserved = world:spawn(tag)
+    world:batchSpawnAt({8, 5, 3}, {tag})
+    world:batchSpawn(4, {tag})
+    world:commit()
+    test.equal(world:getStats().entities, 8)
+    test.assert(world:isAlive(reserved))
+    test.assert(world:isAlive(8) and world:isAlive(5) and world:isAlive(3))
+    test.raises(
+        function(): nil
+            world:spawn()
+        end,
+        "exhaustion"
+    )
+end
+
+function suite.ordersQueuedWholeArchetypeChangesAndLaterScalarExceptions(): nil
+    const world = tecs.ecs.newWorld()
+    const first = assert(world:batchSpawn(8, {tag, position(3)}))
+    world:commit()
+    const selection = world:newQuery({include = {tag}})
+    world:batchSet(selection, extra)
+    world:batchRemove(selection, position)
+    world:batchSet(selection, flag(false))
+    world:set(first, position(81))
+    world:remove(first + 1, extra)
+    world:despawn(first + 2)
+    world:commit()
+    test.equal(assert(world:get(first, position)).x, 81)
+    test.assert(not world:has(first + 1, extra))
+    test.assert(not world:isAlive(first + 2))
+    for id = first + 3, first + 7 do
+        test.assert(world:has(id, extra))
+        test.assert(not world:has(id, position))
+        test.equal(world:get(id, flag), false)
+    end
+end
+
+function suite.capturedBulkRowsExcludeEarlierQueuedSpawns(): nil
+    const world = tecs.ecs.newWorld()
+    const first = assert(world:batchSpawn(4, {tag}))
+    world:commit()
+    const later = assert(world:batchSpawn(3, {tag}))
+    local written = 0
+    world:batchSet(
+        world:newQuery({
+            include = {tag}
+        }),
+        position,
+        function(candidate: tecs.ecs.Archetype, firstRow: integer, lastRow: integer): nil
+            for row = firstRow, lastRow do
+                assert(candidate:getMut(position))[row].x = 42
+                written += 1
+            end
+        end
+    )
+    world:commit()
+    test.equal(written, 4)
+    for id = first, first + 3 do
+        test.equal(assert(world:get(id, position)).x, 42)
+    end
+    for id = later, later + 2 do
+        test.assert(not world:has(id, position))
+    end
+end
+
+function suite.bulkRemovalObserversStageAgainstTheDestinationSignature(): nil
+    const world = tecs.ecs.newWorld()
+    const first = assert(world:batchSpawn(4, {tag, position(7)}))
+    world:commit()
+    local removed = 0
+    world:newQuery({
+        include = {position},
+        onEntitiesRemoved = function(
+            candidate: tecs.ecs.Archetype,
+            firstRow: integer,
+            lastRow: integer,
+            count: integer
+        ): nil
+            removed += count
+            for row = firstRow, lastRow do
+                world:set(candidate.entities[row], extra)
+            end
+        end
+    })
+    world:batchRemove(world:newQuery({include = {tag}}), position)
+    world:commit()
+    test.equal(removed, 4)
+    for id = first, first + 3 do
+        test.assert(world:has(id, extra))
+        test.assert(not world:has(id, position))
+    end
+end
+
+function suite.bulkDeletionOfTargetsStillCascadesAcrossArchetypes(): nil
+    const world = tecs.ecs.newWorld()
+    const parent = assert(world:batchSpawn(3, {tag}))
+    const child = assert(world:batchSpawn(3, {tecs.ecs.ChildOf(parent)}))
+    world:commit()
+    world:batchDespawn(world:newQuery({include = {tag}}))
+    world:commit()
+    test.equal(world:getStats().entities, 0)
+    test.assert(not world:isAlive(child))
+end
+
+function suite.batchDefaultsStillRunForEveryEntityAndEachReset(): nil
+    local sequence = 0
+    const unique = tecs.ecs.newComponent({
+        name = "test.BulkUniqueDefault",
+        default = function(): Point
+            sequence += 1
+            return new Point(x = sequence)
+        end,
+        construct = function(): Point
+            return new Point(x = 0)
+        end
+    })
+    const world = tecs.ecs.newWorld()
+    const first = assert(world:batchSpawn(5, {unique, tag}))
+    world:commit()
+    const before = sequence
+    world:batchSet(world:newQuery({include = {tag}}), unique)
+    world:commit()
+    test.equal(sequence - before, 5)
+    test.assert(assert(world:get(first, unique)).x ~= assert(world:get(first + 1, unique)).x)
+end
+
+function suite.failingBulkDefaultsDoNotExchangeLiveSourceColumns(): nil
+    local fail = false
+    const fragile = tecs.ecs.newComponent({
+        name = "test.BulkFailingDefault",
+        construct = function(): Point
+            return new Point(x = 0)
+        end,
+        default = function(): Point
+            if fail then
+                error("bulk default failed")
+            end
+            return new Point(x = 0)
+        end
+    })
+    const world = tecs.ecs.newWorld()
+    const first = assert(world:batchSpawn(5, {tag, position(61)}))
+    world:commit()
+    fail = true
+    world:batchSet(world:newQuery({include = {tag}}), fragile)
+    test.raises(
+        function(): nil
+            world:commit()
+        end,
+        "bulk default failed"
+    )
+    test.equal(world:getStats().entities, 5)
+    for id = first, first + 4 do
+        test.equal(assert(world:get(id, position)).x, 61)
+        test.assert(not world:has(id, fragile))
+    end
+    fail = false
+    world:batchSet(world:newQuery({include = {tag}}), fragile)
+    world:commit()
+    test.assert(world:has(first, fragile))
+end
+
+return suite

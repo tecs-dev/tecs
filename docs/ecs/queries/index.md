@@ -18,9 +18,11 @@ for archetype, length in movers:iter() do
     local entities = archetype.entities
     local transforms = assert(archetype:getMut(Transform2D))
     local velocities = assert(archetype:get(Velocity))
-    for row = 1, length as integer do
-        transforms[row].x = transforms[row].x + velocities[row].x * dt
-        print(entities[row])
+    unsafe do
+        for row = 1, length as integer do
+            transforms[row].x = transforms[row].x + velocities[row].x * dt
+            print(entities[row])
+        end
     end
 end
 ```
@@ -43,11 +45,13 @@ marks that component dirty:
 for archetype, length in movers:iter() do
     local transforms = assert(archetype:getMut(Transform2D))
     local velocities = assert(archetype:get(Velocity))
-    for row = 1, length as integer do
-        local transform = transforms[row]
-        local velocity = velocities[row]
-        transform.x = transform.x + velocity.x * dt
-        transform.y = transform.y + velocity.y * dt
+    unsafe do
+        for row = 1, length as integer do
+            local transform = transforms[row]
+            local velocity = velocities[row]
+            transform.x = transform.x + velocity.x * dt
+            transform.y = transform.y + velocity.y * dt
+        end
     end
 end
 ```
@@ -57,7 +61,7 @@ without dirtying it. Use `getMut` for unconditional writes. For a conditional
 write, read through `get` and call
 `archetype:markComponentDirty(Component)` only when the write occurs.
 
-Sum the counts yielded by `iter()` to count matches without visiting rows.
+Use `query:count()` to count matches without visiting rows.
 
 Iteration supports nesting, including two loops over the same query. Iterators
 own traversal state only; they do not control structural transaction lifetime.
@@ -77,10 +81,12 @@ local expiring = world:newQuery({
 for archetype, length in expiring:iter() do
     local entities = archetype.entities
     local ttls = assert(archetype:getMut(tecs.ecs.TTL))
-    for row = 1, length as integer do
-        ttls[row].remaining = ttls[row].remaining - dt
-        if ttls[row].remaining <= 0 then
-            world:despawn(entities[row])
+    unsafe do
+        for row = 1, length as integer do
+            ttls[row].remaining = ttls[row].remaining - dt
+            if ttls[row].remaining <= 0 then
+                world:despawn(entities[row])
+            end
         end
     end
 end
@@ -117,8 +123,8 @@ inside every `run` call.
 
 ## Disabled entities {#disabled-entities}
 
-Exclude `tecs.ecs.Disabled` explicitly in game queries. Rendering excludes this
-tag, so disabled entities stop drawing.
+Queries exclude `tecs.ecs.Disabled` automatically unless their `include` list
+explicitly requests it. Rendering also excludes this tag.
 
 ```nupp
 local movement = world:newQuery({
@@ -129,6 +135,6 @@ local movement = world:newQuery({
 
 ## Paused entities {#paused-entities}
 
-Exclude `tecs.ecs.Paused` in logic queries when paused entities should stop
-moving. Render extraction keeps paused entities visible. Listing the tag in
-`include` instead selects paused entities for inspection.
+Set `type = "logic"` to exclude `tecs.ecs.Paused` automatically, or add an explicit
+exclusion to an ordinary query. Render extraction keeps paused entities visible.
+Listing the tag in `include` selects paused entities for inspection.

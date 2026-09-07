@@ -126,4 +126,41 @@ function suite.rejectsInvalidCapacities(): nil
     )
 end
 
+function suite.nativeGrowthRetainsPlacementStampsAndRecycleOrder(): nil
+    const allocator = idallocator.new(1000)
+    const first = idallocator.allocSlot(allocator)
+    const second = idallocator.allocSlot(allocator)
+    idallocator.place(allocator, first, 7, 12)
+    idallocator.place(allocator, second, 7, 13)
+    idallocator.freeSlot(allocator, first)
+    idallocator.stampMutation(allocator, second, -17)
+    idallocator.reserveSlots(allocator, 900)
+    test.equal(idallocator.mutationBatchAt(allocator, second), -17)
+    const owner, row = idallocator.placement(allocator, second)
+    test.equal(owner, 7)
+    test.equal(row, 13)
+    test.equal(idallocator.allocSlot(allocator), first)
+    test.equal(idallocator.generationAt(allocator, first), 1)
+    idallocator.clearStamps(allocator)
+    test.equal(idallocator.mutationBatchAt(allocator, second), 0)
+end
+
+function suite.nativeSlotsPreserveTheMaximumPackedGeneration(): nil
+    const allocator = idallocator.new(100)
+    const id = idallocator.encodeId(99, idallocator.generationCount - 1)
+    idallocator.stakeId(allocator, id)
+    idallocator.place(allocator, 99, 1, 0)
+    test.assert(not idallocator.isStale(allocator, id))
+    test.equal(idallocator.generationAt(allocator, 99), 2147483647)
+    idallocator.freeSlot(allocator, 99)
+    test.equal(idallocator.generationAt(allocator, 99), 0)
+    test.assert(idallocator.isStale(allocator, id))
+    test.raises(
+        function(): nil
+            idallocator.stakeId(allocator, 9007199254740992)
+        end,
+        "invalid packed"
+    )
+end
+
 return suite

@@ -424,6 +424,35 @@ function suite.spreadsPitchAroundTheRequestedRate(): nil
     test.assert(distinct)
 end
 
+function suite.restoresAndReseedsWorldManagedPitchVariance(): nil
+    const world = ecs.newWorld()
+    world:seedRandom(42)
+    const recorder = newRecorder()
+    const mixer = audio.install(world, {backend = recorder.backend, maxVoices = 8})
+    const clip = loaded(mixer)
+    const unrelated = world:randomStream("game.loot")
+    const before = unrelated:state()
+    const saved = world:saveSnapshot()
+    mixer:play(clip, {pitchVariance = 0.1})
+    mixer:flush()
+    const expected = assert(lastOf(recorder, audiobackend.PLAY)).pitch
+    world:loadSnapshot(saved)
+    clear(recorder)
+    mixer:play(clip, {pitchVariance = 0.1})
+    mixer:flush()
+    test.equal(assert(lastOf(recorder, audiobackend.PLAY)).pitch, expected)
+    world:seedRandom(42)
+    clear(recorder)
+    mixer:play(clip, {pitchVariance = 0.1})
+    mixer:flush()
+    test.equal(assert(lastOf(recorder, audiobackend.PLAY)).pitch, expected)
+    const after = unrelated:state()
+    for index = 1, 4 do
+        test.equal(after[index], before[index])
+    end
+    test.assert(world:randomStream("tecs.audio") ~= unrelated)
+end
+
 function suite.holdsOnePlacementPerVoice(): nil
     local recorder = newRecorder()
     local mixer = audio.newAudio({backend = recorder.backend})

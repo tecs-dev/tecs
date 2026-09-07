@@ -22,11 +22,13 @@ world:addSystem({
         for archetype, length in movers:iter() do
             local transforms = assert(archetype:getMut(Transform2D))
             local velocities = assert(archetype:get(Velocity))
-            for row = 1, length as integer do
-                transforms[row].x = transforms[row].x
-                    + velocities[row].x * dt
-                transforms[row].y = transforms[row].y
-                    + velocities[row].y * dt
+            unsafe do
+                for row = 1, length as integer do
+                    transforms[row].x = transforms[row].x
+                        + velocities[row].x * dt
+                    transforms[row].y = transforms[row].y
+                        + velocities[row].y * dt
+                end
             end
         end
     end,
@@ -44,12 +46,27 @@ around those values.
 
 | Kind                           | Use                                                    |
 | ------------------------------ | ------------------------------------------------------ |
+| Native struct                  | Fixed-layout numeric data in contiguous native columns |
 | [Record](table-components.md)  | Structured values, strings, nested records and handles |
 | [Scalar](scalar-components.md) | One number, boolean or string per entity               |
 | [Tag](tag-components.md)       | Presence with no per-entity value                      |
 
-The engine uses the same factories. Transform, tint and material values are
-records; `Renderable2D` is a tag.
+The engine uses the same factories. Transform, tint, shape material, camera,
+lighting, animation, audio state, physics values, and numeric UI components use
+`newFFIComponent` with native structs. `Renderable2D` is a tag. Text, styles,
+Tiled metadata and other components with strings or managed collections remain
+records.
+
+Native component columns are one-based `T[?]` arrays, indexed inside `unsafe do`
+using the query's row count. Reads return live row references; reacquire them
+after publication, compaction, clear or restore. Native assignment copies a
+value into the row rather than sharing a managed object.
+
+Nupp owns struct methods and derives. Built-in native values derive
+`nupp.derive.Debug` and `nupp.derive.Serde`. A prepared Serde codec can encode a
+borrowed row directly. That generic encoding describes the struct's own fields;
+world snapshots still use Tecs's component codecs, including name-based asset
+resolution and transient-state handling.
 
 ## Entity access
 

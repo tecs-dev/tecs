@@ -11,29 +11,205 @@ entity leaves and become active again without rebuilding the query.
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
 
---- Include and exclude constraints for an archetype query.
+--- Identifies the world that owns a query without retaining that world.
+export record Owner
+    token: boolean
+end
+
+--- Membership constraints, grouping and notifications for an archetype query.
 export type Descriptor = {
+    --- Caller-writable. Names this query for inspection.
+    name: string?,
+
+    --- Caller-writable. Excludes Paused for logic queries; nil behaves like render.
+    type: ("logic" | "render")?,
+
+    --- Caller-writable. Requires all listed components and overrides their automatic
+    --- exclusions.
     include: {components.Component}?,
-    exclude: {components.Component}?
+
+    --- Caller-writable. Requires at least one listed component; an empty list adds no
+    --- constraint.
+    includeAny: {components.Component}?,
+
+    --- Caller-writable. Rejects every listed component.
+    exclude: {components.Component}?,
+
+    --- Caller-writable. Receives entering rows after publication, including initial
+    --- members.
+    onEntitiesAdded: MembershipCallback?,
+
+    --- Caller-writable. Receives departing rows while their old values remain readable.
+    onEntitiesRemoved: MembershipCallback?,
+
+    --- Caller-writable. Retains only initially matching archetypes, with live rows, and
+    --- forbids callbacks.
+    temp: boolean?,
+
+    --- Caller-writable. Assigns each matching archetype an integer group once.
+    groupBy: (function(candidate: archetype.Archetype): integer)?
 }
+
+--- Receives a contiguous one-based row range entering or leaving a query.
+export type MembershipCallback = function(
+    candidate: archetype.Archetype,
+    firstRow: integer,
+    lastRow: integer,
+    count: integer
+)
 
 --- A reusable query whose matching archetypes are updated by its world.
 export record Query
+    private owner: Owner?
+
+    --- Read-only. Describes the normalized query; mutation after construction is
+    --- unsupported.
+    descriptor: Descriptor
+
     private include: {components.Component}
     private exclude: {components.Component}
+    private includeAny: {components.Component}
     private active: {archetype.Archetype}
+    private matched: {[archetype.Archetype]: boolean}
+    private groupIds: {integer}
+    private grouped: {[integer]: {archetype.Archetype}}
+    private archetypeGroups: {[archetype.Archetype]: integer}
 
-    iter: function(self: Query): function(): (archetype.Archetype?, integer?)
+    --- Iterates nonempty archetypes, in ascending group order when grouped.
+    --- @param self The query to read.
+    --- @return Returns an independent iterator yielding an archetype, count and live
+    ---     entity column.
+    iter: function(self: Query): function(): (archetype.Archetype?, integer?, {integer}?)
+
+    --- Iterates nonempty group identifiers in ascending order.
+    --- @param self The query to read.
+    --- @return Returns an independent iterator, empty for ungrouped queries.
+    groups: function(self: Query): function(): integer?
+
+    --- Iterates nonempty archetypes in one group.
+    --- @param self The query to read.
+    --- @param groupId The integer group identifier.
+    --- @return Returns an independent iterator yielding an archetype, count and live
+    ---     entity column.
+    group: function(self: Query, groupId: integer): function(): (archetype.Archetype?, integer?, {integer}?)
+
+    --- Returns an archetype's assigned group.
+    --- @param self The query to read.
+    --- @param candidate The archetype to inspect.
+    --- @return Returns nil when unmatched or ungrouped.
+    getGroup: function(self: Query, candidate: archetype.Archetype): integer?
+
+    --- Counts entities in one group.
+    --- @param self The query to read.
+    --- @param groupId The integer group identifier.
+    --- @return Returns zero when the group is absent.
+    getGroupCount: function(self: Query, groupId: integer): integer
+
+    --- Counts all currently matching entities.
+    --- @param self The query to read.
+    --- @return Returns the committed entity count.
+    count: function(self: Query): integer
+end
+
+--- Binds a query to its owning world's token.
+--- @param value The query being registered.
+--- @param owner The owning world's identity token.
+export function bindOwner(value: Query, owner: Owner): nil
+    value.owner = owner
+end
+
+--- Reports whether a query belongs to the selected world.
+--- @param value The query to validate.
+--- @param owner The world's identity token.
+--- @return Returns true only for that world.
+export function belongsTo(value: Query, owner: Owner): boolean
+    return value.owner == owner
+end
+
+--- Releases an empty archetype permanently removed by world maintenance.
+--- @param value The query to update.
+--- @param candidate The empty archetype to forget.
+export function removeArchetype(value: Query, candidate: archetype.Archetype): nil
+    if not value.matched[candidate] then
+        return
+    end
+    value.matched[candidate] = nil
+    for index = #value.active, 1, -1 do
+        if value.active[index] == candidate then
+            table.remove(value.active, index)
+        end
+    end
+    const id = value.archetypeGroups[candidate]
+    value.archetypeGroups[candidate] = nil
+    if id ~= nil then
+        const items = assert(value.grouped[id])
+        for index = #items, 1, -1 do
+            if items[index] == candidate then
+                table.remove(items, index)
+            end
+        end
+        if #items == 0 then
+            value.grouped[id] = nil
+            for index = #value.groupIds, 1, -1 do
+                if value.groupIds[index] == id then
+                    table.remove(value.groupIds, index)
+                end
+            end
+        end
+    end
 end
 
 --- Creates a query with no active archetypes yet.
 --- @param descriptor the include and exclude constraints
+--- @param filterStates Whether to apply Disabled and logic Paused exclusions.
 --- @return the reusable query
-export function new(descriptor: Descriptor?): Query
+export function new(descriptor: Descriptor?, filterStates: boolean?): Query
+    const source = descriptor or {}
+    if source.type ~= nil and source.type ~= "logic" and source.type ~= "render" then
+        error("query type must be logic or render", 2)
+    end
+    if source.temp and (source.onEntitiesAdded ~= nil or source.onEntitiesRemoved ~= nil) then
+        error("temporary queries cannot have membership callbacks", 2)
+    end
+    const include = table.clone(source.include or {})
+    const exclude = table.clone(source.exclude or {})
+    const includeAny = table.clone(source.includeAny or {})
+    if filterStates then
+        const automatic = source.type == "logic" and {components.Disabled, components.Paused} or {components.Disabled}
+        for index = 1, #automatic do
+            const component = automatic[index]
+            local explicit = false
+            for position = 1, #include do
+                if include[position] == component then
+                    explicit = true
+                end
+            end
+            if not explicit then
+                exclude[#exclude + 1] = component
+            end
+        end
+    end
+
     return new Query(
-        include = descriptor and descriptor.include or {},
-        exclude = descriptor and descriptor.exclude or {},
-        active = {}
+        descriptor = {
+            name = source.name,
+            type = source.type,
+            include = include,
+            includeAny = includeAny,
+            exclude = exclude,
+            onEntitiesAdded = source.onEntitiesAdded,
+            onEntitiesRemoved = source.onEntitiesRemoved,
+            temp = source.temp,
+            groupBy = source.groupBy
+        },
+        include = include,
+        exclude = exclude,
+        includeAny = includeAny,
+        active = {},
+        matched = {},
+        groupIds = {},
+        grouped = {},
+        archetypeGroups = {}
     )
 end
 
@@ -53,6 +229,15 @@ export function matches(value: Query, candidate: archetype.Archetype): boolean
         end
     end
 
+    if #value.includeAny > 0 then
+        for index = 1, #value.includeAny do
+            if archetype.has(candidate, value.includeAny[index]) then
+                return true
+            end
+        end
+        return false
+    end
+
     return true
 end
 
@@ -60,27 +245,151 @@ end
 --- @param value the query to update
 --- @param candidate the newly registered archetype
 export function addArchetype(value: Query, candidate: archetype.Archetype): nil
-    if matches(value, candidate) then
-        value.active[#value.active + 1] = candidate
+    if value.matched[candidate] or not matches(value, candidate) then
+        return
+    end
+    value.matched[candidate] = true
+    value.active[#value.active + 1] = candidate
+    const groupBy = value.descriptor.groupBy
+    if groupBy ~= nil then
+        const id = groupBy(candidate)
+        value.archetypeGroups[candidate] = id
+        local items = value.grouped[id]
+        if items == nil then
+            items = {}
+            value.grouped[id] = items
+            value.groupIds[#value.groupIds + 1] = id
+            table.sort(value.groupIds)
+        end
+        items[#items + 1] = candidate
+    end
+    const added = value.descriptor.onEntitiesAdded
+    if added ~= nil and #candidate.entities > 0 then
+        added(candidate, 1, #candidate.entities, #candidate.entities)
     end
 end
 
 --- Iterates nonempty matching archetypes and their current entity counts.
 --- @param self the query to iterate
 --- @return the iterator
-function Query.iter(self: Query): function(): (archetype.Archetype?, integer?)
+function Query.iter(self: Query): function(): (archetype.Archetype?, integer?, {integer}?)
+    if self.descriptor.groupBy ~= nil then
+        local groupIndex: integer = 1
+        local rowIndex: integer = 0
+        return function(): (archetype.Archetype?, integer?, {integer}?)
+            while groupIndex <= #self.groupIds do
+                const items = assert(self.grouped[self.groupIds[groupIndex]])
+                rowIndex = rowIndex + 1
+                if rowIndex > #items then
+                    groupIndex = groupIndex + 1
+                    rowIndex = 0
+                else
+                    const candidate = items[rowIndex]
+                    if #candidate.entities > 0 then
+                        return candidate, #candidate.entities, candidate.entities
+                    end
+                end
+            end
+
+            return nil, nil, nil
+        end
+    end
     local active = self.active
     local index: integer = 0
-    return function(): (archetype.Archetype?, integer?)
+
+    return function(): (archetype.Archetype?, integer?, {integer}?)
         while index < #active do
             index = index + 1
             local candidate = active[index]
             local count = #candidate.entities
             if count > 0 then
-                return candidate, count
+                return candidate, count, candidate.entities
             end
         end
 
-        return nil, nil
+        return nil, nil, nil
+    end
+end
+
+function Query.group(self: Query, groupId: integer): function(): (archetype.Archetype?, integer?, {integer}?)
+    const items = self.grouped[groupId] or {}
+    local index: integer = 0
+    return function(): (archetype.Archetype?, integer?, {integer}?)
+        while index < #items do
+            index = index + 1
+            const candidate = items[index]
+            if #candidate.entities > 0 then
+                return candidate, #candidate.entities, candidate.entities
+            end
+        end
+
+        return nil, nil, nil
+    end
+end
+
+function Query.getGroup(self: Query, candidate: archetype.Archetype): integer?
+    return self.archetypeGroups[candidate]
+end
+
+function Query.getGroupCount(self: Query, groupId: integer): integer
+    const items = self.grouped[groupId]
+    local total: integer = 0
+    if items ~= nil then
+        for index = 1, #items do
+            total = total + #items[index].entities
+        end
+    end
+
+    return total
+end
+
+function Query.count(self: Query): integer
+    local total: integer = 0
+    for index = 1, #self.active do
+        total = total + #self.active[index].entities
+    end
+
+    return total
+end
+
+function Query.groups(self: Query): function(): integer?
+    local index: integer = 0
+    return function(): integer?
+        while index < #self.groupIds do
+            index = index + 1
+            const id = self.groupIds[index]
+            if self:getGroupCount(id) > 0 then
+                return id
+            end
+        end
+
+        return nil
+    end
+end
+
+--- Delivers a membership change, suppressing moves wholly inside the query.
+--- @param value The subscribed query.
+--- @param candidate The readable archetype that gains or loses the rows.
+--- @param other The opposite archetype of a move, or nil for a lifetime change.
+--- @param firstRow The one-based first affected row.
+--- @param count The number of affected rows.
+--- @param added Whether the rows enter rather than leave.
+export function notify(
+    value: Query,
+    candidate: archetype.Archetype,
+    other: archetype.Archetype?,
+    firstRow: integer,
+    count: integer,
+    added: boolean
+): nil
+    if not value.matched[candidate] or (other ~= nil and value.matched[other]) then
+        return
+    end
+    local callback = value.descriptor.onEntitiesRemoved
+    if added then
+        callback = value.descriptor.onEntitiesAdded
+    end
+    if callback ~= nil then
+        callback(candidate, firstRow, firstRow + count - 1, count)
     end
 end

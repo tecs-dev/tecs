@@ -13,12 +13,23 @@ local function frame(exclusive session: tecs.host.Session): nil
 end
 
 local function textEntity(world: tecs.ecs.World, value: string): integer
-    local texts = world:newQuery({include = {tecs.gfx.Text}})
-    for candidate, count in texts:iter() do
-        local column = assert(candidate:get(tecs.gfx.Text))
-        for row = 1, count as integer do
-            if column[row].text == value then
-                return (candidate as tecs.ecs.Archetype).entities[row]
+    -- Scene assertions inspect hidden labels too; game queries exclude them by default.
+    for _, texts in ipairs({
+        world:newQuery({
+            include = {tecs.gfx.Text},
+            temp = true
+        }),
+        world:newQuery({
+            include = {tecs.gfx.Text, tecs.ecs.Disabled},
+            temp = true
+        }),
+    }) do
+        for candidate, count in texts:iter() do
+            local column = assert(candidate:get(tecs.gfx.Text))
+            for row = 1, count as integer do
+                if column[row].text == value then
+                    return (candidate as tecs.ecs.Archetype).entities[row]
+                end
             end
         end
     end
@@ -33,20 +44,30 @@ end
 
 local function checkSharedFonts(world: tecs.ecs.World, density: number): nil
     local fonts: {[number]: tecs.gfx.fonts.Font} = {}
-    local texts = world:newQuery({include = {tecs.gfx.Text}})
     local checked = 0
-    for candidate, count in texts:iter() do
-        const column = assert(candidate:get(tecs.gfx.Text))
-        for row = 1, count as integer do
-            const text = column[row]
-            const font = assert(text.font)
-            nupp.test.equal(font.size, text.size * density)
-            const shared = fonts[text.size]
-            if shared then
-                nupp.test.assert(font == shared, "demo labels overwrite the same image with different font atlases")
-                checked = checked + 1
-            else
-                fonts[text.size] = font
+    for _, texts in ipairs({
+        world:newQuery({
+            include = {tecs.gfx.Text},
+            temp = true
+        }),
+        world:newQuery({
+            include = {tecs.gfx.Text, tecs.ecs.Disabled},
+            temp = true
+        }),
+    }) do
+        for candidate, count in texts:iter() do
+            const column = assert(candidate:get(tecs.gfx.Text))
+            for row = 1, count as integer do
+                const text = column[row]
+                const font = assert(text.font)
+                nupp.test.equal(font.size, text.size * density)
+                const shared = fonts[text.size]
+                if shared then
+                    nupp.test.assert(font == shared, "demo labels overwrite the same image with different font atlases")
+                    checked = checked + 1
+                else
+                    fonts[text.size] = font
+                end
             end
         end
     end

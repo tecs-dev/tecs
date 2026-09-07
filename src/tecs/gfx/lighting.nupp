@@ -83,7 +83,8 @@ export const TILE_SLOTS: integer = 64
 export const CAST_FANOUT: integer = 4
 
 --- Represents a light the deferred resolve accumulates.
-export record PointLight2D
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct PointLight2D
     --- Caller-writable. Sets the height above the surface plane in world
     --- units. At zero the Lambert term vanishes and the light contributes
     --- nothing.
@@ -108,7 +109,7 @@ export record PointLight2D
 end
 
 --- The process-wide `PointLight2D` component definition.
-export const PointLight2DComponent: components.TableComponent<PointLight2D> = components.newComponent({
+export const PointLight2DComponent: components.FFIComponent<PointLight2D> = components.newFFIComponent({
     -- This persisted component name is a compatibility surface carried across
     -- from the Teal implementation, and so are its six field names.
     name = "PointLight2D",
@@ -120,17 +121,10 @@ export const PointLight2DComponent: components.TableComponent<PointLight2D> = co
         b: number?,
         intensity: number?
     ): PointLight2D
-        return new PointLight2D(
-            height = height or 64,
-            radius = radius or 256,
-            r = r or 1,
-            g = g or 1,
-            b = b or 1,
-            intensity = intensity or 1
-        )
+        return new PointLight2D(height or 64, radius or 256, r or 1, g or 1, b or 1, intensity or 1)
     end,
     default = function(): PointLight2D
-        return new PointLight2D(height = 64, radius = 256, r = 1, g = 1, b = 1, intensity = 1)
+        return new PointLight2D(64, 256, 1, 1, 1, 1)
     end,
 })
 
@@ -144,22 +138,23 @@ export const PointLight2DComponent: components.TableComponent<PointLight2D> = co
 --- Coverage is the silhouette the material already decided, so a circle, a
 --- rounded box, or a glyph casts the shape it draws with no threshold of its
 --- own to set.
-export record Occluder2D
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct Occluder2D
     --- Caller-writable. Sets the occluder height from zero to one of the
     --- world's configured shadow height.
     height: number
 end
 
 --- The process-wide `Occluder2D` component definition.
-export const Occluder2DComponent: components.TableComponent<Occluder2D> = components.newComponent({
+export const Occluder2DComponent: components.FFIComponent<Occluder2D> = components.newFFIComponent({
     -- This persisted component name is a compatibility surface carried across
     -- from the Teal implementation, and so is its `height` field name.
     name = "Occluder2D",
     construct = function(height: number?): Occluder2D
-        return new Occluder2D(height = height or 1.0)
+        return new Occluder2D(height or 1.0)
     end,
     default = function(): Occluder2D
-        return new Occluder2D(height = 1.0)
+        return new Occluder2D(1.0)
     end,
 })
 
@@ -173,22 +168,23 @@ export const Occluder2DComponent: components.TableComponent<Occluder2D> = compon
 ---
 --- The nearest few lights by weight throw the copy. Adding a distant light does
 --- not move an established shadow.
-export record DropShadow2D
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct DropShadow2D
     --- Caller-writable. Sets how far lights throw the shadow, from zero to one
     --- of the world's configured shadow height.
     height: number
 end
 
 --- The process-wide `DropShadow2D` component definition.
-export const DropShadow2DComponent: components.TableComponent<DropShadow2D> = components.newComponent({
+export const DropShadow2DComponent: components.FFIComponent<DropShadow2D> = components.newFFIComponent({
     -- This persisted component name is a compatibility surface carried across
     -- from the Teal implementation, and so is its `height` field name.
     name = "DropShadow2D",
     construct = function(height: number?): DropShadow2D
-        return new DropShadow2D(height = height or 1.0)
+        return new DropShadow2D(height or 1.0)
     end,
     default = function(): DropShadow2D
-        return new DropShadow2D(height = 1.0)
+        return new DropShadow2D(1.0)
     end,
 })
 

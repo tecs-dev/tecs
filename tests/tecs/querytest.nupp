@@ -52,4 +52,176 @@ function suite.exposesTypedRawColumnsOnMatchingArchetypes(): nil
     test.equal(positions[1].x, 11)
 end
 
+function suite.restoresAutomaticStateFilteringWithoutMutatingDescriptors(): nil
+    const world = tecs.ecs.newWorld()
+    const tag = tecs.ecs.newTagComponent({name = "test.QueryStateTag"})
+    world:spawn(tag)
+    world:spawn(tag, tecs.ecs.Paused)
+    world:spawn(tag, tecs.ecs.Disabled)
+    world:commit()
+    const descriptor: tecs.ecs.QueryDescriptor = {include = {tag}}
+    test.equal(world:newQuery(descriptor):count(), 2)
+    test.assert(descriptor.exclude == nil)
+    test.equal(world:newQuery({type = "logic", include = {tag}}):count(), 1)
+    test.equal(world:newQuery({type = "render", include = {tag}}):count(), 2)
+    test.equal(world:newQuery({include = {tag, tecs.ecs.Disabled}}):count(), 1)
+    test.equal(world:newQuery({type = "logic", include = {tag, tecs.ecs.Paused}}):count(), 1)
+end
+
+function suite.groupsOrMatchesAndKeepsNestedIteratorsIndependent(): nil
+    const world = tecs.ecs.newWorld()
+    const first = tecs.ecs.newTagComponent({name = "test.QueryGroupFirst"})
+    const second = tecs.ecs.newTagComponent({name = "test.QueryGroupSecond"})
+    const grouped = world:newQuery({
+        includeAny = {first, second},
+        groupBy = function(candidate: tecs.ecs.Archetype): integer
+            return archetype.has(candidate, first) and -2 or 7
+        end
+    })
+    world:spawn(second)
+    const firstEntity = world:spawn(first)
+    world:spawn(first, second)
+    world:spawn()
+    world:commit()
+    test.equal(grouped:count(), 3)
+    test.equal(grouped:getGroupCount(-2), 2)
+    test.equal(grouped:getGroupCount(99), 0)
+    const groups = grouped:groups()
+    test.equal(groups() as integer, -2)
+    test.equal(groups() as integer, 7)
+    test.assert(groups() == nil)
+    local nested: integer = 0
+    for candidate, count, entities in grouped:iter() do
+        test.equal(#assert(entities), count as integer)
+        test.assert(grouped:getGroup(assert(candidate)) ~= nil)
+        for _inner, innerCount in grouped:iter() do
+            nested = nested + (innerCount as integer)
+        end
+    end
+    test.equal(nested, 9)
+    const left = grouped:group(-2)
+    const right = grouped:group(7)
+    test.assert(left() ~= nil)
+    test.assert(right() ~= nil)
+    test.assert(left() ~= nil)
+    test.assert(right() == nil)
+    world:despawn(firstEntity)
+    world:commit()
+    test.equal(grouped:getGroupCount(-2), 1)
+end
+
+function suite.reportsOnlyQueryMembershipTransitionsWithReadableRows(): nil
+    const world = tecs.ecs.newWorld()
+    const tag = tecs.ecs.newTagComponent({name = "test.QueryObserved"})
+    const extra = tecs.ecs.newTagComponent({name = "test.QueryObservedExtra"})
+    const first = world:spawn(tag)
+    world:commit()
+    local added, removed = 0, 0
+    world:newQuery({
+        include = {tag},
+        onEntitiesAdded = function(candidate: tecs.ecs.Archetype, start: integer, last: integer, count: integer): nil
+            test.equal(last - start + 1, count)
+            test.assert(world:isAlive(candidate.entities[start]))
+            added = added + count
+        end,
+        onEntitiesRemoved = function(candidate: tecs.ecs.Archetype, start: integer, last: integer, count: integer): nil
+            test.equal(last - start + 1, count)
+            test.assert(world:has(candidate.entities[start], tag))
+            removed = removed + count
+        end
+    })
+    test.equal(added, 1)
+    world:set(first, extra)
+    world:commit()
+    test.equal(added, 1)
+    test.equal(removed, 0)
+    world:remove(first, tag)
+    world:commit()
+    test.equal(removed, 1)
+    world:set(first, tag)
+    world:commit()
+    test.equal(added, 2)
+    world:despawn(first)
+    world:commit()
+    test.equal(removed, 2)
+end
+
+function suite.temporaryQueriesFreezeArchetypesButReadLiveRows(): nil
+    const world = tecs.ecs.newWorld()
+    const tag = tecs.ecs.newTagComponent({name = "test.QueryTemporary"})
+    const extra = tecs.ecs.newTagComponent({name = "test.QueryTemporaryExtra"})
+    world:spawn(tag)
+    world:commit()
+    const frozen = world:newQuery({include = {tag}, temp = true})
+    world:spawn(tag)
+    world:spawn(tag, extra)
+    world:commit()
+    test.equal(frozen:count(), 2)
+    test.equal(world:newQuery({include = {tag}}):count(), 3)
+    test.raises(
+        function(): nil
+            world:newQuery({
+                temp = true,
+                onEntitiesAdded = function(
+                    _candidate: tecs.ecs.Archetype,
+                    _first: integer,
+                    _last: integer,
+                    _count: integer
+                ): nil
+                end
+            })
+        end,
+        "temporary queries"
+    )
+end
+
+function suite.observersCanStageWorkAndInitialCallbacksCanPublishNewArchetypes(): nil
+    const world = tecs.ecs.newWorld()
+    const tag = tecs.ecs.newTagComponent({name = "test.QueryReentrant"})
+    const extra = tecs.ecs.newTagComponent({name = "test.QueryReentrantExtra"})
+    world:spawn(tag)
+    world:commit()
+    local calls = 0
+    const observed = world:newQuery({
+        include = {tag},
+        onEntitiesAdded = function(
+            _candidate: tecs.ecs.Archetype,
+            _first: integer,
+            _last: integer,
+            _count: integer
+        ): nil
+            calls = calls + 1
+            if calls == 1 then
+                world:spawn(tag, extra);
+                world:commit()
+            end
+        end
+    })
+    test.equal(calls, 2)
+    test.equal(observed:count(), 2)
+end
+
+function suite.stagesObserverMutationsAgainstTheDestinationSignature(): nil
+    const world = tecs.ecs.newWorld()
+    const leaving = tecs.ecs.newTagComponent({name = "test.QueryLeavingMutation"})
+    const added = tecs.ecs.newTagComponent({name = "test.QueryAddedMutation"})
+    const id = world:spawn(leaving)
+    world:commit()
+    world:newQuery({
+        include = {leaving},
+        onEntitiesRemoved = function(
+            candidate: tecs.ecs.Archetype,
+            first: integer,
+            _last: integer,
+            _count: integer
+        ): nil
+            world:set(candidate.entities[first], added)
+        end
+    })
+    world:remove(id, leaving)
+    world:commit()
+    test.assert(not world:has(id, leaving))
+    test.assert(world:has(id, added))
+end
+
 return suite

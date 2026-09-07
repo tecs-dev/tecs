@@ -506,7 +506,7 @@ end
 function suite.audioSnapshotHandlerKey(): nil
     local world = ecs.newWorld()
     audio.install(world, {backend = silentBackend()})
-    equalList(snapshotKeys(world), {"tecs.audio"})
+    equalList(snapshotKeys(world), {"tecs.audio", "tecs.random"})
 end
 
 function suite.sequenceSnapshotHandlerKey(): nil
@@ -519,6 +519,12 @@ function suite.physicsSnapshotHandlerKey(): nil
     local world = ecs.newWorld()
     physics.install(world, {simulation = physicsreference.create().simulation})
     equalList(snapshotKeys(world), {"tecs.physics"})
+end
+
+function suite.randomSnapshotKey(): nil
+    const world = ecs.newWorld()
+    world:seedRandom(42)
+    equalList(snapshotKeys(world), {"tecs.random"})
 end
 
 -------------------------------------------------------------------------------

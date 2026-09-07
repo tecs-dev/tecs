@@ -18,10 +18,12 @@ function suite.usesQualifiedValuesTypesAndNestedModulesWithoutImports(): nil
         name = "namespace.move",
         phase = tecs.ecs.phases.Update,
         run = function(dt: number): nil
-            for candidate, count in query:iter() do
-                local transforms: {tecs.ecs.Transform2D} = assert(candidate:getMut(tecs.ecs.Transform2D))
-                for index = 1, count as integer do
-                    transforms[index].x = transforms[index].x + 30 * dt
+            unsafe do
+                for candidate, count in query:iter() do
+                    local transforms: tecs.ecs.Transform2D[?] = assert(candidate:getMut(tecs.ecs.Transform2D))
+                    for index = 1, count as integer do
+                        transforms[index].x = transforms[index].x + 30 * dt
+                    end
                 end
             end
         end,

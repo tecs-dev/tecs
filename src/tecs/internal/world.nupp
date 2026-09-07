@@ -8,20 +8,23 @@ does not make it alive until `commit`; `despawn` leaves a committed entity alive
 until the same barrier. This is the transaction boundary the archetype and
 query layers will build on.
 
-This module intentionally contains no private scheduler or completion runtime.
-Systems that suspend will use `nupp.tasks`, and parallel work will use
-`nupp.workers` when those layers are connected.
+This module orders ECS systems, but owns no private task or completion runtime.
+Systems suspend through `nupp.tasks`; parallel work belongs to `nupp.workers`.
 ]]
 
 local tasks = require("nupp.tasks")
+local ffi = require("ffi")
+local random = require("nupp.data.random")
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
 local events = require("tecs.internal.events")
 local nuppevents = require("nupp.events")
+local ffistorage = require("tecs.internal.ffistorage")
 local idallocator = require("tecs.internal.idallocator")
 local inverseindex = require("tecs.internal.inverseindex")
 local phases = require("tecs.internal.phases")
 local query = require("tecs.internal.query")
+local randomstreams = require("tecs.internal.randomstreams")
 local snapshotvalue = require("tecs.internal.snapshotvalue")
 
 --- A frame system body.
@@ -72,11 +75,31 @@ export type StatePolicy = {
 
 --- Registration options for a frame system.
 export type SystemConfig = {
+    --- Caller-writable. Names the system uniquely; nil requests an engine-owned name.
     name: string?,
+
+    --- Caller-writable. Selects the leaf phase that dispatches the system.
     phase: phases.Phase,
+
+    --- Caller-writable. Receives the phase delta, world and borrowed task scope.
     run: System,
+
+    --- Caller-writable. Gates each dispatch; a disabled system does not evaluate it.
     runIf: RunIf?,
+
+    --- Caller-writable. Names systems that must run later in this phase; missing and
+    --- cross-phase names contribute no edge. The world copies the list.
+    before: {string}?,
+
+    --- Caller-writable. Names systems that must run earlier in this phase; missing and
+    --- cross-phase names contribute no edge. The world copies the list.
+    after: {string}?,
+
+    --- Caller-writable. Publishes staged changes before evaluating runIf.
     commitBefore: boolean?,
+
+    --- Caller-writable. Publishes staged changes after dispatch, even when runIf is
+    --- false.
     commitAfter: boolean?
 }
 
@@ -104,6 +127,7 @@ end
 export record SnapshotArchetype
     components: {string}
     entities: {SnapshotEntity}
+
 end
 
 --- One named custom snapshot value.
@@ -122,6 +146,7 @@ export record Snapshot
     archetypes: {SnapshotArchetype}
     data: {SnapshotDataEntry}
     states: {string}
+
 end
 
 --- Metadata returned after a snapshot load.
@@ -171,6 +196,8 @@ local record RegisteredSystem
     phase: phases.Phase
     run: System
     runIf: RunIf?
+    before: {string}
+    after: {string}
     commitBefore: boolean
     commitAfter: boolean
     enabled: boolean
@@ -186,12 +213,70 @@ local record PendingSpawn
     id: integer
     target: archetype.Archetype
     values: {[integer]: any}
+    isSealed: boolean
 end
 
 local record PendingMove
     id: integer
     target: archetype.Archetype
     values: {[integer]: any}
+    isSealed: boolean
+end
+
+--- Initializes or updates one contiguous, one-based range of committed rows.
+export type BatchCallback = function(
+    candidate: archetype.Archetype,
+    firstRow: integer,
+    lastRow: integer,
+    count: integer
+)
+
+local record SpawnBatch
+    index: integer
+    target: archetype.Archetype
+    values: {[integer]: any}
+    shared: {[integer]: boolean}
+    count: integer
+    firstId: integer
+    ids: {integer}?
+    rawIds: number[?]?
+    callback: BatchCallback?
+end
+
+local record MutationBatch
+    index: integer
+    source: archetype.Archetype
+    target: archetype.Archetype
+    ids: number[?]
+    count: integer
+    values: {[integer]: any}
+    shared: {[integer]: boolean}
+    callback: BatchCallback?
+    despawn: boolean
+    resetComponent: components.Component?
+    writeComponent: components.Component?
+end
+
+local record BatchWrite
+    ids: {integer}
+    component: components.Component
+    callback: BatchCallback
+end
+
+local record PendingSegment
+    spawns: {PendingSpawn}
+    moves: {PendingMove}
+    despawns: {integer}
+    writer: BatchWrite?
+    spawnBatch: SpawnBatch?
+    mutationBatch: MutationBatch?
+end
+
+local record PendingNotice
+    target: archetype.Archetype
+    source: archetype.Archetype
+    entity: integer
+    observerLimit: integer
 end
 
 --- A world containing entity identities and staged structural work.
@@ -201,23 +286,35 @@ end
 export record World is nupp.events.Source<integer>
     private allocator: idallocator.IdAllocator
     private archetypes: {archetype.Archetype}
+    private archetypeById: {[integer]: archetype.Archetype}
+    private maxArchetypeId: integer
+    private freeArchetypeIds: {integer}
     private archetypeBySignature: {[string]: archetype.Archetype}
     private pendingSpawns: {PendingSpawn}
+    private pendingSegments: {PendingSegment}
     private pendingSpawnBySlot: {[integer]: PendingSpawn}
+    private spawnBatches: {SpawnBatch}
+    private mutationBatches: {MutationBatch}
     private pendingMoves: {PendingMove}
     private pendingMoveBySlot: {[integer]: PendingMove}
+    private publishingMove: PendingMove?
     private pendingDespawns: {integer}
     private pendingDespawnBySlot: {[integer]: boolean}
     private queries: {query.Query}
+    private queryOwner: query.Owner
+    private queryObservers: {query.Query}
     private relationshipIndexes: {[integer]: inverseindex.InverseIndex}
     private keyIndex: {[string]: integer}
     private systems: {RegisteredSystem}
+    private schedule: {[phases.Phase]: {RegisteredSystem}}
+    private scheduleDirty: boolean
     private systemNames: {[string]: RegisteredSystem}
     private anonymousSystemCount: integer
     private disabledPhases: {[string]: boolean}
     private bundles: {[string]: Bundle}
     private snapshotHandlers: {SnapshotHandler}
     private snapshotHandlerNames: {[string]: boolean}
+    private randomRegistry: randomstreams.Registry?
     private stateComponents: {[string]: components.Component}
     private statePolicies: {[string]: StatePolicy}
     private stateStack: {string}
@@ -229,6 +326,8 @@ export record World is nupp.events.Source<integer>
     private observedEntities: {[integer]: boolean}
 
     private committing: boolean
+    private runningSystem: boolean
+    private commitRequested: boolean
     private nominalFrameTime: number
     private fixedTimestep: number
     private fixedAccumulator: number
@@ -249,6 +348,103 @@ export record World is nupp.events.Source<integer>
 
     spawn: function(exclusive self: World, ...: components.Input): integer
     spawnAt: function(exclusive self: World, id: integer, ...: components.Input): nil
+
+    --- Reserves a batch sharing one signature and initializes its rows at the next
+    --- barrier.
+    --- @param self The world to modify.
+    --- @param count The positive number of entities to reserve.
+    --- @param inputs The component definitions or values, including required defaults.
+    --- @param callback The optional initializer, called before membership and spawn
+    ---     events.
+    --- @return Returns a first packed id and nil for a contiguous range, or nil and an
+    ---     explicit id list when slots or generations are non-contiguous.
+    --- @raises Raises for invalid count, exhausted capacity, bare relationships or
+    ---     EntityKey.
+    batchSpawn: function(
+        exclusive self: World,
+        count: integer,
+        inputs: {components.Input},
+        callback: BatchCallback?
+    ): (integer?, {integer}?)
+
+    --- Reserves supplied packed identities in order for a deferred batch spawn.
+    --- @param self The world to modify.
+    --- @param ids The identities to restore; an empty list does nothing.
+    --- @param inputs The shared component signature and initial values.
+    --- @param callback The optional row initializer at publication.
+    --- @raises Raises before reserving any id if one is invalid, duplicated or
+    ---     occupied,
+    ---     or the signature contains EntityKey or a bare relationship.
+    batchSpawnAt: function(
+        exclusive self: World,
+        ids: {integer},
+        inputs: {components.Input},
+        callback: BatchCallback?
+    ): nil
+
+    --- Reserves packed identities directly from a zero-based native double array.
+    --- @param self The world to modify.
+    --- @param ids The borrowed array, retained until publication. Do not change its
+    ---     selected prefix before the barrier.
+    --- @param count The number of identities in the prefix; zero does nothing.
+    --- @param inputs The shared signature. Unlike ordinary batch spawns, this
+    ---     restoration path permits EntityKey, initialized before key registration.
+    --- @param callback The optional initializer, called before indexes and observers.
+    --- @raises Raises before reservation for an invalid count, identity, duplicate,
+    ---     occupied slot, or bare relationship.
+    batchSpawnAtRaw: function(
+        exclusive self: World,
+        ids: number[?],
+        count: integer,
+        inputs: {components.Input},
+        callback: BatchCallback?
+    ): nil
+
+    --- Stages a value or deferred column writer for currently matching entities.
+    --- @param self The world owning the query.
+    --- @param selection The reusable query; membership is captured at this call.
+    --- @param input The component value, or definition when supplying a callback.
+    --- @param callback The optional writer, called for each contiguous affected range.
+    --- @raises Raises for a foreign query, EntityKey, or callback mode with an instance
+    ---     or relationship. Relationship values support constant mode.
+    batchSet: function(
+        exclusive self: World,
+        selection: query.Query,
+        input: components.Input,
+        callback: BatchCallback?
+    ): nil
+
+    --- Stages component removal for the query's current committed members.
+    --- @param self The world owning the query.
+    --- @param selection The reusable query to capture now.
+    --- @param input The component definition or a relationship value selecting one
+    ---     target.
+    --- @raises Raises when the query belongs to another world.
+    batchRemove: function(exclusive self: World, selection: query.Query, input: components.Input): nil
+
+    --- Stages normal teardown, events and cascading for currently matching entities.
+    --- @param self The world owning the query.
+    --- @param selection The reusable query to capture now.
+    --- @raises Raises when the query belongs to another world.
+    batchDespawn: function(exclusive self: World, selection: query.Query): nil
+
+    --- Visits every archetype, including empty and disabled ones, in registry order.
+    --- @param self The world to inspect.
+    --- @param callback The callback; it must not commit or compact during this
+    ---     traversal.
+    forEachArchetype: function(borrows self: World, callback: function(candidate: archetype.Archetype)): nil
+
+    --- Captures archetypes with dirty components in registry order.
+    --- @param self The world to inspect.
+    --- @return Returns an independent iterator, including empty dirty archetypes.
+    dirtyArchetypes: function(borrows self: World): function(): archetype.Archetype?
+
+    --- Prunes empty dead-target archetypes and rebuilds storage that has lost rows.
+    --- @param self A quiet world with no pending mutations or active dispatch.
+    --- @return Returns the number of archetypes pruned and surviving stores rebuilt.
+    --- @raises Raises during dispatch, publication, or with uncommitted work.
+    compact: function(exclusive self: World): (integer, integer)
+
     isAlive: function(borrows self: World, id: integer): boolean
     has: function(borrows self: World, id: integer, component: components.Component): boolean
     byKey: function(borrows self: World, key: string): integer?
@@ -256,20 +452,139 @@ export record World is nupp.events.Source<integer>
     get: function<C is components.Component>(borrows self: World, id: integer, component: C): C.Value?
     getMut: function<C is components.Component>(exclusive self: World, id: integer, component: C): C.Value?
     markComponentDirty: function(exclusive self: World, id: integer, component: components.Component): nil
-    relationshipSources: function(
+    relationshipSources: function(borrows self: World, relationship: components.Component, target: integer): {integer}
+
+    --- Iterates a source entity's edges in target order.
+    --- @param self The world to inspect.
+    --- @param id The committed source identifier.
+    --- @param relationship The relationship definition or target-specific component.
+    --- @param callback The callback receiving each live edge value.
+    forEachRelationship: function<C is components.Component>(
         borrows self: World,
-        relationship: components.RelationshipComponent,
-        target: integer
-    ): {integer}
+        id: integer,
+        relationship: C,
+        callback: function(value: C.Value)
+    ): nil
+
+    --- Returns the first edge in target order.
+    --- @param self The world to inspect.
+    --- @param id The committed source identifier.
+    --- @param relationship The relationship to inspect.
+    --- @return Returns nil when the source or edge is absent.
+    getFirstRelationship: function<C is components.Component>(
+        borrows self: World,
+        id: integer,
+        relationship: C
+    ): C.Value?
+
+    --- Visits sources targeting an entity in ascending identifier order.
+    --- @param self The world to inspect.
+    --- @param target The target entity identifier.
+    --- @param relationship The reverse-indexed relationship.
+    --- @param callback The callback receiving each source and the caller's context.
+    --- @param context The caller-owned callback context.
+    --- @raises Raises when the relationship has no reverse index.
+    targets: function<T>(
+        borrows self: World,
+        target: integer,
+        relationship: components.Component,
+        callback: function(source: integer, context: T),
+        context: T
+    ): nil
+
+    --- Traverses descendants depth first, visiting each identifier at most once.
+    --- @param self The world to inspect.
+    --- @param root The excluded root identifier.
+    --- @param relationship The reverse-indexed relationship.
+    --- @return Returns an iterator yielding depth and entity; direct children have
+    ---     depth zero.
+    --- @raises Raises when the relationship has no reverse index.
+    traverse: function(
+        borrows self: World,
+        root: integer,
+        relationship: components.Component
+    ): function(): (integer?, integer?)
+
+    --- Walks the first outgoing edge at each level, in target order.
+    --- @param self The world to inspect.
+    --- @param id The excluded starting entity.
+    --- @param relationship The relationship to follow.
+    --- @param callback The callback receiving ancestor, depth starting at one, and
+    ---     context; false stops traversal.
+    --- @param context The caller-owned callback context.
+    --- @param maxDepth The positive depth limit, defaulting to 100.
+    --- @raises Raises on a cycle or when the depth limit is exceeded.
+    walkUp: function<T>(
+        borrows self: World,
+        id: integer,
+        relationship: components.Component,
+        callback: function(ancestor: integer, depth: integer, context: T): boolean?,
+        context: T,
+        maxDepth: integer?
+    ): nil
+
+    --- Creates a query over committed entities, excluding Disabled by default.
+    --- @param self The world that owns the query.
+    --- @param descriptor The constraints and callbacks; nil matches enabled entities.
+    --- @return Returns a persistent query unless temp is true.
+    --- @raises Raises for an invalid query type or temporary membership callbacks.
     newQuery: function(exclusive self: World, descriptor: query.Descriptor?): query.Query
+
     set: function(exclusive self: World, id: integer, input: components.Input, value: any?): nil
-    remove: function(exclusive self: World, id: integer, component: components.Component): nil
+    remove: function(exclusive self: World, id: integer, input: components.Input): nil
     despawn: function(exclusive self: World, id: integer): nil
+
+    --- Publishes staged mutations synchronously, including work staged by observers.
+    --- Reentrant calls during publication join the active drain.
+    --- @param self The world to publish; callers must leave query iteration first.
+    --- @raises Raises when a publication callback raises.
     commit: function(exclusive self: World): nil
+
+    --- Requests publication after the current system and its predicate return.
+    --- Repeated requests coalesce, including across suspension. Outside a system
+    --- this publishes synchronously; publication callbacks join the active drain.
+    --- A failed system cancels the request without publishing its staged work.
+    --- @param self The world whose pending mutations need a publication barrier.
+    --- @raises Raises when a synchronous publication callback raises.
+    enqueueCommit: function(exclusive self: World): nil
+
+    --- Returns this world's stable named Nupp random generator.
+    --- Stream names and the world seed determine independent sequences. The world
+    --- snapshots generators automatically and restores captured objects in place.
+    --- @param self The world that owns the generator and its snapshot state.
+    --- @param name The non-empty stream name, preferably namespaced for its consumer.
+    --- @return Returns the same mutable generator for each call with this name.
+    --- @raises Raises when the name is empty.
+    randomStream: function(exclusive self: World, name: string): random.Random
+
+    --- Restarts every named random stream without replacing captured generators.
+    --- Streams created later derive their seeds from this seed too.
+    --- @param self The world whose random sequences restart.
+    --- @param seed The finite integer seed, interpreted as a 32-bit word.
+    --- @raises Raises when the seed is not a finite integer.
+    seedRandom: function(exclusive self: World, seed: integer): nil
+
+    --- Clears entity data and pending batches while preserving systems, queries and
+    --- resources.
+    --- @param self The world to reset; reserved identities are invalidated too.
+    --- @raises Raises during publication. Use staged despawn from callbacks instead.
     clearEntities: function(exclusive self: World): nil
+
+    --- Registers a system for the next external dispatch, copying its constraints.
+    --- @param self The world to modify.
+    --- @param config The phase, body, optional ordering, gate and barriers.
+    --- @return Returns the unique explicit or generated system name.
+    --- @raises Raises when another registered system carries that name.
     addSystem: function(exclusive self: World, config: SystemConfig): string
+
     removeSystem: function(exclusive self: World, name: string): boolean
+
+    --- Reports the next schedule in phase and dependency order.
+    --- @param self The world to inspect without changing any active dispatch.
+    --- @return Returns caller-owned metadata, including disabled systems.
+    --- @raises Raises when any phase contains an ordering cycle.
     listSystems: function(borrows self: World): {SystemInfo}
+
     setSystemEnabled: function(exclusive self: World, name: string, enabled: boolean): (boolean, string?)
     update: function(exclusive self: World, dt: number): nil
     startup: function(exclusive self: World): nil
@@ -298,6 +613,7 @@ export record World is nupp.events.Source<integer>
     getBundles: function(borrows self: World): {[string]: Bundle}
     getBundle: function(borrows self: World, name: string): Bundle?
     saveSnapshot: function(exclusive self: World, options: SnapshotOptions?): Snapshot
+
     loadSnapshot: function(exclusive self: World, snapshot: Snapshot): SnapshotPrelude
     addSnapshotHandler: function(exclusive self: World, handler: SnapshotHandler): nil
     observe: function<E is nupp.events.Emittable>(
@@ -375,17 +691,27 @@ export function new(
     return new World(
         allocator = idallocator.new(maxEntities),
         archetypes = {empty},
+        archetypeById = {[1] = empty},
+        maxArchetypeId = 1,
+        freeArchetypeIds = {},
         archetypeBySignature = bySignature,
         pendingSpawns = {},
+        pendingSegments = {},
         pendingSpawnBySlot = {},
+        spawnBatches = {},
+        mutationBatches = {},
         pendingMoves = {},
         pendingMoveBySlot = {},
         pendingDespawns = {},
         pendingDespawnBySlot = {},
         queries = {},
+        queryOwner = new query.Owner(token = true),
+        queryObservers = {},
         relationshipIndexes = {},
         keyIndex = {},
         systems = {},
+        schedule = {},
+        scheduleDirty = true,
         systemNames = {},
         anonymousSystemCount = 0,
         disabledPhases = {},
@@ -399,6 +725,8 @@ export function new(
         updating = false,
         observedEntities = {},
         committing = false,
+        runningSystem = false,
+        commitRequested = false,
         nominalFrameTime = nominalFrameTime or 1 / 60,
         fixedTimestep = timestep or DEFAULT_TIMESTEP,
         fixedAccumulator = 0,
@@ -421,11 +749,19 @@ local function resolveArchetype(exclusive world: World, values: {components.Comp
     if existing ~= nil then
         return existing
     end
-    local id = world.archetypeCount + 1
+    local id: integer
+    if #world.freeArchetypeIds > 0 then
+        id = world.freeArchetypeIds[#world.freeArchetypeIds]
+        world.freeArchetypeIds[#world.freeArchetypeIds] = nil
+    else
+        world.maxArchetypeId = world.maxArchetypeId + 1
+        id = world.maxArchetypeId
+    end
     local created = archetype.new(id, values)
-    world.archetypes[id] = created
+    world.archetypes[#world.archetypes + 1] = created
+    world.archetypeById[id] = created
     world.archetypeBySignature[signature] = created
-    world.archetypeCount = id
+    world.archetypeCount = world.archetypeCount + 1
     for index = 1, #world.queries do
         query.addArchetype(world.queries[index], created)
     end
@@ -433,11 +769,19 @@ local function resolveArchetype(exclusive world: World, values: {components.Comp
     return created
 end
 
-local function reserve(exclusive world: World, id: integer, target: archetype.Archetype, values: {[integer]: any}): nil
+local function reserve(
+    exclusive world: World,
+    id: integer,
+    target: archetype.Archetype,
+    values: {[integer]: any}
+): PendingSpawn
     local slot = idallocator.slotOf(id)
-    local pending = new PendingSpawn(id = id, target = target, values = values)
+    local pending = new PendingSpawn(id = id, target = target, values = values, isSealed = false)
+    world.pendingDespawnBySlot[slot] = nil
     world.pendingSpawns[#world.pendingSpawns + 1] = pending
     world.pendingSpawnBySlot[slot] = pending
+
+    return pending
 end
 
 --- Adds everything the named components pull in with them.
@@ -445,24 +789,85 @@ end
 --- A component may name others it cannot be meaningful without, and adding it
 --- adds those too, so the entity lands in an archetype that carries all of
 --- them and the systems reading the pair actually match it. A component
---- already named keeps the value the caller supplied for it; one added here
---- takes its own default, which is what a column written without a value gets
---- anyway.
+--- already named keeps its value; a missing one takes either the requirement's
+--- shared instance or its own per-entity default. An explicit root limits set
+--- expansion to the newly added component, not every component already present.
 --- @param definitions the component list to extend in place
-local function expandRequires(exclusive definitions: {components.Component}): nil
+--- @param supplied the staged values to extend with shared requirements
+--- @param root the newly added component, or nil for all spawn inputs
+local function expandRequires(
+    exclusive definitions: {components.Component},
+    exclusive supplied: {[integer]: any},
+    root: components.Component?
+): nil
     local present: {[integer]: boolean} = {}
     for index = 1, #definitions do
         present[definitions[index].componentId] = true
     end
-    local named = #definitions
+    local named = root ~= nil and 1 or #definitions
     for index = 1, named do
-        local required = components.requiresClosure(definitions[index])
+        local required = components.requiresClosure(root or definitions[index])
         for position = 1, #required do
-            local component = required[position]
+            const entry = required[position]
+            local component = entry.component
             if not present[component.componentId] then
                 present[component.componentId] = true
                 definitions[#definitions + 1] = component
+                if entry.explicit then
+                    supplied[component.componentId] = entry.value
+                end
+                const relationship = components.asRelationship(component)
+                if relationship ~= nil and not relationship.sparse then
+                    const edges = entry.value as {any}
+                    for edgeIndex = 1, #edges do
+                        definitions[#definitions + 1] = relationship:targeting(components.edgeTarget(edges[edgeIndex]))
+                    end
+                end
             end
+        end
+    end
+end
+
+local function mergeEdges(previous: {any}, additions: {any}, exclusiveRelationship: boolean): {any}
+    const result: {any} = table.clone(previous)
+    for index = 1, #additions do
+        const edge = additions[index]
+        const target = components.edgeTarget(edge)
+        if exclusiveRelationship then
+            result[1] = edge
+        else
+            local found = false
+            for position = 1, #result do
+                if components.edgeTarget(result[position]) == target then
+                    result[position] = edge;
+                    found = true;
+                    break
+                end
+            end
+            if not found then
+                result[#result + 1] = edge
+            end
+        end
+    end
+    table.sort(result, function(left: any, right: any): boolean
+        return components.edgeTarget(left) < components.edgeTarget(right)
+    end)
+
+    return result
+end
+
+local function appendRelationshipDefinitions(
+    definitions: {components.Component},
+    relationship: components.RelationshipComponent,
+    edges: {any}
+): nil
+    if #edges == 0 then
+        return
+    end
+    definitions[#definitions + 1] = assert(components.findById(relationship.componentId))
+    if not relationship.sparse then
+        for index = 1, #edges do
+            definitions[#definitions + 1] = relationship:targeting(components.edgeTarget(edges[index]))
         end
     end
 end
@@ -470,20 +875,42 @@ end
 local function collectInputs(values: {components.Input}): {components.Component}, {[integer]: any}
     local definitions: {components.Component} = {}
     local supplied: {[integer]: any} = {}
+    local relationships: {components.RelationshipComponent}? = nil
     for index = 1, #values do
         local input = values[index]
         local component = components.definitionOf(input)
-        definitions[index] = component
         local raw, explicit = components.explicitValue(input)
-        if component.storageType == "relationship" and not explicit then
+        const relationship = components.asRelationship(component)
+        if relationship ~= nil and not explicit then
             error("Relationship " .. component.componentName .. " requires a target", 3)
         end
-        if explicit then
-            supplied[component.componentId] = raw
+        if relationship ~= nil then
+            if supplied[relationship.componentId] == nil then
+                if relationships == nil then
+                    relationships = {}
+                end
+                relationships[#relationships + 1] = relationship
+            end
+            const additions: {any} = input is components.RelationshipBatch and input.values or {raw}
+            supplied[
+                relationship.componentId
+            ] = mergeEdges(supplied[relationship.componentId] or {}, additions, relationship.exclusive)
+        else
+            definitions[#definitions + 1] = component
+            if explicit then
+                supplied[component.componentId] = raw
+            end
         end
     end
 
-    expandRequires(definitions)
+    if relationships ~= nil then
+        for index = 1, #relationships do
+            const relationship = relationships[index]
+            appendRelationshipDefinitions(definitions, relationship, supplied[relationship.componentId] as {any})
+        end
+    end
+
+    expandRequires(definitions, supplied)
 
     return definitions, supplied
 end
@@ -493,9 +920,6 @@ end
 --- @return the reserved packed entity id
 --- @raises when the world has exhausted its fixed entity capacity
 function World.spawn(exclusive self: World, ...: components.Input): integer
-    local slot = idallocator.allocSlot(self.allocator)
-    local generation = idallocator.generationAt(self.allocator, slot)
-    local id = idallocator.encodeId(slot, generation)
     local inputs: {components.Input} = {...}
     local stateComponent = self.autoStateComponent
     if stateComponent ~= nil then
@@ -511,7 +935,11 @@ function World.spawn(exclusive self: World, ...: components.Input): integer
         end
     end
     local definitions, supplied = collectInputs(inputs)
-    reserve(self, id, resolveArchetype(self, definitions), supplied)
+    const target = resolveArchetype(self, definitions)
+    local slot = idallocator.allocSlot(self.allocator)
+    local generation = idallocator.generationAt(self.allocator, slot)
+    local id = idallocator.encodeId(slot, generation)
+    reserve(self, id, target, supplied)
 
     return id
 end
@@ -524,18 +952,20 @@ function World.spawnAt(exclusive self: World, id: integer, ...: components.Input
     local slot = idallocator.slotOf(id)
     local pending = self.pendingSpawnBySlot[slot]
     local archetypeId = idallocator.placement(self.allocator, slot)
-    if pending ~= nil or archetypeId ~= 0 then
+    if pending ~= nil or idallocator.spawnBatchAt(self.allocator, slot) ~= 0 or archetypeId ~= 0 then
         error("world.spawnAt: slot " .. tostring(slot) .. " is already reserved or alive", 2)
     end
-    idallocator.stakeId(self.allocator, id)
     local definitions, supplied = collectInputs({...})
-    reserve(self, id, resolveArchetype(self, definitions), supplied)
+    const target = resolveArchetype(self, definitions)
+    idallocator.stakeId(self.allocator, id)
+    reserve(self, id, target, supplied)
 end
 
 local function withComponent(
     source: archetype.Archetype,
     component: components.Component,
-    include: boolean
+    include: boolean,
+    supplied: {[integer]: any}?
 ): {components.Component}
     local values: {components.Component} = {}
     for index = 1, #source.components do
@@ -550,28 +980,44 @@ local function withComponent(
         -- names it. Removing one does not take them away again: another
         -- component may want the same thing, and a caller that added the
         -- requirement itself did not ask for it to leave.
-        expandRequires(values)
+        expandRequires(values, supplied or {}, component)
     end
 
     return values
 end
 
+local function pendingDespawn(borrows world: World, slot: integer): boolean
+    return world.pendingDespawnBySlot[slot] or idallocator.mutationBatchAt(world.allocator, slot) < 0
+end
+
 local function logicalArchetype(borrows world: World, id: integer): archetype.Archetype?
     local slot = idallocator.slotOf(id)
-    local pendingSpawn = world.pendingSpawnBySlot[slot]
-    if pendingSpawn ~= nil and pendingSpawn.id == id then
-        return pendingSpawn.target
+    const mutation = idallocator.mutationBatchAt(world.allocator, slot)
+    if mutation > 0 and not idallocator.isStale(world.allocator, id) then
+        return world.mutationBatches[mutation].target
     end
     local pendingMove = world.pendingMoveBySlot[slot]
     if pendingMove ~= nil and pendingMove.id == id then
         return pendingMove.target
+    end
+    local pendingSpawn = world.pendingSpawnBySlot[slot]
+    if pendingSpawn ~= nil and pendingSpawn.id == id then
+        return pendingSpawn.target
+    end
+    const batch = idallocator.spawnBatchAt(world.allocator, slot)
+    if batch ~= 0 and not idallocator.isStale(world.allocator, id) then
+        return world.spawnBatches[batch].target
+    end
+    const publishing = world.publishingMove
+    if publishing ~= nil and publishing.id == id then
+        return publishing.target
     end
     if not world:isAlive(id) then
         return nil
     end
     local archetypeId = idallocator.placement(world.allocator, slot)
 
-    return world.archetypes[archetypeId]
+    return world.archetypeById[archetypeId]
 end
 
 local function mergeValues(target: {[integer]: any}, source: {[integer]: any}): nil
@@ -587,21 +1033,92 @@ local function stageMove(
     values: {[integer]: any}
 ): nil
     local slot = idallocator.slotOf(id)
+    if idallocator.mutationBatchAt(world.allocator, slot) > 0 then
+        idallocator.stampMutation(world.allocator, slot, 0)
+    end
     local pendingSpawn = world.pendingSpawnBySlot[slot]
-    if pendingSpawn ~= nil and pendingSpawn.id == id then
+    if pendingSpawn ~= nil and pendingSpawn.id == id and not pendingSpawn.isSealed then
         pendingSpawn.target = target
         mergeValues(pendingSpawn.values, values)
         return
     end
     local pending = world.pendingMoveBySlot[slot]
-    if pending ~= nil then
+    if pending ~= nil and not pending.isSealed then
         pending.target = target
         mergeValues(pending.values, values)
         return
     end
-    pending = new PendingMove(id = id, target = target, values = values)
+    pending = new PendingMove(id = id, target = target, values = values, isSealed = false)
     world.pendingMoves[#world.pendingMoves + 1] = pending
     world.pendingMoveBySlot[slot] = pending
+end
+
+local function logicalEdges(
+    borrows world: World,
+    id: integer,
+    source: archetype.Archetype,
+    relationship: components.RelationshipComponent
+): {any}
+    if not archetype.has(source, relationship) then
+        return {}
+    end
+    const slot = idallocator.slotOf(id)
+    const move = world.pendingMoveBySlot[slot]
+    if move ~= nil and move.values[relationship.componentId] ~= nil then
+        return move.values[relationship.componentId] as {any}
+    end
+    for segmentIndex = #world.pendingSegments, 1, -1 do
+        const moves = world.pendingSegments[segmentIndex].moves
+        for index = #moves, 1, -1 do
+            const previous = moves[index]
+            if previous.id == id and previous.values[relationship.componentId] ~= nil then
+                return previous.values[relationship.componentId] as {any}
+            end
+        end
+    end
+    const spawn = world.pendingSpawnBySlot[slot]
+    if spawn ~= nil then
+        return spawn.values[relationship.componentId] or {}
+    end
+    const batch = idallocator.spawnBatchAt(world.allocator, slot)
+    if batch ~= 0 then
+        return world.spawnBatches[batch].values[relationship.componentId] or {}
+    end
+    const publishing = world.publishingMove
+    if publishing ~= nil and publishing.id == id and publishing.values[relationship.componentId] ~= nil then
+        return publishing.values[relationship.componentId] as {any}
+    end
+    const archetypeId, row = idallocator.placement(world.allocator, slot)
+
+    return archetype.edgeValues(assert(world.archetypeById[archetypeId]), row, relationship)
+end
+
+local function stageEdges(
+    exclusive world: World,
+    id: integer,
+    source: archetype.Archetype,
+    relationship: components.RelationshipComponent,
+    edges: {any}
+): nil
+    const native = ffistorage.find(relationship.componentId)
+    if native ~= nil then
+        for index = 1, #edges do
+            edges[index] = ffistorage.capture(native, edges[index])
+        end
+    end
+    const definitions: {components.Component} = {}
+    for index = 1, #source.components do
+        const component = source.components[index]
+        if components.asRelationship(component) ~= relationship then
+            definitions[#definitions + 1] = component
+        end
+    end
+    appendRelationshipDefinitions(definitions, relationship, edges)
+    const supplied: {[integer]: any} = {[relationship.componentId] = edges}
+    if #edges > 0 and not archetype.has(source, relationship) then
+        expandRequires(definitions, supplied, relationship)
+    end
+    stageMove(world, id, resolveArchetype(world, definitions), supplied)
 end
 
 --- Stages a component value to be present at the next barrier.
@@ -609,10 +1126,26 @@ end
 --- @param id the entity to change
 --- @param input the component definition or scalar wrapper to add
 --- @param value an optional raw scalar value for the three-argument form
+--- @raises Raises when a relationship has no valid target-bearing value.
 function World.set(exclusive self: World, id: integer, input: components.Input, value: any?): nil
     local component = components.definitionOf(input)
     local source = logicalArchetype(self, id)
     if source == nil then
+        return
+    end
+    const relationship = components.asRelationship(component)
+    if relationship ~= nil then
+        local raw, explicit = components.explicitValue(input)
+        if value ~= nil then
+            raw = value;
+            explicit = true
+        end
+        if not explicit then
+            error("relationship requires a target", 2)
+        end
+        const additions: {any} = input is components.RelationshipBatch and input.values or {raw}
+        const edges = mergeEdges(logicalEdges(self, id, source, relationship), additions, relationship.exclusive)
+        stageEdges(self, id, source, relationship, edges)
         return
     end
     local supplied: {[integer]: any} = {}
@@ -625,11 +1158,14 @@ function World.set(exclusive self: World, id: integer, input: components.Input, 
         if not explicit then
             raw = components.defaultValue(component)
         end
+        if component.storageType == "ffi" then
+            raw = ffistorage.capture(assert(ffistorage.find(component.componentId)), raw)
+        end
         supplied[component.componentId] = raw
     end
     local target = source
     if not archetype.has(source, component) then
-        target = resolveArchetype(self, withComponent(source, component, true))
+        target = resolveArchetype(self, withComponent(source, component, true, supplied))
     elseif component.storageType == "tag" then
         return
     end
@@ -639,13 +1175,541 @@ end
 --- Stages a tag component to be absent at the next barrier.
 --- @param self the world to modify
 --- @param id the entity to change
---- @param component the tag component to remove
-function World.remove(exclusive self: World, id: integer, component: components.Component): nil
+--- @param input The component to remove, or a relationship instance selecting just its
+---     target.
+function World.remove(exclusive self: World, id: integer, input: components.Input): nil
+    const component = components.definitionOf(input)
     local source = logicalArchetype(self, id)
     if source == nil or not archetype.has(source, component) then
         return
     end
+    const relationship = components.asRelationship(component)
+    if relationship ~= nil then
+        local selected = components.targetOf(component)
+        const raw, explicit = components.explicitValue(input)
+        if explicit then
+            selected = components.edgeTarget(raw)
+        end
+        const edges: {any} = {}
+        if selected ~= nil then
+            const previous = logicalEdges(self, id, source, relationship)
+            for index = 1, #previous do
+                if components.edgeTarget(previous[index]) ~= selected then
+                    edges[#edges + 1] = previous[index]
+                end
+            end
+        end
+        stageEdges(self, id, source, relationship, edges)
+        return
+    end
     stageMove(self, id, resolveArchetype(self, withComponent(source, component, false)), {})
+end
+
+local function sealPending(exclusive world: World, writer: BatchWrite?): nil
+    if #world.pendingSpawns == 0 and #world.pendingMoves == 0 and #world.pendingDespawns == 0 and writer == nil then
+        return
+    end
+    for index = 1, #world.pendingSpawns do
+        world.pendingSpawns[index].isSealed = true
+    end
+    for index = 1, #world.pendingMoves do
+        world.pendingMoves[index].isSealed = true
+    end
+    world.pendingSegments[
+        #world.pendingSegments + 1
+    ] = new PendingSegment(
+        spawns = world.pendingSpawns,
+        moves = world.pendingMoves,
+        despawns = world.pendingDespawns,
+        writer = writer
+    )
+    world.pendingSpawns = {}
+    world.pendingMoves = {}
+    world.pendingDespawns = {}
+end
+
+local function batchIds(borrows world: World, selection: query.Query): {integer}
+    if not query.belongsTo(selection, world.queryOwner) then
+        error("batch mutation requires a query from this world", 3)
+    end
+    const ids: {integer} = {}
+    for _, count, entities in selection:iter() do
+        const stored = assert(entities)
+        for row = 1, assert(count) do
+            ids[#ids + 1] = stored[row]
+        end
+    end
+
+    return ids
+end
+
+-- Bulk constants copy their outer value, preserving record behavior. Nested
+-- references remain shared, just as with an ordinary shallow record copy.
+local function copyBatchValue(value: any): any
+    if type(value) == "table" then
+        return setmetatable(table.clone(value), getmetatable(value))
+    end
+    return value
+end
+
+local function copyBatchValues(supplied: {[integer]: any}, shared: {[integer]: boolean}): {[integer]: any}
+    const result: {[integer]: any} = {}
+    for id, value in pairs(supplied) do
+        if shared[id] then
+            result[id] = value
+        elseif components.asRelationship(assert(components.findById(id))) ~= nil then
+            const edges: {any} = {}
+            for index = 1, #value do
+                edges[index] = copyBatchValue(value[index])
+            end
+            result[id] = edges
+        else
+            result[id] = copyBatchValue(value)
+        end
+    end
+
+    return result
+end
+
+local function batchSignature(
+    exclusive world: World,
+    inputs: {components.Input},
+    autoState: boolean,
+    allowKeys: boolean?
+): archetype.Archetype, {[integer]: any}, {[integer]: boolean}
+    const values = table.clone(inputs)
+    if autoState and world.autoStateComponent ~= nil then
+        local present = false
+        for index = 1, #values do
+            if components.definitionOf(values[index]) == world.autoStateComponent then
+                present = true
+            end
+        end
+        if not present then
+            values[#values + 1] = assert(world.autoStateComponent)
+        end
+    end
+    const definitions, supplied = collectInputs(values)
+    const shared: {[integer]: boolean} = {}
+    for id in pairs(supplied) do
+        shared[id] = true
+    end
+    for index = 1, #values do
+        shared[components.definitionOf(values[index]).componentId] = nil
+    end
+    for index = 1, #definitions do
+        if definitions[index] == components.Key and not allowKeys then
+            error("batch spawn does not support EntityKey; set keys per entity", 3)
+        end
+    end
+
+    return resolveArchetype(world, definitions), supplied, shared
+end
+
+local function batchId(batch: SpawnBatch, index: integer): integer
+    if batch.rawIds ~= nil then
+        unsafe do
+            return batch.rawIds[index - 1] as integer
+        end
+    end
+
+    return batch.ids ~= nil and batch.ids[index] or batch.firstId + index - 1
+end
+
+local function queueSpawnBatch(exclusive world: World, batch: SpawnBatch): nil
+    sealPending(world)
+    world.spawnBatches[batch.index] = batch
+    for index = 1, batch.count do
+        const slot = idallocator.slotOf(batchId(batch, index))
+        idallocator.stampSpawn(world.allocator, slot, batch.index)
+        world.pendingDespawnBySlot[slot] = nil
+    end
+    world.pendingSegments[
+        #world.pendingSegments + 1
+    ] = new PendingSegment(spawns = {}, moves = {}, despawns = {}, spawnBatch = batch)
+end
+
+function World.batchSpawn(
+    exclusive self: World,
+    count: integer,
+    inputs: {components.Input},
+    callback: BatchCallback?
+): (integer?, {integer}?)
+    if count < 1 or count % 1 ~= 0 or count == math.huge then
+        error("batchSpawn requires a positive integer count", 2)
+    end
+    const available = self.allocator.maxSlotCount - self.allocator.nextFreshSlot + 1 + self.allocator.freeCount
+    if count > available then
+        error("batchSpawn: entity ID exhaustion", 2)
+    end
+    const target, supplied, shared = batchSignature(self, inputs, true)
+    local ids: {integer}? = nil
+    local firstId: integer = 0
+    if self.allocator.nextFreshSlot + count <= self.allocator.maxSlotCount + 1 then
+        const firstSlot = idallocator.allocContiguousSlots(self.allocator, count)
+        idallocator.reserveSlots(self.allocator, firstSlot + count - 1)
+        const generation = idallocator.generationAt(self.allocator, firstSlot)
+        firstId = idallocator.encodeId(firstSlot, generation)
+        if self.allocator.maxGeneration ~= 0 then
+            for slot = firstSlot + 1, firstSlot + count - 1 do
+                if idallocator.generationAt(self.allocator, slot) ~= generation then
+                    ids = {}
+                    break
+                end
+            end
+        end
+        if ids ~= nil then
+            for index = 1, count do
+                const slot = firstSlot + index - 1
+                ids[index] = idallocator.encodeId(slot, idallocator.generationAt(self.allocator, slot))
+            end
+        end
+    else
+        ids = {}
+        for index = 1, count do
+            const slot = idallocator.allocSlot(self.allocator)
+            ids[index] = idallocator.encodeId(slot, idallocator.generationAt(self.allocator, slot))
+        end
+    end
+    queueSpawnBatch(
+        self,
+        new SpawnBatch(
+            index = #self.spawnBatches + 1,
+            target = target,
+            values = supplied,
+            shared = shared,
+            count = count,
+            firstId = firstId,
+            ids = ids ~= nil and table.clone(ids) or nil,
+            callback = callback
+        )
+    )
+    if ids == nil then
+        return firstId, nil
+    end
+
+    return nil, ids
+end
+
+function World.batchSpawnAt(
+    exclusive self: World,
+    ids: {integer},
+    inputs: {components.Input},
+    callback: BatchCallback?
+): nil
+    const seen: {[integer]: boolean} = {}
+    for index = 1, #ids do
+        const id = ids[index]
+        const slot = idallocator.slotOf(id)
+        if id < 1 or id > 9007199254740991 or id % 1 ~= 0 or slot < 1 or slot > self.allocator.maxSlotCount then
+            error("batchSpawnAt: invalid packed entity id", 2)
+        end
+        if seen[
+            slot
+        ] or self.pendingSpawnBySlot[
+            slot
+        ] ~= nil or idallocator.spawnBatchAt(
+            self.allocator,
+            slot
+        ) ~= 0 or idallocator.placement(self.allocator, slot) ~= 0 then
+            error("batchSpawnAt: duplicate or occupied entity slot", 2)
+        end
+        seen[slot] = true
+    end
+    if #ids == 0 then
+        return
+    end
+    const target, supplied, shared = batchSignature(self, inputs, false)
+    for index = 1, #ids do
+        idallocator.stakeId(self.allocator, ids[index])
+    end
+    queueSpawnBatch(
+        self,
+        new SpawnBatch(
+            index = #self.spawnBatches + 1,
+            target = target,
+            values = supplied,
+            shared = shared,
+            count = #ids,
+            firstId = 0,
+            ids = table.clone(ids),
+            callback = callback
+        )
+    )
+    const reserved: {[integer]: boolean} = {}
+    for slot in pairs(self.pendingSpawnBySlot) do
+        reserved[slot] = true
+    end
+    idallocator.rebuildFreeStack(self.allocator, reserved)
+end
+
+function World.batchSpawnAtRaw(
+    exclusive self: World,
+    ids: number[?],
+    count: integer,
+    inputs: {components.Input},
+    callback: BatchCallback?
+): nil
+    if count < 0 or count % 1 ~= 0 or count == math.huge or count * 8 > ffi.sizeof(ids) then
+        error("batchSpawnAtRaw: count exceeds the native identity array", 2)
+    end
+    if count == 0 then
+        return
+    end
+    const seen: {[integer]: boolean} = {}
+    unsafe do
+        for index = 0, count - 1 do
+            const id = ids[index] as integer
+            const slot = idallocator.slotOf(id)
+            if id < 1 or id > 9007199254740991 or id % 1 ~= 0 or slot < 1 or slot > self.allocator.maxSlotCount then
+                error("batchSpawnAtRaw: invalid packed entity id", 2)
+            end
+            if seen[
+                slot
+            ] or self.pendingSpawnBySlot[
+                slot
+            ] ~= nil or idallocator.spawnBatchAt(
+                self.allocator,
+                slot
+            ) ~= 0 or idallocator.placement(self.allocator, slot) ~= 0 then
+                error("batchSpawnAtRaw: duplicate or occupied entity slot", 2)
+            end
+            seen[slot] = true
+        end
+    end
+    const target, supplied, shared = batchSignature(self, inputs, false, true)
+    unsafe do
+        for index = 0, count - 1 do
+            idallocator.stakeId(self.allocator, ids[index] as integer)
+        end
+    end
+    queueSpawnBatch(
+        self,
+        new SpawnBatch(
+            index = #self.spawnBatches + 1,
+            target = target,
+            values = supplied,
+            shared = shared,
+            count = count,
+            firstId = 0,
+            rawIds = ids,
+            callback = callback
+        )
+    )
+    const reserved: {[integer]: boolean} = {}
+    for slot in pairs(self.pendingSpawnBySlot) do
+        reserved[slot] = true
+    end
+    idallocator.rebuildFreeStack(self.allocator, reserved)
+end
+
+-- Capture row identities in native storage because an earlier queued operation
+-- may move or append to this archetype before this descriptor publishes. The
+-- ordinary whole-archetype case still swaps columns; exceptions use these ids.
+local function tryStageBulk(
+    exclusive world: World,
+    selection: query.Query,
+    component: components.Component?,
+    raw: any,
+    explicit: boolean,
+    removing: boolean,
+    callback: BatchCallback?,
+    despawning: boolean
+): boolean
+    if not query.belongsTo(selection, world.queryOwner) then
+        error("batch mutation requires a query from this world", 3)
+    end
+    if despawning and (#world.spawnBatches > 0 or #world.pendingSpawns > 0) then
+        return false
+    end
+    const batches: {MutationBatch} = {}
+    for candidate, rows in selection:iter() do
+        const count = assert(rows)
+        if count > 0 then
+            const selected = assert(candidate)
+            const source = assert(logicalArchetype(world, selected.entities[1]))
+            if not archetype.bulkSafe(source) then
+                return false
+            end
+            for row = 1, count do
+                const id = selected.entities[row]
+                const slot = idallocator.slotOf(id)
+                if world.pendingMoveBySlot[
+                    slot
+                ] ~= nil or pendingDespawn(world, slot) or logicalArchetype(world, id) ~= source then
+                    return false
+                end
+            end
+            const values: {[integer]: any} = {}
+            const shared: {[integer]: boolean} = {}
+            local target = source
+            local resetComponent: components.Component? = nil
+            if component ~= nil then
+                if removing then
+                    if archetype.has(source, component) then
+                        target = resolveArchetype(world, withComponent(source, component, false))
+                    end
+                else
+                    if not archetype.has(source, component) then
+                        target = resolveArchetype(world, withComponent(source, component, true, values))
+                    end
+                    for id in pairs(values) do
+                        shared[id] = true
+                    end
+                    if component.storageType ~= "tag" then
+                        if explicit then
+                            const native = ffistorage.find(component.componentId)
+                            values[component.componentId] = native ~= nil and ffistorage.capture(native, raw) or raw
+                            shared[component.componentId] = false
+                        elseif callback == nil then
+                            resetComponent = component
+                        end
+                    end
+                end
+            end
+            if not archetype.bulkSafe(target) then
+                return false
+            end
+            const ids = ffi.new("double[?]", count) as number[?]
+            unsafe do
+                for row = 1, count do
+                    ids[row - 1] = selected.entities[row]
+                end
+            end
+            batches[
+                #batches + 1
+            ] = new MutationBatch(
+                index = #world.mutationBatches + #batches + 1,
+                source = source,
+                target = target,
+                ids = ids,
+                count = count,
+                values = values,
+                shared = shared,
+                callback = callback,
+                despawn = despawning,
+                resetComponent = resetComponent,
+                writeComponent = component
+            )
+        end
+    end
+    sealPending(world)
+    for index = 1, #batches do
+        const batch = batches[index]
+        world.mutationBatches[batch.index] = batch
+        unsafe do
+            for row = 0, batch.count - 1 do
+                const slot = idallocator.slotOf(batch.ids[row] as integer)
+                if despawning then
+                    idallocator.stampMutation(world.allocator, slot, -batch.index)
+                else
+                    idallocator.stampMutation(world.allocator, slot, batch.index)
+                end
+            end
+        end
+        world.pendingSegments[
+            #world.pendingSegments + 1
+        ] = new PendingSegment(spawns = {}, moves = {}, despawns = {}, mutationBatch = batch)
+    end
+
+    return true
+end
+
+function World.batchSet(
+    exclusive self: World,
+    selection: query.Query,
+    input: components.Input,
+    callback: BatchCallback?
+): nil
+    const component = components.definitionOf(input)
+    const raw, explicit = components.explicitValue(input)
+    const relationship = components.asRelationship(component)
+    if component == components.Key then
+        error("batchSet does not support EntityKey; set keys per entity", 2)
+    end
+    if callback ~= nil and (explicit or relationship ~= nil) then
+        error("batchSet callback requires a plain component definition", 2)
+    end
+    if relationship ~= nil and not explicit then
+        error("batchSet relationship requires a target", 2)
+    end
+    if relationship == nil and tryStageBulk(self, selection, component, raw, explicit, false, callback, false) then
+        return
+    end
+    const ids = batchIds(self, selection)
+    const targets: {[archetype.Archetype]: archetype.Archetype} = {}
+    const requirements: {[archetype.Archetype]: {[integer]: any}} = {}
+    for index = 1, #ids do
+        const id = ids[index]
+        const source = logicalArchetype(self, id)
+        if source ~= nil then
+            if relationship ~= nil then
+                self:set(id, component, copyBatchValue(raw))
+            elseif callback == nil or not archetype.has(source, component) then
+                local target = targets[source]
+                if target == nil then
+                    const required: {[integer]: any} = {}
+                    target = archetype.has(
+                        source,
+                        component
+                    ) and source or resolveArchetype(self, withComponent(source, component, true, required))
+                    targets[source] = target
+                    requirements[source] = required
+                end
+                const supplied: {[integer]: any} = table.clone(assert(requirements[source]))
+                if component.storageType ~= "tag" then
+                    if explicit then
+                        supplied[component.componentId] = copyBatchValue(raw)
+                    else
+                        supplied[component.componentId] = components.defaultValue(component)
+                    end
+                end
+                stageMove(self, id, target, supplied)
+            end
+        end
+    end
+    if callback ~= nil and #ids > 0 then
+        sealPending(self, new BatchWrite(ids = ids, component = component, callback = callback))
+    end
+end
+
+function World.batchRemove(exclusive self: World, selection: query.Query, input: components.Input): nil
+    const component = components.definitionOf(input)
+    if components.asRelationship(
+        component
+    ) == nil and tryStageBulk(self, selection, component, nil, false, true, nil, false) then
+        return
+    end
+    const ids = batchIds(self, selection)
+    if components.asRelationship(component) ~= nil then
+        for index = 1, #ids do
+            self:remove(ids[index], input)
+        end
+        return
+    end
+    const targets: {[archetype.Archetype]: archetype.Archetype} = {}
+    for index = 1, #ids do
+        const id = ids[index]
+        const source = logicalArchetype(self, id)
+        if source ~= nil and archetype.has(source, component) then
+            local target = targets[source]
+            if target == nil then
+                target = resolveArchetype(self, withComponent(source, component, false))
+                targets[source] = target
+            end
+            stageMove(self, id, target, {})
+        end
+    end
+end
+
+function World.batchDespawn(exclusive self: World, selection: query.Query): nil
+    if tryStageBulk(self, selection, nil, nil, false, false, nil, true) then
+        return
+    end
+    const ids = batchIds(self, selection)
+    for index = 1, #ids do
+        self:despawn(ids[index])
+    end
 end
 
 --- Reports whether an entity is committed and alive.
@@ -670,7 +1734,7 @@ function World.has(borrows self: World, id: integer, component: components.Compo
     local slot = idallocator.slotOf(id)
     local archetypeId = idallocator.placement(self.allocator, slot)
 
-    return archetype.has(self.archetypes[archetypeId], component)
+    return archetype.has(assert(self.archetypeById[archetypeId]), component)
 end
 
 --- Returns one committed component value.
@@ -685,7 +1749,7 @@ function World.get<C is components.Component>(borrows self: World, id: integer, 
     local slot = idallocator.slotOf(id)
     local archetypeId, row = idallocator.placement(self.allocator, slot)
 
-    return archetype.valueAt(self.archetypes[archetypeId], row, component)
+    return archetype.valueAt(assert(self.archetypeById[archetypeId]), row, component)
 end
 
 --- Returns one committed component value and marks its archetype column dirty.
@@ -699,7 +1763,7 @@ function World.getMut<C is components.Component>(exclusive self: World, id: inte
     end
     local slot = idallocator.slotOf(id)
     local archetypeId, row = idallocator.placement(self.allocator, slot)
-    local source = self.archetypes[archetypeId]
+    local source = assert(self.archetypeById[archetypeId])
     source:markComponentDirty(component)
 
     return archetype.valueAt(source, row, component)
@@ -715,7 +1779,7 @@ function World.markComponentDirty(exclusive self: World, id: integer, component:
     end
     local slot = idallocator.slotOf(id)
     local archetypeId = idallocator.placement(self.allocator, slot)
-    self.archetypes[archetypeId]:markComponentDirty(component)
+    assert(self.archetypeById[archetypeId]):markComponentDirty(component)
 end
 
 --- Reports whether any archetype holds a dirty column for one of these components.
@@ -753,13 +1817,14 @@ end
 --- @param relationship the reverse-indexed relationship
 --- @param target the target entity id
 --- @return a sorted caller-owned source list
-function World.relationshipSources(
-    borrows self: World,
-    relationship: components.RelationshipComponent,
-    target: integer
-): {integer}
+--- @raises Raises when the component is not a relationship with a reverse index.
+function World.relationshipSources(borrows self: World, relationship: components.Component, target: integer): {integer}
+    const metadata = assert(components.asRelationship(relationship), "expected a relationship")
+    if not metadata.reverseIndex then
+        error("relationshipSources requires reverseIndex = true", 2)
+    end
     local result: {integer} = {}
-    local inverse = self.relationshipIndexes[relationship.componentId]
+    local inverse = self.relationshipIndexes[metadata.componentId]
     if inverse ~= nil then
         inverse:forEachSource(target, collectRelationshipSource, result)
         table.sort(result)
@@ -768,18 +1833,149 @@ function World.relationshipSources(
     return result
 end
 
---- Creates a reusable query and indexes every existing archetype into it.
---- @param self the world that owns the query
---- @param descriptor the include and exclude constraints
---- @return the reusable query
-function World.newQuery(exclusive self: World, descriptor: query.Descriptor?): query.Query
-    local value = query.new(descriptor)
+function World.forEachRelationship<C is components.Component>(
+    borrows self: World,
+    id: integer,
+    relationship: C,
+    callback: function(value: C.Value)
+): nil
+    if not self:isAlive(id) then
+        return
+    end
+    const archetypeId, row = idallocator.placement(self.allocator, idallocator.slotOf(id))
+    assert(self.archetypeById[archetypeId]):forEachRelationship(relationship, row + 1, callback)
+end
+
+function World.getFirstRelationship<C is components.Component>(
+    borrows self: World,
+    id: integer,
+    relationship: C
+): C.Value?
+    if components.asRelationship(relationship) == nil then
+        error("expected a relationship", 2)
+    end
+    return self:get(id, relationship)
+end
+
+function World.targets<T>(
+    borrows self: World,
+    target: integer,
+    relationship: components.Component,
+    callback: function(source: integer, context: T),
+    context: T
+): nil
+    const sources = self:relationshipSources(relationship, target)
+    for index = 1, #sources do
+        callback(sources[index], context)
+    end
+end
+
+function World.traverse(
+    borrows self: World,
+    root: integer,
+    relationship: components.Component
+): function(): (integer?, integer?)
+    const metadata = assert(components.asRelationship(relationship), "expected a relationship")
+    if not metadata.reverseIndex then
+        error("traverse requires reverseIndex = true", 2)
+    end
+    const inverse = self.relationshipIndexes[metadata.componentId]
+    const stack: {{integer}} = {}
+    const seen: {[integer]: boolean} = {[root] = true}
+    local function pushChildren(target: integer, depth: integer): nil
+        const children: {integer} = {}
+        if inverse ~= nil then
+            inverse:forEachSource(target, collectRelationshipSource, children)
+        end
+        table.sort(children)
+        for index = #children, 1, -1 do
+            stack[#stack + 1] = {children[index], depth}
+        end
+    end
+
+    pushChildren(root, 0)
+
+    return function(): (integer?, integer?)
+        while #stack > 0 do
+            const item = assert(table.remove(stack))
+            const id: integer = item[1]
+            const depth: integer = item[2]
+            if not seen[id] then
+                seen[id] = true
+                pushChildren(id, (depth + 1) as integer)
+                return depth, id
+            end
+        end
+
+        return nil, nil
+    end
+end
+
+function World.walkUp<T>(
+    borrows self: World,
+    id: integer,
+    relationship: components.Component,
+    callback: function(ancestor: integer, depth: integer, context: T): boolean?,
+    context: T,
+    maxDepth: integer?
+): nil
+    const metadata = assert(components.asRelationship(relationship), "expected a relationship")
+    const limit = maxDepth or 100
+    if limit < 1 then
+        error("walkUp requires a positive depth limit", 2)
+    end
+    const seen: {[integer]: boolean} = {[id] = true}
+    local current: integer = id
+    local depth: integer = 0
+    while self:isAlive(current) do
+        const edge = self:get(current, metadata)
+        if edge == nil then
+            return
+        end
+        current = edge.target
+        depth = depth + 1
+        if seen[current] or depth > limit then
+            error("walkUp encountered a cycle or exceeded its depth limit", 2)
+        end
+        seen[current] = true
+        if callback(current, depth, context) == false then
+            return
+        end
+    end
+end
+
+local function registerQuery(exclusive self: World, value: query.Query): query.Query
+    query.bindOwner(value, self.queryOwner)
+    if not value.descriptor.temp then
+        self.queries[#self.queries + 1] = value
+        if value.descriptor.onEntitiesAdded ~= nil or value.descriptor.onEntitiesRemoved ~= nil then
+            self.queryObservers[#self.queryObservers + 1] = value
+        end
+    end
     for index = 1, self.archetypeCount do
         query.addArchetype(value, self.archetypes[index])
     end
-    self.queries[#self.queries + 1] = value
 
     return value
+end
+
+--- Creates a reusable query with automatic state filtering.
+--- @param self The world owning the query.
+--- @param descriptor The constraints and optional membership callbacks, copied during
+---     construction.
+--- @return Returns a query excluding Disabled unless explicitly included, and Paused
+---     for logic queries.
+--- @raises Raises when a temporary query declares callbacks or a callback raises.
+function World.newQuery(exclusive self: World, descriptor: query.Descriptor?): query.Query
+    return registerQuery(self, query.new(descriptor, true))
+end
+
+--- Creates a persistent engine query that can see disabled entities during cleanup.
+--- @param world The world owning native resources or retained derived data.
+--- @param descriptor The explicit constraints; no state exclusions are added.
+--- @return Returns the registered query.
+export function newUnfilteredQuery(exclusive world: World, descriptor: query.Descriptor?): query.Query
+    return registerQuery(world, query.new(descriptor))
 end
 
 --- Registers an addressed typed-event observer.
@@ -910,26 +2106,54 @@ end
 --- @param id the entity to remove
 function World.despawn(exclusive self: World, id: integer): nil
     local slot = idallocator.slotOf(id)
-    if self.pendingDespawnBySlot[slot] then
+    if pendingDespawn(self, slot) then
         return
     end
     local pending = self.pendingSpawnBySlot[slot]
-    if (pending == nil or pending.id ~= id) and not self:isAlive(id) then
+    const batch = idallocator.spawnBatchAt(self.allocator, slot)
+    if (
+        pending == nil or pending.id ~= id
+    ) and (batch == 0 or idallocator.isStale(self.allocator, id)) and not self:isAlive(id) then
         return
     end
     self.pendingDespawns[#self.pendingDespawns + 1] = id
     self.pendingDespawnBySlot[slot] = true
-    for index = 1, #self.pendingSpawns do
-        local child = self.pendingSpawns[index]
+    for _, child in pairs(self.pendingSpawnBySlot) do
         local childSlot = idallocator.slotOf(child.id)
-        if not self.pendingDespawnBySlot[childSlot] then
-            for componentIndex = 1, #child.target.components do
-                local relationship = components.asRelationship(child.target.components[componentIndex])
+        if not pendingDespawn(self, childSlot) then
+            const target = assert(logicalArchetype(self, child.id))
+            for componentIndex = 1, #target.components do
+                local relationship = components.asRelationship(target.components[componentIndex])
                 if relationship ~= nil and relationship.cascadeDelete then
-                    local raw = child.values[relationship.componentId] as components.RelationshipValue?
-                    if raw ~= nil and raw.target == id then
+                    const raw = logicalEdges(self, child.id, target, relationship)
+                    if #raw > 0 and components.edgeTarget(raw[1]) == id then
                         self:despawn(child.id)
                         break
+                    end
+                end
+            end
+        end
+    end
+    for batchIndex = 1, #self.spawnBatches do
+        const children = self.spawnBatches[batchIndex]
+        if not archetype.bulkSafe(children.target) then
+            for childIndex = 1, children.count do
+                const childId = batchId(children, childIndex)
+                const childSlot = idallocator.slotOf(childId)
+                if idallocator.spawnBatchAt(
+                    self.allocator,
+                    childSlot
+                ) == children.index and not pendingDespawn(self, childSlot) then
+                    const target = assert(logicalArchetype(self, childId))
+                    for componentIndex = 1, #target.components do
+                        const relationship = components.asRelationship(target.components[componentIndex])
+                        if relationship ~= nil and relationship.cascadeDelete then
+                            const edges = logicalEdges(self, childId, target, relationship)
+                            if #edges > 0 and components.edgeTarget(edges[1]) == id then
+                                self:despawn(childId)
+                                break
+                            end
+                        end
                     end
                 end
             end
@@ -984,10 +2208,13 @@ end
 local function linkOutgoing(exclusive world: World, source: archetype.Archetype, row: integer, entity: integer): nil
     for index = 1, #source.components do
         local relationship = components.asRelationship(source.components[index])
-        if relationship ~= nil and relationship.reverseIndex then
-            local value = archetype.valueAt(source, row, relationship)
-            if value ~= nil then
-                relationshipIndex(world, relationship):link(entity, value.target)
+        if relationship ~= nil and relationship.componentId == source.components[
+            index
+        ].componentId and relationship.reverseIndex then
+            const edges = archetype.edgeValues(source, row, relationship)
+            const inverse = relationshipIndex(world, relationship)
+            for edgeIndex = 1, #edges do
+                inverse:link(entity, components.edgeTarget(edges[edgeIndex]))
             end
         end
     end
@@ -1000,10 +2227,13 @@ end
 local function unlinkOutgoing(exclusive world: World, source: archetype.Archetype, row: integer, entity: integer): nil
     for index = 1, #source.components do
         local relationship = components.asRelationship(source.components[index])
-        if relationship ~= nil and relationship.reverseIndex then
-            local value = archetype.valueAt(source, row, relationship)
-            if value ~= nil then
-                relationshipIndex(world, relationship):unlink(entity, value.target)
+        if relationship ~= nil and relationship.componentId == source.components[
+            index
+        ].componentId and relationship.reverseIndex then
+            const edges = archetype.edgeValues(source, row, relationship)
+            const inverse = relationshipIndex(world, relationship)
+            for edgeIndex = 1, #edges do
+                inverse:unlink(entity, components.edgeTarget(edges[edgeIndex]))
             end
         end
     end
@@ -1021,53 +2251,185 @@ local function removeFromArchetype(exclusive world: World, source: archetype.Arc
     end
 end
 
-local function publishMove(exclusive world: World, pending: PendingMove): nil
+local function notifyQueries(
+    exclusive world: World,
+    source: archetype.Archetype,
+    other: archetype.Archetype?,
+    row: integer,
+    count: integer,
+    added: boolean,
+    observerLimit: integer?
+): nil
+    const observers = world.queryObservers
+    local index: integer = 1
+    local limit: integer = observerLimit or #observers
+    while index <= limit do
+        query.notify(observers[index], source, other, row + 1, count, added)
+        index = index + 1
+        if not added then
+            limit = #observers
+        end
+    end
+end
+
+local function publishMove(exclusive world: World, pending: PendingMove, notices: {PendingNotice}?): nil
     local id = pending.id
     if not world:isAlive(id) then
         return
     end
     local slot = idallocator.slotOf(id)
     local archetypeId, row = idallocator.placement(world.allocator, slot)
-    local source = world.archetypes[archetypeId]
+    local source = assert(world.archetypeById[archetypeId])
     local target = pending.target
     if source == target then
         for componentId, raw in pairs(pending.values) do
-            local stored = assert(source.columns[componentId])
-            local relationship = components.asRelationship(assert(components.findById(componentId)))
-            if relationship ~= nil and relationship.reverseIndex then
-                local previous = stored[row + 1] as components.RelationshipValue
-                local replacement = raw as components.RelationshipValue
-                if previous.target ~= replacement.target then
-                    local inverse = relationshipIndex(world, relationship)
-                    inverse:unlink(id, previous.target)
-                    inverse:link(id, replacement.target)
+            if source.componentIds[componentId] then
+                local stored = assert(source.columns[componentId])
+                local relationship = components.asRelationship(assert(components.findById(componentId)))
+                if relationship ~= nil then
+                    const previous = archetype.edgeValues(source, row, relationship)
+                    const replacement = raw as {any}
+                    if relationship.reverseIndex then
+                        const inverse = relationshipIndex(world, relationship)
+                        for index = 1, #previous do
+                            inverse:unlink(id, components.edgeTarget(previous[index]))
+                        end
+                        for index = 1, #replacement do
+                            inverse:link(id, components.edgeTarget(replacement[index]))
+                        end
+                    end
+                    archetype.setEdges(source, row, relationship, replacement)
+                else
+                    if componentId == components.Key.componentId then
+                        local previous = stored[row + 1] as string
+                        local replacement = raw as string
+                        if previous ~= replacement then
+                            claimKey(world, id, replacement)
+                            releaseKey(world, id, previous)
+                        end
+                    end
+                    stored[row + 1] = raw
+                    source:markComponentDirty(assert(components.findById(componentId)))
                 end
             end
-            if componentId == components.Key.componentId then
-                local previous = stored[row + 1] as string
-                local replacement = raw as string
-                if previous ~= replacement then
-                    claimKey(world, id, replacement)
-                    releaseKey(world, id, previous)
-                end
-            end
-            stored[row + 1] = raw
-            source:markComponentDirty(assert(components.findById(componentId)))
         end
         return
     end
     local values = archetype.valuesForMove(source, row, target, pending.values)
+    world.publishingMove = pending
+    notifyQueries(world, source, target, row, 1, false)
     unlinkOutgoing(world, source, row, id)
-    removeFromArchetype(world, source, row)
     local targetRow = archetype.append(target, id, values)
+    -- Native values are row references: copy into the destination before swap
+    -- removal overwrites their source. No per-component clone is necessary.
+    removeFromArchetype(world, source, row)
     linkOutgoing(world, target, targetRow, id)
     idallocator.place(world.allocator, slot, target.id, targetRow)
+    world.publishingMove = nil
+    if notices ~= nil then
+        notices[
+            #notices + 1
+        ] = new PendingNotice(target = target, source = source, entity = id, observerLimit = #world.queryObservers)
+    else
+        notifyQueries(world, target, source, targetRow, 1, true)
+    end
+end
+
+local function publishSpawnBatch(exclusive world: World, batch: SpawnBatch): nil
+    const target = batch.target
+    archetype.reserveCapacity(target, #target.entities + batch.count)
+    const observerLimit = #world.queryObservers
+    const firstRow = #target.entities + 1
+    const plain = archetype.bulkSafe(target, true)
+    local lastRow = firstRow - 1
+    for index = 1, batch.count do
+        const id = batchId(batch, index)
+        const slot = idallocator.slotOf(id)
+        if pendingDespawn(world, slot) then
+            world:clearObservers(id)
+            idallocator.freeSlot(world.allocator, slot)
+        else
+            if plain then
+                lastRow = lastRow + 1
+                target.entities[lastRow] = id
+            else
+                lastRow = archetype.append(target, id, copyBatchValues(batch.values, batch.shared)) + 1
+            end
+            idallocator.place(world.allocator, slot, target.id, lastRow - 1)
+            idallocator.stampSpawn(world.allocator, slot, 0)
+            world.liveCount = world.liveCount + 1
+        end
+    end
+    if lastRow < firstRow then
+        return
+    end
+    if plain then
+        archetype.initializeRange(target, firstRow, lastRow, batch.values, batch.shared)
+    end
+    const callback = batch.callback
+    local succeeded, failure = pcall(function(): nil
+        if callback ~= nil then
+            callback(target, firstRow, lastRow, lastRow - firstRow + 1)
+        end
+    end)
+    if not plain or archetype.has(target, components.Key) then
+        for row = firstRow, lastRow do
+            linkOutgoing(world, target, row - 1, target.entities[row])
+        end
+    end
+    if not succeeded then
+        error(failure, 0)
+    end
+    notifyQueries(world, target, nil, firstRow - 1, lastRow - firstRow + 1, true, observerLimit)
+    if world:hasObservers(0, events.OnSpawn) then
+        for row = firstRow, lastRow do
+            world:emit(0, events.OnSpawn, target.entities[row])
+        end
+    end
+end
+
+local function publishBatchWrite(exclusive world: World, writer: BatchWrite): nil
+    const rows: {[archetype.Archetype]: {integer}} = {}
+    const ordered: {archetype.Archetype} = {}
+    for index = 1, #writer.ids do
+        const id = writer.ids[index]
+        const slot = idallocator.slotOf(id)
+        if world:isAlive(id) and not pendingDespawn(world, slot) then
+            const archetypeId, row = idallocator.placement(world.allocator, slot)
+            const target = assert(world.archetypeById[archetypeId])
+            if archetype.has(target, writer.component) then
+                local selected = rows[target]
+                if selected == nil then
+                    selected = {};
+                    rows[target] = selected;
+                    ordered[#ordered + 1] = target
+                end
+                selected[#selected + 1] = row + 1
+            end
+        end
+    end
+    for index = 1, #ordered do
+        const target = ordered[index]
+        const selected = assert(rows[target])
+        table.sort(selected)
+        local position: integer = 1
+        while position <= #selected do
+            const first = selected[position]
+            local last = first
+            position = position + 1
+            while position <= #selected and selected[position] == last + 1 do
+                last = selected[position];
+                position = position + 1
+            end
+            writer.callback(target, first, last, last - first + 1)
+        end
+    end
 end
 
 local function publishSpawn(exclusive world: World, pending: PendingSpawn): nil
     local id = pending.id
     local slot = idallocator.slotOf(id)
-    if world.pendingDespawnBySlot[slot] then
+    if pendingDespawn(world, slot) then
         world:clearObservers(id)
         idallocator.freeSlot(world.allocator, slot)
         return
@@ -1077,6 +2439,7 @@ local function publishSpawn(exclusive world: World, pending: PendingSpawn): nil
     linkOutgoing(world, target, row, id)
     idallocator.place(world.allocator, slot, target.id, row)
     world.liveCount = world.liveCount + 1
+    notifyQueries(world, target, nil, row, 1, true)
     world:emit(0, events.OnSpawn, id)
 end
 
@@ -1087,7 +2450,7 @@ publishDespawn = function(exclusive world: World, id: integer): nil
     end
     local slot = idallocator.slotOf(id)
     local archetypeId, row = idallocator.placement(world.allocator, slot)
-    local source = world.archetypes[archetypeId]
+    local source = assert(world.archetypeById[archetypeId])
     local relationships = components.relationships()
     for index = 1, #relationships do
         local relationship = relationships[index]
@@ -1097,59 +2460,254 @@ publishDespawn = function(exclusive world: World, id: integer): nil
                 local children = inverse:removeTarget(id)
                 for child in pairs(children) do
                     local childSlot = idallocator.slotOf(child)
-                    if not world.pendingDespawnBySlot[childSlot] and world:isAlive(child) then
+                    if not pendingDespawn(world, childSlot) and world:isAlive(child) then
                         world.pendingDespawnBySlot[childSlot] = true
                         publishDespawn(world, child)
                     end
                 end
             end
+        elseif not relationship.sparse and relationship.reverseIndex then
+            const inverse = world.relationshipIndexes[relationship.componentId]
+            if inverse ~= nil then
+                const sources = inverse:removeTarget(id)
+                if next(sources) ~= nil then
+                    const selected = relationship:targeting(id)
+                    for sourceId in pairs(sources) do
+                        if not pendingDespawn(world, idallocator.slotOf(sourceId)) then
+                            world:remove(sourceId, selected)
+                        end
+                    end
+                end
+            end
         end
     end
+    -- Descendant removal can swap this entity's row in the same sparse archetype.
+    archetypeId, row = idallocator.placement(world.allocator, slot)
+    source = assert(world.archetypeById[archetypeId])
     unlinkOutgoing(world, source, row, id)
     world:emit(id, events.OnDespawn, id)
     world:emit(0, events.OnDespawn, id)
     world:clearObservers(id)
+    notifyQueries(world, source, nil, row, 1, false)
     removeFromArchetype(world, source, row)
     idallocator.freeSlot(world.allocator, slot)
     world.liveCount = world.liveCount - 1
 end
 
-local function drainCommit(exclusive world: World): nil
-    local spawnIndex: integer = 1
-    local moveIndex: integer = 1
-    local despawnIndex: integer = 1
-    while spawnIndex <= #world.pendingSpawns
-        or moveIndex <= #world.pendingMoves
-        or despawnIndex <= #world.pendingDespawns do
-        while spawnIndex <= #world.pendingSpawns do
-            local pending = world.pendingSpawns[spawnIndex]
-            spawnIndex = spawnIndex + 1
-            local slot = idallocator.slotOf(pending.id)
-            world.pendingSpawnBySlot[slot] = nil
-            publishSpawn(world, pending)
-        end
-        while moveIndex <= #world.pendingMoves do
-            local pending = world.pendingMoves[moveIndex]
-            moveIndex = moveIndex + 1
-            local slot = idallocator.slotOf(pending.id)
-            world.pendingMoveBySlot[slot] = nil
-            if not world.pendingDespawnBySlot[slot] then
-                publishMove(world, pending)
+local function publishMutationBatch(exclusive world: World, batch: MutationBatch): nil
+    const source = batch.source
+    const target = batch.target
+    local whole = #source.entities == batch.count
+    if whole then
+        unsafe do
+            for index = 0, batch.count - 1 do
+                const id = batch.ids[index] as integer
+                if source.entities[
+                    index + 1
+                ] ~= id or (not batch.despawn and pendingDespawn(world, idallocator.slotOf(id))) then
+                    whole = false
+                    break
+                end
+                if batch.despawn then
+                    for _, inverse in pairs(world.relationshipIndexes) do
+                        if inverse:hasTarget(id) then
+                            whole = false
+                            break
+                        end
+                    end
+                    if not whole then
+                        break
+                    end
+                end
             end
         end
-        while despawnIndex <= #world.pendingDespawns do
-            local id = world.pendingDespawns[despawnIndex]
-            despawnIndex = despawnIndex + 1
-            publishDespawn(world, id)
+    end
+    if whole and batch.despawn then
+        -- Ordinary sources with no incoming relationships need no per-row
+        -- swap removal or edge dispatch. Observers still see committed rows.
+        if world.observers.count > 0 then
+            for row = 1, batch.count do
+                const id = source.entities[row]
+                world:emit(id, events.OnDespawn, id)
+                world:emit(0, events.OnDespawn, id)
+                world:clearObservers(id)
+            end
+        end
+        notifyQueries(world, source, nil, 0, batch.count, false)
+        for row = 1, batch.count do
+            idallocator.freeSlot(world.allocator, idallocator.slotOf(source.entities[row]))
+        end
+        world.liveCount = world.liveCount - batch.count
+        archetype.truncate(source)
+        return
+    end
+    if whole then
+        if source ~= target then
+            notifyQueries(world, source, target, 0, batch.count, false)
+        end
+        const first = archetype.moveAll(source, target, batch.values, batch.shared, batch.resetComponent)
+        for row = first, first + batch.count - 1 do
+            const slot = idallocator.slotOf(target.entities[row])
+            idallocator.place(world.allocator, slot, target.id, row - 1)
+            if idallocator.mutationBatchAt(world.allocator, slot) == batch.index then
+                idallocator.stampMutation(world.allocator, slot, 0)
+            end
+        end
+        const observerLimit = #world.queryObservers
+        if batch.callback ~= nil then
+            batch.callback(target, first, first + batch.count - 1, batch.count)
+        end
+        if source ~= target then
+            notifyQueries(world, target, source, first - 1, batch.count, true, observerLimit)
+        end
+        return
+    end
+    -- Earlier publication changed the captured rows, or teardown has edges.
+    -- Keep the exceptional path identical to scalar mutation, including
+    -- callback ordering, reverse indexes, cancellation and cascading.
+    local notices: {PendingNotice}? = nil
+    local writerIds: {integer}? = nil
+    if batch.callback ~= nil then
+        notices = {}
+        writerIds = {}
+    end
+    unsafe do
+        for index = 0, batch.count - 1 do
+            const id = batch.ids[index] as integer
+            const slot = idallocator.slotOf(id)
+            if idallocator.mutationBatchAt(world.allocator, slot) == batch.index then
+                idallocator.stampMutation(world.allocator, slot, 0)
+            end
+            if batch.despawn then
+                publishDespawn(world, id)
+            elseif not pendingDespawn(world, slot) then
+                const supplied = copyBatchValues(batch.values, batch.shared)
+                if batch.resetComponent ~= nil then
+                    supplied[batch.resetComponent.componentId] = components.defaultValue(batch.resetComponent)
+                end
+                publishMove(
+                    world,
+                    new PendingMove(id = id, target = target, values = supplied, isSealed = true),
+                    notices
+                )
+                if writerIds ~= nil then
+                    writerIds[#writerIds + 1] = id
+                end
+            end
+        end
+    end
+    if batch.callback ~= nil then
+        const writer = new BatchWrite(
+            ids = assert(writerIds),
+            component = assert(batch.writeComponent),
+            callback = batch.callback
+        )
+        publishBatchWrite(world, writer)
+    end
+    if notices ~= nil then
+        for index = 1, #notices do
+            const notice = notices[index]
+            const _, row = idallocator.placement(world.allocator, idallocator.slotOf(notice.entity))
+            notifyQueries(world, notice.target, notice.source, row, 1, true, notice.observerLimit)
         end
     end
 end
 
---- Publishes every staged mutation and drains work staged by lifecycle observers.
---- @param self the world to modify
---- @raises when a lifecycle observer raises
+local function drainCommit(exclusive world: World): nil
+    sealPending(world)
+    local segmentIndex: integer = 1
+    while segmentIndex <= #world.pendingSegments do
+        const segment = world.pendingSegments[segmentIndex]
+        segmentIndex = segmentIndex + 1
+        if segment.spawnBatch ~= nil then
+            publishSpawnBatch(world, segment.spawnBatch)
+        end
+        if segment.mutationBatch ~= nil then
+            publishMutationBatch(world, segment.mutationBatch)
+        end
+        local index: integer = 1
+        while index <= #segment.spawns do
+            const pending = segment.spawns[index]
+            const slot = idallocator.slotOf(pending.id)
+            if world.pendingSpawnBySlot[slot] == pending then
+                world.pendingSpawnBySlot[slot] = nil
+            end
+            publishSpawn(world, pending)
+            index = index + 1
+        end
+        local notices: {PendingNotice}? = nil
+        if segment.writer ~= nil then
+            notices = {}
+        end
+        for moveIndex = 1, #segment.moves do
+            const pending = segment.moves[moveIndex]
+            const slot = idallocator.slotOf(pending.id)
+            if world.pendingMoveBySlot[slot] == pending then
+                world.pendingMoveBySlot[slot] = nil
+            end
+            if not pendingDespawn(world, slot) then
+                publishMove(world, pending, notices)
+            end
+        end
+        if segment.writer ~= nil then
+            publishBatchWrite(world, segment.writer)
+        end
+        if notices ~= nil then
+            for noticeIndex = 1, #notices do
+                const notice = notices[noticeIndex]
+                const _, row = idallocator.placement(world.allocator, idallocator.slotOf(notice.entity))
+                notifyQueries(world, notice.target, notice.source, row, 1, true, notice.observerLimit)
+            end
+        end
+        for despawnIndex = 1, #segment.despawns do
+            publishDespawn(world, segment.despawns[despawnIndex])
+        end
+        sealPending(world)
+    end
+end
+
+local function ensureRandom(exclusive world: World): randomstreams.Registry
+    local registry = world.randomRegistry
+    if registry == nil then
+        registry = randomstreams.newRegistry()
+        world.randomRegistry = registry
+    end
+
+    return registry
+end
+
+function World.randomStream(exclusive self: World, name: string): random.Random
+    if name == "" then
+        error("world.randomStream: a stream needs a non-empty name", 2)
+    end
+    return randomstreams.stream(ensureRandom(self), name)
+end
+
+function World.seedRandom(exclusive self: World, seed: integer): nil
+    if seed % 1 ~= 0 then
+        error("world.seedRandom: seed must be a finite integer", 2)
+    end
+    randomstreams.reseed(ensureRandom(self), seed)
+end
+
+function World.enqueueCommit(exclusive self: World): nil
+    if self.runningSystem or self.committing then
+        self.commitRequested = true
+        return
+    end
+    self:commit()
+end
+
 function World.commit(exclusive self: World): nil
     if self.committing then
+        return
+    end
+    self.commitRequested = false
+    if #self.pendingSegments == 0
+        and #self.pendingSpawns == 0
+        and #self.pendingMoves == 0
+        and #self.pendingDespawns == 0
+    then
         return
     end
     self.committing = true
@@ -1157,6 +2715,40 @@ function World.commit(exclusive self: World): nil
         drainCommit(self)
     end)
     self.committing = false
+    -- The drain already includes every mutation staged by publication callbacks.
+    self.commitRequested = false
+    self.publishingMove = nil
+    if not succeeded then
+        -- Already published rows remain live; unplaced reservations must not leak
+        -- capacity when a writer or observer interrupts the rest of the queue.
+        for batchIndex = 1, #self.spawnBatches do
+            const batch = self.spawnBatches[batchIndex]
+            for index = 1, batch.count do
+                const id = batchId(batch, index)
+                const slot = idallocator.slotOf(id)
+                if idallocator.spawnBatchAt(self.allocator, slot) == batch.index then
+                    self:clearObservers(id)
+                    idallocator.freeSlot(self.allocator, slot)
+                end
+            end
+        end
+        for _, pending in pairs(self.pendingSpawnBySlot) do
+            const slot = idallocator.slotOf(pending.id)
+            if idallocator.placement(
+                self.allocator,
+                slot
+            ) == 0 and idallocator.generationAt(self.allocator, slot) == idallocator.generationPartOf(pending.id) then
+                self:clearObservers(pending.id)
+                idallocator.freeSlot(self.allocator, slot)
+            end
+        end
+    end
+    self.pendingSegments = {}
+    if not succeeded then
+        idallocator.clearStamps(self.allocator)
+    end
+    self.spawnBatches = {}
+    self.mutationBatches = {}
     self.pendingSpawns = {}
     self.pendingSpawnBySlot = {}
     self.pendingMoves = {}
@@ -1168,14 +2760,24 @@ function World.commit(exclusive self: World): nil
     end
 end
 
---- Removes every entity and invalidates every identity reserved by this world.
---- @param self the world to clear
 function World.clearEntities(exclusive self: World): nil
+    if self.committing then
+        error("clearEntities cannot run during publication", 2)
+    end
+    for index = 1, self.archetypeCount do
+        const candidate = self.archetypes[index]
+        if #candidate.entities > 0 then
+            notifyQueries(self, candidate, nil, 0, #candidate.entities, false)
+        end
+    end
     idallocator.reset(self.allocator)
     for index = 1, self.archetypeCount do
         archetype.clear(self.archetypes[index])
     end
     self.pendingSpawns = {}
+    self.pendingSegments = {}
+    self.spawnBatches = {}
+    self.mutationBatches = {}
     self.pendingSpawnBySlot = {}
     self.pendingMoves = {}
     self.pendingMoveBySlot = {}
@@ -1191,6 +2793,81 @@ function World.clearEntities(exclusive self: World): nil
     end
     self.observedEntities = {}
     self.liveCount = 0
+end
+
+function World.forEachArchetype(borrows self: World, callback: function(candidate: archetype.Archetype)): nil
+    const count = self.archetypeCount
+    for index = 1, count do
+        callback(self.archetypes[index])
+    end
+end
+
+function World.dirtyArchetypes(borrows self: World): function(): archetype.Archetype?
+    const selected: {archetype.Archetype} = {}
+    for index = 1, self.archetypeCount do
+        const candidate = self.archetypes[index]
+        if candidate:anyComponentDirty() then
+            selected[#selected + 1] = candidate
+        end
+    end
+    local index: integer = 0
+
+    return function(): archetype.Archetype?
+        index = index + 1
+        return selected[index]
+    end
+end
+
+function World.compact(exclusive self: World): (integer, integer)
+    if self.updating
+        or self.committing
+        or #self.pendingSpawns > 0
+        or #self.pendingMoves > 0
+        or #self.pendingDespawns > 0
+        or #self.pendingSegments > 0
+    then
+        error("compact requires a quiet, committed world", 2)
+    end
+    local pruned: integer = 0
+    local compacted: integer = 0
+    local write: integer = 1
+    for index = 1, self.archetypeCount do
+        const candidate = self.archetypes[index]
+        local dead = false
+        if candidate.id ~= 1 and #candidate.entities == 0 then
+            for position = 1, #candidate.components do
+                const target = components.targetOf(candidate.components[position])
+                if target ~= nil and not self:isAlive(target) then
+                    dead = true;
+                    break
+                end
+            end
+        end
+        if dead then
+            self.archetypeBySignature[candidate.signature] = nil
+            self.archetypeById[candidate.id] = nil
+            self.freeArchetypeIds[#self.freeArchetypeIds + 1] = candidate.id
+            for position = 1, #self.queries do
+                query.removeArchetype(self.queries[position], candidate)
+            end
+            -- A temporary query may still retain this empty object, so release its
+            -- unused backing stores too without adding it back to any query.
+            archetype.compact(candidate)
+            pruned = pruned + 1
+        else
+            self.archetypes[write] = candidate
+            write = write + 1
+            if archetype.compact(candidate) then
+                compacted = compacted + 1
+            end
+        end
+    end
+    for index = self.archetypeCount, write, -1 do
+        self.archetypes[index] = nil
+    end
+    self.archetypeCount = write - 1
+
+    return pruned, compacted
 end
 
 --- Returns the live entity carrying one durable key.
@@ -1367,7 +3044,7 @@ local function defaultBundleInput(component: components.Component): components.I
     if component is components.ScalarComponent<any> then
         return new components.ScalarInstance(componentType = component, value = component.scalarDefault)
     end
-    if component.storageType == "table" then
+    if (component.storageType == "table" or component.storageType == "ffi") then
         local tableComponent = component as components.TableComponent<any>
         return new components.TableInstance(componentType = tableComponent, value = tableComponent.defaultFactory())
     end
@@ -1512,7 +3189,7 @@ local function saveComponentValue(component: components.Component, value: any): 
     if component is components.ScalarComponent<any> then
         return value
     end
-    if component.storageType == "table" then
+    if (component.storageType == "table" or component.storageType == "ffi") then
         local tableComponent = component as components.TableComponent<any>
         return snapshotvalue.clone(tableComponent.snapshotSave(value))
     end
@@ -1521,6 +3198,19 @@ local function saveComponentValue(component: components.Component, value: any): 
     end
 
     return nil
+end
+
+local function saveEdges(component: components.Component, edges: {any}): any
+    const relationship = assert(components.asRelationship(component))
+    if relationship.exclusive and component.storageType == "relationship" then
+        return components.edgeTarget(edges[1])
+    end
+    const saved: {any} = {}
+    for index = 1, #edges do
+        saved[index] = saveComponentValue(component, edges[index])
+    end
+
+    return {edges = saved}
 end
 
 local function sortedKeys(values: {[string]: any}): {string}
@@ -1549,6 +3239,7 @@ end
 --- @param options optional named custom data
 --- @return a caller-owned plain-value snapshot
 --- @raises when called during an update or a value cannot be represented
+--- @raises Raises when custom data uses the reserved tecs.random key.
 function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): Snapshot
     if self.updating then
         error("world.saveSnapshot: cannot save during a world update", 2)
@@ -1565,7 +3256,7 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
             local savedComponents: {components.Component} = {}
             for componentIndex = 1, #source.components do
                 local component = source.components[componentIndex]
-                if not component.transient then
+                if not component.transient and components.targetOf(component) == nil then
                     names[#names + 1] = component.componentName
                     savedComponents[#savedComponents + 1] = component
                     if not componentSeen[component.componentName] then
@@ -1580,8 +3271,15 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
                 for componentIndex = 1, #savedComponents do
                     local component = savedComponents[componentIndex]
                     if component.storageType ~= "tag" then
-                        local stored = archetype.valueAt(source, row - 1, component)
-                        values[component.componentName] = saveComponentValue(component, stored)
+                        const relationship = components.asRelationship(component)
+                        if relationship ~= nil then
+                            values[
+                                component.componentName
+                            ] = saveEdges(component, archetype.edgeValues(source, row - 1, relationship))
+                        else
+                            local stored = archetype.valueAt(source, row - 1, component)
+                            values[component.componentName] = saveComponentValue(component, stored)
+                        end
                     end
                 end
                 entities[#entities + 1] = new SnapshotEntity(id = source.entities[row], values = values)
@@ -1597,10 +3295,16 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
         local keys = sortedKeys(custom)
         for index = 1, #keys do
             local key = keys[index]
+            if key == randomstreams.snapshotKey then
+                error("world.saveSnapshot: tecs.random is reserved for world-managed streams", 2)
+            end
             addSnapshotData(data, dataSeen, key, custom[key])
         end
     end
     local handlers = table.clone(self.snapshotHandlers)
+    if self.randomRegistry ~= nil then
+        addSnapshotData(data, dataSeen, randomstreams.snapshotKey, randomstreams.save(self.randomRegistry))
+    end
     table.sort(handlers, function(left: SnapshotHandler, right: SnapshotHandler): boolean
         return left.name < right.name
     end)
@@ -1627,6 +3331,38 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
 end
 
 local function loadComponentInput(component: components.Component, value: any): components.Input
+    const relationship = components.asRelationship(component)
+    if relationship ~= nil then
+        local saved: {any}
+        if relationship.exclusive and component.storageType == "relationship" and type(value) == "number" then
+            saved = {value}
+        else
+            if type(value) ~= "table" or type(value.edges) ~= "table" then
+                error("snapshot relationship requires an edge list", 2)
+            end
+            saved = value.edges as {any}
+        end
+        if #saved == 0 or (relationship.exclusive and #saved ~= 1) then
+            error("snapshot relationship has invalid edge count", 2)
+        end
+        const edges: {any} = {}
+        const seen: {[integer]: boolean} = {}
+        for index = 1, #saved do
+            local edge: any
+            if (component.storageType == "table" or component.storageType == "ffi") then
+                edge = (component as components.TableComponent<any>).snapshotLoad(snapshotvalue.clone(saved[index]))
+            else
+                edge = {target = saved[index]}
+            end
+            const target = components.edgeTarget(edge)
+            if seen[target] then
+                error("snapshot relationship repeats a target", 2)
+            end
+            seen[target] = true
+            edges[index] = edge
+        end
+        return new components.RelationshipBatch(componentType = component, values = edges)
+    end
     if component.storageType == "tag" then
         return component
     end
@@ -1636,7 +3372,7 @@ local function loadComponentInput(component: components.Component, value: any): 
         end
         return new components.ScalarInstance(componentType = component, value = value)
     end
-    if component.storageType == "table" then
+    if (component.storageType == "table" or component.storageType == "ffi") then
         local tableComponent = component as components.TableComponent<any>
         return new components.TableInstance(
             componentType = tableComponent,
@@ -1778,6 +3514,11 @@ function World.loadSnapshot(exclusive self: World, snapshot: Snapshot): Snapshot
         dataByKey[entry.key] = entry.value
     end
 
+    local randomState: randomstreams.State? = nil
+    if dataSeen[randomstreams.snapshotKey] then
+        randomState = randomstreams.prepare(dataByKey[randomstreams.snapshotKey])
+    end
+
     self:clearEntities()
     self.stateStack = {}
     self.autoStateComponent = nil
@@ -1807,6 +3548,9 @@ function World.loadSnapshot(exclusive self: World, snapshot: Snapshot): Snapshot
         archetypeCount = snapshot.archetypeCount,
         componentTable = copyComponentTable(snapshot.componentTable)
     )
+    if randomState ~= nil then
+        randomstreams.restore(ensureRandom(self), randomState)
+    end
     for index = 1, #self.snapshotHandlers do
         local handler = self.snapshotHandlers[index]
         local value = dataByKey[handler.name]
@@ -1828,8 +3572,11 @@ end
 --- Registers a named custom snapshot participant.
 --- @param self the world that owns the handler
 --- @param handler the stable key and optional save, load, and finish callbacks
---- @raises when the key is empty or already registered
+--- @raises when the key is empty, already registered, or reserved as tecs.random
 function World.addSnapshotHandler(exclusive self: World, handler: SnapshotHandler): nil
+    if handler.name == randomstreams.snapshotKey then
+        error("world.addSnapshotHandler: tecs.random is reserved for world-managed streams", 2)
+    end
     if handler.name == "" then
         error("snapshot handler requires a non-empty name", 2)
     end
@@ -1840,11 +3587,111 @@ function World.addSnapshotHandler(exclusive self: World, handler: SnapshotHandle
     self.snapshotHandlers[#self.snapshotHandlers + 1] = handler
 end
 
---- Registers a frame system in a phase.
---- @param self the world to modify
---- @param config the phase, body, optional name, gate, and barrier requests
---- @return the unique registered system name
---- @raises when an explicit or generated name is already registered
+local function orderSystems(systems: {RegisteredSystem}, phase: phases.Phase): {RegisteredSystem}
+    const names: {[string]: integer} = {}
+    const indegrees: {integer} = {}
+    const successors: {{integer}} = {}
+    const seen: {{[integer]: boolean}} = {}
+    for index = 1, #systems do
+        names[systems[index].name] = index
+        indegrees[index] = 0
+        successors[index] = {}
+        seen[index] = {}
+    end
+    local function edge(first: integer, second: integer): nil
+        -- Self references were no-ops in the original scheduler too.
+        if first == second or seen[first][second] then
+            return
+        end
+        seen[first][second] = true
+        const outgoing = successors[first]
+        outgoing[#outgoing + 1] = second
+        indegrees[second] = indegrees[second] + 1
+    end
+
+    for index = 1, #systems do
+        const system = systems[index]
+        for position = 1, #system.before do
+            const target = names[system.before[position]]
+            if target ~= nil then
+                edge(index, target)
+            end
+        end
+        for position = 1, #system.after do
+            const target = names[system.after[position]]
+            if target ~= nil then
+                edge(target, index)
+            end
+        end
+    end
+    const ordered: {RegisteredSystem} = {}
+    const emitted: {[integer]: boolean} = {}
+    for position = 1, #systems do
+        local ready: integer? = nil
+        for index = 1, #systems do
+            if not emitted[index] and indegrees[index] == 0 then
+                ready = index
+                break
+            end
+        end
+        if ready == nil then
+            const blocked: {string} = {}
+            for index = 1, #systems do
+                if not emitted[index] then
+                    blocked[#blocked + 1] = systems[index].name
+                end
+            end
+            error("Cycle detected in system dependencies in phase " .. phase .. ": " .. table.concat(blocked, ", "), 0)
+        end
+        emitted[ready] = true
+        ordered[position] = systems[ready]
+        const outgoing = successors[ready]
+        for index = 1, #outgoing do
+            const target = outgoing[index]
+            indegrees[target] = indegrees[target] - 1
+        end
+    end
+
+    return ordered
+end
+
+local function buildSchedule(borrows world: World): {[phases.Phase]: {RegisteredSystem}}
+    const result: {[phases.Phase]: {RegisteredSystem}} = {}
+    for index = 1, #world.systems do
+        const system = world.systems[index]
+        if not system.removed then
+            local selected = result[system.phase]
+            if selected == nil then
+                selected = {}
+                result[system.phase] = selected
+            end
+            selected[#selected + 1] = system
+        end
+    end
+    local index: integer = 1
+    while true do
+        const phase = phases.selectionAt(phases.AllGroups, index)
+        if phase == nil then
+            break
+        end
+        const selected = result[phase]
+        if selected ~= nil then
+            result[phase] = orderSystems(selected, phase)
+        end
+        index = index + 1
+    end
+
+    return result
+end
+
+local function prepareSchedule(exclusive world: World): nil
+    if world.scheduleDirty then
+        -- Publish the cache only after every phase passes cycle validation.
+        world.schedule = buildSchedule(world)
+        world.scheduleDirty = false
+    end
+end
+
 function World.addSystem(exclusive self: World, config: SystemConfig): string
     local name = config.name
     if name == nil then
@@ -1859,6 +3706,8 @@ function World.addSystem(exclusive self: World, config: SystemConfig): string
         phase = config.phase,
         run = config.run,
         runIf = config.runIf,
+        before = table.clone(config.before or {}),
+        after = table.clone(config.after or {}),
         commitBefore = config.commitBefore == true,
         commitAfter = config.commitAfter == true,
         enabled = true,
@@ -1867,6 +3716,7 @@ function World.addSystem(exclusive self: World, config: SystemConfig): string
     self.systems[#self.systems + 1] = system
     self.systemNames[name] = system
     self.systemCount = self.systemCount + 1
+    self.scheduleDirty = true
 
     return name
 end
@@ -1898,6 +3748,7 @@ function World.removeSystem(exclusive self: World, name: string): boolean
     system.removed = true
     self.systemNames[name] = nil
     self.systemCount = self.systemCount - 1
+    self.scheduleDirty = true
     if not self.updating then
         compactSystems(self)
     end
@@ -1905,10 +3756,8 @@ function World.removeSystem(exclusive self: World, name: string): boolean
     return true
 end
 
---- Returns registered systems in phase and registration order.
---- @param self the world to inspect
---- @return caller-owned system metadata
 function World.listSystems(borrows self: World): {SystemInfo}
+    const schedule = self.scheduleDirty and buildSchedule(self) or self.schedule
     local result: {SystemInfo} = {}
     local phaseIndex: integer = 1
     while true do
@@ -1917,19 +3766,22 @@ function World.listSystems(borrows self: World): {SystemInfo}
             break
         end
         local position: integer = 0
-        for systemIndex = 1, #self.systems do
-            local system = self.systems[systemIndex]
-            if not system.removed and system.phase == phase then
-                position = position + 1
-                result[
-                    #result + 1
-                ] = new SystemInfo(
-                    name = system.name,
-                    phase = phase,
-                    position = position,
-                    enabled = system.enabled,
-                    hasRunIf = system.runIf ~= nil
-                )
+        const selected = schedule[phase]
+        if selected ~= nil then
+            for systemIndex = 1, #selected do
+                local system = selected[systemIndex]
+                if not system.removed then
+                    position = position + 1
+                    result[
+                        #result + 1
+                    ] = new SystemInfo(
+                        name = system.name,
+                        phase = phase,
+                        position = position,
+                        enabled = system.enabled,
+                        hasRunIf = system.runIf ~= nil
+                    )
+                end
             end
         end
         phaseIndex = phaseIndex + 1
@@ -1995,18 +3847,26 @@ local function runPhase(exclusive world: World, phase: phases.Phase, dt: number,
     if world.disabledPhases[phase] then
         return
     end
-    for index = 1, #world.systems do
-        local system = world.systems[index]
-        if system.enabled and system.phase == phase then
-            if system.commitBefore then
-                world:commit()
-            end
-            local gate = system.runIf
-            if gate == nil or gate(dt, world, system.name) then
-                system.run(dt, world, scope)
-            end
-            if system.commitAfter then
-                world:commit()
+    const selected = world.schedule[phase]
+    if selected ~= nil then
+        for index = 1, #selected do
+            local system = selected[index]
+            if system.enabled then
+                if system.commitBefore then
+                    world:commit()
+                end
+                -- Publication callbacks may stop a system before its dispatch.
+                if system.enabled then
+                    world.runningSystem = true
+                    local gate = system.runIf
+                    if gate == nil or gate(dt, world, system.name) then
+                        system.run(dt, world, scope)
+                    end
+                    world.runningSystem = false
+                    if system.commitAfter or world.commitRequested then
+                        world:commit()
+                    end
+                end
             end
         end
     end
@@ -2093,6 +3953,7 @@ function World.startup(exclusive self: World): nil
     if self.updating then
         error("world.startup: another world dispatch is active", 2)
     end
+    prepareSchedule(self)
     self:commit()
     self.updating = true
     local succeeded, failure = pcall(function(): nil
@@ -2101,6 +3962,8 @@ function World.startup(exclusive self: World): nil
         end
     end)
     self.updating = false
+    self.runningSystem = false
+    self.commitRequested = false
     compactSystems(self)
     if not succeeded then
         error(failure, 0)
@@ -2114,6 +3977,7 @@ function World.shutdown(exclusive self: World): nil
     if self.updating then
         error("world.shutdown: another world dispatch is active", 2)
     end
+    prepareSchedule(self)
     self:commit()
     self.updating = true
     local succeeded, failure = pcall(function(): nil
@@ -2122,6 +3986,8 @@ function World.shutdown(exclusive self: World): nil
         end
     end)
     self.updating = false
+    self.runningSystem = false
+    self.commitRequested = false
     compactSystems(self)
     if not succeeded then
         error(failure, 0)
@@ -2141,6 +4007,7 @@ function World.runPhase(exclusive self: World, phase: phases.Selection, dt: numb
     if elapsed < 0 or elapsed ~= elapsed then
         error("world.runPhase: dt must be a non-negative number", 2)
     end
+    prepareSchedule(self)
     self:commit()
     self.updating = true
     local succeeded, failure = pcall(function(): nil
@@ -2149,6 +4016,8 @@ function World.runPhase(exclusive self: World, phase: phases.Selection, dt: numb
         end
     end)
     self.updating = false
+    self.runningSystem = false
+    self.commitRequested = false
     compactSystems(self)
     if not succeeded then
         error(failure, 0)
@@ -2172,6 +4041,7 @@ function World.update(exclusive self: World, dt: number): nil
     if dt < 0 or dt ~= dt then
         error("world.update: dt must be a non-negative number", 2)
     end
+    prepareSchedule(self)
     self:commit()
     self.updating = true
     local succeeded, failure = pcall(function(): nil
@@ -2180,6 +4050,8 @@ function World.update(exclusive self: World, dt: number): nil
         end
     end)
     self.updating = false
+    self.runningSystem = false
+    self.commitRequested = false
     compactSystems(self)
     if not succeeded then
         error(failure, 0)

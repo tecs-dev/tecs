@@ -6,6 +6,424 @@ The entity component system shared by game code and engine systems.
 The ECS exposes staged entity lifetime, tag and scalar components, dense
 archetype storage, and reusable queries. A spawn reserves its id immediately,
 and `commit` publishes structural changes.
+
+## Native component storage
+
+`newFFIComponent` stores Nupp structs inline in contiguous native columns. Nupp
+owns the struct layout and methods. Tecs owns column capacity, publication and
+dirty tracking. There is no generated parallel C schema and no row wrapper in
+the query loop. A native column grows geometrically with a single memory copy;
+bulk spawns reserve the whole destination range before calling their writer.
+
+```nupp
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+local struct Velocity
+    x: number
+    y: number
+end
+local velocity = tecs.ecs.newFFIComponent({
+    name = "game.Velocity",
+    construct = function(x: number, y: number): Velocity
+        return new Velocity(x, y)
+    end,
+    default = function(): Velocity return new Velocity() end,
+})
+local world = tecs.ecs.newWorld()
+world:batchSpawn(1000, {velocity})
+world:commit()
+for candidate, count in world:newQuery({include = {velocity}}):iter() do
+    local column = assert(candidate:getMut(velocity))
+    unsafe do
+        for row = 1, count do column[row].x += 1 end
+    end
+end
+```
+
+Built-in transforms, tint, shape material, camera, lights, animation, sound,
+physics values and numeric UI components use this storage and derive
+`nupp.derive.Debug` and `nupp.derive.Serde`. Derived methods work on constructed
+values and borrowed rows without changing column layout. Use
+`nupp.data.serde.json():prepare(nupp.data.serde.of(Velocity))` for a typed JSON
+codec; Nupp's separate `nupp.derive.JSON` provider currently admits records only.
+Generic Serde encoding describes physical component fields, whereas world
+snapshots use the component's registered codecs. Asset-bearing built-ins keep
+their custom name-based codecs and never persist process-local IDs as assets.
+
+`get` and `getMut` return `T[?]` for a native component, and the existing managed
+array for a table or scalar component. Native rows use the same **one-based**
+indices as the query's entity list; row zero is padding. Use the query count,
+not `#column`, `pairs`, `ipairs`, or table library operations on a native column.
+Direct C-array indexing requires Nupp's `unsafe` scope. `world:get` still returns
+one typed struct value, and `world:getMut` marks the owning column dirty first.
+
+Native column assignments copy bytes, including inline fixed arrays. Entities never
+share these inline rows, even when they receive the same constructed input or
+requirement. Struct values returned by reads are live row references, not owned
+copies. Column views and row references expire at the next structural publication,
+compaction, clear, or snapshot restore. Reacquire them afterwards. Never retain a
+native row reference across such a boundary or use `commit` inside its loop.
+
+Supported layouts contain numeric and boolean fields and fixed arrays of those
+types. Pointer-bearing objects, unions, bitfields, variable arrays and nested
+structs are rejected at registration, as they were outside the old FFI field
+schema. Table snapshots have automatic field codecs; arrays are saved one-based
+and signed/unsigned 64-bit integers are saved as exact decimal strings. Optional
+`save` and `load` hooks must be supplied together. They replace automatic codecs
+and disable native raw encoding in both directions so custom behavior is never
+silently bypassed. Transient and required components follow the ordinary ECS
+rules. The binary snapshot integration is a separate publication layer over
+this native storage.
+
+`newFFIRelationship` uses the same native field policy and supports exclusive or
+multiple targets, reverse lookup, cascades and sparse or dense edge placement.
+Its struct must contain a `target: number` field. Dense `targeting()` selectors
+return native columns. A wildcard relationship column is a managed array of
+references to its first native edge, not another copy of that edge. Sparse edge
+lists likewise retain native values. Changes through wildcard, target-specific
+and relationship-iteration access therefore reach the same payload. Sparse
+relationships retain constructed edge objects, matching the original sparse
+store. Reusing one edge instance for several sources shares that payload;
+construct separate instances for independent values and mark every affected
+source dirty after mutating a deliberately shared payload.
+
+## Component requirements
+
+Every component factory accepts `requires`, including scalar components and both
+relationship factories. A requirement is a component definition or a constructed
+[](tecs.ecs.ComponentInput). Definitions use their default value when a missing
+column is initialized; record default factories run separately for each entity.
+Constructed instances supply shared values instead, including across bulk
+operations. Their outer records are not copied. Treat these shared records as
+immutable or explicitly mark every affected entity dirty after an external write.
+
+```nupp
+local health = tecs.ecs.newScalarComponent({
+    name = "game.Health", kind = "number", default = 100,
+})
+local enemy = tecs.ecs.newTagComponent({
+    name = "game.Enemy", requires = {health(50), tecs.ecs.Transform2D},
+})
+local world = tecs.ecs.newWorld()
+local id = world:spawn(enemy)
+world:commit()
+assert(world:get(id, health) == 50)
+```
+
+Requirements expand transitively into the same staged archetype transition.
+`spawn`, `spawnAt`, bundles, bulk spawns, `set` and `batchSet` all apply them.
+They are initialized before membership callbacks and bulk writers observe the
+new columns. Explicit spawn inputs and already-present components keep their
+values, including values staged earlier in the same transaction. A definition
+explicitly passed to spawn uses its own default instead of a required instance.
+
+Tecs copies requirement lists at registration and caches their transitive
+closures. Traversal is breadth-first in declaration order and deduplicates by
+component identity; the first encountered requirement for a component wins.
+Cycles terminate without repeating the root component. Multiple explicit spawn
+components expand in argument order after all explicit inputs are collected.
+
+Requirements are addition rules, not permanent invariants. Replacing a value,
+adding an unrelated component, or adding another target to an existing
+relationship does not restore deliberately removed requirements. Removing a
+component leaves its requirements in place. Removing and re-adding it expands
+its closure again. Snapshot restore follows `spawnAt`: it reapplies requirements
+missing from saved data, including defaults for omitted transient components.
+
+A required relationship must be a constructed, target-bearing instance, not a
+bare relationship definition. It participates in dense target matching, reverse
+lookup and cascade deletion just like an explicitly added edge. Target ids in a
+process-wide requirement must be meaningful in every world using that component.
+All requirements of an edge apply to its source, not its target. An existing
+relationship takes precedence over a required edge to that relationship.
+
+## Query membership
+
+Queries exclude `Disabled` unless their `include` list explicitly requests it.
+Setting `type = "logic"` also excludes `Paused`, with the same explicit-include
+override. `include` requires every component, `includeAny` requires at least
+one, and `exclude` rejects any listed component. The world copies these lists.
+
+```nupp
+local moving = world:newQuery({
+    type = "logic",
+    include = {tecs.ecs.Transform2D},
+    exclude = {tecs.ecs.ChildOf},
+})
+for candidate, count, entities in moving:iter() do
+    local transforms = assert(candidate:getMut(tecs.ecs.Transform2D))
+    unsafe do
+        for row = 1, count do
+            transforms[row].x = transforms[row].x + 1
+        end
+    end
+end
+```
+
+`groupBy` assigns an integer group once per matching archetype. `iter()` visits
+groups in ascending order, `groups()` yields nonempty groups, and `group(id)`
+visits one group's archetypes. `count()` and `getGroupCount(id)` read current
+entity counts. Iterators are independent and can be nested.
+
+`onEntitiesAdded` receives the initial matching rows and subsequent entries.
+`onEntitiesRemoved` receives departing rows before removal. Both callbacks take
+`(archetype, firstRow, lastRow, count)` with one-based inclusive bounds. Moves
+between two matching archetypes do not fire either callback. A callback may
+stage mutations; the active commit drains them after the current publication.
+Changing fields on an existing component is not a membership change.
+
+`temp = true` freezes the matched archetype set at construction, while reading
+its live rows. Temporary queries do not subscribe to new archetypes and cannot
+declare membership callbacks. Structural changes remain staged until a barrier,
+so leaving an iterator early requires no cleanup. Do not call `commit` inside
+an active query iteration.
+
+## Relationship storage
+
+`newRelationship` constructs target-only edges. Relationships are non-exclusive
+and dense by default. `exclusive = true` replaces a source's previous edge.
+Otherwise setting an existing target replaces that edge and preserves the others.
+`sparse = true` stores edges by entity without creating a distinct archetype for
+each target set. Dense relationships expose `relationship:targeting(entity)`
+for include/exclude constraints and direct access to one target's column.
+
+```nupp
+local follows = tecs.ecs.newRelationship({
+    name = "game.Follows", reverseIndex = true,
+})
+local leader = world:spawn()
+local other = world:spawn()
+local follower = world:spawn(follows(leader), follows(other))
+world:commit()
+local followers = world:newQuery({include = {follows:targeting(leader)}})
+world:remove(follower, follows(other))
+world:commit()
+```
+
+Remove a relationship definition to remove every edge; pass an instance to
+remove just its target, for either storage mode. `get` and `getFirstRelationship`
+return the first edge in ascending target order. `forEachRelationship` visits
+every edge in that order. Its archetype counterpart takes a one-based row.
+Edge values are live; use `getMut` before changing payload fields. Never write
+an edge's `target` field directly: `set` maintains the signature and reverse index.
+
+`newDataRelationship` adds typed record payloads. Its constructor receives the
+target first and returns a record with that same `target` field. Explicit `save`
+and `load` hooks preserve the record's type and behavior across snapshots.
+`DataRelationship<T>` retains `T` through world reads, iteration and targeted
+column access. Snapshots store relationship names and edges, independent of
+generated dense target-component identifiers.
+
+`reverseIndex = true` enables `relationshipSources`, callback-based `targets`,
+and depth-first `traverse`. Traversal excludes its root, reports direct children
+at depth zero and visits each identifier at most once. `walkUp` follows the first
+edge at each level, reports the direct parent at depth one, and raises on cycles
+or its default depth limit of 100. Return false from its callback to stop early.
+`cascadeDelete = true` requires an exclusive, reverse-indexed relationship.
+Destruction then removes the descendants in the same publication barrier.
+For a reverse-indexed dense relationship without cascading, deleting a target
+removes just that target's incoming edges. Non-cascading sparse edges retain the
+target identifier until explicitly removed; always check `isAlive` before using
+such a target as a live entity.
+
+## Bulk mutations and maintenance
+
+`batchSpawn(count, inputs, callback?)` reserves a shared signature once and
+publishes its rows at the next barrier. It returns `(firstId, nil)` only when
+every packed identity is contiguous; otherwise it returns `(nil, ids)`. Use the
+explicit list in that case, including after recycling slots or clearing a world
+whose used prefix and fresh suffix carry different generations. `batchSpawnAt`
+validates all supplied identities before reserving them, for restoration work.
+Like `spawnAt`, it does not add the active state's automatic tag.
+`batchSpawnAtRaw(ids, count, inputs, callback?)` reads a zero-based native double
+array without materializing an ID list. The world retains the array until
+publication; its selected prefix must not change before that barrier. This
+restoration path also permits initializing `EntityKey` before index registration.
+
+```nupp
+local firstId, ids = world:batchSpawn(100, {tecs.ecs.Transform2D},
+    function(candidate: tecs.ecs.Archetype, first: integer, last: integer)
+        local transforms = assert(candidate:getMut(tecs.ecs.Transform2D))
+        unsafe do
+            for row = first, last do
+                transforms[row].x = row * 10
+            end
+        end
+    end
+)
+world:commit()
+```
+
+Initializers receive `(archetype, firstRow, lastRow, count)` with one-based
+inclusive bounds, after placement but before query-entry and spawn events.
+Cancelled spawns receive no rows or events. Later `set` and `remove` calls on
+reserved IDs apply after initialization. A batch takes explicit relationship
+values such as `ChildOf(parent)`, not a bare relationship without a target.
+Never overwrite relationship targets through a column; stage per-entity `set`
+calls when targets vary. Ordinary batch spawn signatures cannot contain `EntityKey`,
+including through requirements; assign keys individually with `set`.
+
+`batchSet(query, value)` and `batchRemove(query, componentOrRelationshipValue)`
+stage changes for the query's committed members at the call. `batchDespawn(query)`
+uses normal lifecycle events, observer cleanup and relationship cascading.
+Queries must belong to the same world; temporary queries are supported. New
+members that arrive later in the transaction are not retroactively selected.
+Query state filters apply, so include `Disabled` explicitly when selecting it.
+
+`batchSet(query, Component, callback)` ensures a plain component exists and
+invokes the writer at the barrier, once per contiguous affected row range.
+Writers use `getMut`, see earlier staged writes, and precede later scalar writes.
+Entries into queries that require the added component see initialized values.
+Callback mode rejects instances and relationships; constant mode supports edges.
+Bulk setting `EntityKey` is rejected because a shared value cannot claim distinct
+keys. Explicit record constants get independent shallow outer copies, retaining
+their record type; nested references remain shared. Instance-valued requirements
+remain shared. Default factories run per entity.
+
+The original bulk storage paths operate on compact batch descriptors and native
+slot stamps. A contiguous spawn allocates no identity list or per-entity
+transaction records. Plain whole-archetype moves exchange common column buffers
+when the destination is empty and copy native ranges when it is populated;
+plain deletion truncates storage once. Relationships, durable keys and selections
+changed by earlier publication use the per-entity behavior where needed.
+Query batches retain native identity snapshots to preserve membership at the call.
+Reacquire column views after publication, including a buffer exchange.
+
+All operations remain deferred. Callback boundaries preserve call order inside
+the transaction; they do not publish early from the API call. A callback can
+stage further work for the same commit to drain, but cannot clear or compact
+the world during publication. As with scalar mutations, a
+callback failure is not an atomic rollback of already published rows.
+
+`forEachArchetype` includes empty and disabled archetypes. `dirtyArchetypes()`
+captures an independent iterator over dirty archetypes in registry order,
+including empty ones changed by removal. Dirty marks clear at the end of update.
+
+Call `compact()` outside dispatch on a committed world. It prunes empty dense
+relationship archetypes with dead target identities, releases their persistent
+query/group entries, and reuses freed archetype IDs without renumbering survivors.
+Ordinary empty archetypes and the empty-signature sentinel remain registered.
+It also rebuilds row tables whose occupancy has fallen since their high-water
+mark. The returned counts are `(pruned, rebuilt)`; the second counts rebuilt
+stores, not bytes reclaimed or an exposed native capacity. Component values,
+dirty flags, systems and persistent queries survive. Reacquire column/entity
+views after compaction, and do not compact or commit inside an active iterator.
+An explicitly retained temporary query can keep an old empty archetype object
+alive, but it will not adopt a new archetype that later reuses the same ID.
+
+## World-managed random streams
+
+`world:randomStream(name)` returns a `nupp.data.random.Random` owned by the world.
+The world seed and the non-empty stream name determine its sequence, independently
+of which other streams exist or how many values they draw. Repeated calls return
+the same generator. Use namespaced names and capture streams during setup.
+
+```nupp
+local world = tecs.ecs.newWorld()
+world:seedRandom(42)
+local loot = world:randomStream("game.loot")
+local roll = loot:integer(1, 20)
+local saved = world:saveSnapshot()
+local expected = loot:next()
+world:loadSnapshot(saved)
+assert(loot:next() == expected)
+```
+
+The initial world seed is the fixed value `0x5EED1234`, not a clock reading.
+`seedRandom(seed)` reads a 32-bit word and restarts all existing streams in
+place; future streams derive their seeds from the new world seed too. Drawing,
+shuffling, ranges and individual state access use Nupp's generator methods
+directly. Independent generators outside a world use `nupp.data.random.newRandom`.
+Generators are mutable and must not be shared across concurrent workers.
+
+The first stream or seed call enables snapshot persistence under `tecs.random`.
+This reserved key and its `{seed, streams}` payload retain the old architecture's
+contract, as does the byte-based name-to-seed mapping. Each saved stream contains
+four signed 32-bit state words. Saving neither advances the generators nor
+leaves a live view into them.
+
+Loading a snapshot restores already-captured generators in place, creates saved
+streams not yet requested, and restarts existing streams absent from the save
+using the restored world seed. A fresh world needs no initialization call before
+loading saved random data. Random state restores after entity publication and
+before custom snapshot handlers run. Malformed random payloads raise before the
+world clears entities or changes generators. Unsigned 32-bit saved words are
+accepted and normalized too.
+
+A snapshot without `tecs.random` leaves current streams and the seed unchanged.
+Clearing entities also leaves them alone. Runtime closures such as timer
+predicates are not snapshot state: giving `runif.every` a world stream restores
+its future random draws, but does not rewind the timer's elapsed time. The
+`tecs.random` key cannot be supplied through custom data or a snapshot handler.
+Installing audio uses the `tecs.audio` stream for pitch variance automatically;
+standalone mixers retain their own independent Nupp generators.
+
+## System scheduling
+
+`addSystem` accepts `before` and `after` lists of system names. Constraints apply
+only within one leaf phase; missing names and names in other phases contribute
+no edge. Self references are ignored and duplicate edges count once. Among
+systems whose dependencies are satisfied, the earliest registered runs first.
+Disabled systems retain their position and ordering edges.
+
+The world copies constraint lists. It rebuilds the schedule after registration
+changes, validating every phase before the next dispatch publishes staged work
+or runs any system. A cycle raises with its phase and blocked system names.
+`listSystems()` reports dependency order and also raises for a cycle. Remove a
+conflicting system to repair the schedule; enabling or disabling cannot repair it.
+
+An update, startup, shutdown or explicit `runPhase` captures one schedule at its
+entry. A system added during that dispatch starts on the next external dispatch,
+even if its phase has not run yet. Removal and enable/disable changes affect
+remaining dispatches immediately. Listing during a dispatch describes the next
+schedule without changing the active one. Ordering does not introduce structural
+barriers: request `commitBefore` or `commitAfter` when a same-phase dependency
+also requires publication of staged entities.
+
+Call `world:enqueueCommit()` when that extra barrier is conditional on work
+performed by a system. Requests from its body or `runIf` predicate coalesce into
+one publication after the body returns, or after a false predicate skips it,
+before the next system runs. Suspension does not end the system: its query view
+stays unchanged until it returns. Requests alone never publish midway through
+iteration. A publication callback may request another commit without recursion;
+the active drain includes its staged work.
+
+Outside a running system, `enqueueCommit()` publishes synchronously, including
+child work settling after dispatch. Leave any query iterator before calling it
+there. Explicit `commit()` remains synchronous even inside a system. If a body
+or predicate raises, the dispatcher clears its request without introducing a
+barrier during unwinding; pending mutations remain staged for a later commit.
+Publication failures retain already published rows and discard unpublished work,
+as with any other commit failure.
+
+```nupp
+world:addSystem({
+    name = "game.SpawnWave",
+    phase = tecs.ecs.phases.Update,
+    before = {"game.MoveEnemies"},
+    commitAfter = true,
+    runIf = tecs.ecs.runif.both(
+        tecs.ecs.runif.inState("game"),
+        tecs.ecs.runif.every(2)
+    ),
+    run = spawnWave,
+})
+```
+
+`tecs.ecs.runif` provides `after`, `every`, `cooldown`, `inState`, `both`,
+`either` and `negate`. Timers consume the phase delta only when evaluated.
+`after` removes its system before its one allowed run; `every` retains excess
+elapsed time but fires at most once per dispatch; `cooldown` starts ready and
+discards excess time when firing. Each timer factory creates state for one
+system. Reusing a predicate shares that state. Timer closures are not snapshots.
+
+Combinators short-circuit, including their operands' side effects. The example
+pauses its timer outside `game`; swapping the operands keeps the timer advancing
+and spends ticks outside that state. A disabled system or phase never evaluates
+its predicates. Use `every(interval, jitter, generator)` for jitter, supplying a
+`nupp.data.random.Random` directly. The first interval is unjittered and later
+intervals clamp to one percent of the base interval. Pass a named world stream
+to snapshot its random state; there is no implicit stream or automatic timer
+rewind when an entity snapshot is restored.
 ]]
 
 local idallocator = require("tecs.internal.idallocator")
@@ -17,6 +435,7 @@ local events = require("tecs.internal.events")
 local phasevalues = require("tecs.internal.phases")
 local query = require("tecs.internal.query")
 local rendercomponents = require("tecs.internal.rendercomponents")
+local runifpredicates = require("tecs.internal.runif")
 
 --- The options accepted by `newWorld`.
 export type WorldConfig = {
@@ -44,10 +463,25 @@ export type ScalarComponent<T> = components.ScalarComponent<T>
 --- A record-valued component definition.
 export type TableComponent<T> = components.TableComponent<T>
 
---- A one-target-per-source entity relationship.
+--- A typed native struct component with contiguous, one-based C-array columns.
+export type FFIComponent<T> = components.FFIComponent<T>
+
+--- Configures a native struct component and optional custom snapshot codecs.
+export type FFIComponentOptions<T> = components.TableComponentOptions<T>
+
+--- A typed native relationship with dense target columns or entity-indexed edges.
+export type FFIRelationship<T> = components.FFIRelationship<T>
+
+--- Selects one target-specific native relationship column.
+export type FFIRelationshipTarget<T> = components.FFIRelationshipTarget<T>
+
+--- Configures the native edge layout, constructor and relationship behavior.
+export type FFIRelationshipOptions<T> = components.FFIRelationshipOptions<T>
+
+--- A target-only entity relationship with selectable cardinality and storage.
 export type Relationship = components.RelationshipComponent
 
---- The value returned when reading an exclusive relationship.
+--- A target-only relationship edge value.
 export type RelationshipValue = components.RelationshipValue
 
 --- Options for a marker component with no per-entity value.
@@ -59,10 +493,19 @@ export type ScalarComponentOptions = components.ScalarComponentOptions
 --- Options for a record-valued component.
 export type TableComponentOptions<T> = components.TableComponentOptions<T>
 
---- Options for an exclusive entity relationship.
+--- Construction and storage options for target-only relationships.
 export type RelationshipOptions = components.RelationshipOptions
 
---- Include and exclude constraints for a reusable query.
+--- A relationship carrying typed edge records with a target field.
+export type DataRelationship<T> = components.DataRelationship<T>
+
+--- A typed component selecting one dense relationship target.
+export type RelationshipTarget<T> = components.RelationshipTarget<T>
+
+--- Construction and storage options for typed relationship edges.
+export type DataRelationshipOptions<T> = components.DataRelationshipOptions<T>
+
+--- Membership constraints, grouping and notifications for a reusable query.
 export type QueryDescriptor = query.Descriptor
 
 --- A reusable archetype query.
@@ -70,6 +513,9 @@ export type Query = query.Query
 
 --- A dense archetype returned by query iteration.
 export type Archetype = archetype.Archetype
+
+--- Initializes or updates a contiguous one-based archetype row range at a barrier.
+export type BatchCallback = entityworld.BatchCallback
 
 --- A frame phase.
 export type Phase = phasevalues.Phase
@@ -85,6 +531,9 @@ export type SystemConfig = entityworld.SystemConfig
 
 --- A system body receiving elapsed time, its world, and the update task scope.
 export type System = entityworld.System
+
+--- A predicate receiving the phase delta, world and registered system name.
+export type RunIf = entityworld.RunIf
 
 --- One registered system as reported in execution order.
 export type SystemInfo = entityworld.SystemInfo
@@ -130,6 +579,9 @@ export type StateFocusChange = events.StateFocusChange
 
 --- The ordered frame phase constants.
 export const phases = phasevalues
+
+--- Provides timer, state and logical predicates for system dispatch.
+export const runif = runifpredicates
 
 --- Fires at address zero after an entity becomes committed and alive.
 export type OnSpawn = events.OnSpawn
@@ -267,6 +719,8 @@ end
 --- @param options the process-unique component name and snapshot policy
 --- @return the registered tag component
 --- @raises when the name is empty or already registered
+--- @raises Raises when a requirement is unregistered or names an untargeted
+---     relationship.
 export function newTagComponent(options: TagComponentOptions): Component
     return components.newTagComponent(options)
 end
@@ -275,6 +729,8 @@ end
 --- @param options the process-unique name, primitive kind, default, and snapshot policy
 --- @return the registered scalar component specialized to the selected kind
 --- @raises when the name is empty or already registered
+--- @raises Raises when a requirement is unregistered or names an untargeted
+---     relationship.
 export const newScalarComponent: components.NewScalarComponent = components.newScalarComponent
 
 --- Creates and registers a record-valued component.
@@ -282,16 +738,52 @@ export const newScalarComponent: components.NewScalarComponent = components.newS
 ---     policy
 --- @return the registered table component
 --- @raises when the name is empty or already registered
+--- @raises Raises when a requirement is unregistered or names an untargeted
+---     relationship.
 export function newComponent<T>(options: TableComponentOptions<T>): TableComponent<T>
     return components.newComponent(options)
 end
 
---- Creates and registers an exclusive entity relationship.
+--- Registers a component backed by contiguous Nupp struct rows.
+--- @param options The constructor and default returning the same struct type, with
+---     optional paired codecs overriding automatic detached field snapshots.
+--- @return Returns the callable native component definition.
+--- @raises Raises when the layout is unsupported or only one custom codec is supplied.
+--- @raises Raises when the component name is empty or already registered.
+export function newFFIComponent<T>(options: FFIComponentOptions<T>): FFIComponent<T>
+    return components.newFFIComponent(options)
+end
+
+--- Registers a relationship with native struct payloads.
+--- @param options The layout witness and constructor, with a number-valued target
+---     field, plus optional codecs and edge storage policy.
+--- @return Returns the callable relationship definition.
+--- @raises Raises for invalid layout, target field, relationship policy or codec pair.
+export function newFFIRelationship<T>(options: FFIRelationshipOptions<T>): FFIRelationship<T>
+    return components.newFFIRelationship(options)
+end
+
+--- Creates and registers a target-only entity relationship.
 --- @param options the relationship name and reverse-index behavior
 --- @return the callable relationship component
---- @raises when cascade deletion lacks reverse indexing
+--- @raises Raises when cascade deletion lacks exclusivity or reverse indexing.
+--- @raises Raises when a requirement is unregistered or names an untargeted
+---     relationship.
 export function newRelationship(options: RelationshipOptions): Relationship
     return components.newRelationship(options)
+end
+
+--- Registers a relationship carrying typed edge records.
+--- @param options The target-bearing constructor, storage policy and typed snapshot
+---     hooks.
+--- @return Returns the callable relationship; its constructor's first argument is the
+---     target entity.
+--- @raises Raises when the name is duplicated, storage policy is invalid or snapshot
+---     hooks are missing.
+--- @raises Raises when a requirement is unregistered or names an untargeted
+---     relationship.
+export function newDataRelationship<T>(options: DataRelationshipOptions<T>): DataRelationship<T>
+    return components.newDataRelationship(options)
 end
 
 --- Returns a registered component by numeric id.

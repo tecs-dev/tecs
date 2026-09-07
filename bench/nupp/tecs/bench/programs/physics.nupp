@@ -184,28 +184,30 @@ world:addSystem({
     run = function(_dt: number): nil
         -- One sixtieth of a second of force, as the Teal scene applies it.
         const strength = BLOWER_FORCE / 60.0
-        for candidate, count in bodies:iter() do
-            const archetype = assert(candidate)
-            -- `get`, not `getMut`: the blower reads positions and never writes
-            -- a transform, and taking the mutable column would mark it dirty
-            -- for every consumer downstream.
-            const transforms: {ecs.Transform2D} = assert(archetype:get(ecs.Transform2D))
-            const entities = archetype.entities
-            for row = 1, count as integer do
-                const transform = transforms[row]
-                for index = 1, #JETS do
-                    const source = JETS[index]
-                    const dx = transform.x - source.x
-                    const dy = transform.y - source.y
-                    const distance = dx * dx + dy * dy
-                    if distance < RADIUS_SQUARED then
-                        const falloff = 1.0 - distance / RADIUS_SQUARED
-                        physics.applyImpulse(
-                            world,
-                            entities[row],
-                            source.dx * strength * falloff,
-                            source.dy * strength * falloff
-                        )
+        unsafe do
+            for candidate, count in bodies:iter() do
+                const archetype = assert(candidate)
+                -- `get`, not `getMut`: the blower reads positions and never writes
+                -- a transform, and taking the mutable column would mark it dirty
+                -- for every consumer downstream.
+                const transforms: ecs.Transform2D[?] = assert(archetype:get(ecs.Transform2D))
+                const entities = archetype.entities
+                for row = 1, count as integer do
+                    const transform = transforms[row]
+                    for index = 1, #JETS do
+                        const source = JETS[index]
+                        const dx = transform.x - source.x
+                        const dy = transform.y - source.y
+                        const distance = dx * dx + dy * dy
+                        if distance < RADIUS_SQUARED then
+                            const falloff = 1.0 - distance / RADIUS_SQUARED
+                            physics.applyImpulse(
+                                world,
+                                entities[row],
+                                source.dx * strength * falloff,
+                                source.dy * strength * falloff
+                            )
+                        end
                     end
                 end
             end

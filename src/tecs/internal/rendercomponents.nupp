@@ -5,7 +5,8 @@ The dependency-low component definitions shared by the ECS surface and the
 Rust renderer.
 
 These component names and public value shapes are snapshot compatibility
-surfaces. Their Nupp storage is record-backed.
+surfaces. Their Nupp storage is contiguous native structs. Derived methods remain on
+both constructed values and borrowed column rows.
 
 `Sprite` reaches `tecs.gfx.images` because a snapshot stores an image by name
 and a column stores it by id, and the registry is the only thing that maps one
@@ -18,7 +19,8 @@ local images = require("tecs.gfx.images")
 const sin, cos = math.sin, math.cos
 
 --- Places an entity in the two-dimensional world.
-export record Transform2D
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct Transform2D
     --- Caller-writable. Sets the horizontal position in world units.
     x: number
 
@@ -42,7 +44,7 @@ export record Transform2D
 end
 
 --- The process-wide `Transform2D` component definition.
-export const Transform2DComponent: components.TableComponent<Transform2D> = components.newComponent({
+export const Transform2DComponent: components.FFIComponent<Transform2D> = components.newFFIComponent({
     -- This persisted component name is a compatibility surface.
     name = "Transform2D",
     construct = function(
@@ -54,24 +56,17 @@ export const Transform2DComponent: components.TableComponent<Transform2D> = comp
         scaleX: number?,
         scaleY: number?
     ): Transform2D
-        return new Transform2D(
-            x = x or 0,
-            y = y or 0,
-            z = z or 0,
-            layer = layer or 1,
-            rotation = rotation or 0,
-            scaleX = scaleX or 1,
-            scaleY = scaleY or 1
-        )
+        return new Transform2D(x or 0, y or 0, z or 0, layer or 1, rotation or 0, scaleX or 1, scaleY or 1)
     end,
     default = function(): Transform2D
-        return new Transform2D(x = 0, y = 0, z = 0, layer = 1, rotation = 0, scaleX = 1, scaleY = 1)
+        return new Transform2D(0, 0, 0, 1, 0, 1, 1)
     end,
 })
 
 --- Stores the pose before the current fixed step for presentation interpolation.
 --- Presence opts an entity in. Scale, depth and layer use their current values.
-export record PreviousTransform2D
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct PreviousTransform2D
     --- Engine-owned. Stores the previous horizontal position in world units.
     x: number
 
@@ -84,19 +79,20 @@ end
 
 --- The process-wide transform-history component. Its name and fields are snapshot
 --- compatibility surfaces.
-export const PreviousTransform2DComponent: components.TableComponent<PreviousTransform2D> = components.newComponent({
+export const PreviousTransform2DComponent: components.FFIComponent<PreviousTransform2D> = components.newFFIComponent({
     name = "PreviousTransform2D",
     requires = {Transform2DComponent},
     construct = function(x: number?, y: number?, rotation: number?): PreviousTransform2D
-        return new PreviousTransform2D(x = x or 0, y = y or 0, rotation = rotation or 0)
+        return new PreviousTransform2D(x or 0, y or 0, rotation or 0)
     end,
     default = function(): PreviousTransform2D
-        return new PreviousTransform2D(x = 0, y = 0, rotation = 0)
+        return new PreviousTransform2D(0, 0, 0)
     end,
 })
 
 --- Controls a renderable entity's color and opacity.
-export record Tint
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct Tint
     --- Caller-writable. Sets the red channel from zero to one.
     r: number
 
@@ -111,14 +107,14 @@ export record Tint
 end
 
 --- The process-wide `Tint` component definition.
-export const TintComponent: components.TableComponent<Tint> = components.newComponent({
+export const TintComponent: components.FFIComponent<Tint> = components.newFFIComponent({
     -- This persisted component name is a compatibility surface.
     name = "Tint",
     construct = function(r: number?, g: number?, b: number?, a: number?): Tint
-        return new Tint(r = r or 1, g = g or 1, b = b or 1, a = a or 1)
+        return new Tint(r or 1, g or 1, b or 1, a or 1)
     end,
     default = function(): Tint
-        return new Tint(r = 1, g = 1, b = 1, a = 1)
+        return new Tint(1, 1, 1, 1)
     end,
 })
 
@@ -132,7 +128,8 @@ export const Renderable2D: components.Component = components.newTagComponent({na
 --- image with the rectangle set to the full range. An entity carrying no
 --- `Sprite`, or one whose image is not resident, draws its tint against the
 --- backend's opaque white fallback.
-export record Sprite
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct Sprite
     --- Caller-writable. Selects an image by its `tecs.gfx.images` id. Zero
     --- selects no image.
     image: integer
@@ -151,16 +148,16 @@ export record Sprite
 end
 
 --- The process-wide `Sprite` component definition.
-export const SpriteComponent: components.TableComponent<Sprite> = components.newComponent({
+export const SpriteComponent: components.FFIComponent<Sprite> = components.newFFIComponent({
     -- This persisted component name is a compatibility surface, and so are the
     -- `image`, `u0`, `v0`, `u1`, and `v1` keys the snapshot below writes. A
     -- snapshot stores the image by name because an id is process-local.
     name = "Sprite",
     construct = function(image: integer?, u0: number?, v0: number?, u1: number?, v1: number?): Sprite
-        return new Sprite(image = image or 0, u0 = u0 or 0, v0 = v0 or 0, u1 = u1 or 1, v1 = v1 or 1)
+        return new Sprite(image or 0, u0 or 0, v0 or 0, u1 or 1, v1 or 1)
     end,
     default = function(): Sprite
-        return new Sprite(image = 0, u0 = 0, v0 = 0, u1 = 1, v1 = 1)
+        return new Sprite(0, 0, 0, 1, 1)
     end,
     save = function(value: Sprite): any
         return {image = images.nameOf(value.image), u0 = value.u0, v0 = value.v0, u1 = value.u1, v1 = value.v1,}
@@ -174,11 +171,11 @@ export const SpriteComponent: components.TableComponent<Sprite> = components.new
         end
 
         return new Sprite(
-            image = image,
-            u0 = (stored.u0 as number?) or 0,
-            v0 = (stored.v0 as number?) or 0,
-            u1 = (stored.u1 as number?) or 1,
-            v1 = (stored.v1 as number?) or 1
+            image,
+            (stored.u0 as number?) or 0,
+            (stored.v0 as number?) or 0,
+            (stored.u1 as number?) or 1,
+            (stored.v1 as number?) or 1
         )
     end,
 })
@@ -193,7 +190,8 @@ export const SpriteComponent: components.TableComponent<Sprite> = components.new
 --- one camera can serve targets of different sizes. Use the same dimensions
 --- for conversion and rendering and `toWorld`, `toScreen`, and `matrix` then
 --- share one mapping, so points round-trip.
-export record Camera2D
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct Camera2D
     --- Caller-writable. Sets the horizontal center of the view in world units.
     x: number
 
@@ -209,160 +207,147 @@ export record Camera2D
     --- scene counter-clockwise on screen.
     rotation: number
 
-    matrix: function(borrows self: Camera2D, width: number, height: number): {number}
-    viewBounds: function(borrows self: Camera2D, width: number, height: number): (number, number, number, number)
-    toWorld: function(
+    --- Returns the world-to-clip matrix for a viewport of `width` by `height`.
+    ---
+    --- Column major, because that is how a shader reads a four-by-four uniform:
+    --- the first four numbers are the first column, not the first row. Transposing
+    --- them renders something plausible rather than nothing, which is how the
+    --- mistake survives review.
+    ---
+    --- The matrix owns the only y flip in the camera. `toScreen` and `toWorld`
+    --- each spell out the same negated scale rather than sharing one helper, so a
+    --- mismatch between the three stays visible.
+    --- @param self the camera to project through
+    --- @param width the viewport width in target pixels
+    --- @param height the viewport height in target pixels
+    --- @return a fresh sixteen-number table the caller owns, indexed from one
+    function matrix(borrows self: Camera2D, width: number, height: number): {number}
+        const sx = 2.0 * self.zoom / width
+        const sy = -2.0 * self.zoom / height
+        const c = cos(self.rotation)
+        const s = sin(self.rotation)
+
+        -- The transpose of the usual rotation, so world offsets turn by minus the
+        -- rotation before the y negation above flips the result back. What comes
+        -- out is the scene turning counter-clockwise on screen by plus rotation.
+        const m00 = sx * c
+        const m01 = sx * s
+        const m10 = -sy * s
+        const m11 = sy * c
+
+        -- Depth passes through untouched and w stays one: a depth is written from
+        -- the layer band rather than projected out of world space.
+
+        return {
+            m00,
+            m10,
+            0.0,
+            0.0,
+            m01,
+            m11,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            -(m00 * self.x + m01 * self.y),
+            -(m10 * self.x + m11 * self.y),
+            0.0,
+            1.0,
+        }
+    end
+
+    --- Returns the world rectangle this camera can see.
+    ---
+    --- A rotated camera reports the axis-aligned box enclosing the view's corners,
+    --- so culling keeps a little more than it must. Keeping too much costs a few
+    --- instances; keeping too little drops geometry that should have drawn, which
+    --- is why the error goes this way.
+    --- @param self the camera to bound
+    --- @param width the viewport width in target pixels
+    --- @param height the viewport height in target pixels
+    --- @return the smallest x, then the smallest y, then the largest x, then the
+    ---     largest y
+    function viewBounds(borrows self: Camera2D, width: number, height: number): number, number, number, number
+        const halfWidth = width * 0.5 / self.zoom
+        const halfHeight = height * 0.5 / self.zoom
+        const c = math.abs(cos(self.rotation))
+        const s = math.abs(sin(self.rotation))
+        const extentX = halfWidth * c + halfHeight * s
+        const extentY = halfWidth * s + halfHeight * c
+
+        return self.x - extentX, self.y - extentY, self.x + extentX, self.y + extentY
+    end
+
+    --- Converts a target point to world space.
+    --- @param self the camera to project through
+    --- @param screenX the pixels from the left of the viewport
+    --- @param screenY the pixels from the top of the viewport, running down
+    --- @param width the viewport width in target pixels, the same one the matrix was
+    ---     built
+    ---     with
+    --- @param height the viewport height in target pixels, the same one the matrix was
+    ---     built with
+    --- @return the world x, then the world y; a point outside the viewport converts
+    ---     too and lands outside the view rectangle
+    function toWorld(
         borrows self: Camera2D,
         screenX: number,
         screenY: number,
         width: number,
         height: number
-    ): (number, number)
-    toScreen: function(
+    ): number, number
+        const dx = (screenX - width * 0.5) / self.zoom
+        const dy = (screenY - height * 0.5) / self.zoom
+        const c = cos(self.rotation)
+        const s = sin(self.rotation)
+
+        return self.x + dx * c - dy * s, self.y + dx * s + dy * c
+    end
+
+    --- Converts a world point to target space.
+    ---
+    --- Exactly the inverse of `toWorld` at the same width and height, and the same
+    --- mapping `matrix` applies, so a point round-trips.
+    --- @param self the camera to project through
+    --- @param worldX the world x
+    --- @param worldY the world y, running down
+    --- @param width the viewport width in target pixels, the same one the matrix was
+    ---     built
+    ---     with
+    --- @param height the viewport height in target pixels, the same one the matrix was
+    ---     built with
+    --- @return the pixels from the left, then the pixels from the top; neither is
+    ---     clamped
+    ---     to the viewport
+    function toScreen(
         borrows self: Camera2D,
         worldX: number,
         worldY: number,
         width: number,
         height: number
-    ): (number, number)
-end
+    ): number, number
+        const dx = worldX - self.x
+        const dy = worldY - self.y
+        const c = cos(self.rotation)
+        const s = sin(self.rotation)
+        const rx = dx * c + dy * s
+        const ry = -dx * s + dy * c
 
---- Returns the world-to-clip matrix for a viewport of `width` by `height`.
----
---- Column major, because that is how a shader reads a four-by-four uniform:
---- the first four numbers are the first column, not the first row. Transposing
---- them renders something plausible rather than nothing, which is how the
---- mistake survives review.
----
---- The matrix owns the only y flip in the camera. `toScreen` and `toWorld`
---- each spell out the same negated scale rather than sharing one helper, so a
---- mismatch between the three stays visible.
---- @param self the camera to project through
---- @param width the viewport width in target pixels
---- @param height the viewport height in target pixels
---- @return a fresh sixteen-number table the caller owns, indexed from one
-function Camera2D.matrix(borrows self: Camera2D, width: number, height: number): {number}
-    const sx = 2.0 * self.zoom / width
-    const sy = -2.0 * self.zoom / height
-    const c = cos(self.rotation)
-    const s = sin(self.rotation)
-
-    -- The transpose of the usual rotation, so world offsets turn by minus the
-    -- rotation before the y negation above flips the result back. What comes
-    -- out is the scene turning counter-clockwise on screen by plus rotation.
-    const m00 = sx * c
-    const m01 = sx * s
-    const m10 = -sy * s
-    const m11 = sy * c
-
-    -- Depth passes through untouched and w stays one: a depth is written from
-    -- the layer band rather than projected out of world space.
-
-    return {
-        m00,
-        m10,
-        0.0,
-        0.0,
-        m01,
-        m11,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
-        -(m00 * self.x + m01 * self.y),
-        -(m10 * self.x + m11 * self.y),
-        0.0,
-        1.0,
-    }
-end
-
---- Returns the world rectangle this camera can see.
----
---- A rotated camera reports the axis-aligned box enclosing the view's corners,
---- so culling keeps a little more than it must. Keeping too much costs a few
---- instances; keeping too little drops geometry that should have drawn, which
---- is why the error goes this way.
---- @param self the camera to bound
---- @param width the viewport width in target pixels
---- @param height the viewport height in target pixels
---- @return the smallest x, then the smallest y, then the largest x, then the largest y
-function Camera2D.viewBounds(borrows self: Camera2D, width: number, height: number): number, number, number, number
-    const halfWidth = width * 0.5 / self.zoom
-    const halfHeight = height * 0.5 / self.zoom
-    const c = math.abs(cos(self.rotation))
-    const s = math.abs(sin(self.rotation))
-    const extentX = halfWidth * c + halfHeight * s
-    const extentY = halfWidth * s + halfHeight * c
-
-    return self.x - extentX, self.y - extentY, self.x + extentX, self.y + extentY
-end
-
---- Converts a target point to world space.
---- @param self the camera to project through
---- @param screenX the pixels from the left of the viewport
---- @param screenY the pixels from the top of the viewport, running down
---- @param width the viewport width in target pixels, the same one the matrix was built
----     with
---- @param height the viewport height in target pixels, the same one the matrix was
----     built with
---- @return the world x, then the world y; a point outside the viewport converts
----     too and lands outside the view rectangle
-function Camera2D.toWorld(
-    borrows self: Camera2D,
-    screenX: number,
-    screenY: number,
-    width: number,
-    height: number
-): number, number
-    const dx = (screenX - width * 0.5) / self.zoom
-    const dy = (screenY - height * 0.5) / self.zoom
-    const c = cos(self.rotation)
-    const s = sin(self.rotation)
-
-    return self.x + dx * c - dy * s, self.y + dx * s + dy * c
-end
-
---- Converts a world point to target space.
----
---- Exactly the inverse of `toWorld` at the same width and height, and the same
---- mapping `matrix` applies, so a point round-trips.
---- @param self the camera to project through
---- @param worldX the world x
---- @param worldY the world y, running down
---- @param width the viewport width in target pixels, the same one the matrix was built
----     with
---- @param height the viewport height in target pixels, the same one the matrix was
----     built with
---- @return the pixels from the left, then the pixels from the top; neither is clamped
----     to the viewport
-function Camera2D.toScreen(
-    borrows self: Camera2D,
-    worldX: number,
-    worldY: number,
-    width: number,
-    height: number
-): number, number
-    const dx = worldX - self.x
-    const dy = worldY - self.y
-    const c = cos(self.rotation)
-    const s = sin(self.rotation)
-    const rx = dx * c + dy * s
-    const ry = -dx * s + dy * c
-
-    return width * 0.5 + rx * self.zoom, height * 0.5 + ry * self.zoom
+        return width * 0.5 + rx * self.zoom, height * 0.5 + ry * self.zoom
+    end
 end
 
 --- The process-wide `Camera2D` component definition.
-export const Camera2DComponent: components.TableComponent<Camera2D> = components.newComponent({
+export const Camera2DComponent: components.FFIComponent<Camera2D> = components.newFFIComponent({
     -- This persisted component name is a compatibility surface.
     name = "Camera2D",
     construct = function(x: number?, y: number?, zoom: number?, rotation: number?): Camera2D
-        return new Camera2D(x = x or 0, y = y or 0, zoom = zoom or 1, rotation = rotation or 0)
+        return new Camera2D(x or 0, y or 0, zoom or 1, rotation or 0)
     end,
     default = function(): Camera2D
-        return new Camera2D(x = 0, y = 0, zoom = 1, rotation = 0)
+        return new Camera2D(0, 0, 1, 0)
     end,
 })
 

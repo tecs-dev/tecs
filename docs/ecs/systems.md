@@ -24,9 +24,11 @@ local function spinPlugin(exclusive world: tecs.ecs.World): nil
             for archetype, length in spinning:iter() do
                 local transforms = assert(archetype:getMut(Transform2D))
                 local speeds = assert(archetype:get(Spin))
-                for row = 1, length as integer do
-                    transforms[row].rotation =
-                        transforms[row].rotation + speeds[row] * dt
+                unsafe do
+                    for row = 1, length as integer do
+                        transforms[row].rotation =
+                            transforms[row].rotation + speeds[row] * dt
+                    end
                 end
             end
         end,

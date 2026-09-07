@@ -91,22 +91,144 @@ decodes audio, `cpal` owns the device, `gilrs` owns gamepad enumeration and its
 mapping database, and Rapier owns rigid-body storage and stepping. What crosses
 into game code is a flat typed value, not a library handle.
 
+## System ordering
+
+Phase boundaries carry the engine's frame dependencies. Named `before` and
+`after` constraints express the dependencies left inside one phase without
+making plugin installation order the only way to order systems. Missing or
+cross-phase names add no edge, so an optional plugin stays optional. The
+schedule uses registration order to break ties, rejects cycles before dispatch,
+and caches its phase-local arrays until registration changes.
+
+One external world dispatch captures one schedule. Rebuilding it in the middle
+of a phase could repeat or skip systems, so additions wait for the next dispatch;
+removals mark their existing entries inactive immediately. A disabled system
+retains its dependency edges. Ordering alone is not a publication barrier.
+
+Timer predicates consume simulation deltas, not wall clocks, and short-circuit
+composition controls whether a timer advances. Jitter takes a Nupp random
+generator explicitly: restoring Tecs-specific scheduling does not restore a
+second random API or silently make runtime closures part of entity snapshots.
+
+World-managed randomness adds ownership and persistence to Nupp's generator,
+not another generator implementation. A stream's seed is derived from the world
+seed and its name, so adding a consumer cannot move another consumer's sequence.
+Reseeding and snapshot restore mutate existing generators in place because
+systems capture them during setup. The persisted `tecs.random` key and seed
+derivation remain compatible with the old architecture. Restore recognizes that
+key even before a world first requests a stream, removing the old initialization
+ordering trap. Worlds that never use randomness allocate no stream registry and
+write no random snapshot entry.
+
 ## Structural mutation
 
+Component requirements are addition rules, not continuously enforced invariants.
+They expand only when a component enters the staged signature, preserving
+existing values and intentional removals. Definitions request per-entity
+defaults; constructed instances explicitly request shared values. Every mutation
+path uses the same closure, so a bulk operation or a relationship cannot silently
+bypass the dependencies a component declares.
+
 Tecs uses one deferred structural model. Systems in a phase stage spawns,
-despawns, additions, removals, bundles, and batches together; the scheduler
+despawns, additions, removals, and bundle spawns together; the scheduler
 publishes them at the phase boundary. A system can declare `commitBefore` or
-`commitAfter` when it unconditionally needs an extra boundary. A conditional
-`enqueueCommit` request made during a system is honored only after that system
-returns, before the next one runs; outside system dispatch it settles
-synchronously for tests and debug tooling. Mutation itself never switches to
-an eager path.
+`commitAfter` when it needs an extra boundary. Explicit `world:commit()` settles
+staged work synchronously for setup, tests and debug tooling. A query iterator
+owns no mutation scope, so callers leave the loop before explicitly committing.
+
+`world:enqueueCommit()` is the conditional boundary: a system requests it only
+when its work needs to be visible to the next system. The dispatcher coalesces
+requests until the body returns, even when the body suspends, preserving the
+current iterator's view. Predicate requests follow the same rule even when the
+predicate skips the body. Outside a system the request is synchronous, and
+requests during publication join its drain instead of recursing. A failed
+system cancels its request without publishing during error unwinding.
 
 Value access stays direct. `getMut` marks and returns a live component because
-changing its fields cannot move the entity between archetypes. Replacing an
-existing component value through `set` takes the same immediate path. This
-keeps the common simulation loop cheap without maintaining a second structural
-mutation implementation.
+changing its fields cannot move the entity between archetypes. Replacing a
+component through `set` is staged, including when the component already exists.
+Relationship targets must be changed through `set`, because the reverse index
+and, for dense relationships, the archetype signature depend on that target.
+
+### Bulk operations and compaction
+
+Bulk mutation uses the same staged transaction as scalar mutation. A batch
+resolves its shared shape once, captures query members at the call, and leaves
+publication to the barrier. Deferred column writers introduce ordered transaction
+segments so a later scalar write cannot be overwritten by an earlier initializer.
+Relationship edits retain the ordinary reverse-index and cascade paths.
+
+Maintenance is explicit because rebuilding row tables invalidates captured
+column views. Archetype identity is separate from the dense registry that
+enumerates it: pruning a dead relationship target must not renumber survivors.
+The Nupp stores expose no native capacity, so compaction reports stores rebuilt
+after occupancy shrinks rather than inventing a byte count.
+
+### Query membership and relationship storage
+
+State exclusion belongs to query construction: all game queries exclude
+`Disabled`, and logic queries also exclude `Paused`, unless explicitly included.
+Native resource reconciliation and retained UI layout need an internal unfiltered
+query because they must clean up disabled entities and restore hidden ones.
+Putting that exception at those ownership boundaries keeps ordinary simulation
+queries from accidentally processing disabled entities.
+
+Query observers follow set membership. Moving between two matching archetypes
+does not report removal and addition, because the entity never left the query.
+Departing callbacks read the old row; entering callbacks read the published row.
+Callbacks may stage another mutation, which the active commit drains afterwards.
+Only queries with callbacks join the notification list, so ordinary queries add
+no observer dispatch work to each entity move.
+
+Dense relationships place each target in the archetype signature and keep edge
+payloads in target-specific columns. This lets a query select a target without
+scanning entity values. Sparse relationships keep entity-indexed edge sets and
+put only the relationship's presence in the signature. Frequent retargeting then
+does not fragment archetypes. `ChildOf` and the physics ownership relationships
+use sparse storage for that reason. Both modes support cardinality, traversal,
+reverse indexes and snapshots. Indexed dense edges clean up a deleted target;
+non-cascading sparse edges retain their identifiers until explicitly removed,
+preserving the original relationship contract.
+
+Typed table data relationships require explicit snapshot hooks. The constructor alone
+cannot reconstruct a record from saved fields when it takes additional arguments
+or establishes invariants. Leaving that decision with its declaration preserves
+the edge's record identity and methods after load.
+
+### Native columns and publication
+
+Native component layout belongs to Nupp's struct declaration. Recreating a C
+schema and installing a second metatype would duplicate that authority and could
+steal another component's instance identity. Tecs instead binds the declaration
+to its component, reads field metadata once, and keeps contiguous columns with
+the original one-based rows, geometric growth and bulk memory copies. Two
+components can use the same struct layout without sharing component identity.
+
+The built-in numeric components use that path too, including shape material,
+transforms, tint, camera, lights, animation, sound, physics and numeric UI state.
+Their Debug and Serde derives belong to Nupp, not a Tecs-generated metatype.
+Managed strings and collections stay in record components. Renderer caches own
+reusable native copies instead of retaining one allocated row reference per
+entity; this also keeps interpolation separate from simulation memory.
+
+Publication copies a moving native row before swap-removing its source. Managed
+records tolerate the opposite order because a reference keeps the record, but a
+native row reference names a location whose bytes swap removal overwrites. Dense
+relationship wildcard columns likewise alias their first target column instead
+of keeping a second payload copy. Growth, compaction and swap removal repair
+those aliases while no query loop is running.
+
+Automatic native snapshot codecs cover the supported inline fields. Explicit
+codec pairs disable raw serialization in both directions; a fast path that
+bypasses an image registry or runtime-state reconstruction is incorrect. Native
+storage exposes buffer-direct column copies and retained custom backing for the
+snapshot and renderer boundaries. These are storage capabilities, not a claim
+that binary world snapshot framing has already been restored.
+
+`nupp task bench storage` compares the native ECS query loop with the original
+direct FFI-array loop and managed records, and compares the two buffer-direct
+copy paths. It also reports allocation over warmed full-query loops. It is not
+a substitute for the shapes, physics and snapshot benchmarks.
 
 ### Builtin systems and the hierarchy gate
 
