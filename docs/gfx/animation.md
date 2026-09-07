@@ -35,7 +35,9 @@ world:spawn(
 )
 ```
 
-Playback advances in fixed steps. Machines that replay the same simulation
+Playback advances in fixed steps on the GPU. A shared sheet/tag/slice table
+resolves UVs and moving pivots without rewriting every animated entity or
+uploading instances each frame. Machines that replay the same simulation
 therefore select the same frames. `frameOf` and `timeOf` report playback on
 the same fixed-step clock.
 
@@ -51,12 +53,26 @@ sheet shares its frame and timing data.
 
 ## Slices and pivots
 
-Aseprite slices may move between frames. `sheet:pivotOf(sliceId, frame)` returns the pivot for a slice and frame. A game can
-use that position for hands, muzzles, and feet; the renderer does not apply a
-pivot component automatically.
+Aseprite slices may move between frames. Spawn `hero:pivot("feet")` with the
+sprite and animation to keep the selected slice anchored at `Transform2D`.
+The GPU applies each frame's pivot and culls against the full cycle's reach.
+For a fixed normalized anchor, use `tecs.gfx.Pivot(x, y)`; `(0.5, 0.5)` is centered.
+`sheet:pivotOf(sliceId, frame)` also returns a pivot for hands, muzzles or other
+gameplay attachments.
 
 ## Reloads
 
 `tecs.gfx.sheet.replace` can replace its frame, tag, slice, and
 timing data in place. Existing entities retain the sheet id and continue from
 their playback state. A replacement must preserve the bound image dimensions.
+
+## Observing playback
+
+`timeOf(world, entity)` and `frameOf(world, entity)` resolve the same fixed clock
+as the shader. Add `AnimationEvents` only to entities whose `Looped` or
+`Completed` events game code needs. Unwatched one-shots clamp to their last
+frame on the GPU. Watched one-shots also clear `playing` when reporting completion.
+
+Snapshots store live phases and sheet names, then rebuild process-local playback
+IDs on load. Register sheets before restoring the world. Clean animations keep
+their instance buffers even while their visible frames change.

@@ -278,3 +278,11 @@ Continue with [Worlds and entities](ecs/world.md), [Components](ecs/components/i
 [Shapes](gfx/shapes.md) covers the built-in geometry; [Materials](gfx/materials.md)
 covers custom shaders. Run `nupp task ex-shapes` for the shape gallery or
 `nupp task bench render` for the [native rendering benchmark](gfx/benchmarks.md).
+
+## 3D scenes and GPU particles
+
+Run `nupp task ex-animated3d` for the original animated glTF scene,
+`nupp task ex-ibl3d` for environment lighting, `nupp task ex-shadows3d` for
+cascaded and local shadows, or `nupp task ex-particles` for GPU emitters.
+[3D rendering](gfx/3d.md) includes the smaller demos and large-scene setup;
+[particles](gfx/particles.md) explains playback and pool sizing.

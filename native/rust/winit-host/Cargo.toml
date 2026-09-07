@@ -12,5 +12,9 @@ image.workspace = true
 bytemuck.workspace = true
 pollster.workspace = true
 serde_json.workspace = true
-wgpu.workspace = true
+glam.workspace = true
+wgpu = { workspace = true, features = ["glsl"] }
 winit.workspace = true
+
+[dev-dependencies]
+tecs-assets = { path = "../tecs-assets" }

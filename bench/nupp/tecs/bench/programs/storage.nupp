@@ -44,16 +44,16 @@ nativeWorld:commit()
 managedWorld:commit()
 const nativeQuery = nativeWorld:newQuery({include = {native}})
 const managedQuery = managedWorld:newQuery({include = {managed}})
-const baseline = carray(NativePoint, count + 1)
+const baseline = carray(NativePoint, count)
 unsafe do
-    for row = 1, count do
+    for row = 0, count - 1 do
         baseline[row].y = 1
     end
 end
 
 local function directLoop(): nil
     unsafe do
-        for row = 1, count do
+        for row = 0, count - 1 do
             baseline[row].x += baseline[row].y
         end
     end
@@ -99,7 +99,7 @@ const nativeRaw = harness.newStage("native raw save")
 harness.measure(raw, warmup, samples, function(): nil
     bytes:reset()
     unsafe do
-        bytes:putcdata(ffi.cast<voidptr>(baseline[1]), (count * 16) as uint64)
+        bytes:putcdata(ffi.cast<voidptr>(baseline), count * 16)
     end
 end)
 harness.measure(nativeRaw, warmup, samples, function(): nil
@@ -122,5 +122,5 @@ print("Rows per window: " .. tostring(count))
 print(harness.format({direct, ecs, tables, raw, nativeRaw}))
 print("Native ECS allocations over 100 full query loops: " .. tostring(allocated) .. " bytes")
 unsafe do
-    assert(baseline[1].x == warmup + samples)
+    assert(baseline[0].x == warmup + samples)
 end

@@ -1,0 +1,194 @@
+local test = require("nupp.test")
+local particles = require("tecs.gfx.particles")
+local ecs = require("tecs.ecs")
+local suite = {}
+local sequence: integer = 0
+local function effect(capacity: integer?): particles.Effect
+    sequence = sequence + 1
+    return particles.newEffect({
+        name = "test.particles." .. tostring(sequence),
+        capacity = capacity ?? 8,
+        schedule = {rate = 60, duration = 0.1},
+        initial = {lifetime = 0.1, size = 3},
+        update = {
+            size = particles.newCurve({
+                {0, 1},
+                {1, 0}
+            }),
+            color = particles.newGradient({
+                {0, "#ffffffff"},
+                {1, "#ff000000"}
+            })
+        }
+    })
+end
+
+local function number(bytes: string, offset: integer): number
+    local reader = nupp.io.newScalarReader(bytes)
+    reader:skip(offset)
+    const value = reader:readFloat32()
+    reader:drop()
+
+    return value
+end
+
+local function word(bytes: string, offset: integer): integer
+    local reader = nupp.io.newScalarReader(bytes)
+    reader:skip(offset)
+    const value = reader:readUint32() as integer
+    reader:drop()
+
+    return value
+end
+
+local function emitterOffset(bytes: string): integer
+    return 48 + word(bytes, 32)
+end
+
+function suite.compilesEffectsAndSendsOnlyEmitterRecords(): nil
+    const world = ecs.newWorld()
+    const built = effect(4000000)
+    particles.plugin(world, {capacity = 4000000})
+    const entity = world:spawn(ecs.Transform2D(40, 50), particles.ParticleEmitter({effect = built}))
+    world:commit()
+    world:update(1 / 60)
+    const bytes = particles.section(world)
+    test.equal(word(bytes, 16), 4000000)
+    test.equal(word(bytes, 36), 1)
+    test.assert(#bytes < 100000, "four million GPU slots carry one emitter rather than four million CPU particles")
+    const at = emitterOffset(bytes)
+    test.equal(number(bytes, at + 2 * 4), 4000000)
+    test.equal(number(bytes, at + 10 * 4), 40)
+    test.equal(number(bytes, at + 11 * 4), 50)
+    test.equal(number(bytes, at + 21 * 4), 1)
+    test.equal(number(bytes, at + 22 * 4), 1)
+    test.assert(world:has(entity, ecs.Transform2D))
+end
+
+function suite.pausesDrainsClearsAndRestartsAnEmitter(): nil
+    const world = ecs.newWorld()
+    particles.plugin(world)
+    const entity = world:spawn(particles.ParticleEmitter({effect = effect()}))
+    world:commit()
+    world:update(1 / 60)
+    const item = assert(world:get(entity, particles.ParticleEmitter))
+    item:pause()
+    world:update(1 / 60)
+    local bytes = particles.section(world)
+    local at = emitterOffset(bytes)
+    test.equal(number(bytes, at + 21 * 4), 1)
+    test.equal(number(bytes, at + 22 * 4), 0)
+    item:play()
+    item:burst(3)
+    world:update(1 / 60)
+    bytes = particles.section(world)
+    at = emitterOffset(bytes)
+    test.equal(number(bytes, at + 20 * 4), 3)
+    world:update(1 / 60)
+    bytes = particles.section(world)
+    at = emitterOffset(bytes)
+    test.equal(number(bytes, at + 20 * 4), 0)
+    item:clear()
+    world:update(1 / 60)
+    bytes = particles.section(world)
+    at = emitterOffset(bytes)
+    test.equal(number(bytes, at + 7 * 4), 3.5)
+    item:stop()
+    for _ = 1, 12 do
+        world:update(1 / 60)
+    end
+    test.assert(item:finished(), "stopped fields drain while their own clock advances")
+    item:restart()
+    world:update(1 / 60)
+    test.assert(not item:finished())
+    test.equal(item.state, "playing")
+end
+
+function suite.pausedEntityKeepsItsFieldClock(): nil
+    const world = ecs.newWorld()
+    particles.plugin(world)
+    const entity = world:spawn(particles.ParticleEmitter({effect = effect()}), ecs.Paused)
+    world:commit()
+    world:update(1 / 60)
+    const bytes = particles.section(world)
+    const at = emitterOffset(bytes)
+    test.equal(number(bytes, at + 21 * 4), 0)
+    test.equal(number(bytes, at + 22 * 4), 0)
+    world:remove(entity, ecs.Paused)
+    world:commit()
+    world:update(1 / 60)
+    const moved = particles.section(world)
+    test.equal(number(moved, emitterOffset(moved) + 21 * 4), 1)
+end
+
+function suite.releasesDrainedRangesAndReusesCapacity(): nil
+    const world = ecs.newWorld()
+    particles.plugin(world, {capacity = 8, maxEmitters = 1})
+    const built = effect()
+    const entity = world:spawn(particles.ParticleEmitter({effect = built}))
+    world:commit()
+    world:update(1 / 60)
+    world:despawn(entity)
+    world:commit()
+    for _ = 1, 20 do
+        world:update(1 / 60)
+    end
+    test.equal(word(particles.section(world), 36), 0)
+    world:spawn(particles.ParticleEmitter({effect = built}))
+    world:commit()
+    world:update(1 / 60)
+    test.equal(word(particles.section(world), 36), 1)
+end
+
+function suite.snapshotsNameEffectsAndRefillAnEmptyField(): nil
+    const world = ecs.newWorld()
+    particles.plugin(world)
+    const built = effect()
+    const entity = world:spawn(particles.ParticleEmitter({effect = built, seed = 42}))
+    world:commit()
+    world:update(1 / 60)
+    const saved = world:saveSnapshot()
+    const restored = ecs.newWorld()
+    particles.plugin(restored)
+    restored:loadSnapshot(saved)
+    const item = assert(restored:get(entity, particles.ParticleEmitter))
+    test.equal(item.effect.name, built.name)
+    test.equal(item.seed, 42)
+    restored:update(1 / 60)
+    const bytes = particles.section(restored)
+    test.equal(word(bytes, 36), 1)
+    test.equal(number(bytes, emitterOffset(bytes) + 21 * 4), 2)
+end
+
+function suite.burstOnlyEffectsFinishAndClipsRefreshWithoutAnEmitterWrite(): nil
+    sequence = sequence + 1
+    const built = particles.newEffect({
+        name = "test.burst-only." .. tostring(sequence),
+        capacity = 8,
+        schedule = {bursts = {{time = 0.1, count = 4}}},
+        initial = {lifetime = 0.1},
+        render = {clip = 7}
+    })
+    test.equal(built.emitFor, 0.1)
+    const world = ecs.newWorld()
+    particles.plugin(world)
+    const id = world:spawn(ecs.Transform2D(123, 45), particles.ParticleEmitter({effect = built}))
+    world:commit()
+    tecs.gfx.clips.setRegion(7, {x = 10, y = 20, width = 90, height = 70})
+    world:update(1 / 60)
+    const first = particles.section(world)
+    const offset = emitterOffset(first)
+    test.equal(number(first, offset + 8 * 4), 123)
+    test.equal(number(first, offset + 9 * 4), 45)
+    test.equal(number(first, 40 + ((built.index - 1) * 69 + 65) * 4), 10)
+    tecs.gfx.clips.setRegion(7, {x = 30, y = 20, width = 70, height = 70})
+    const second = particles.section(world)
+    test.equal(number(second, 40 + ((built.index - 1) * 69 + 65) * 4), 30)
+    for _ = 1, 20 do
+        world:update(1 / 60)
+    end
+    test.assert(assert(world:get(id, particles.ParticleEmitter)):finished())
+    tecs.gfx.clips.clearRegion(7)
+end
+
+return suite

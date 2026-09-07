@@ -160,7 +160,13 @@ export const SpriteComponent: components.FFIComponent<Sprite> = components.newFF
         return new Sprite(0, 0, 0, 1, 1)
     end,
     save = function(value: Sprite): any
-        return {image = images.nameOf(value.image), u0 = value.u0, v0 = value.v0, u1 = value.u1, v1 = value.v1,}
+        return {
+            image = images.nameOf(value.image),
+            u0 = value.u0 < 0 and 0 or value.u0,
+            v0 = value.u0 < 0 and 0 or value.v0,
+            u1 = value.u0 < 0 and 1 or value.u1,
+            v1 = value.u0 < 0 and 1 or value.v1,
+        }
     end,
     load = function(value: any): Sprite
         local stored = value as {[string]: any}

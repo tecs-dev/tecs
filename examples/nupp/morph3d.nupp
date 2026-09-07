@@ -1,0 +1,182 @@
+module morph3d
+
+const FLOOR_VERTICES: {
+    number
+} = {
+    -4,
+    -1.5,
+    -3,
+    0,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    0,
+    4,
+    -1.5,
+    -3,
+    0,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    4,
+    -1.5,
+    3,
+    0,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    1,
+    -4,
+    -1.5,
+    3,
+    0,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+}
+const FLOOR_INDICES: {integer} = {0, 2, 1, 0, 3, 2}
+
+local function install(exclusive app: tecs.application.Application): nil
+    const world = app.world
+    const camera = tecs.gfx.newCamera3D()
+    const lighting = tecs.gfx.meshes.newLighting()
+    lighting.ambient = 0
+    lighting.probe = {
+        0.08,
+        0.1,
+        0.14,
+        0.08,
+        0.1,
+        0.14,
+        0.08,
+        0.1,
+        0.14,
+        0.08,
+        0.1,
+        0.14,
+        0.08,
+        0.1,
+        0.14,
+        0.08,
+        0.1,
+        0.14
+    }
+    lighting.shadows = true
+    lighting.shadowDistance = 8
+    lighting.directionX = -0.55
+    lighting.directionY = -1
+    lighting.directionZ = -0.4
+    lighting.r = 0.92
+    lighting.g = 0.96
+    lighting.b = 1
+    lighting.intensity = 2.6
+    lighting.shadowStrength = 0.82
+    lighting.shadowSoftness = 1.5
+    world:spawn(tecs.gfx.View({camera3D = camera, lighting = lighting}))
+    camera.y = 0.35
+    camera.z = 5.5
+    camera.verticalFov = math.rad(50)
+
+    const controller = tecs.gfx.flycamera3d.new(app.input, app.window, camera, {moveSpeed = 3, sprintMultiplier = 4})
+    world:addSystem({
+        name = "example.MorphFlyCamera",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number): nil
+            controller:update(dt)
+        end,
+    })
+    print("morph3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
+
+    const floor, floorBounds = tecs.gfx.models.newMesh({
+        name = "example://morph-floor",
+        vertices = FLOOR_VERTICES,
+        indices = FLOOR_INDICES,
+    })
+    world:spawn(
+        tecs.ecs.Transform3D(),
+        floor,
+        floorBounds,
+        tecs.gfx.MeshMaterial(),
+        tecs.gfx.Tint(0.22, 0.25, 0.3, 1),
+        tecs.gfx.Renderable3D
+    )
+
+    const loaded = assert(tecs.gfx.models.load(tecs.files.assetPath("models/morph-cube.gltf")))
+    const model = loaded
+    const instance = model:newInstance()
+    const placement = tecs.ecs.Transform3D().value
+    instance.transform = placement
+    local entities: {integer} = {}
+    for index, primitive in ipairs(instance.primitives) do
+        entities[
+            index
+        ] = world:spawn(
+            primitive.transform,
+            primitive.mesh,
+            primitive.bounds,
+            primitive.material,
+            primitive.morph,
+            tecs.gfx.Tint(1, 1, 1, 1),
+            tecs.gfx.Renderable3D
+        )
+    end
+    world:commit()
+    for index, entity in ipairs(entities) do
+        instance:bind(world, index, entity)
+    end
+    instance:play("StretchAndTwist", {speed = 0.65})
+    local turn = 0.0
+    world:addSystem({
+        name = "example.AnimateMorph",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number): nil
+            turn = (turn + dt * 0.45) % (math.pi * 2)
+            placement.rotationY = math.sin(turn * 0.5)
+            placement.rotationW = math.cos(turn * 0.5)
+            instance:update(dt)
+        end,
+    })
+    print("morph3d: rotating six colored faces while cycling two GPU morph targets")
+end
+
+--- Creates the Tecs glTF morph targets example.
+--- @param title optional window title
+--- @param width logical width
+--- @param height logical height
+--- @param debug enable guarded failures
+--- @param maxFrames optional bounded run
+--- @return native host session
+export function create(
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?
+): tecs.host.Session
+    return tecs.host.createWithPlugin(
+        install,
+        title or "Tecs glTF morph targets",
+        width or 960,
+        height or 640,
+        debug,
+        maxFrames
+    )
+end

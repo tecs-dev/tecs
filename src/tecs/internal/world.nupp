@@ -839,8 +839,8 @@ local function mergeEdges(previous: {any}, additions: {any}, exclusiveRelationsh
             local found = false
             for position = 1, #result do
                 if components.edgeTarget(result[position]) == target then
-                    result[position] = edge;
-                    found = true;
+                    result[position] = edge
+                    found = true
                     break
                 end
             end
@@ -1137,7 +1137,7 @@ function World.set(exclusive self: World, id: integer, input: components.Input, 
     if relationship ~= nil then
         local raw, explicit = components.explicitValue(input)
         if value ~= nil then
-            raw = value;
+            raw = value
             explicit = true
         end
         if not explicit then
@@ -2400,8 +2400,8 @@ local function publishBatchWrite(exclusive world: World, writer: BatchWrite): ni
             if archetype.has(target, writer.component) then
                 local selected = rows[target]
                 if selected == nil then
-                    selected = {};
-                    rows[target] = selected;
+                    selected = {}
+                    rows[target] = selected
                     ordered[#ordered + 1] = target
                 end
                 selected[#selected + 1] = row + 1
@@ -2418,7 +2418,7 @@ local function publishBatchWrite(exclusive world: World, writer: BatchWrite): ni
             local last = first
             position = position + 1
             while position <= #selected and selected[position] == last + 1 do
-                last = selected[position];
+                last = selected[position]
                 position = position + 1
             end
             writer.callback(target, first, last, last - first + 1)
@@ -2838,7 +2838,7 @@ function World.compact(exclusive self: World): (integer, integer)
             for position = 1, #candidate.components do
                 const target = components.targetOf(candidate.components[position])
                 if target ~= nil and not self:isAlive(target) then
-                    dead = true;
+                    dead = true
                     break
                 end
             end
@@ -4160,4 +4160,18 @@ export function querySnapshot(borrows value: World, descriptor: query.Descriptor
     end
 
     return found
+end
+
+-- Releases a renderer-owned persistent query when its viewport is destroyed.
+export function releaseQuery(exclusive value: World, owned: query.Query): nil
+    for index = #value.queries, 1, -1 do
+        if value.queries[index] == owned then
+            table.remove(value.queries, index)
+        end
+    end
+    for index = #value.queryObservers, 1, -1 do
+        if value.queryObservers[index] == owned then
+            table.remove(value.queryObservers, index)
+        end
+    end
 end

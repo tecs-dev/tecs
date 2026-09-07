@@ -60,6 +60,7 @@ fn engine_pack() -> ShaderPack {
 /// and a test can name a column.
 fn header() -> Header {
     Header {
+        animation_clock: 0.,
         graph_revision: 1,
         flags: FRAME_SHADOWS,
         target: [SIZE as f32, SIZE as f32],
@@ -364,6 +365,17 @@ fn cast_render(
         label: Some("image"),
         layout: &layouts.image,
         entries: &[
+            BindGroupEntry {
+                binding: 6,
+                resource: device
+                    .create_buffer(&BufferDescriptor {
+                        label: Some("empty animation table"),
+                        size: 4,
+                        usage: BufferUsages::STORAGE,
+                        mapped_at_creation: false,
+                    })
+                    .as_entire_binding(),
+            },
             BindGroupEntry {
                 binding: 0,
                 resource: BindingResource::TextureView(

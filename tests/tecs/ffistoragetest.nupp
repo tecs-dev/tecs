@@ -189,7 +189,8 @@ function suite.compactionAndClearRetainNativeStorage(): nil
         test.equal(type(assert(candidate:get(point))), "cdata")
         archetype.append(assert(candidate), 999, {})
         unsafe do
-            test.equal(assert(candidate:get(point))[1].x, 3)
+            const points = assert(candidate:get(point))
+            test.equal(points[1].x, 3)
         end
     end
 end
@@ -309,7 +310,7 @@ function suite.rawColumnIOIsBoundedAndDoesNotCopyPaddingRowZero(): nil
     const source = ffistorage.allocate(storage, 3) as ArrayValue[?]
     const target = ffistorage.allocate(storage, 3) as ArrayValue[?]
     unsafe do
-        source[1].values[1] = 9;
+        source[1].values[1] = 9
         source[2].values[2] = 11
     end
     const bytes = buffer.new()

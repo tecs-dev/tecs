@@ -10,5 +10,5 @@
 fn compositeMain(input: FullscreenOutput) -> @location(0) vec4<f32> {
     let lit = textureSample(input0, passSampler, input.uv);
     let bloom = textureSample(input1, passSampler, input.uv).rgb * scene.bloom.w;
-    return vec4<f32>(lit.rgb + bloom, lit.a);
+    return vec4<f32>(lit.rgb * lit.a + bloom, lit.a);
 }

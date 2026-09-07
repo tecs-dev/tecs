@@ -47,18 +47,20 @@ for the life of the process.
 
 # Built-in scope
 
-General post-processing exposes target and pass declarations, but the backend
-executes fragment bodies only for built-in pass names. A custom pass can allocate
-and clear targets at a named seam; without a backend implementation for its name,
-it draws nothing.
+Custom passes supply WGSL defining `postprocess(uv: vec2<f32>) -> vec4<f32>`.
+The backend supplies `scene`, `passSampler`, the declared `input0`, `input1`,
+and subsequent textures, and `params.values`, four vectors of four scalar
+parameters. A depth input is a `texture_depth_2d`. Use `setParameters` for
+animated tuning; this updates a uniform without recompiling the pipeline.
+A custom pass writes one color output, or the window when outputs is empty.
+A pass without a shader uses its built-in body or only clears its outputs.
 
 The Tiled subsystem owns map parsing, tilesets, edits and static TileChunks.
 Its chunks and animated sprites draw through this render-pass graph.
 
-Rendering uses one camera. The packet header carries one view and the cull tests
-one rectangle. Multi-view rendering would require a view table in the packet, a
-view index in the cull uniform, and a composite pass that sets a viewport per
-view. No `forwardView` target is declared.
+Each explicit `tecs.gfx.View` runs this graph at its viewport resolution.
+The renderer composites those results in view order. With no explicit views,
+the active camera draws one full-frame view.
 ]]
 
 --- Names the shared depth attachment, which is not a declarable target.
@@ -122,6 +124,12 @@ export type TargetSpec = {
 
 --- One render pass, as the graph holds it.
 export record Pass
+    --- Read-only. Supplies WGSL defining postprocess(uv), or nil for a built-in body.
+    shader: string?
+
+    --- Read-only. Supplies up to sixteen scalar shader parameters.
+    parameters: {number}
+
     --- Read-only. Names the pass, unique within the graph.
     name: string
 
@@ -161,6 +169,8 @@ end
 --- load every output rather than clear it, and `clear` overrides every
 --- output's own clear with one color.
 export type PassSpec = {
+    shader: string?,
+    parameters: {number}?,
     name: string,
     inputs: {string}?,
     outputs: {string}?,
@@ -302,6 +312,18 @@ local function validate(spec: PassSpec, position: integer, level: integer): nil
         end
     end
 
+    if spec.shader ~= nil then
+        assert(
+            #spec.shader > 0 and #spec.shader <= 1048576,
+            "passes: shader source must contain 1 through 1048576 bytes"
+        )
+        assert(spec.outputs == nil or #spec.outputs <= 1, "passes: a custom post-process writes one color output")
+    end
+    const parameters = spec.parameters or {}
+    assert(#parameters <= 16, "passes: at most sixteen shader parameters")
+    for _, value in ipairs(parameters) do
+        assert(finite(value), "passes: parameters must be finite")
+    end
     const outputs = spec.outputs
     const depth = spec.depth or "none"
     if DEPTH_CODES[depth as string] == nil then
@@ -310,6 +332,9 @@ local function validate(spec: PassSpec, position: integer, level: integer): nil
     if outputs ~= nil then
         for slot = 1, #outputs do
             const output = outputs[slot]
+            for _, input in ipairs(spec.inputs or {}) do
+                assert(input ~= output, "passes: a pass cannot read and write the same target")
+            end
             const target = targetByName[output]
             if target == nil then
                 error("passes: pass '" .. name .. "' writes undeclared target '" .. output .. "'", level)
@@ -333,6 +358,8 @@ end
 --- Builds the held pass from a caller's spec.
 local function build(spec: PassSpec): Pass
     return new Pass(
+        shader = spec.shader,
+        parameters = table.clone(spec.parameters or {}),
         name = spec.name,
         inputs = copyNames(spec.inputs),
         outputs = copyNames(spec.outputs),
@@ -381,6 +408,55 @@ export function insertPassBefore(before: string, spec: PassSpec): nil
     passNames[spec.name] = true
     revisionValue = revisionValue + 1
     cachedSection = nil
+end
+
+--- Changes one pass's uniform parameters without recompiling its pipeline.
+--- @param name The caller supplies the existing custom pass name.
+--- @param values The caller supplies at most sixteen finite scalars; omitted lanes are
+---     zero.
+--- @raises When the pass has no custom shader or any scalar is invalid.
+export function setParameters(name: string, values: {number}): nil
+    assert(#values <= 16, "passes: at most sixteen shader parameters")
+    for _, value in ipairs(values) do
+        assert(finite(value), "passes: parameters must be finite")
+    end
+    for _, pass in ipairs(passList) do
+        if pass.name == name then
+            assert(pass.shader ~= nil, "passes: parameters require a custom shader")
+            local changed = false
+            for index = 1, 16 do
+                changed = changed or (pass.parameters[index] or 0) ~= (values[index] or 0)
+            end
+            if changed then
+                pass.parameters = table.clone(values)
+                revisionValue = revisionValue + 1
+                cachedSection = nil
+            end
+            return
+        end
+    end
+    error("passes: unknown custom pass " .. name, 2)
+end
+
+--- Replaces a pass's custom WGSL body while preserving its inputs and outputs.
+--- @param name The caller supplies an existing pass name.
+--- @param source The caller supplies WGSL defining postprocess(uv: vec2<f32>) ->
+---     vec4<f32>.
+--- @raises When the source is empty, too large, or the pass writes multiple outputs.
+export function setShader(name: string, source: string): nil
+    assert(#source > 0 and #source <= 1048576, "passes: invalid shader source size")
+    for _, pass in ipairs(passList) do
+        if pass.name == name then
+            assert(#pass.outputs <= 1, "passes: a custom post-process writes one color output")
+            if pass.shader ~= source then
+                pass.shader = source
+                revisionValue = revisionValue + 1
+                cachedSection = nil
+            end
+            return
+        end
+    end
+    error("passes: unknown pass " .. name, 2)
 end
 
 --- Returns the declared targets in declaration order.
@@ -546,6 +622,25 @@ export function section(): string
         end
     end
 
+    local custom: integer = 0
+    for _, pass in ipairs(passList) do
+        if pass.shader ~= nil then
+            custom = custom + 1
+        end
+    end
+    if custom > 0 then
+        writer:writeUint32(0x50504658):writeUint32(wrap(custom))
+        for index, pass in ipairs(passList) do
+            if pass.shader ~= nil then
+                const source = assert(pass.shader)
+                writer:writeUint32(wrap(index - 1)):writeUint32(wrap(#source)):writeBytes(source)
+                writer:writeBytes(string.rep("\0", (4 - #source % 4) % 4))
+                for lane = 1, 16 do
+                    writer:writeFloat32(narrow(pass.parameters[lane] or 0))
+                end
+            end
+        end
+    end
     writer:drop()
     const encoded = buffer:getString()
     buffer:drop()

@@ -11,9 +11,16 @@
 //! in `body_for` are the passes this backend implements, and each of them is a
 //! compatibility surface.
 
+mod meshes;
+mod meshlighting;
+mod modeltextures;
+mod particles;
+mod views;
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use wgpu::util::DeviceExt;
 
 use anyhow::{bail, Context, Result};
 use wgpu::{
@@ -79,6 +86,7 @@ const CAST_MODE_SHADOW: u32 = 1;
 const CAST_MODE_STAMP: u32 = 2;
 
 const MATERIAL_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/material.wgsl");
+const FRAMETABLE_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/frametable.wgsl");
 const TILECHUNK_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/tilechunk.wgsl");
 const INSTANCE_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/instance.wgsl");
 const CULL_WGSL: &str = include_str!("../../../../assets/shaders/wgsl/cull.wgsl");
@@ -142,6 +150,7 @@ impl Gate {
 }
 
 pub struct PassRuntime {
+    parameters: Option<(Buffer, BindGroup)>,
     pub body: Body,
     pub gate: Gate,
     pub pipeline: Option<RenderPipeline>,
@@ -254,6 +263,7 @@ struct Scratch {
 /// that builds pipelines needs the same set the frame does.
 pub struct Layouts {
     pub scene: BindGroupLayout,
+    pub mesh_composite: BindGroupLayout,
     pub image: BindGroupLayout,
     pub cull: BindGroupLayout,
     pub draw: BindGroupLayout,
@@ -327,6 +337,16 @@ impl Layouts {
                     count: None,
                 },
                 BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: ShaderStages::VERTEX,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
                     binding: 5,
                     visibility: ShaderStages::VERTEX,
                     ty: BindingType::Buffer {
@@ -359,6 +379,7 @@ impl Layouts {
                     count: None,
                 },
                 storage_entry(8, true),
+                storage_entry(9, true),
             ],
         });
         let draw = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -419,7 +440,9 @@ impl Layouts {
                 },
             ],
         });
+        let mesh_composite = input_layout(device, &[Input::Target(0)]);
         Self {
+            mesh_composite,
             scene,
             image,
             cull,
@@ -445,6 +468,16 @@ pub struct Capture {
 }
 
 pub struct Graphics {
+    particle_pool: Option<u32>,
+    particle_pools: HashMap<u32, particles::Pool>,
+    mesh_renderer: Option<meshes::Renderer>,
+    mesh_source: Option<(u64, BindGroup)>,
+    mesh_fallback: BindGroup,
+    views: HashMap<u32, views::ViewState>,
+    view_revision: Option<u32>,
+    rendering_view: bool,
+    asset_revision: u64,
+    view_compositor: Option<views::Compositor>,
     surface: Option<Surface<'static>>,
     offscreen: Option<wgpu::Texture>,
     capture_requested: bool,
@@ -463,6 +496,7 @@ pub struct Graphics {
     images: HashMap<u32, TextureView>,
     linear_images: HashMap<u32, TextureView>,
     tile_chunks: Buffer,
+    frame_table: Buffer,
     material_maps: HashMap<u32, [u32; 3]>,
     map_fallbacks: [TextureView; 3],
     bind_groups: HashMap<(u32, u32), BindGroup>,
@@ -537,10 +571,13 @@ impl Graphics {
         }))
         .context("select a wgpu adapter for the window")?;
         let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor {
+            required_features: adapter.features() & (wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::TEXTURE_COMPRESSION_BC | wgpu::Features::TEXTURE_BINDING_ARRAY | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING),
             label: Some("tecs device"),
             required_limits: wgpu::Limits {
                 max_storage_buffer_binding_size: adapter.limits().max_storage_buffer_binding_size,
                 max_buffer_size: adapter.limits().max_buffer_size,
+                max_binding_array_elements_per_shader_stage: adapter.limits().max_binding_array_elements_per_shader_stage,
+                max_storage_buffers_per_shader_stage: 9,
                 ..Default::default()
             },
             ..Default::default()
@@ -586,10 +623,13 @@ impl Graphics {
             ..Default::default()
         }))?;
         let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor {
+            required_features: adapter.features() & (wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::TEXTURE_COMPRESSION_BC | wgpu::Features::TEXTURE_BINDING_ARRAY | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING),
             label: Some("tecs benchmark device"),
             required_limits: wgpu::Limits {
                 max_storage_buffer_binding_size: adapter.limits().max_storage_buffer_binding_size,
                 max_buffer_size: adapter.limits().max_buffer_size,
+                max_binding_array_elements_per_shader_stage: adapter.limits().max_binding_array_elements_per_shader_stage,
+                max_storage_buffers_per_shader_stage: 9,
                 ..Default::default()
             },
             ..Default::default()
@@ -810,6 +850,11 @@ impl Graphics {
         }
         queue.write_buffer(&cast_modes, 0, &modes);
 
+        let frame_table = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("sprite frame table"),
+            contents: &[0; 4],
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+        });
         let tile_chunks = device.create_buffer(&BufferDescriptor {
             label: Some("tecs tile grids"),
             size: super::packet::TILE_STRIDE as u64,
@@ -856,12 +901,52 @@ impl Graphics {
                 view_formats: &[],
             })
         });
+        let mesh_black = device.create_texture(&TextureDescriptor {
+            label: Some("empty mesh view"),
+            size: Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba16Float,
+            usage: TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let mesh_view = mesh_black.create_view(&Default::default());
+        let mesh_fallback = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("empty mesh view"),
+            layout: &layouts.mesh_composite,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::Sampler(&pass_sampler),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(&mesh_view),
+                },
+            ],
+        });
         Ok(Self {
+            mesh_renderer: None,
+            mesh_source: None,
+            mesh_fallback,
+            views: HashMap::new(),
+            view_revision: None,
+            rendering_view: false,
+            asset_revision: 0,
+            view_compositor: None,
             surface,
             offscreen,
             capture_requested: false,
             captured: None,
             tile_chunks,
+            frame_table,
+            particle_pool: None,
+            particle_pools: HashMap::new(),
             material_maps: HashMap::new(),
             map_fallbacks,
             device,
@@ -904,6 +989,15 @@ impl Graphics {
         })
     }
 
+    pub fn upload_model(&mut self, id: u32, bytes: &[u8]) -> Result<()> {
+        let renderer = self
+            .mesh_renderer
+            .get_or_insert_with(|| meshes::Renderer::new(&self.device, &self.queue));
+        renderer.upload(id, bytes)?;
+        self.view_revision = Some(0);
+        Ok(())
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
@@ -920,6 +1014,7 @@ impl Graphics {
 
     /// Makes one image resident, replacing whatever already lived under its id.
     pub fn upload_image(&mut self, id: u32, width: u32, height: u32, pixels: &[u8]) -> Result<()> {
+        self.asset_revision += 1;
         if id == 0 {
             bail!("image id 0 is the backend's own fallback and cannot be replaced");
         }
@@ -939,6 +1034,7 @@ impl Graphics {
 
     /// Drops one image and everything bound to it.
     pub fn release_image(&mut self, id: u32) -> Result<()> {
+        self.asset_revision += 1;
         if id == 0 {
             bail!("image id 0 is the backend's own fallback and cannot be released");
         }
@@ -957,6 +1053,7 @@ impl Graphics {
     }
 
     pub fn set_material_maps(&mut self, image: u32, maps: [u32; 3]) -> Result<()> {
+        self.asset_revision += 1;
         let parent = self
             .images
             .get(&image)
@@ -1019,6 +1116,10 @@ impl Graphics {
                     BindGroupEntry {
                         binding: 4,
                         resource: BindingResource::TextureView(views[2]),
+                    },
+                    BindGroupEntry {
+                        binding: 6,
+                        resource: self.frame_table.as_entire_binding(),
                     },
                     BindGroupEntry {
                         binding: 5,
@@ -1218,6 +1319,10 @@ impl Graphics {
                     binding: 8,
                     resource: self.lights.as_entire_binding(),
                 },
+                BindGroupEntry {
+                    binding: 9,
+                    resource: self.frame_table.as_entire_binding(),
+                },
             ],
         });
         let draw_group = device.create_bind_group(&BindGroupDescriptor {
@@ -1381,6 +1486,36 @@ impl Graphics {
             .context("the requested frame was not rendered")?
     }
 
+    /// Reads the last completed offscreen frame without advancing simulation.
+    pub fn capture_offscreen(&self) -> Result<Capture> {
+        let texture = self
+            .offscreen
+            .as_ref()
+            .context("capture needs an offscreen renderer")?;
+        let pitch = (self.config.width * 4).div_ceil(256) * 256;
+        let buffer = self.device.create_buffer(&BufferDescriptor {
+            label: Some("tecs offscreen screenshot"),
+            size: u64::from(pitch) * u64::from(self.config.height),
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(pitch),
+                    rows_per_image: Some(self.config.height),
+                },
+            },
+            texture.size(),
+        );
+        self.queue.submit([encoder.finish()]);
+        self.read_capture(&buffer, pitch)
+    }
+
     fn read_capture(&self, buffer: &Buffer, pitch: u32) -> Result<Capture> {
         use image::ImageEncoder;
         let (send, receive) = std::sync::mpsc::channel();
@@ -1445,6 +1580,9 @@ impl Graphics {
 
     /// The generation a new frame may reference; zero requests a complete upload.
     pub fn scene_revision(&self) -> u32 {
+        if let Some(revision) = self.view_revision {
+            return revision;
+        }
         self.resident_scene
             .as_ref()
             .map_or(0, |scene| scene.revision)
@@ -1452,6 +1590,10 @@ impl Graphics {
 
     /// Returns true when a frame was submitted, false when the surface skipped it.
     pub fn render(&mut self, bytes: &[u8]) -> Result<bool> {
+        if bytes.starts_with(&views::MAGIC.to_ne_bytes()) {
+            return self.render_views(bytes);
+        }
+        self.view_revision = None;
         if let Some(reason) = self.lost.lock().expect("mutex").take() {
             // Everything held belonged to a device that no longer exists, so it
             // is dropped rather than submitted to. A frame after this one
@@ -1484,6 +1626,33 @@ impl Graphics {
             self.pack.material_count(),
             self.resident_scene.as_ref(),
         )?;
+        if !packet.frame_table.is_empty() {
+            if packet.frame_table.len() as u64
+                > self.device.limits().max_storage_buffer_binding_size
+            {
+                bail!("animation table exceeds adapter capacity");
+            }
+            if packet.frame_table.len() as u64 > self.frame_table.size() {
+                self.frame_table = self.device.create_buffer(&BufferDescriptor {
+                    label: Some("sprite frame table"),
+                    size: (packet.frame_table.len() as u64).next_power_of_two(),
+                    usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                self.bind_groups.clear();
+                if let Some(scratch) = &mut self.scratch {
+                    scratch.cull_group = rebind_cull(
+                        &self.device,
+                        &self.layouts.cull,
+                        scratch,
+                        &self.lights,
+                        &self.frame_table,
+                    );
+                }
+            }
+            self.queue
+                .write_buffer(&self.frame_table, 0, packet.frame_table);
+        }
         let header = packet.header;
         validate_instance_capacity(packet.instance_count, &self.device.limits())?;
 
@@ -1491,21 +1660,33 @@ impl Graphics {
             || self.pipeline_format != Some(self.config.format)
         {
             let graph = parse_graph(packet.graph)?;
-            self.graph_generation += 1;
-            self.passes = build_passes(
-                &self.device,
-                &self.layouts,
-                &self.instance_module,
-                &self.cast_module,
-                &graph,
-                self.config.format,
-            )?;
+            let rebuild = self.pipeline_format != Some(self.config.format)
+                || self
+                    .graph
+                    .as_ref()
+                    .is_none_or(|held| !held.same_pipelines(&graph));
+            if rebuild {
+                self.graph_generation += 1;
+                self.bound_generation = 0;
+                self.passes = build_passes(
+                    &self.device,
+                    &self.layouts,
+                    &self.instance_module,
+                    &self.cast_module,
+                    &graph,
+                    self.config.format,
+                )?;
+            } else {
+                for (runtime, spec) in self.passes.iter().zip(graph.passes()) {
+                    if let Some((buffer, _)) = &runtime.parameters {
+                        self.queue
+                            .write_buffer(buffer, 0, bytemuck::cast_slice(&spec.parameters));
+                    }
+                }
+            }
             self.graph = Some(graph);
             self.graph_revision = Some(header.graph_revision);
             self.pipeline_format = Some(self.config.format);
-            // The pipelines changed, so the bind groups over the targets have
-            // to be made again against the layouts the new ones declare.
-            self.bound_generation = 0;
         }
         let graph = self
             .graph
@@ -1653,6 +1834,52 @@ impl Graphics {
                 data,
             );
         }
+        let mut particle_id = None;
+        if !packet.particles.is_empty() {
+            let data = particles::parse(packet.particles)?;
+            if !self.rendering_view {
+                self.particle_pools.retain(|id, _| *id == data.id);
+            }
+            if data.emitters.is_empty() {
+                self.particle_pools.remove(&data.id);
+            } else {
+                particle_id = Some(data.id);
+                if !self.particle_pools.contains_key(&data.id) {
+                    let size = u64::from(data.capacity) * INSTANCE_STRIDE as u64;
+                    if size > self.device.limits().max_storage_buffer_binding_size
+                        || size > self.device.limits().max_buffer_size
+                    {
+                        bail!("particle pool exceeds adapter storage limit");
+                    }
+                    let held = self.scratch.take();
+                    self.ensure_scratch(data.capacity, data.maximum, 0);
+                    let scratch = self.scratch.take().expect("particle scratch");
+                    self.scratch = held;
+                    let pool = particles::Pool::new(&self.device, &data, scratch)?;
+                    self.particle_pools.insert(data.id, pool);
+                }
+                let pool = self.particle_pools.get_mut(&data.id).unwrap();
+                pool.update(&self.queue, &data)?;
+                pool.bind_frame_table(
+                    &self.device,
+                    &self.layouts.cull,
+                    &self.lights,
+                    &self.frame_table,
+                );
+                pool.prepare_cull(&self.queue, &header);
+                let images: Vec<_> = pool
+                    .batches
+                    .iter()
+                    .map(|batch| (batch.image, batch.sampler))
+                    .collect();
+                for (image, sampler) in images {
+                    self.image_bind_group(image, sampler);
+                }
+            }
+        } else if !self.rendering_view {
+            self.particle_pools.clear();
+        }
+        self.particle_pool = particle_id;
         self.ensure_scratch(
             packet.instance_count,
             batches.len() as u32,
@@ -1735,6 +1962,12 @@ impl Graphics {
                 label: Some("tecs frame encoder"),
             });
 
+        if let Some(id) = particle_id {
+            self.particle_pools
+                .get_mut(&id)
+                .unwrap()
+                .dispatch(&mut encoder, &self.cull_pipelines);
+        }
         let scratch = self.scratch.as_ref().expect("ensured above");
         {
             // Dispatched every frame, including one with no lights at all. It is
@@ -1798,7 +2031,11 @@ impl Graphics {
                     depth_slice: None,
                     resolve_target: None,
                     ops: Operations {
-                        load: load_op(spec.clear, None),
+                        load: if self.rendering_view {
+                            LoadOp::Clear(Color::TRANSPARENT)
+                        } else {
+                            load_op(spec.clear, None)
+                        },
                         store: StoreOp::Store,
                     },
                 });
@@ -1859,6 +2096,20 @@ impl Graphics {
                     if matches!(runtime.body, Body::Lighting) {
                         pass.set_bind_group(2, &self.lighting_group, &[]);
                     }
+                    if (spec.name == "composite" || spec.name == "bloomExtract")
+                        && spec.shader.is_none()
+                    {
+                        pass.set_bind_group(
+                            2,
+                            self.mesh_source
+                                .as_ref()
+                                .map_or(&self.mesh_fallback, |(_, group)| group),
+                            &[],
+                        );
+                    }
+                    if let Some((_, group)) = &runtime.parameters {
+                        pass.set_bind_group(2, group, &[]);
+                    }
                     pass.draw(0..3, 0..1);
                 }
                 Body::Occluders => {
@@ -1881,9 +2132,6 @@ impl Graphics {
                     self.cast_draw(&mut pass, stamp, scratch, batches, CAST_MODE_STAMP);
                 }
                 Body::Instanced { lane } => {
-                    if packet.instance_count == 0 {
-                        continue;
-                    }
                     let pipeline = runtime
                         .pipeline
                         .as_ref()
@@ -1907,6 +2155,30 @@ impl Graphics {
                             &[slot as u32 * scratch.batch_stride],
                         );
                         pass.draw_indirect(&scratch.draw_args, slot as u64 * DRAW_ARGS_WORDS * 4);
+                    }
+                    if let Some(id) = particle_id {
+                        let pool = &self.particle_pools[&id];
+                        for (slot, batch) in pool.batches.iter().enumerate() {
+                            if batch.lane != lane {
+                                continue;
+                            }
+                            pass.set_bind_group(
+                                1,
+                                self.bind_groups
+                                    .get(&(batch.image, batch.sampler))
+                                    .expect("particle image"),
+                                &[],
+                            );
+                            pass.set_bind_group(
+                                2,
+                                &pool.scratch.draw_group,
+                                &[slot as u32 * pool.scratch.batch_stride],
+                            );
+                            pass.draw_indirect(
+                                &pool.scratch.draw_args,
+                                slot as u64 * DRAW_ARGS_WORDS * 4,
+                            );
+                        }
                     }
                 }
             }
@@ -1984,8 +2256,16 @@ pub fn build_passes(
 ) -> Result<Vec<PassRuntime>> {
     let mut passes = Vec::with_capacity(graph.passes().len());
     for pass in graph.passes() {
-        let body = body_for(&pass.name);
-        let gate = gate_for(&pass.name);
+        let body = if pass.shader.is_some() {
+            Body::Fullscreen
+        } else {
+            body_for(&pass.name)
+        };
+        let gate = if pass.shader.is_some() {
+            Gate::Always
+        } else {
+            gate_for(&pass.name)
+        };
         let color_formats: Vec<TextureFormat> = if pass.outputs.is_empty() {
             vec![surface_format]
         } else {
@@ -1996,6 +2276,7 @@ pub fn build_passes(
         };
         let depth = depth_state(pass.depth);
 
+        let mut parameters = None;
         let mut second: Option<RenderPipeline> = None;
         let (pipeline, input_layout) = match body {
             Body::Empty => (None, None),
@@ -2048,7 +2329,7 @@ pub fn build_passes(
                 let blend = if lane == LANE_OPAQUE {
                     None
                 } else {
-                    Some(BlendState::ALPHA_BLENDING)
+                    Some(BlendState::PREMULTIPLIED_ALPHA_BLENDING)
                 };
                 let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
                     label: Some("tecs instanced pipeline layout"),
@@ -2093,17 +2374,84 @@ pub fn build_passes(
                 (Some(pipeline), None)
             }
             Body::Fullscreen | Body::Lighting => {
-                let entry = fullscreen_entry(&pass.name)
-                    .with_context(|| format!("pass '{}' has no fullscreen body", pass.name))?;
+                let mesh_composite = (pass.name == "composite" || pass.name == "bloomExtract")
+                    && pass.shader.is_none();
+                let composite_source = if mesh_composite {
+                    let source = if pass.name == "composite" {
+                        COMPOSITE_WGSL.replace("return vec4<f32>(lit.rgb * lit.a + bloom, lit.a);", "let background = textureSample(meshColor, meshSampler, input.uv); let alpha = lit.a + background.a * (1.0 - lit.a); return vec4<f32>(lit.rgb * lit.a + bloom + background.rgb * (1.0 - lit.a), alpha);")
+                    } else {
+                        POSTPROCESS_WGSL.replace("let color = textureSample(input0, passSampler, input.uv).rgb;", "let foreground = textureSample(input0, passSampler, input.uv); let background = textureSample(meshColor, meshSampler, input.uv); let color = foreground.rgb * foreground.a + background.rgb * (1.0 - foreground.a);")
+                    };
+                    Some(format!("@group(2) @binding(0) var meshSampler: sampler;\n@group(2) @binding(1) var meshColor: texture_2d<f32>;\n{source}"))
+                } else {
+                    None
+                };
+                let custom = pass.shader.as_ref().map(|source| format!("struct Parameters {{ values: array<vec4<f32>, 4>, }}\n@group(2) @binding(0) var<uniform> params: Parameters;\n{source}\n@fragment fn customMain(input: FullscreenOutput) -> @location(0) vec4<f32> {{ return postprocess(input.uv); }}"));
+                let entry = if let Some(source) = composite_source.as_deref() {
+                    (
+                        if pass.name == "composite" {
+                            "compositeMain"
+                        } else {
+                            "bloomExtractMain"
+                        },
+                        source,
+                        None,
+                    )
+                } else if let Some(source) = custom.as_deref() {
+                    (
+                        "customMain",
+                        source,
+                        pass.outputs
+                            .is_empty()
+                            .then_some(BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    )
+                } else {
+                    fullscreen_entry(&pass.name)
+                        .with_context(|| format!("pass '{}' has no fullscreen body", pass.name))?
+                };
                 let module = device.create_shader_module(ShaderModuleDescriptor {
                     label: Some(pass.name.as_str()),
-                    source: ShaderSource::Wgsl(Cow::Owned(fullscreen_source(
+                    source: ShaderSource::Wgsl(Cow::Owned(fullscreen_source_typed(
                         entry.1,
-                        pass.inputs.len(),
+                        &pass.inputs,
                     ))),
                 });
-                let input_layout = input_layout(device, pass.inputs.len());
+                let input_layout = input_layout(device, &pass.inputs);
+                let parameter_layout =
+                    device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                        label: Some("post-process parameters"),
+                        entries: &[BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: ShaderStages::FRAGMENT,
+                            ty: BindingType::Buffer {
+                                ty: BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        }],
+                    });
                 let mut groups = vec![Some(&layouts.scene), Some(&input_layout)];
+                if mesh_composite {
+                    groups.push(Some(&layouts.mesh_composite));
+                }
+                if custom.is_some() {
+                    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("post-process parameters"),
+                        contents: bytemuck::cast_slice(&pass.parameters),
+                        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                    });
+                    let group = device.create_bind_group(&BindGroupDescriptor {
+                        label: Some("post-process parameters"),
+                        layout: &parameter_layout,
+                        entries: &[BindGroupEntry {
+                            binding: 0,
+                            resource: buffer.as_entire_binding(),
+                        }],
+                    });
+                    parameters = Some((buffer, group));
+                    groups.push(Some(&parameter_layout));
+                }
                 if matches!(body, Body::Lighting) {
                     groups.push(Some(&layouts.lighting));
                 }
@@ -2148,6 +2496,7 @@ pub fn build_passes(
         };
 
         passes.push(PassRuntime {
+            parameters,
             body,
             gate,
             pipeline,
@@ -2218,19 +2567,23 @@ fn channel_blend(operation: BlendOperation) -> BlendState {
 }
 
 /// Builds the layout a fullscreen pass with `count` declared inputs binds.
-fn input_layout(device: &Device, count: usize) -> BindGroupLayout {
+fn input_layout(device: &Device, inputs: &[Input]) -> BindGroupLayout {
     let mut entries = vec![BindGroupLayoutEntry {
         binding: 0,
         visibility: ShaderStages::FRAGMENT,
         ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
         count: None,
     }];
-    for index in 0..count {
+    for (index, input) in inputs.iter().enumerate() {
         entries.push(BindGroupLayoutEntry {
             binding: index as u32 + 1,
             visibility: ShaderStages::FRAGMENT,
             ty: BindingType::Texture {
-                sample_type: TextureSampleType::Float { filterable: false },
+                sample_type: if *input == Input::Depth {
+                    TextureSampleType::Depth
+                } else {
+                    TextureSampleType::Float { filterable: false }
+                },
                 view_dimension: TextureViewDimension::D2,
                 multisampled: false,
             },
@@ -2248,7 +2601,7 @@ fn input_layout(device: &Device, count: usize) -> BindGroupLayout {
 /// call into it.
 pub fn instance_source(pack: &ShaderPack) -> String {
     format!(
-        "{MATERIAL_WGSL}\n{}\n{INSTANCE_WGSL}\n{TILECHUNK_WGSL}",
+        "{MATERIAL_WGSL}\n{}\n{INSTANCE_WGSL}\n{TILECHUNK_WGSL}\n{FRAMETABLE_WGSL}",
         pack.dispatch()
     )
 }
@@ -2261,7 +2614,7 @@ pub fn instance_source(pack: &ShaderPack) -> String {
 /// needs no alpha threshold of its own.
 pub fn cast_source(pack: &ShaderPack) -> String {
     format!(
-        "{MATERIAL_WGSL}\n{}\n{CAST_WGSL}\n{TILECHUNK_WGSL}",
+        "{MATERIAL_WGSL}\n{}\n{CAST_WGSL}\n{TILECHUNK_WGSL}\n{FRAMETABLE_WGSL}",
         pack.dispatch()
     )
 }
@@ -2313,7 +2666,7 @@ fn fullscreen_entry(name: &str) -> Option<(&'static str, &'static str, Option<Bl
         "present" => Some((
             "presentMain",
             PRESENT_WGSL,
-            Some(BlendState::ALPHA_BLENDING),
+            Some(BlendState::PREMULTIPLIED_ALPHA_BLENDING),
         )),
         _ => None,
     }
@@ -2321,6 +2674,19 @@ fn fullscreen_entry(name: &str) -> Option<(&'static str, &'static str, Option<Bl
 
 /// Builds a fullscreen pass's module with exactly the input bindings its
 /// pipeline layout provides.
+fn fullscreen_source_typed(fragment: &str, inputs: &[Input]) -> String {
+    let mut source = fullscreen_source(fragment, inputs.len());
+    for (index, input) in inputs.iter().enumerate() {
+        if *input == Input::Depth {
+            source = source.replace(
+                &format!("var input{index}: texture_2d<f32>"),
+                &format!("var input{index}: texture_depth_2d"),
+            );
+        }
+    }
+    source
+}
+
 fn fullscreen_source(fragment: &str, inputs: usize) -> String {
     let mut source = String::from(RESOLVE_WGSL);
     source.push('\n');
@@ -2589,6 +2955,40 @@ fn linear_view(view: &TextureView) -> TextureView {
     })
 }
 
+fn rebind_cull(
+    device: &Device,
+    layout: &BindGroupLayout,
+    scratch: &Scratch,
+    lights: &Buffer,
+    frames: &Buffer,
+) -> BindGroup {
+    let buffers = [
+        &scratch.instances,
+        &scratch.batches,
+        &scratch.slots,
+        &scratch.block_counts,
+        &scratch.visible,
+        &scratch.draw_args,
+        &scratch.batch_base,
+        &scratch.cull_uniform,
+        lights,
+        frames,
+    ];
+    let entries: Vec<_> = buffers
+        .into_iter()
+        .enumerate()
+        .map(|(binding, buffer)| BindGroupEntry {
+            binding: binding as u32,
+            resource: buffer.as_entire_binding(),
+        })
+        .collect();
+    device.create_bind_group(&BindGroupDescriptor {
+        label: Some("sprite cull"),
+        layout,
+        entries: &entries,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2627,6 +3027,94 @@ mod tests {
         graphics.finish_frame().unwrap();
         assert_eq!(graphics.drawn_instances().unwrap(), 2);
         assert_eq!(graphics.scene_revision(), 2);
+    }
+
+    #[test]
+    fn sprite_frames_advance_on_gpu_without_instance_uploads() {
+        use crate::packet::tests::{retained, PacketBuilder};
+        let probe = Instance::new(InstanceDescriptor::new_without_display_handle());
+        if pollster::block_on(probe.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .is_err()
+        {
+            return;
+        }
+        let mut graphics = Graphics::offscreen(640, 360).unwrap();
+        graphics
+            .upload_image(1, 2, 1, &[255, 0, 0, 255, 0, 255, 0, 255])
+            .unwrap();
+        let mut fixture = PacketBuilder::new()
+            .graph(crate::graph::tests::deferred())
+            .instances(1, 0)
+            .batch(1, 0, 0, 0, 1);
+        for (i, v) in [
+            320_f32, 180., 0., 0.5, 64., 64., 0., 0., -1., 0., 1., 1., 1., 1., 1., 1.,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            fixture.instances[0][i] = v.to_bits();
+        }
+        fixture.counts[3] = 1;
+        let full = fixture.build();
+        // Two authored milliseconds, distinct UVs, shared by any number of rows.
+        let table = [
+            1_f32, 7., 5., 2., 2., 0., 1., 0., 0., 0.5, 1., 1., 0., 0., 0., 0.5, 0., 1., 1., 1.,
+            0., 0., 0.,
+        ];
+        let packet = |original: &[u8], clock: f32, data: &[f32]| {
+            let mut bytes = original[..128].to_vec();
+            bytes[4..8].copy_from_slice(&8_u32.to_ne_bytes());
+            bytes[8..12].copy_from_slice(&136_u32.to_ne_bytes());
+            bytes.extend(clock.to_ne_bytes());
+            bytes.extend(((data.len() * 4) as u32).to_ne_bytes());
+            bytes.extend_from_slice(bytemuck::cast_slice(data));
+            bytes.extend_from_slice(&original[128..]);
+            bytes
+        };
+        graphics.request_capture();
+        graphics.render(&packet(&full, 0., &table)).unwrap();
+        let first = graphics.take_capture().unwrap();
+        let at = (180 * 640 + 320) * 4;
+        assert!(
+            first.rgba[at] > 200 && first.rgba[at + 1] < 10,
+            "first sprite frame is red"
+        );
+        let instances = graphics.scratch.as_ref().unwrap().instances.clone();
+        let resident = retained(&full, 1);
+        graphics.request_capture();
+        graphics.render(&packet(&resident, 1., &[])).unwrap();
+        let second = graphics.take_capture().unwrap();
+        assert!(
+            second.rgba[at + 1] > 200 && second.rgba[at] < 10,
+            "retained sprite resolves green from new clock"
+        );
+        assert_eq!(instances, graphics.scratch.as_ref().unwrap().instances);
+        // The anchor lies outside the camera, but the second frame's pivot
+        // brings its quad back into view. Culling must cover every frame.
+        let mut shifted = table;
+        shifted[12] = 1.5;
+        shifted[14] = 1.5;
+        shifted[20] = 1.5;
+        shifted[22] = 1.5;
+        let mut outside = full.clone();
+        let instance_offset = outside.len() - INSTANCE_STRIDE;
+        outside[instance_offset..instance_offset + 4].copy_from_slice(&700_f32.to_ne_bytes());
+        graphics.request_capture();
+        graphics.render(&packet(&outside, 1., &shifted)).unwrap();
+        let pivoted = graphics.take_capture().unwrap();
+        let edge = (180 * 640 + 604) * 4;
+        assert!(
+            pivoted.rgba[edge + 1] > 200,
+            "moving pivot survives GPU culling at the camera edge"
+        );
+        graphics.render(&packet(&full, 0., &table)).unwrap();
+        graphics.request_capture();
+        graphics.render(&packet(&resident, 2., &[])).unwrap();
+        assert_eq!(
+            first.rgba,
+            graphics.take_capture().unwrap().rgba,
+            "GPU wraps exactly at the authored cycle boundary"
+        );
     }
 
     #[test]
@@ -2799,6 +3287,47 @@ mod tests {
         assert_eq!(dark, [0, 0, 0, 255]);
         graphics.upload_image(3, 2, 1, &[255; 8]).unwrap();
         assert!(graphics.set_material_maps(1, [3, 0, 0]).is_err());
+    }
+
+    #[test]
+    fn custom_postprocess_draws_and_updates_parameters_without_rebuilding() {
+        use crate::packet::tests::PacketBuilder;
+        let probe = Instance::new(InstanceDescriptor::new_without_display_handle());
+        if pollster::block_on(probe.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .is_err()
+        {
+            return;
+        }
+        let mut graphics = Graphics::offscreen(640, 360).unwrap();
+        let source = "fn postprocess(uv: vec2<f32>) -> vec4<f32> { return params.values[0]; }";
+        let mut generation = 0;
+        for (revision, color) in [(1, [1., 0., 0., 1.]), (2, [0., 1., 0., 1.])] {
+            let mut parameters = [0.; 16];
+            parameters[..4].copy_from_slice(&color);
+            let mut fixture = PacketBuilder::new().graph(crate::graph::tests::custom(
+                crate::graph::tests::deferred(),
+                11,
+                source,
+                parameters,
+            ));
+            fixture.header[4] = revision;
+            graphics.request_capture();
+            graphics.render(&fixture.build()).unwrap();
+            let capture = graphics.take_capture().unwrap();
+            assert_eq!(
+                &capture.rgba[..4],
+                if revision == 1 {
+                    &[255, 0, 0, 255]
+                } else {
+                    &[0, 255, 0, 255]
+                }
+            );
+            if revision == 1 {
+                generation = graphics.graph_generation;
+            } else {
+                assert_eq!(generation, graphics.graph_generation);
+            }
+        }
     }
 
     #[test]

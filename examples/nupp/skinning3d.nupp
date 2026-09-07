@@ -1,0 +1,144 @@
+module skinning3d
+
+const IDENTITY: {number} = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}
+
+local function palette(offset: number): {number}
+    local values: {number} = {}
+    for index = 1, 16 do
+        values[index] = IDENTITY[index]
+        values[index + 16] = IDENTITY[index]
+    end
+    values[29] = offset
+
+    return values
+end
+
+local function install(exclusive app: tecs.application.Application): nil
+    const world = app.world
+    const camera = tecs.gfx.newCamera3D()
+    const lighting = tecs.gfx.meshes.newLighting()
+    lighting.ambient = 1
+    lighting.intensity = 0
+    world:spawn(tecs.gfx.View({camera3D = camera, lighting = lighting}))
+    camera.z = 3
+    camera.verticalFov = math.rad(50)
+
+    const controller = tecs.gfx.flycamera3d.new(app.input, app.window, camera, {moveSpeed = 3, sprintMultiplier = 4})
+    world:addSystem({
+        name = "example.SkinningFlyCamera",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number): nil
+            controller:update(dt)
+        end,
+    })
+
+    local mesh, sourceBounds = tecs.gfx.models.newMesh({
+        name = "example://two-joint-strip",
+        vertices = {
+            -0.35,
+            -1,
+            0,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0.35,
+            -1,
+            0,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0.35,
+            1,
+            0,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            1,
+            -0.35,
+            1,
+            0,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            1,
+            0,
+            1,
+        },
+        indices = {0, 1, 2, 0, 2, 3},
+        joints = {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0},
+        weights = {1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0},
+    })
+    const skin = tecs.gfx.MeshSkin(palette(0))
+    const bounds = tecs.gfx.Bounds3D(
+        sourceBounds.value.centerX,
+        sourceBounds.value.centerY,
+        sourceBounds.value.centerZ,
+        sourceBounds.value.radius + 0.5
+    )
+    const entity = world:spawn(
+        tecs.ecs.Transform3D(),
+        mesh,
+        bounds,
+        tecs.gfx.MeshMaterial(),
+        skin,
+        tecs.gfx.Tint(0.2, 0.72, 1, 1),
+        tecs.gfx.Renderable3D
+    )
+
+    local elapsed = 0.0
+    world:addSystem({
+        name = "example.AnimateSkin",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number): nil
+            elapsed = elapsed + dt
+            assert(world:getMut(entity, tecs.gfx.MeshSkin)).matrices = palette(math.sin(elapsed * 2) * 0.55)
+        end,
+    })
+
+    print("skinning3d: animating one of two joints entirely in the mesh vertex stage")
+    print("skinning3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
+end
+
+--- Creates the Tecs GPU skinning example.
+--- @param title optional window title
+--- @param width logical width
+--- @param height logical height
+--- @param debug enable guarded failures
+--- @param maxFrames optional bounded run
+--- @return native host session
+export function create(
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?
+): tecs.host.Session
+    return tecs.host.createWithPlugin(
+        install,
+        title or "Tecs GPU skinning",
+        width or 960,
+        height or 640,
+        debug,
+        maxFrames
+    )
+end

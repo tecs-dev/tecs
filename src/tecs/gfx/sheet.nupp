@@ -231,6 +231,11 @@ export record Sheet
     tagCount: function(self: Sheet): integer
     cycle: function(self: Sheet, id: integer): number
     frameAt: function(self: Sheet, id: integer, time: number): integer
+    pivot: function(
+        self: Sheet,
+        name: string,
+        frame: integer?
+    ): components.FFIInstance<PivotValue, components.FFIComponent<PivotValue>>
     slice: function(self: Sheet, name: string): Slice?
     sliceId: function(self: Sheet, name: string?): integer
     sliceName: function(self: Sheet, id: integer): string
@@ -1014,7 +1019,7 @@ export function replace(built: Sheet): Sheet?, string?
     rescale(live)
 
     -- Both the name and the id the build took now answer the live sheet. The id
-    -- is not given back, because an id is handed out once and never reused;
+    -- is not given back, because an id is handed out once and never reused
     -- what it does is resolve to the sheet its frames ended up in, so anything
     -- that read the build's id between the build and this call is pointed at
     -- the right one. It also takes the build out of the registry, which
@@ -1377,4 +1382,68 @@ export function fromAseprite(options: AsepriteOptions): Sheet
     end
 
     return builder:finish()
+end
+
+--- A sprite's anchor as fractions of its frame. A bound slice follows its
+--- authored keys during GPU animation without updating the component.
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct PivotValue
+    --- Caller-writable horizontal anchor; one half selects the center.
+    x: number
+
+    --- Caller-writable vertical anchor; one half selects the center.
+    y: number
+
+    --- Caller-writable sheet id, or zero for a direct anchor.
+    sheet: integer
+
+    --- Caller-writable slice id, or zero for a direct anchor.
+    slice: integer
+end
+
+--- Anchors a sprite directly, or follows a sheet slice. Snapshots store names.
+export const Pivot = components.newFFIComponent({
+    name = "Pivot",
+    construct = function(x: number?, y: number?, sheetId: integer?, sliceId: integer?): PivotValue
+        return new PivotValue(x ?? 0.5, y ?? 0.5, sheetId ?? 0, sliceId ?? 0)
+    end,
+    default = function(): PivotValue
+        return new PivotValue(0.5, 0.5, 0, 0)
+    end,
+    save = function(value: PivotValue): any
+        const source = byId(value.sheet)
+        return {
+            x = value.x,
+            y = value.y,
+            sheet = source ~= nil and source.name or nil,
+            slice = source ~= nil and source:sliceName(value.slice) or nil
+        }
+    end,
+    load = function(value: any): PivotValue
+        const stored = value as {[string]: any}
+        const name = stored.sheet as string?
+        const source = name ~= nil and byName(name) or nil
+        return new PivotValue(
+            (stored.x as number?) ?? 0.5,
+            (stored.y as number?) ?? 0.5,
+            source ~= nil and source.id or 0,
+            source ~= nil and source:sliceId(stored.slice as string?) or 0
+        )
+    end,
+})
+
+--- Creates an anchor that follows a named slice.
+--- @param self the sheet containing the slice
+--- @param name the authored slice name
+--- @param frame an initial sheet frame, defaulting to the first
+--- @return a Pivot component ready to spawn beside the sprite and Animation
+function Sheet.pivot(
+    self: Sheet,
+    name: string,
+    frame: integer?
+): components.FFIInstance<PivotValue, components.FFIComponent<PivotValue>>
+    const id = self:sliceId(name)
+    assert(id > 0, "sheet has no slice named " .. name)
+    const x, y = self:pivotOf(id, frame ?? 1)
+    return Pivot(x, y, self.id, id)
 end

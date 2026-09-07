@@ -1,7 +1,13 @@
 module tecs.gfx
 
 --[[
-The public scene-rendering values a two-dimensional game spawns.
+The public scene-rendering values a game spawns.
+
+`Renderable3D` selects indexed meshes with `Transform3D`, `Mesh`, `Bounds3D`
+and `MeshMaterial`. [Models](tecs.gfx.models) load shared glTF geometry and
+independent animation poses. [Particles](tecs.gfx.particles) keep individual
+particle state on the GPU; entities author their emitters. `View` selects
+ordered 2D and 3D cameras.
 
 `Tint`, `Sprite`, and `Renderable2D` accompany `tecs.ecs.Transform2D` on a
 drawable entity, and `Camera2D` with `ActiveCamera` selects the view every
@@ -150,3 +156,91 @@ export const DirtyTileChunk = tecs.internal.tilechunk.DirtyTileChunk
 
 --- The number of cells along a tile chunk edge.
 export const TILE_CHUNK_SIZE = tecs.internal.tilechunk.SIZE
+
+--- Describes an ordered viewport with its own camera. Explicit views replace
+--- the synthesized full-frame camera; coordinates are fractions of the frame.
+export type View = tecs.internal.views.View
+
+--- Constructs a viewport from a camera and optional rectangle, order and enabled
+--- fields.
+export const View = tecs.internal.views.Component
+
+--- Creates a camera value for a View or coordinate conversion outside an entity.
+--- @param options The caller supplies world position, positive zoom and radians of
+---     rotation.
+--- @return The camera value, centered at zero with zoom one by default.
+--- @raises When zoom is not positive or a value is not finite.
+export function newCamera2D(options: {
+    x: number?,
+    y: number?,
+    zoom: number?,
+    rotation: number?
+}?): Camera2D
+    const value = options or {}
+    const camera = new rendercomponents.Camera2D(value.x ?? 0, value.y ?? 0, value.zoom ?? 1, value.rotation ?? 0)
+    assert(camera.zoom > 0, "camera zoom must be positive")
+    for _, number in ipairs({camera.x, camera.y, camera.zoom, camera.rotation}) do
+        assert(number == number and math.abs(number) < math.huge, "camera values must be finite")
+    end
+
+    return camera
+end
+
+--- Stores the Bounds3D data for one 3D primitive.
+export type Bounds3D = tecs.internal.meshcomponents.Bounds3D
+
+--- Constructs the Bounds3D component for a 3D primitive.
+export const Bounds3D = tecs.internal.meshcomponents.Bounds3DComponent
+
+--- Stores the Mesh data for one 3D primitive.
+export type Mesh = tecs.internal.meshcomponents.Mesh
+
+--- Constructs the Mesh component for a 3D primitive.
+export const Mesh = tecs.internal.meshcomponents.MeshComponent
+
+--- Stores the MeshMaterial data for one 3D primitive.
+export type MeshMaterial = tecs.internal.meshcomponents.MeshMaterial
+
+--- Constructs the MeshMaterial component for a 3D primitive.
+export const MeshMaterial = tecs.internal.meshcomponents.MeshMaterialComponent
+
+--- Stores the MeshSkin data for one 3D primitive.
+export type MeshSkin = tecs.internal.meshcomponents.MeshSkin
+
+--- Constructs the MeshSkin component for a 3D primitive.
+export const MeshSkin = tecs.internal.meshcomponents.MeshSkinComponent
+
+--- Stores the MeshMorph data for one 3D primitive.
+export type MeshMorph = tecs.internal.meshcomponents.MeshMorph
+
+--- Constructs the MeshMorph component for a 3D primitive.
+export const MeshMorph = tecs.internal.meshcomponents.MeshMorphComponent
+
+--- Marks geometry for the 3D renderer.
+export const Renderable3D = tecs.internal.meshcomponents.Renderable3D
+
+--- A perspective camera with quaternion orientation.
+export type Camera3D = tecs.gfx.camera3d.Camera3D
+
+--- Creates a right-handed perspective camera looking along negative Z.
+export const newCamera3D = tecs.gfx.camera3d.newCamera3D
+
+--- Omnidirectional mesh light positioned by Transform3D.
+export type PointLight3D = tecs.internal.meshcomponents.PointLight3D
+
+--- Constructs a point light with radius, linear RGB, intensity and LIGHT_* flags.
+export const PointLight3D = tecs.internal.meshcomponents.PointLight3DComponent
+
+--- Conical mesh light aimed along Transform3D local negative Z.
+export type SpotLight3D = tecs.internal.meshcomponents.SpotLight3D
+
+--- Constructs a spot light with radius, inner and outer half-angles in radians,
+--- linear RGB, intensity and LIGHT_* flags.
+export const SpotLight3D = tecs.internal.meshcomponents.SpotLight3DComponent
+
+--- Requests a slot in the local-light shadow atlas.
+export const LIGHT_CASTS_SHADOWS: integer = 1
+
+--- Anchors a sprite at normalized X/Y coordinates or an authored sheet slice.
+--- Use Sheet:pivot to keep animated slice anchors synchronized with the GPU frames.
+export const Pivot = tecs.gfx.sheet.Pivot

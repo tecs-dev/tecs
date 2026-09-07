@@ -46,6 +46,10 @@ fn open() -> Option<(wgpu::Device, wgpu::Queue)> {
     }))
     .ok()?;
     pollster::block_on(adapter.request_device(&DeviceDescriptor {
+        required_limits: wgpu::Limits {
+            max_storage_buffers_per_shader_stage: 9,
+            ..Default::default()
+        },
         label: Some("tecs pipeline test"),
         ..Default::default()
     }))
@@ -308,6 +312,10 @@ fn builds_the_compute_pipelines_against_the_layouts_a_frame_binds() {
     });
     entries.push(BindGroupEntry {
         binding: 8,
+        resource: lights.as_entire_binding(),
+    });
+    entries.push(BindGroupEntry {
+        binding: 9,
         resource: lights.as_entire_binding(),
     });
     let _ = device.create_bind_group(&BindGroupDescriptor {

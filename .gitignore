@@ -10,3 +10,5 @@
 
 # macOS system files
 .DS_Store
+
+/assets/external/

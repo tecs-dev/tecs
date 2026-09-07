@@ -10,6 +10,7 @@ collector address becomes part of the host contract.
 ]]
 
 local application = require("tecs.application")
+local viewpacket = require("tecs.internal.viewpacket")
 local framepacket = require("tecs.internal.framepacket")
 local framepump = require("tecs.internal.framepump")
 local images = require("tecs.gfx.images")
@@ -26,6 +27,7 @@ export record Session
     private imageCommandIndex: integer
     private pump: framepump.Pump
     private extractor: framepacket.Extractor
+    private views: viewpacket.Collector
 end
 
 local function append(exclusive session: Session, event: platformevents.Event): nil
@@ -96,7 +98,8 @@ export function newSession(config: application.Config?): Session
         imageCommands = {},
         imageCommandIndex = 1,
         pump = framepump.newPump(),
-        extractor = framepacket.new(app.world)
+        extractor = framepacket.new(app.world),
+        views = viewpacket.new(app.world)
     )
 end
 
@@ -193,6 +196,10 @@ end
 ---     independent full snapshot.
 export function renderPacket(exclusive session: Session, residentRevision: integer?): string
     local width, height = session.app.window:getPixelSize()
+    const views = session.views:frame(width, height, residentRevision)
+    if views ~= nil then
+        return views
+    end
     if residentRevision ~= nil then
         return session.extractor:frame(width, height, residentRevision)
     end
@@ -605,4 +612,10 @@ export function captureResult(
     reason: string?
 ): nil
     tecs.gfx.screenshot.complete(id, width, height, rgba, png, reason)
+end
+
+--- Drains one pending model upload for the native renderer.
+--- @return The model ID and geometry packet, or zero and an empty string.
+export function nextModelUpload(): integer, string
+    return tecs.gfx.models.nextUpload()
 end

@@ -1,0 +1,1294 @@
+module tecs.gfx.models
+
+--[[
+Resident glTF models and allocation-stable node animation.
+
+`tecs.gfx.models.load` decodes a glTF or GLB file and returns a shared model. Each `newInstance` owns its joint palettes, morph weights, and
+primitive templates, so copies of one model can play different poses without
+duplicating geometry, materials, textures, morph deltas, or clips.
+
+```nupp
+local model = assert(tecs.gfx.models.load("models/hero.gltf"))
+local instance = model:newInstance()
+local entities: {integer} = {}
+for index, primitive in ipairs(instance.primitives) do
+    entities[index] = world:spawn(
+        primitive.transform,
+        primitive.mesh,
+        primitive.bounds,
+        primitive.material,
+        primitive.skin,
+        primitive.morph,
+        tecs.gfx.Tint(1, 1, 1, 1),
+        tecs.gfx.Renderable3D
+    )
+end
+world:commit()
+for index, entity in ipairs(entities) do
+    instance:bind(world, index, entity)
+end
+instance:play("Walk")
+
+world:addSystem({
+    name = "game.AnimateModel",
+    phase = tecs.ecs.phases.Update,
+    run = function(dt: number): nil
+        instance:update(dt)
+    end,
+})
+```
+
+Sampling resets the reusable pose to the file's base TRS, applies one clip,
+builds node world matrices in parent order, updates bound `Transform3D`
+components, and stages each instance-owned skin palette and morph vector. No
+table or cdata is allocated per sample. Bounds remain caller-owned and must
+enclose every pose.
+]]
+
+local ecs = require("tecs.ecs")
+local mesh = require("tecs.internal.meshcomponents")
+local components = require("tecs.internal.components")
+local assetnative = require("tecs.internal.assetnative")
+local Transform3D = mesh.Transform3DComponent
+local type World = ecs.World
+local type TransformInput = components.FFIInstance<mesh.Transform3D, components.FFIComponent<mesh.Transform3D>>
+export type MeshInput = components.FFIInstance<mesh.Mesh, components.FFIComponent<mesh.Mesh>>
+export type BoundsInput = components.FFIInstance<mesh.Bounds3D, components.FFIComponent<mesh.Bounds3D>>
+export type MaterialInput = components.FFIInstance<mesh.MeshMaterial, components.FFIComponent<mesh.MeshMaterial>>
+local type SkinInput = components.TableInstance<mesh.MeshSkin>
+local type MorphInput = components.TableInstance<mesh.MeshMorph>
+local type Node = {
+    parent: integer,
+    translation: {number},
+    rotation: {number},
+    scale: {number},
+    matrix: {number}?
+}
+local type Channel = {
+    node: integer,
+
+    --- Read-only. Contains the source asset path.
+    path: integer,
+    interpolation: integer,
+    width: integer,
+    times: {number},
+    values: {number}
+}
+local type Draw = {
+    --- Caller-writable. Selects resident geometry.
+    mesh: integer,
+
+    --- Caller-writable. Selects resident PBR material data.
+    material: integer,
+
+    --- Caller-writable. Selects this instance's joint palette; its empty palette
+    --- denotes rigid geometry.
+    skin: integer,
+    node: integer,
+    weights: {number}
+}
+local type Skin = {
+    node: integer,
+    joints: {integer},
+    inverseBinds: {number},
+    matrices: {number}
+}
+local type Geometry = {bounds: {number}}
+local type MetadataAnimation = {
+    name: string,
+    duration: number,
+    firstChannel: integer,
+    channelCount: integer
+}
+local type Metadata = {
+    --- Read-only. Contains the source asset path.
+    path: string,
+    nodes: {Node},
+    draws: {Draw},
+    skins: {Skin},
+    meshes: {Geometry},
+    materials: {any},
+    channels: {Channel},
+
+    --- Read-only. Contains decoded clips in file order.
+    animations: {MetadataAnimation}
+}
+
+--- Holds one authored clip and its reusable channel data.
+export record Animation
+    --- Read-only. Names the authored clip.
+    name: string
+
+    --- Read-only. Reports the clip duration in seconds.
+    duration: number
+
+    --- Engine-owned. Retains decoded channels for sampling; game code uses Instance.
+    channels: {Channel}
+end
+
+--- Holds the spawnable components for one independently posed primitive.
+export record Primitive
+    --- Caller-writable. Contains this primitive's sampled world transform.
+    transform: TransformInput
+
+    --- Caller-writable. Selects resident geometry.
+    mesh: MeshInput
+
+    --- Caller-writable. Supplies the local bound, which must enclose every
+    --- animated pose.
+    bounds: BoundsInput
+
+    --- Caller-writable. Selects resident PBR material data.
+    material: MaterialInput
+
+    --- Caller-writable. Selects this instance's joint palette; its empty palette
+    --- denotes rigid geometry.
+    skin: SkinInput
+
+    --- Caller-writable. Selects this instance's morph weights; its empty palette
+    --- denotes geometry without morph targets.
+    morph: MorphInput
+
+    --- Read-only. Reports the authored material name for fixture and game metadata.
+    materialName: string = ""
+end
+
+--- Controls clip playback, with speed one, looping and immediate playback by default.
+export type PlayOptions = {
+    --- Caller-writable. Multiplies elapsed time. Negative values raise on
+    --- `update`.
+    speed: number?,
+
+    --- Caller-writable. Controls whether playback wraps at the duration.
+    loop: boolean?,
+
+    --- Caller-writable. Controls whether `update` advances playback.
+    playing: boolean?
+}
+
+--- Retains shared geometry, materials and authored clips.
+export record Model
+    --- Read-only. Contains the source asset path.
+    path: string
+
+    --- Engine-owned. Identifies the resident upload; game code selects primitives
+    --- instead.
+    id: integer
+
+    --- Read-only. Contains decoded clips in file order.
+    animations: {Animation}
+
+    --- Read-only. Reports the number of decoded clips.
+    animationCount: integer
+
+    private _draws: {Draw}
+    private _nodes: {Node}
+    private _skins: {Skin}
+    private _meshes: {MeshInput}
+    private _bounds: {BoundsInput}
+    private _materials: {MaterialInput}
+    private _materialNames: {string}
+    private _order: {integer}
+    private _animationByName: {[string]: integer}
+    private _nextInstance: integer = 0
+
+    --- Creates an independently animated instance.
+    --- @return Returns reusable primitive templates plus private joint
+    ---     palettes and morph-weight vectors.
+    newInstance: function(exclusive self: Model): Instance
+
+    --- Returns a clip's one-based index.
+    --- @param name The caller supplies an authored or generated clip name.
+    --- @return Returns its index, or nil when absent. Duplicate authored names
+    ---     raise because selecting either by that name would be ambiguous.
+    animationIndex: function(borrows self: Model, name: string): integer?
+end
+
+--- Plays one independently posed copy of a resident model.
+export record Instance
+    --- Read-only. Contains this instance's spawnable primitive bundles.
+    primitives: {Primitive}
+
+    --- Caller-writable. Places the complete sampled model in world space, or
+    --- nil to preserve the file's authored placement without placement work.
+    --- Sampling composes this transform after the authored node hierarchy.
+    transform: mesh.Transform3D?
+
+    --- Read-only. Reports the selected one-based clip, or zero before `play`.
+    animation: integer
+
+    --- Read-only. Reports the current clip time in seconds.
+    time: number
+
+    --- Caller-writable. Multiplies elapsed time. Negative values raise on
+    --- `update`.
+    speed: number
+
+    --- Caller-writable. Controls whether playback wraps at the duration.
+    loop: boolean
+
+    --- Caller-writable. Controls whether `update` advances playback.
+    playing: boolean
+
+    private _model: Model
+    private _world: World?
+    private _entities: {[integer]: integer}
+    private _pose: {number}
+    private _localMatrices: {number}
+    private _worldMatrices: {number}
+    private _palettes: {{number}}
+    private _skins: {SkinInput}
+    private _morphs: {MorphInput}
+    private _morphWeights: {{number}}
+    private _temporary: {number}
+    private _inverse: {number}
+
+    --- Binds one primitive to an existing entity's `Transform3D`.
+    --- @param world The caller supplies the entity's world. Every binding on
+    ---     one instance must use the same world.
+    --- @param primitive The caller supplies a one-based primitive index.
+    --- @param entity The caller supplies a live entity carrying `Transform3D`.
+    --- @return The operation returns no value.
+    bind: function(exclusive self: Instance, world: World, primitive: integer, entity: integer): nil
+
+    --- Removes one primitive's entity binding.
+    --- @param primitive The caller supplies a one-based primitive index.
+    --- @return The operation returns no value.
+    unbind: function(exclusive self: Instance, primitive: integer): nil
+
+    --- Selects and restarts a clip.
+    --- @param animation The caller supplies a one-based index or clip name.
+    --- @param options Omitted fields default to speed one, looping, and
+    ---     immediate playback.
+    --- @return The operation returns no value.
+    play: function(exclusive self: Instance, animation: string | integer, options: PlayOptions?): nil
+
+    --- Samples a clip at an explicit time without allocating.
+    --- @param animation The caller supplies a one-based index or clip name.
+    --- @param time The caller supplies seconds. Negative values clamp to zero.
+    --- @param loop Whether time wraps at the duration. Defaults to false.
+    --- @return The operation returns no value.
+    sample: function(exclusive self: Instance, animation: string | integer, time: number, loop: boolean?): nil
+
+    --- Advances and samples the selected clip.
+    --- @param dt The caller supplies non-negative elapsed seconds.
+    --- @return The operation returns no value.
+    update: function(exclusive self: Instance, dt: number): nil
+end
+
+local function multiply(a: {number}, ao: integer, b: {number}, bo: integer, out: {number}, oo: integer)
+    for column = 0, 3 do
+        for row = 0, 3 do
+            local sum = 0.0
+            for lane = 0, 3 do
+                sum = sum + a[ao + lane * 4 + row] * b[bo + column * 4 + lane]
+            end
+            out[oo + column * 4 + row] = sum
+        end
+    end
+end
+
+local function compose(pose: {number}, po: integer, out: {number}, offset: integer)
+    const x, y, z, w = pose[po + 3], pose[po + 4], pose[po + 5], pose[po + 6]
+    const sx, sy, sz = pose[po + 7], pose[po + 8], pose[po + 9]
+    const xx, yy, zz = x * x, y * y, z * z
+    const xy, xz, yz = x * y, x * z, y * z
+    const wx, wy, wz = w * x, w * y, w * z
+    out[offset] = (1 - 2 * (yy + zz)) * sx
+    out[offset + 1] = (2 * (xy + wz)) * sx
+    out[offset + 2] = (2 * (xz - wy)) * sx
+    out[offset + 3] = 0
+    out[offset + 4] = (2 * (xy - wz)) * sy
+    out[offset + 5] = (1 - 2 * (xx + zz)) * sy
+    out[offset + 6] = (2 * (yz + wx)) * sy
+    out[offset + 7] = 0
+    out[offset + 8] = (2 * (xz + wy)) * sz
+    out[offset + 9] = (2 * (yz - wx)) * sz
+    out[offset + 10] = (1 - 2 * (xx + yy)) * sz
+    out[offset + 11] = 0
+    out[offset + 12], out[offset + 13], out[offset + 14], out[offset + 15] = pose[po], pose[po + 1], pose[po + 2], 1
+end
+
+local function inverseAffine(source: {number}, offset: integer, out: {number})
+    const a00, a01, a02 = source[offset], source[offset + 4], source[offset + 8]
+    const a10, a11, a12 = source[offset + 1], source[offset + 5], source[offset + 9]
+    const a20, a21, a22 = source[offset + 2], source[offset + 6], source[offset + 10]
+    const determinant = a00 * (a11 * a22 - a12 * a21) - a01 * (a10 * a22 - a12 * a20) + a02 * (a10 * a21 - a11 * a20)
+    if math.abs(determinant) <= 1e-20 then
+        error("tecs: an animated mesh transform is not invertible", 3)
+    end
+    const d = 1.0 / determinant
+    const i00, i01, i02 = (a11 * a22 - a12 * a21) * d, (a02 * a21 - a01 * a22) * d, (a01 * a12 - a02 * a11) * d
+    const i10, i11, i12 = (a12 * a20 - a10 * a22) * d, (a00 * a22 - a02 * a20) * d, (a02 * a10 - a00 * a12) * d
+    const i20, i21, i22 = (a10 * a21 - a11 * a20) * d, (a01 * a20 - a00 * a21) * d, (a00 * a11 - a01 * a10) * d
+    const tx, ty, tz = source[offset + 12], source[offset + 13], source[offset + 14]
+    out[1], out[2], out[3], out[4] = i00, i10, i20, 0
+    out[5], out[6], out[7], out[8] = i01, i11, i21, 0
+    out[9], out[10], out[11], out[12] = i02, i12, i22, 0
+    out[13] = -(i00 * tx + i01 * ty + i02 * tz)
+    out[14] = -(i10 * tx + i11 * ty + i12 * tz)
+    out[15], out[16] = -(i20 * tx + i21 * ty + i22 * tz), 1
+end
+
+local function writeTransform(matrix: {number}, offset: integer, target: mesh.Transform3D)
+    local sx = math.sqrt(matrix[offset] ^ 2 + matrix[offset + 1] ^ 2 + matrix[offset + 2] ^ 2)
+    const sy = math.sqrt(matrix[offset + 4] ^ 2 + matrix[offset + 5] ^ 2 + matrix[offset + 6] ^ 2)
+    const sz = math.sqrt(matrix[offset + 8] ^ 2 + matrix[offset + 9] ^ 2 + matrix[offset + 10] ^ 2)
+    const determinant = matrix[
+        offset
+    ] * (
+        matrix[offset + 5] * matrix[offset + 10] - matrix[offset + 6] * matrix[offset + 9]
+    ) - matrix[
+        offset + 4
+    ] * (
+        matrix[offset + 1] * matrix[offset + 10] - matrix[offset + 2] * matrix[offset + 9]
+    ) + matrix[offset + 8] * (matrix[offset + 1] * matrix[offset + 6] - matrix[offset + 2] * matrix[offset + 5])
+    if sx <= 1e-20 or sy <= 1e-20 or sz <= 1e-20 then
+        error("tecs: an animated node has a zero scale axis", 3)
+    end
+    if determinant < 0 then
+        sx = -sx
+    end
+    const r00, r01, r02 = matrix[offset] / sx, matrix[offset + 4] / sy, matrix[offset + 8] / sz
+    const r10, r11, r12 = matrix[offset + 1] / sx, matrix[offset + 5] / sy, matrix[offset + 9] / sz
+    const r20, r21, r22 = matrix[offset + 2] / sx, matrix[offset + 6] / sy, matrix[offset + 10] / sz
+    if math.abs(
+        r00 * r01 + r10 * r11 + r20 * r21
+    ) > 1e-4 or math.abs(
+        r00 * r02 + r10 * r12 + r20 * r22
+    ) > 1e-4 or math.abs(r01 * r02 + r11 * r12 + r21 * r22) > 1e-4 then
+        error("tecs: an animated node hierarchy produces shear", 3)
+    end
+    local qx, qy, qz, qw = 0.0, 0.0, 0.0, 1.0
+    const trace = r00 + r11 + r22
+    if trace > 0 then
+        const scale = math.sqrt(trace + 1.0) * 2
+        qw, qx, qy, qz = 0.25 * scale, (r21 - r12) / scale, (r02 - r20) / scale, (r10 - r01) / scale
+    elseif r00 > r11 and r00 > r22 then
+        const scale = math.sqrt(1.0 + r00 - r11 - r22) * 2
+        qw, qx, qy, qz = (r21 - r12) / scale, 0.25 * scale, (r01 + r10) / scale, (r02 + r20) / scale
+    elseif r11 > r22 then
+        const scale = math.sqrt(1.0 + r11 - r00 - r22) * 2
+        qw, qx, qy, qz = (r02 - r20) / scale, (r01 + r10) / scale, 0.25 * scale, (r12 + r21) / scale
+    else
+        const scale = math.sqrt(1.0 + r22 - r00 - r11) * 2
+        qw, qx, qy, qz = (r10 - r01) / scale, (r02 + r20) / scale, (r12 + r21) / scale, 0.25 * scale
+    end
+    target.x, target.y, target.z = matrix[offset + 12], matrix[offset + 13], matrix[offset + 14]
+    target.rotationX, target.rotationY, target.rotationZ, target.rotationW = qx, qy, qz, qw
+    target.scaleX, target.scaleY, target.scaleZ = sx, sy, sz
+end
+
+local function findKey(times: {number}, time: number): integer
+    if time <= times[1] then
+        return 1
+    end
+    const last = #times
+    if time >= times[last] then
+        return last
+    end
+    local low, high = 1, last - 1
+    while low <= high do
+        const middle = math.floor((low + high) * 0.5)
+        if time < times[middle] then
+            high = middle - 1
+        elseif time >= times[middle + 1] then
+            low = middle + 1
+        else
+            return middle
+        end
+    end
+
+    return math.max(1, math.min(last, low)) as integer
+end
+
+local function normalizeRotation(pose: {number}, offset: integer)
+    const length = math.sqrt(pose[offset] ^ 2 + pose[offset + 1] ^ 2 + pose[offset + 2] ^ 2 + pose[offset + 3] ^ 2)
+    if length <= 1e-20 then
+        error("tecs: an animation produced a zero rotation quaternion", 3)
+    end
+    pose[
+        offset
+    ], pose[
+        offset + 1
+    ], pose[
+        offset + 2
+    ], pose[
+        offset + 3
+    ] = pose[offset] / length, pose[offset + 1] / length, pose[offset + 2] / length, pose[offset + 3] / length
+end
+
+local function sampleChannel(channel: Channel, time: number, target: {number}, targetOffset: integer)
+    const width = channel.width
+    const times = channel.times
+    const values = channel.values
+    const key = findKey(times, time)
+    const last = #times
+    if channel.interpolation == 1 or key == last or time <= times[1] then
+        const row = channel.interpolation == 2 and ((key - 1) * 3 + 1) or key - 1
+        const source = row * width
+        for lane = 0, width - 1 do
+            target[targetOffset + lane] = values[source + lane + 1]
+        end
+    elseif channel.interpolation == 2 then
+        const span = times[key + 1] - times[key]
+        const alpha = (time - times[key]) / span
+        const alpha2, alpha3 = alpha * alpha, alpha * alpha * alpha
+        const h00, h10 = 2 * alpha3 - 3 * alpha2 + 1, alpha3 - 2 * alpha2 + alpha
+        const h01, h11 = -2 * alpha3 + 3 * alpha2, alpha3 - alpha2
+        const left = (key - 1) * 3 * width
+        const right = key * 3 * width
+        for lane = 0, width - 1 do
+            const p0 = values[left + width + lane + 1]
+            const m0 = values[left + width * 2 + lane + 1] * span
+            const p1 = values[right + width + lane + 1]
+            const m1 = values[right + lane + 1] * span
+            target[targetOffset + lane] = h00 * p0 + h10 * m0 + h01 * p1 + h11 * m1
+        end
+    elseif channel.path == 1 then
+        const left = (key - 1) * 4
+        const right = key * 4
+        local dot = 0.0
+        for lane = 1, 4 do
+            dot = dot + values[left + lane] * values[right + lane]
+        end
+        local sign = 1.0
+        if dot < 0 then
+            dot, sign = -dot, -1.0
+        end
+        dot = math.max(-1.0, math.min(1.0, dot))
+        const alpha = (time - times[key]) / (times[key + 1] - times[key])
+        local a, b = 1.0 - alpha, alpha
+        if dot < 0.9995 then
+            const angle = math.acos(dot)
+            const inverse = 1.0 / math.sin(angle)
+            a, b = math.sin((1.0 - alpha) * angle) * inverse, math.sin(alpha * angle) * inverse
+        end
+        for lane = 0, 3 do
+            target[targetOffset + lane] = values[left + lane + 1] * a + values[right + lane + 1] * sign * b
+        end
+    else
+        const alpha = (time - times[key]) / (times[key + 1] - times[key])
+        const left = (key - 1) * width
+        const right = key * width
+        for lane = 0, width - 1 do
+            const a, b = values[left + lane + 1], values[right + lane + 1]
+            target[targetOffset + lane] = a + (b - a) * alpha
+        end
+    end
+    if channel.path == 1 then
+        normalizeRotation(target, targetOffset)
+    end
+end
+
+local function animationIndex(model: Model, animation: string | integer): integer
+    if type(animation) == "number" then
+        const index = animation as integer
+        if index < 1 or index > model.animationCount or index ~= math.floor(index) then
+            error(
+                ("tecs: model animation index %s is outside 1..%d"):format(tostring(animation), model.animationCount),
+                3
+            )
+        end
+        return index
+    end
+    const index = model:animationIndex(animation as string)
+    if index == nil then
+        error(("tecs: model '%s' has no animation '%s'"):format(model.path, tostring(animation)), 3)
+    end
+
+    return index
+end
+
+local function evaluate(exclusive self: Instance, animation: integer, time: number)
+    const model = self._model
+    const pose = self._pose
+    for index, node in ipairs(model._nodes) do
+        const offset = (index - 1) * 10
+        pose[
+            offset + 1
+        ], pose[offset + 2], pose[offset + 3] = node.translation[1], node.translation[2], node.translation[3]
+        pose[
+            offset + 4
+        ], pose[
+            offset + 5
+        ], pose[offset + 6], pose[offset + 7] = node.rotation[1], node.rotation[2], node.rotation[3], node.rotation[4]
+        pose[offset + 8], pose[offset + 9], pose[offset + 10] = node.scale[1], node.scale[2], node.scale[3]
+    end
+    for index = 1, #model._draws do
+        local weights = self._morphWeights[index]
+        if weights ~= nil then
+            const defaults = model._draws[index].weights
+            for target, weight in ipairs(defaults) do
+                weights[target] = weight
+            end
+        end
+    end
+    if animation ~= 0 then
+        for _, channel in ipairs(model.animations[animation].channels) do
+            if channel.path == 3 then
+                for index, draw in ipairs(model._draws) do
+                    local weights = self._morphWeights[index]
+                    if draw.node == channel.node and weights ~= nil then
+                        sampleChannel(channel, time, weights, 1)
+                    end
+                end
+            else
+                const offset = (channel.node - 1) * 10 + (channel.path == 0 and 1 or channel.path == 1 and 4 or 8)
+                sampleChannel(channel, time, pose, offset)
+            end
+        end
+    end
+    const locals = self._localMatrices
+    for index, node in ipairs(model._nodes) do
+        const offset = (index - 1) * 16 + 1
+        if node.matrix ~= nil then
+            for lane = 0, 15 do
+                locals[offset + lane] = node.matrix[lane + 1]
+            end
+        else
+            compose(pose, (index - 1) * 10 + 1, locals, offset)
+        end
+    end
+    const worlds = self._worldMatrices
+    for _, nodeIndex in ipairs(model._order) do
+        const node = model._nodes[nodeIndex]
+        const offset = (nodeIndex - 1) * 16 + 1
+        if node.parent == 0 then
+            for lane = 0, 15 do
+                worlds[offset + lane] = locals[offset + lane]
+            end
+        else
+            multiply(worlds, (node.parent - 1) * 16 + 1, locals, offset, worlds, offset)
+        end
+    end
+    const root = self.transform
+    if root ~= nil then
+        pose[1], pose[2], pose[3] = root.x, root.y, root.z
+        pose[4], pose[5], pose[6], pose[7] = root.rotationX, root.rotationY, root.rotationZ, root.rotationW
+        pose[8], pose[9], pose[10] = root.scaleX, root.scaleY, root.scaleZ
+        compose(pose, 1, self._inverse, 1)
+    end
+    for index, draw in ipairs(model._draws) do
+        const primitive = self.primitives[index]
+        if root ~= nil then
+            multiply(self._inverse, 1, worlds, (draw.node - 1) * 16 + 1, self._temporary, 1)
+            writeTransform(self._temporary, 1, primitive.transform.value)
+        else
+            writeTransform(worlds, (draw.node - 1) * 16 + 1, primitive.transform.value)
+        end
+        const entity = self._entities[index]
+        if entity ~= nil then
+            const world = assert(self._world)
+            const target = assert(world:getMut(entity, Transform3D))
+            const source = primitive.transform.value
+            target.x, target.y, target.z = source.x, source.y, source.z
+            target.rotationX, target.rotationY, target.rotationZ, target.rotationW = source.rotationX, source.rotationY, source.rotationZ, source.rotationW
+            target.scaleX, target.scaleY, target.scaleZ = source.scaleX, source.scaleY, source.scaleZ
+        end
+    end
+    for index, source in ipairs(model._skins) do
+        const palette = self._palettes[index]
+        inverseAffine(worlds, (source.node - 1) * 16 + 1, self._inverse)
+        for jointIndex, node in ipairs(source.joints) do
+            const bindOffset = (jointIndex - 1) * 16 + 1
+            multiply(worlds, (node - 1) * 16 + 1, source.inverseBinds, bindOffset, self._temporary, 1)
+            multiply(self._inverse, 1, self._temporary, 1, palette, bindOffset)
+        end
+
+    end
+    const boundWorld = self._world
+    if boundWorld ~= nil then
+        for _, entity in pairs(self._entities) do
+            boundWorld:markComponentDirty(entity, mesh.MeshSkinComponent)
+            boundWorld:markComponentDirty(entity, mesh.MeshMorphComponent)
+        end
+    end
+end
+
+function Model.animationIndex(borrows self: Model, name: string): integer?
+    if name == nil or name == "" then
+        error("tecs: a model animation name cannot be empty", 2)
+    end
+    const index = self._animationByName[name]
+    if index == 0 then
+        error(("tecs: model '%s' has more than one animation named '%s'"):format(self.path, name), 2)
+    end
+
+    return index
+end
+
+function Model.newInstance(exclusive self: Model): Instance
+    self._nextInstance = self._nextInstance + 1
+    local skins: {SkinInput} = {}
+    local palettes: {{number}} = {}
+    for index, source in ipairs(self._skins) do
+        local palette: {number} = {}
+        for lane, value in ipairs(source.matrices) do
+            palette[lane] = value
+        end
+        palettes[index] = palette
+        skins[index] = mesh.MeshSkinComponent(palette)
+    end
+    local primitives: {Primitive} = {}
+    local morphs: {MorphInput} = {}
+    local morphWeights: {{number}} = {}
+    for index, draw in ipairs(self._draws) do
+        if #draw.weights > 0 then
+            local weights: {number} = {}
+            for target, weight in ipairs(draw.weights) do
+                weights[target] = weight
+            end
+            morphWeights[index] = weights
+            morphs[index] = mesh.MeshMorphComponent(weights)
+        end
+        primitives[
+            index
+        ] = new Primitive(
+            transform = Transform3D(),
+            mesh = self._meshes[draw.mesh],
+            bounds = self._bounds[draw.mesh],
+            material = self._materials[draw.material] or mesh.MeshMaterialComponent(),
+            materialName = self._materialNames[draw.material] or "",
+            skin = skins[draw.skin] or mesh.MeshSkinComponent({}),
+            morph = morphs[index] or mesh.MeshMorphComponent({})
+        )
+    end
+    const instance = new Instance(
+        primitives = primitives,
+        animation = 0,
+        time = 0,
+        speed = 1,
+        loop = true,
+        playing = false,
+        _model = self,
+        _world = nil,
+        transform = nil,
+        _entities = {},
+        _pose = {},
+        _localMatrices = {},
+        _worldMatrices = {},
+        _palettes = palettes,
+        _skins = skins,
+        _morphs = morphs,
+        _morphWeights = morphWeights,
+        _temporary = {},
+        _inverse = {}
+    )
+    evaluate(instance, 0, 0.0)
+
+    return instance
+end
+
+function Instance.bind(exclusive self: Instance, world: World, primitive: integer, entity: integer)
+    if world == nil then
+        error("tecs: a model binding needs a world", 2)
+    end
+    if self.primitives[primitive] == nil then
+        error(("tecs: model primitive %s is outside 1..%d"):format(tostring(primitive), #self.primitives), 2)
+    end
+    if self._world ~= nil and self._world ~= world then
+        error("tecs: one model instance cannot bind entities from different worlds", 2)
+    end
+    const target = assert(world:getMut(entity, Transform3D))
+    const source = self.primitives[primitive].transform.value
+    target.x, target.y, target.z = source.x, source.y, source.z
+    target.rotationX, target.rotationY, target.rotationZ, target.rotationW = source.rotationX, source.rotationY, source.rotationZ, source.rotationW
+    target.scaleX, target.scaleY, target.scaleZ = source.scaleX, source.scaleY, source.scaleZ
+    self._world = world
+    self._entities[primitive] = entity
+end
+
+function Instance.unbind(exclusive self: Instance, primitive: integer)
+    if self.primitives[primitive] == nil then
+        error(("tecs: model primitive %s is outside 1..%d"):format(tostring(primitive), #self.primitives), 2)
+    end
+    self._entities[primitive] = nil
+end
+
+function Instance.play(exclusive self: Instance, animation: string | integer, options: PlayOptions?)
+    options = options or {}
+    const speed = options.speed or 1.0
+    if speed < 0 then
+        error("tecs: model animation speed cannot be negative", 2)
+    end
+    self.animation = animationIndex(self._model, animation)
+    self.time = 0.0
+    self.speed = speed
+    self.loop = options.loop == nil or options.loop
+    self.playing = options.playing == nil or options.playing
+    evaluate(self, self.animation, 0.0)
+end
+
+function Instance.sample(exclusive self: Instance, animation: string | integer, time: number, loop: boolean?)
+    if time == nil or time ~= time or time == math.huge or time == -math.huge then
+        error("tecs: model animation time must be finite", 2)
+    end
+    const index = animationIndex(self._model, animation)
+    const duration = self._model.animations[index].duration
+    local sampled = math.max(0.0, time)
+    if loop and duration > 0 then
+        sampled = sampled % duration
+    else
+        sampled = math.min(sampled, duration)
+    end
+    self.animation, self.time = index, sampled
+    evaluate(self, index, sampled)
+end
+
+function Instance.update(exclusive self: Instance, dt: number)
+    if dt == nil or dt ~= dt or dt < 0 or dt == math.huge then
+        error("tecs: model animation delta must be finite and non-negative", 2)
+    end
+    if not self.playing or self.animation == 0 then
+        return
+    end
+    if self.speed < 0 or self.speed ~= self.speed or self.speed == math.huge then
+        error("tecs: model animation speed must be finite and non-negative", 2)
+    end
+    const duration = self._model.animations[self.animation].duration
+    local time = self.time + dt * self.speed
+    if self.loop and duration > 0 then
+        time = time % duration
+    elseif time >= duration then
+        time = duration
+        self.playing = false
+    end
+    self.time = time
+    evaluate(self, self.animation, time)
+end
+
+local function orderOf(nodes: {Node}): {integer}
+    local order: {integer} = {}
+    local state: {[integer]: integer} = {}
+    local function visit(index: integer)
+        if state[index] == 2 then
+            return
+        end
+        if state[index] == 1 then
+            error("tecs: a model node hierarchy contains a cycle", 3)
+        end
+        state[index] = 1
+        const parent = nodes[index].parent
+        if parent ~= 0 then
+            if nodes[parent] == nil then
+                error("tecs: a model node names a missing parent", 3)
+            end
+            visit(parent)
+        end
+        state[index] = 2
+        order[#order + 1] = index
+    end
+
+    for index = 1, #nodes do
+        visit(index)
+    end
+
+    return order
+end
+
+local commands: {string} = {}
+local commandIds: {integer} = {}
+local nextCommand: integer = 1
+
+--- Allows import-time material tuning without duplicating geometry or images.
+export type MaterialInfo = {
+    --- Caller-writable. Names the authored material.
+    name: string,
+
+    --- Caller-writable. Selects metallic-roughness (0), unlit (1), or Lambert (2).
+    model: integer,
+
+    --- Caller-writable. Sets the metallic factor from zero to one.
+    metallic: number,
+
+    --- Caller-writable. Sets the perceptual roughness from zero to one.
+    roughness: number
+}
+
+--- Runs once per imported material before the resident GPU upload is queued.
+export type LoadOptions = {
+    --- Caller-writable. Tunes each decoded material before its upload is queued.
+    --- @param value The callback receives the material's authored values in place.
+    --- @return The callback returns no value.
+    material: function(exclusive value: MaterialInfo): nil
+}
+
+local function register(bytes: string, path: string, options: LoadOptions?): Model
+    local reader = nupp.io.newScalarReader(bytes)
+    const metadataBytes = reader:readBytes(reader:readUint32() as integer)
+    reader:drop()
+    const source = nupp.data.json.decode(metadataBytes) as Metadata
+    if options ~= nil then
+        for _, material in ipairs(source.materials) do
+            options.material(material as MaterialInfo)
+        end
+        const metadata = nupp.data.json.encode(source)
+        local buffer = nupp.io.newBuffer()
+        local writer = nupp.io.newScalarWriter(buffer)
+        writer:writeUint32(nupp.math.u32.wrap(#metadata))
+            :writeBytes(metadata)
+            :writeBytes(string.rep("\0", (4 - #metadata % 4) % 4))
+        writer:writeBytes(bytes:sub(5 + #metadataBytes + (4 - #metadataBytes % 4) % 4))
+        writer:drop()
+        bytes = buffer:getString()
+        buffer:drop()
+    end
+    const nextId = tecs.internal.meshregistry.register(path)
+    local animations: {Animation} = {}
+    local byName: {[string]: integer} = {}
+    for index, animation in ipairs(source.animations) do
+        local channels: {Channel} = {}
+        for channel = 1, animation.channelCount do
+            channels[channel] = source.channels[animation.firstChannel + channel]
+        end
+        animations[index] = new Animation(name = animation.name, duration = animation.duration, channels = channels)
+        byName[animation.name] = byName[animation.name] ~= nil and 0 or index
+    end
+    local meshes: {MeshInput} = {}
+    local bounds: {BoundsInput} = {}
+    local materials: {MaterialInput} = {}
+    local materialNames: {string} = {}
+    for index, geometry in ipairs(source.meshes) do
+        meshes[index] = mesh.MeshComponent(nextId, index)
+        bounds[
+            index
+        ] = mesh.Bounds3DComponent(geometry.bounds[1], geometry.bounds[2], geometry.bounds[3], geometry.bounds[4])
+    end
+    for index, material in ipairs(source.materials) do
+        materials[index] = mesh.MeshMaterialComponent(nextId, index)
+        materialNames[index] = (material as {name: string}).name
+    end
+    local model = new Model(
+        path = path,
+        id = nextId,
+        animations = animations,
+        animationCount = #animations,
+        _draws = source.draws,
+        _nodes = source.nodes,
+        _skins = source.skins,
+        _meshes = meshes,
+        _bounds = bounds,
+        _materials = materials,
+        _materialNames = materialNames,
+        _order = orderOf(source.nodes),
+        _animationByName = byName
+    )
+    commands[#commands + 1] = bytes
+    commandIds[#commandIds + 1] = nextId
+
+    return model
+end
+
+--- Loads and registers a glTF or GLB scene for independent instances.
+--- @param path The caller supplies a model path; external buffers and images resolve
+---     beside it.
+--- @param options The caller may tune imported materials before upload.
+--- @return The shared model, or nil and the decoder's reason when loading fails.
+--- @raises When the supplied path is empty.
+export function load(path: string, options: LoadOptions?): Model?, string?
+    assert(path ~= "", "model path cannot be empty")
+    const ok, result = pcall(function(): string
+        const bytes = assetnative.load(path, 2)
+        return bytes
+    end)
+    if not ok then
+        return nil, tostring(result)
+    end
+    const bytes = result as string
+
+    return register(bytes, path, options)
+end
+
+--- Describes one indexed triangle mesh in local coordinates.
+export type MeshOptions = {
+    --- Caller-writable. Names shared geometry with a stable, non-empty identity.
+    name: string,
+
+    --- Caller-writable. Supplies twelve floats per vertex: position XYZ, normal XYZ,
+    --- tangent XYZW and texture UV.
+    vertices: {number},
+
+    --- Caller-writable. Supplies zero-based triangle indices, three per triangle.
+    indices: {integer},
+
+    --- Caller-writable. Optionally supplies four linear RGBA values per vertex.
+    colors: {number}?,
+
+    --- Caller-writable. Optionally supplies four zero-based joint indices per vertex.
+    joints: {integer}?,
+
+    --- Caller-writable. Supplies four nonnegative weights with each joint quartet.
+    --- Each quartet must have positive total; the constructor normalizes it.
+    weights: {number}?
+}
+
+--- Builds resident indexed geometry from the original twelve-float mesh layout.
+--- @param options The caller supplies a stable name, position/normal/tangent/UV
+---     vertices and zero-based triangle indices.
+--- @return The mesh component and its computed local bounding sphere.
+--- @raises When streams are empty, malformed or contain nonfinite values or invalid
+---     indices.
+export function newMesh(options: MeshOptions): MeshInput, BoundsInput
+    assert(
+        options.name ~= "" and #options.vertices > 0 and #options.vertices % 12 == 0,
+        "mesh requires named twelve-float vertices"
+    )
+    assert(#options.indices > 0 and #options.indices % 3 == 0, "mesh indices must describe triangles")
+    const vertexCount = #options.vertices // 12
+    local data = nupp.io.newBuffer()
+    local writer = nupp.io.newScalarWriter(data)
+    local minX, minY, minZ = math.huge, math.huge, math.huge
+    local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+    for offset = 1, #options.vertices, 12 do
+        minX, minY, minZ = math.min(
+            minX,
+            options.vertices[offset]
+        ), math.min(minY, options.vertices[offset + 1]), math.min(minZ, options.vertices[offset + 2])
+        maxX, maxY, maxZ = math.max(
+            maxX,
+            options.vertices[offset]
+        ), math.max(maxY, options.vertices[offset + 1]), math.max(maxZ, options.vertices[offset + 2])
+    end
+    const x, y, z = (minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2
+    local radius = 0.0
+    for offset = 1, #options.vertices, 12 do
+        radius = math.max(
+            radius,
+            math.sqrt(
+                (
+                    options.vertices[offset] - x
+                ) ^ 2 + (options.vertices[offset + 1] - y) ^ 2 + (options.vertices[offset + 2] - z) ^ 2
+            )
+        )
+    end
+    for _, value in ipairs(options.vertices) do
+        assert(value == value and math.abs(value) < math.huge, "mesh vertices must be finite")
+        writer:writeFloat32(nupp.math.f32.narrow(value))
+    end
+    for _, value in ipairs(options.indices) do
+        assert(value >= 0 and value < vertexCount and value % 1 == 0, "mesh index exceeds vertex count")
+        writer:writeUint32(nupp.math.u32.wrap(value))
+    end
+    const colors = options.colors
+    if colors ~= nil then
+        assert(#colors == vertexCount * 4, "mesh colors need four floats per vertex")
+        for _, value in ipairs(colors) do
+            assert(value == value and math.abs(value) < math.huge, "mesh colors must be finite")
+            writer:writeFloat32(nupp.math.f32.narrow(value))
+        end
+    end
+    const skinOffset = (#options.vertices + #options.indices + (colors ~= nil and #colors or 0)) * 4
+    const joints, weights = options.joints, options.weights
+    assert((joints == nil) == (weights == nil), "mesh joints and weights must be supplied together")
+    local skinBytes: integer = 0
+    if joints ~= nil and weights ~= nil then
+        assert(
+            #joints == vertexCount * 4 and #weights == vertexCount * 4,
+            "mesh skin needs four joints and weights per vertex"
+        )
+        for vertex = 0, vertexCount - 1 do
+            local total = 0.0
+            for lane = 1, 4 do
+                const joint = joints[vertex * 4 + lane]
+                assert(
+                    joint >= 0 and joint < 16777216,
+                    "mesh joint index must be nonnegative and exactly representable"
+                )
+                writer:writeFloat32(nupp.math.f32.narrow(joint))
+                const weight = weights[vertex * 4 + lane]
+                assert(
+                    weight == weight and weight >= 0 and weight < math.huge,
+                    "mesh skin weight must be finite and nonnegative"
+                )
+                total = total + weight
+            end
+            assert(total > 0, "mesh skin weights must have positive total")
+            for lane = 1, 4 do
+                writer:writeFloat32(nupp.math.f32.narrow(weights[vertex * 4 + lane] / total))
+            end
+        end
+        skinBytes = vertexCount * 32
+    end
+    writer:drop()
+    const metadata: any = {
+        version = 1,
+        path = options.name,
+        mipmaps = false,
+        images = nupp.data.json.asArray({}),
+        materials = nupp.data.json.asArray({}),
+        skins = nupp.data.json.asArray({}),
+        channels = nupp.data.json.asArray({}),
+        animations = nupp.data.json.asArray({}),
+        meshes = {
+            {
+                name = options.name,
+                vertices = {0, #options.vertices * 4},
+                indices = {#options.vertices * 4, #options.indices * 4},
+                colors = {
+                    colors ~= nil and (#options.vertices + #options.indices) * 4 or 0,
+                    colors ~= nil and #colors * 4 or 0
+                },
+                skin = {skinOffset, skinBytes},
+                morph = {0, 0},
+                morphTargets = 0,
+                bounds = {x, y, z, radius},
+                material = 0,
+                weights = {}
+            }
+        },
+        nodes = {{parent = 0, translation = {0, 0, 0}, rotation = {0, 0, 0, 1}, scale = {1, 1, 1}}},
+        draws = {{mesh = 1, material = 0, skin = 0, node = 1, weights = {}}}
+    }
+    const json = nupp.data.json.encode(metadata)
+    local output = nupp.io.newBuffer()
+    local prefix = nupp.io.newScalarWriter(output)
+    prefix:writeUint32(nupp.math.u32.wrap(#json))
+        :writeBytes(json)
+        :writeBytes(string.rep("\0", (4 - #json % 4) % 4))
+        :writeBytes(data:getString())
+    prefix:drop()
+    data:drop()
+    const bytes = output:getString()
+    output:drop()
+    const model = register(bytes, options.name)
+
+    return model._meshes[1], model._bounds[1]
+end
+
+--- Drains one model upload for the native host; zero means the queue is empty.
+--- @return The model ID and packed geometry, or zero and an empty string.
+export function nextUpload(): integer, string
+    if nextCommand > #commands then
+        commands, commandIds, nextCommand = {}, {}, 1
+        return 0, ""
+    end
+    const id, bytes = commandIds[nextCommand], commands[nextCommand]
+    nextCommand = nextCommand + 1
+
+    return id, bytes
+end
+
+--- Loads the six original environment faces and registers their shared GPU mip chain.
+--- @param name The stable, non-empty environment identity used by View lighting and
+---     snapshots.
+--- @param faces File paths in positive X, negative X, positive Y, negative Y, positive
+---     Z, negative Z order.
+--- @return The environment name, or nil and a decoding failure. All faces must be
+---     equally sized squares.
+export function loadEnvironment(name: string, faces: {string}): string?, string?
+    assert(name ~= "" and #faces == 6, "an environment requires a name and six face paths")
+    const ok, result = pcall(function(): string
+        local pixels: {string} = {}
+        local images: {any} = {}
+        local size: integer = 0
+        local offset: integer = 0
+        for index, path in ipairs(faces) do
+            const bytes, width, height = assetnative.load(path, 1)
+            assert(width == height and (size == 0 or size == width), "environment faces must be equally sized squares")
+            size = width
+            pixels[index] = bytes
+            images[index] = {width = width, height = height, pixels = {offset, #bytes}}
+            offset = offset + #bytes
+        end
+        const metadata = nupp.data.json.encode({version = 1, environment = name, images = images})
+        local buffer = nupp.io.newBuffer()
+        local writer = nupp.io.newScalarWriter(buffer)
+        writer:writeUint32(nupp.math.u32.wrap(#metadata))
+            :writeBytes(metadata)
+            :writeBytes(string.rep("\0", (4 - #metadata % 4) % 4))
+        for _, bytes in ipairs(pixels) do
+            writer:writeBytes(bytes)
+        end
+        writer:drop()
+        const bytes = buffer:getString()
+        buffer:drop()
+
+        return bytes
+    end)
+    if not ok then
+        return nil, tostring(result)
+    end
+    const id = tecs.internal.meshregistry.register("environment://" .. name)
+    commands[#commands + 1] = result as string
+    commandIds[#commandIds + 1] = id
+
+    return name, nil
+end
+
+--- Configures a shared mesh material. Colors and emission are linear RGB
+--- texture paths load relative to the caller's content directory.
+export type MaterialOptions = {
+    --- Caller-writable. Names the shared material with a stable, non-empty identity.
+    name: string,
+
+    --- Caller-writable. Selects a MATERIAL_* model; metallic-roughness is the default.
+    model: integer?,
+
+    --- Caller-writable. Sets linear red reflectance and defaults to one.
+    baseR: number?,
+
+    --- Caller-writable. Sets linear green reflectance and defaults to one.
+    baseG: number?,
+
+    --- Caller-writable. Sets linear blue reflectance and defaults to one.
+    baseB: number?,
+
+    --- Caller-writable. Sets opacity from zero to one and defaults to one.
+    baseA: number?,
+
+    --- Caller-writable. Sets linear red emission and defaults to zero.
+    emissiveR: number?,
+
+    --- Caller-writable. Sets linear green emission and defaults to zero.
+    emissiveG: number?,
+
+    --- Caller-writable. Sets linear blue emission and defaults to zero.
+    emissiveB: number?,
+
+    --- Caller-writable. Sets the metallic factor from zero to one and defaults to zero.
+    metallic: number?,
+
+    --- Caller-writable. Sets perceptual roughness from zero to one and defaults to one.
+    roughness: number?,
+
+    --- Caller-writable. Scales the normal map XY channels and defaults to one.
+    normalScale: number?,
+
+    --- Caller-writable. Sets occlusion strength from zero to one and defaults to one.
+    occlusionStrength: number?,
+
+    --- Caller-writable. Selects opaque, mask, or blend and defaults to opaque.
+    alphaMode: string?,
+
+    --- Caller-writable. Sets the mask threshold from zero to one and defaults to 0.5.
+    alphaCutoff: number?,
+
+    --- Caller-writable. Disables back-face culling when true and defaults to false.
+    doubleSided: boolean?,
+
+    --- Caller-writable. Names the optional base-color texture, sampled as sRGB.
+    baseMap: string?,
+
+    --- Caller-writable. Names the optional tangent-space normal texture, sampled as
+    --- linear data.
+    normalMap: string?,
+
+    --- Caller-writable. Names the optional linear texture with roughness in green and
+    --- metallic in blue.
+    metallicRoughnessMap: string?,
+
+    --- Caller-writable. Names the optional linear texture with occlusion in red.
+    occlusionMap: string?,
+
+    --- Caller-writable. Names the optional emission texture, sampled as sRGB.
+    emissionMap: string?
+}
+
+--- Selects Cook-Torrance metallic-roughness shading.
+export const MATERIAL_METALLIC_ROUGHNESS: integer = 0
+
+--- Selects unlit base color and emission.
+export const MATERIAL_UNLIT: integer = 1
+
+--- Selects diffuse Lambert shading.
+export const MATERIAL_LAMBERT: integer = 2
+
+--- Registers an independently authored material for any mesh.
+--- @param options The caller supplies an identity, shading model, factors and optional
+---     maps.
+--- @return Returns a shared MeshMaterial component ready to spawn.
+--- @raises When a map cannot load or a material factor is invalid.
+export function newMaterial(options: MaterialOptions): MaterialInput
+    assert(options.name ~= "", "material requires a stable name")
+    const mode = options.alphaMode ?? "opaque"
+    assert(mode == "opaque" or mode == "mask" or mode == "blend", "material alphaMode is opaque, mask or blend")
+    const model = options.model ?? MATERIAL_METALLIC_ROUGHNESS
+    assert(model >= 0 and model <= 2, "unknown mesh shading model")
+    const base = {options.baseR ?? 1, options.baseG ?? 1, options.baseB ?? 1, options.baseA ?? 1}
+    const emission = {options.emissiveR ?? 0, options.emissiveG ?? 0, options.emissiveB ?? 0}
+    const metallic, roughness = options.metallic ?? 0, options.roughness ?? 1
+    const normalScale, occlusion = options.normalScale ?? 1, options.occlusionStrength ?? 1
+    const cutoff = options.alphaCutoff ?? 0.5
+    for _, value in ipairs({
+        base[1],
+        base[2],
+        base[3],
+        base[4],
+        emission[1],
+        emission[2],
+        emission[3],
+        metallic,
+        roughness,
+        normalScale,
+        occlusion,
+        cutoff
+    }) do
+        assert(value == value and value >= 0 and value < math.huge, "material values must be finite and nonnegative")
+    end
+    assert(
+        metallic <= 1 and roughness <= 1 and occlusion <= 1 and cutoff <= 1 and base[4] <= 1,
+        "material factors must be at most one"
+    )
+    local images: {any} = {}
+    local pixels: {string} = {}
+    local offsets: {integer} = {}
+    local size: integer = 0
+    for index, path in ipairs({
+        options.baseMap ?? "",
+        options.normalMap ?? "",
+        options.metallicRoughnessMap ?? "",
+        options.occlusionMap ?? "",
+        options.emissionMap ?? ""
+    }) do
+        offsets[index] = 0
+        if path ~= "" then
+            const bytes, width, height = assetnative.load(path, 1)
+            offsets[index] = #images + 1
+            images[#images + 1] = {width = width, height = height, pixels = {size, #bytes}}
+            pixels[#pixels + 1] = bytes
+            size = size + #bytes
+        end
+    end
+    const empty = nupp.data.json.asArray({})
+    const material: any = {
+        name = options.name,
+        model = model,
+        baseColor = base,
+        emission = emission,
+        metallic = metallic,
+        roughness = roughness,
+        normalScale = normalScale,
+        occlusionStrength = occlusion,
+        alphaMode = mode == "blend" and 2 or (mode == "mask" and 1 or 0),
+        alphaCutoff = cutoff,
+        doubleSided = options.doubleSided ?? false,
+        images = offsets
+    }
+    const metadata = nupp.data.json.encode({
+        version = 1,
+        path = options.name,
+        mipmaps = true,
+        images = nupp.data.json.asArray(images),
+        materials = {material},
+        meshes = empty,
+        draws = empty,
+        nodes = empty,
+        skins = empty,
+        channels = empty,
+        animations = empty
+    })
+    local buffer = nupp.io.newBuffer()
+    local writer = nupp.io.newScalarWriter(buffer)
+    writer:writeUint32(nupp.math.u32.wrap(#metadata))
+        :writeBytes(metadata)
+        :writeBytes(string.rep("\0", (4 - #metadata % 4) % 4))
+    for _, bytes in ipairs(pixels) do
+        writer:writeBytes(bytes)
+    end
+    writer:drop()
+    const bytes = buffer:getString()
+    buffer:drop()
+
+    return register(bytes, options.name)._materials[1]
+end

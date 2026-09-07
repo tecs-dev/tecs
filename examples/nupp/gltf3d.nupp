@@ -1,0 +1,65 @@
+module gltf3d
+
+local function install(exclusive app: tecs.application.Application): nil
+    const world = app.world
+    const camera = tecs.gfx.newCamera3D()
+    const lighting = tecs.gfx.meshes.newLighting()
+    lighting.ambient = 1
+    lighting.intensity = 0
+    world:spawn(tecs.gfx.View({camera3D = camera, lighting = lighting}))
+    camera.z = 2.5
+    camera.verticalFov = math.rad(55)
+
+    const controller = tecs.gfx.flycamera3d.new(app.input, app.window, camera, {moveSpeed = 3, sprintMultiplier = 4})
+    world:addSystem({
+        name = "example.GltfFlyCamera",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number): nil
+            controller:update(dt)
+        end,
+    })
+    print("gltf3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
+
+    const model = assert(tecs.gfx.models.load(tecs.files.assetPath("models/triangle.gltf")))
+    const instance = model:newInstance()
+    for _, primitive in ipairs(instance.primitives) do
+        if primitive.skin ~= nil then
+            world:spawn(
+                primitive.transform,
+                primitive.mesh,
+                primitive.bounds,
+                primitive.material,
+                primitive.skin,
+                tecs.gfx.Tint(1, 1, 1, 1),
+                tecs.gfx.Renderable3D
+            )
+        else
+            world:spawn(
+                primitive.transform,
+                primitive.mesh,
+                primitive.bounds,
+                primitive.material,
+                tecs.gfx.Tint(1, 1, 1, 1),
+                tecs.gfx.Renderable3D
+            )
+        end
+    end
+    print("gltf3d: loaded textured glTF geometry and transparent PBR material data")
+end
+
+--- Creates the Tecs glTF 3D example.
+--- @param title optional window title
+--- @param width logical width
+--- @param height logical height
+--- @param debug enable guarded failures
+--- @param maxFrames optional bounded run
+--- @return native host session
+export function create(
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?
+): tecs.host.Session
+    return tecs.host.createWithPlugin(install, title or "Tecs glTF 3D", width or 960, height or 640, debug, maxFrames)
+end

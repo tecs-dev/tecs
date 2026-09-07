@@ -1,0 +1,353 @@
+module bistro3d
+
+local INITIAL_DAYLIGHT = 0.55
+local DAYLIGHT_PER_WHEEL = 0.08
+local INITIAL_CAMERA_X = 9.1325
+local INITIAL_CAMERA_Y = 2.6832
+local INITIAL_CAMERA_Z = -26.1308
+
+local type FixtureProfile = {
+    spot: boolean,
+    r: number,
+    g: number,
+    b: number
+}
+
+local type FixtureLight = {
+    x: number,
+    y: number,
+    z: number,
+    rotationX: number,
+    rotationY: number,
+    rotationZ: number,
+    rotationW: number,
+    profile: FixtureProfile
+}
+
+local function mix(from: number, to: number, amount: number): number
+    return from + (to - from) * amount
+end
+
+local function mixColor(
+    color: {number},
+    nightR: number,
+    nightG: number,
+    nightB: number,
+    dayR: number,
+    dayG: number,
+    dayB: number,
+    daylight: number
+): nil
+    color[1] = mix(nightR, dayR, daylight)
+    color[2] = mix(nightG, dayG, daylight)
+    color[3] = mix(nightB, dayB, daylight)
+end
+
+local function tuneLegacyMaterial(exclusive material: tecs.gfx.models.MaterialInfo, lambert: integer): nil
+    -- The source marks every material as a non-PBR Phong conversion and gives
+    -- concrete, foliage, glass, and metal the same metallic and roughness
+    -- factors. Classify its authored names so view-dependent highlights stay
+    -- on surfaces that plausibly have them instead of sweeping over the whole
+    -- street as the camera moves.
+    local name = material.name:lower()
+    if name:find(
+        "metal",
+        1,
+        true
+    ) or name:find(
+        "bronze",
+        1,
+        true
+    ) or name:find(
+        "steel",
+        1,
+        true
+    ) or name:find("iron", 1, true) or name:find("chain", 1, true) or name:find("manhole", 1, true) then
+        material.metallic = 0.7
+        material.roughness = 0.48
+    elseif name:find("glass", 1, true) or name:find("wet", 1, true) then
+        material.metallic = 0.0
+        material.roughness = 0.5
+    else
+        material.model = lambert
+        material.metallic = 0.0
+        material.roughness = 1.0
+    end
+end
+
+local function fixtureProfile(name: string): FixtureProfile?
+    if name:find("Emissive_StreetLight", 1, true) or name:find("Spotlight_Glass_Emissive", 1, true) then
+        return {spot = true, r = 1.0, g = 0.62, b = 0.25}
+    end
+    if not name:find("Paris_StringLights_01_", 1, true) or not name:find("_Emissive", 1, true) then
+        return nil
+    end
+    if name:find("Blue", 1, true) then
+        return {spot = false, r = 0.28, g = 0.48, b = 1.0}
+    elseif name:find("Pink", 1, true) then
+        return {spot = false, r = 1.0, g = 0.28, b = 0.52}
+    elseif name:find("Red", 1, true) then
+        return {spot = false, r = 1.0, g = 0.18, b = 0.12}
+    elseif name:find("Green", 1, true) then
+        return {spot = false, r = 0.2, g = 1.0, b = 0.32}
+    elseif name:find("Orange", 1, true) then
+        return {spot = false, r = 1.0, g = 0.42, b = 0.12}
+    end
+
+    return {spot = false, r = 1.0, g = 0.78, b = 0.48}
+end
+
+local function fixturePosition(primitive: tecs.gfx.models.Primitive): number, number, number
+    const draw, bounds = primitive.transform.value, primitive.bounds.value
+    const x, y, z = bounds.centerX * draw.scaleX, bounds.centerY * draw.scaleY, bounds.centerZ * draw.scaleZ
+    const qx, qy, qz, qw = draw.rotationX, draw.rotationY, draw.rotationZ, draw.rotationW
+    const tx, ty, tz = 2 * (qy * z - qz * y), 2 * (qz * x - qx * z), 2 * (qx * y - qy * x)
+
+    return draw.x
+        + x
+        + qw
+        * tx
+        + qy
+        * tz
+        - qz
+        * ty, draw.y
+        + y
+        + qw
+        * ty
+        + qz
+        * tx
+        - qx
+        * tz, draw.z
+        + z
+        + qw
+        * tz
+        + qx
+        * ty
+        - qy
+        * tx
+end
+
+local function findFixtureLights(instance: tecs.gfx.models.Instance): {FixtureLight}
+    local fixtures: {FixtureLight} = {}
+    for _, primitive in ipairs(instance.primitives) do
+        const draw = primitive.transform.value
+        const profile = fixtureProfile(primitive.materialName)
+        if profile ~= nil then
+            local x, y, z = fixturePosition(primitive)
+            local duplicate = false
+            for _, fixture in ipairs(fixtures) do
+                local dx, dy, dz = fixture.x - x, fixture.y - y, fixture.z - z
+                if dx * dx + dy * dy + dz * dz < 0.25 then
+                    duplicate = true
+                    break
+                end
+            end
+            if not duplicate then
+                fixtures[
+                    #fixtures + 1
+                ] = {
+                    x = x,
+                    y = y,
+                    z = z,
+                    rotationX = draw.rotationX,
+                    rotationY = draw.rotationY,
+                    rotationZ = draw.rotationZ,
+                    rotationW = draw.rotationW,
+                    profile = profile,
+                }
+            end
+        end
+    end
+
+    return fixtures
+end
+
+local function install(exclusive app: tecs.application.Application): nil
+    const world, input = app.world, app.input
+    const camera = tecs.gfx.newCamera3D()
+    const lighting = tecs.gfx.meshes.newLighting()
+    world:spawn(tecs.gfx.View({camera3D = camera, lighting = lighting}))
+
+    -- Use the authored exterior camera. Its quaternion turns Tecs' negative-Z
+    -- camera forward toward the street's positive-Z extent.
+    camera.x = INITIAL_CAMERA_X
+    camera.y = INITIAL_CAMERA_Y
+    camera.z = INITIAL_CAMERA_Z
+    camera.rotationX = 0.005614
+    camera.rotationY = -0.986264
+    camera.rotationZ = -0.034287
+    camera.rotationW = -0.161484
+    camera.verticalFov = math.rad(52)
+    camera.near = 0.1
+    camera.far = 250
+
+    local controller = tecs.gfx.flycamera3d.new(input, app.window, camera, {moveSpeed = 7, sprintMultiplier = 4})
+    world:addSystem({
+        name = "example.BistroFlyCamera",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number): nil
+            controller:update(dt)
+        end,
+    })
+
+    local pointLampEntities: {integer} = {}
+    local spotLampEntities: {integer} = {}
+
+    local daylight = INITIAL_DAYLIGHT
+    local appliedDaylight = -1.0
+    local function applyDaylight()
+        local ambient: {number} = {}
+        mixColor(ambient, 0.015, 0.02, 0.035, 0.085, 0.10, 0.13, daylight)
+
+        local shadow = lighting
+        shadow.directionX = mix(0.35, -0.42, daylight)
+        shadow.directionY = -1.0
+        shadow.directionZ = mix(0.18, -0.26, daylight)
+        shadow.r = mix(0.45, 1.0, daylight)
+        shadow.g = mix(0.58, 0.88, daylight)
+        shadow.b = mix(1.0, 0.72, daylight)
+        shadow.intensity = mix(0.15, 2.5, daylight)
+
+        local probe = {
+            positiveX = {},
+            negativeX = {},
+            positiveY = {},
+            negativeY = {},
+            positiveZ = {},
+            negativeZ = {}
+        } as {[string]: {number}}
+        mixColor(assert(probe.positiveX), 0.035, 0.045, 0.065, 0.20, 0.18, 0.16, daylight)
+        mixColor(assert(probe.negativeX), 0.025, 0.035, 0.055, 0.12, 0.15, 0.20, daylight)
+        mixColor(assert(probe.positiveY), 0.075, 0.095, 0.14, 0.35, 0.42, 0.58, daylight)
+        mixColor(assert(probe.negativeY), 0.008, 0.006, 0.01, 0.055, 0.045, 0.04, daylight)
+        mixColor(assert(probe.positiveZ), 0.045, 0.035, 0.03, 0.24, 0.19, 0.15, daylight)
+        mixColor(assert(probe.negativeZ), 0.025, 0.035, 0.055, 0.13, 0.17, 0.24, daylight)
+        lighting.probe = {}
+        for _, face in ipairs({"positiveX", "negativeX", "positiveY", "negativeY", "positiveZ", "negativeZ"}) do
+            for lane = 1, 3 do
+                lighting.probe[#lighting.probe + 1] = assert(probe[face])[lane] + ambient[lane]
+            end
+        end
+        lighting.probeIntensity = mix(2.0, 3.0, daylight)
+
+        local fog = lighting
+        fog.fogStart = mix(65, 100, daylight)
+        fog.fogFinish = mix(150, 220, daylight)
+        fog.fogR = mix(0.025, 0.35, daylight)
+        fog.fogG = mix(0.04, 0.42, daylight)
+        fog.fogB = mix(0.08, 0.55, daylight)
+
+        for _, entity in ipairs(pointLampEntities) do
+            local light = assert(world:getMut(entity, tecs.gfx.PointLight3D))
+            light.radius = mix(8, 5, daylight)
+            light.intensity = mix(5, 0.2, daylight)
+        end
+        for _, entity in ipairs(spotLampEntities) do
+            local light = assert(world:getMut(entity, tecs.gfx.SpotLight3D))
+            light.radius = mix(16, 10, daylight)
+            light.intensity = mix(20, 1.0, daylight)
+        end
+        appliedDaylight = daylight
+    end
+
+    world:addSystem({
+        name = "example.BistroDayNight",
+        phase = tecs.ecs.phases.Update,
+        run = function(): nil
+            local wheel = input.wheelY
+            if wheel ~= 0.0 then
+                daylight = math.max(0.0, math.min(1.0, daylight + wheel * DAYLIGHT_PER_WHEEL))
+            end
+            if daylight ~= appliedDaylight then
+                applyDaylight()
+                if wheel ~= 0.0 then
+                    print(("bistro3d: daylight %d%%"):format(math.floor(daylight * 100 + 0.5)))
+                end
+            end
+        end,
+    })
+
+    lighting.ambient, lighting.fog, lighting.shadows = 0, true, true
+    lighting.shadowScale, lighting.shadowDistance, lighting.shadowStrength = 0.5, 60, 0.68
+    tecs.gfx.lighting.setBloom({threshold = 0.4, knee = 0.25, intensity = 1.3})
+    const loaded = assert(
+        tecs.gfx.models.load(tecs.files.assetPath("external/bistro/Bistro.tecs.gltf"), {
+            material = function(exclusive value: tecs.gfx.models.MaterialInfo): nil
+                tuneLegacyMaterial(value, tecs.gfx.models.MATERIAL_LAMBERT)
+            end,
+        })
+    )
+    const instance = loaded:newInstance()
+    const fixtures = findFixtureLights(instance)
+    for _, fixture in ipairs(fixtures) do
+        local profile = fixture.profile
+        if profile.spot then
+            local qx, qy, qz, qw = fixture.rotationX, fixture.rotationY, fixture.rotationZ, fixture.rotationW
+            local directionX = -2.0 * (qw * qy + qz * qx)
+            local directionY = 2.0 * (qw * qx - qz * qy)
+            local directionZ = -1.0 + 2.0 * (qx * qx + qy * qy)
+            spotLampEntities[
+                #spotLampEntities + 1
+            ] = world:spawn(
+                tecs.ecs.Transform3D(
+                    fixture.x + directionX * 0.2,
+                    fixture.y + directionY * 0.2,
+                    fixture.z + directionZ * 0.2,
+                    qx,
+                    qy,
+                    qz,
+                    qw,
+                    1,
+                    1,
+                    1
+                ),
+                tecs.gfx.SpotLight3D(16, math.rad(48), math.rad(72), profile.r, profile.g, profile.b, 20, 0)
+            )
+        else
+            pointLampEntities[
+                #pointLampEntities + 1
+            ] = world:spawn(
+                tecs.ecs.Transform3D(fixture.x, fixture.y, fixture.z, 0, 0, 0, 1, 1, 1, 1),
+                tecs.gfx.PointLight3D(8, profile.r, profile.g, profile.b, 5)
+            )
+        end
+    end
+    for _, primitive in ipairs(instance.primitives) do
+        world:spawn(
+            primitive.transform,
+            primitive.mesh,
+            primitive.bounds,
+            primitive.material,
+            tecs.gfx.Tint(1, 1, 1, 1),
+            tecs.gfx.Renderable3D
+        )
+    end
+    print(("bistro3d: loaded %d GPU-cullable chunks"):format(#instance.primitives))
+    print(("bistro3d: attached %d local lights to emissive fixtures"):format(#fixtures))
+    print("bistro3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
+    print("bistro3d: mouse wheel blends continuously between night and day")
+end
+
+--- Creates the Tecs Bistro stress scene example.
+--- @param title optional title
+--- @param width logical width
+--- @param height logical height
+--- @param debug guarded failures
+--- @param maxFrames optional frame limit
+--- @return native host session
+export function create(
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?
+): tecs.host.Session
+    return tecs.host.createWithPlugin(
+        install,
+        title or "Tecs Bistro stress scene",
+        width or 1280,
+        height or 720,
+        debug,
+        maxFrames
+    )
+end

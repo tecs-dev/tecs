@@ -29,7 +29,8 @@ use graphics::{DrawCountReadback, Graphics};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{
-    ElementState, Ime, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent,
+    DeviceEvent, DeviceId, ElementState, Ime, MouseButton, MouseScrollDelta, Touch, TouchPhase,
+    WindowEvent,
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, ModifiersState, PhysicalKey};
@@ -48,6 +49,8 @@ struct Config {
     height: u32,
     debug: bool,
     headless: bool,
+    offscreen: bool,
+    screenshot: Option<PathBuf>,
     max_frames: Option<u32>,
     benchmark: Option<benchmark::Run>,
     benchmark_view: bool,
@@ -73,6 +76,7 @@ struct App {
     frame_parked: bool,
     stats_started: Option<Instant>,
     stats_frames: u32,
+    pending_captures: Vec<u64>,
     stats_pending: Option<(DrawCountReadback, u32, f64)>,
 }
 
@@ -109,6 +113,7 @@ impl App {
             frame_parked: false,
             stats_started: None,
             stats_frames: 0,
+            pending_captures: Vec::new(),
             stats_pending: None,
         })
     }
@@ -386,19 +391,23 @@ impl App {
         }
         self.apply_commands()?;
         self.apply_image_commands()?;
-        if let Some(graphics) = self.graphics.as_mut() {
-            let mut captures = Vec::new();
-            while let Some(id) = self.bridge.next_capture()? {
-                captures.push(id);
+        while let Some((id, bytes)) = self.bridge.next_model_upload()? {
+            if let Some(graphics) = &mut self.graphics {
+                graphics.upload_model(id, &bytes)?;
             }
-            if !captures.is_empty() {
+        }
+        if let Some(graphics) = self.graphics.as_mut() {
+            while let Some(id) = self.bridge.next_capture()? {
+                self.pending_captures.push(id);
+            }
+            if !self.pending_captures.is_empty() {
                 graphics.request_capture();
             }
             let packet = self.bridge.render_packet(graphics.scene_revision())?;
             let submitted = graphics.render(&packet)?;
-            if !captures.is_empty() {
+            if submitted && !self.pending_captures.is_empty() {
                 let result = graphics.take_capture();
-                for id in captures {
+                for id in self.pending_captures.drain(..) {
                     self.bridge.capture_result(id, &result)?;
                 }
             }
@@ -533,6 +542,14 @@ impl ApplicationHandler for App {
                     sequence,
                 )
             }
+            WindowEvent::CursorMoved { .. }
+                if self
+                    .state
+                    .as_ref()
+                    .is_some_and(|s| s.cursor_grab == "locked") =>
+            {
+                Ok(())
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 let scale = self.state.as_ref().map_or(1.0, |state| state.scale_factor);
                 let logical = position.to_logical::<f64>(scale);
@@ -607,6 +624,36 @@ impl ApplicationHandler for App {
         };
         if let Err(error) = result {
             self.fail(event_loop, error);
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _device: DeviceId,
+        event: DeviceEvent,
+    ) {
+        if self.shutdown
+            || !self
+                .state
+                .as_ref()
+                .is_some_and(|state| state.focused && state.cursor_grab == "locked")
+        {
+            return;
+        }
+        if let DeviceEvent::MouseMotion { delta } = event {
+            let timestamp = self.timestamp();
+            let sequence = self.next_sequence();
+            if let Err(error) = self.bridge.push_pointer_move(
+                self.cursor.0,
+                self.cursor.1,
+                delta.0,
+                delta.1,
+                timestamp,
+                sequence,
+            ) {
+                self.fail(event_loop, error);
+            }
         }
     }
 
@@ -716,6 +763,8 @@ fn parse_config() -> Result<Config> {
     let mut height = 720;
     let mut debug = false;
     let mut headless = false;
+    let mut offscreen = false;
+    let mut screenshot = None;
     let mut max_frames = None;
     let mut benchmark_path = None;
     let mut benchmark_view = false;
@@ -787,6 +836,17 @@ fn parse_config() -> Result<Config> {
             "--debug" => debug = true,
             "--benchmark-view" => benchmark_view = true,
             "--headless" => headless = true,
+            "--screenshot" => {
+                screenshot = Some(PathBuf::from(
+                    arguments
+                        .next()
+                        .context("--screenshot requires a PNG path")?,
+                ))
+            }
+            "--offscreen" => {
+                headless = true;
+                offscreen = true;
+            }
             "--frames" => {
                 let frames = arguments
                     .next()
@@ -804,6 +864,9 @@ fn parse_config() -> Result<Config> {
     }
     if width == 0 || height == 0 {
         return Err(anyhow!("window dimensions must be positive"));
+    }
+    if screenshot.is_some() && !offscreen {
+        return Err(anyhow!("--screenshot requires --offscreen"));
     }
     let benchmark = benchmark_path
         .map(|path| benchmark::Run::new(path, benchmark_samples, benchmark_warmup))
@@ -826,6 +889,8 @@ fn parse_config() -> Result<Config> {
         height,
         debug,
         headless,
+        offscreen,
+        screenshot,
         max_frames,
         benchmark,
         benchmark_view,
@@ -908,6 +973,9 @@ fn run_render_benchmark(mut config: Config) -> Result<()> {
             return Err(anyhow!("Nupp application crashed: {failure}"));
         }
         let updated = Instant::now();
+        while let Some((id, bytes)) = bridge.next_model_upload()? {
+            graphics.upload_model(id, &bytes)?;
+        }
         while let Some(command) = bridge.next_image_command()? {
             apply_image_command(&mut graphics, &command)?;
             bridge.report_image_result(command.image, command.serial, None)?;
@@ -944,7 +1012,13 @@ fn run_headless(config: Config) -> Result<()> {
         width: config.width,
         height: config.height,
         debug: config.debug,
-        max_frames: Some(config.max_frames.unwrap_or(1)),
+        // An offscreen frame limit counts completed renders. The application's
+        // smoke limit stops before extraction, which would make --frames 1 blank.
+        max_frames: if config.offscreen {
+            None
+        } else {
+            Some(config.max_frames.unwrap_or(1))
+        },
     })?;
     bridge.init().context("initialize the Tecs application")?;
     // The same check the windowed path makes after every frame. A guarded
@@ -953,13 +1027,61 @@ fn run_headless(config: Config) -> Result<()> {
     // its frame limit and exits zero with nothing on either stream, which is
     // indistinguishable from success. Every smoke test in CI is headless, so
     // this is the one place that decides whether they mean anything.
-    while !matches!(bridge.iterate(0.0)?, FrameState::Stopped) {
+    let mut graphics = if config.offscreen {
+        Some(Graphics::offscreen(config.width, config.height)?)
+    } else {
+        None
+    };
+    let mut rendered = 0_u32;
+    loop {
+        match bridge.iterate(if config.offscreen { 1.0 / 60.0 } else { 0.0 })? {
+            FrameState::Stopped => break,
+            FrameState::Parked => continue,
+            FrameState::Continue => {}
+        }
+        if let Some(graphics) = &mut graphics {
+            while let Some((id, bytes)) = bridge.next_model_upload()? {
+                graphics.upload_model(id, &bytes)?;
+            }
+            while let Some(command) = bridge.next_image_command()? {
+                let reason = apply_image_command(graphics, &command)
+                    .err()
+                    .map(|e| format!("{e:#}"));
+                bridge.report_image_result(command.image, command.serial, reason.as_deref())?;
+            }
+            let mut captures = Vec::new();
+            while let Some(id) = bridge.next_capture()? {
+                captures.push(id);
+            }
+            if !captures.is_empty() {
+                graphics.request_capture();
+            }
+            let packet = bridge.render_packet(graphics.scene_revision())?;
+            graphics.render(&packet)?;
+            if !captures.is_empty() {
+                let capture = graphics.take_capture();
+                for id in captures {
+                    bridge.capture_result(id, &capture)?;
+                }
+            }
+        }
         if let Some(failure) = bridge.crashed()? {
             return Err(anyhow!("Nupp application crashed: {failure}"));
+        }
+        if config.offscreen {
+            rendered += 1;
+            if rendered >= config.max_frames.unwrap_or(120) {
+                break;
+            }
         }
     }
     if let Some(failure) = bridge.crashed()? {
         return Err(anyhow!("Nupp application crashed: {failure}"));
+    }
+    if let (Some(graphics), Some(path)) = (&graphics, &config.screenshot) {
+        let capture = graphics.capture_offscreen()?;
+        std::fs::write(path, capture.png)
+            .with_context(|| format!("write screenshot {}", path.display()))?;
     }
     bridge.shutdown()
 }

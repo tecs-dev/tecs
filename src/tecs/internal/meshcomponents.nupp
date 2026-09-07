@@ -1,0 +1,243 @@
+module tecs.internal.meshcomponents
+
+local components = require("tecs.internal.components")
+local registry = require("tecs.internal.meshregistry")
+local rendercomponents = require("tecs.internal.rendercomponents")
+
+--- Places geometry in a right-handed world with quaternion orientation.
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct Transform3D
+    x: number = 0
+    y: number = 0
+    z: number = 0
+    rotationX: number = 0
+    rotationY: number = 0
+    rotationZ: number = 0
+    rotationW: number = 1
+    scaleX: number = 1
+    scaleY: number = 1
+    scaleZ: number = 1
+end
+
+export const Transform3DComponent: components.FFIComponent<Transform3D> = components.newFFIComponent({
+    name = "Transform3D",
+    construct = function(
+        x: number?,
+        y: number?,
+        z: number?,
+        rotationX: number?,
+        rotationY: number?,
+        rotationZ: number?,
+        rotationW: number?,
+        scaleX: number?,
+        scaleY: number?,
+        scaleZ: number?
+    ): Transform3D
+        return new Transform3D(
+            x ?? 0,
+            y ?? 0,
+            z ?? 0,
+            rotationX ?? 0,
+            rotationY ?? 0,
+            rotationZ ?? 0,
+            rotationW ?? 1,
+            scaleX ?? 1,
+            scaleY ?? 1,
+            scaleZ ?? 1
+        )
+    end,
+    default = function(): Transform3D
+        return new Transform3D()
+    end,
+})
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct Bounds3D
+    centerX: number = 0
+    centerY: number = 0
+    centerZ: number = 0
+    radius: number = 1
+end
+export const Bounds3DComponent: components.FFIComponent<Bounds3D> = components.newFFIComponent({
+    name = "Bounds3D",
+    construct = function(x: number?, y: number?, z: number?, radius: number?): Bounds3D
+        return new Bounds3D(x ?? 0, y ?? 0, z ?? 0, radius ?? 1)
+    end,
+    default = function(): Bounds3D
+        return new Bounds3D()
+    end,
+})
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct Mesh
+    model: integer = 0
+    index: integer = 0
+end
+export const MeshComponent: components.FFIComponent<Mesh> = components.newFFIComponent({
+    name = "Mesh",
+    construct = function(model: integer?, index: integer?): Mesh
+        return new Mesh(model ?? 0, index ?? 0)
+    end,
+    default = function(): Mesh
+        return new Mesh()
+    end,
+    save = function(value: Mesh): any
+        return {asset = registry.name(value.model), index = value.index}
+    end,
+    load = function(value: any): Mesh
+        const saved = value as {
+            asset: string?,
+            index: integer
+        }
+
+        return new Mesh(saved.asset ~= nil and registry.find(saved.asset) or 0, saved.index)
+    end,
+
+})
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct MeshMaterial
+    model: integer = 0
+    index: integer = 0
+end
+export const MeshMaterialComponent: components.FFIComponent<MeshMaterial> = components.newFFIComponent({
+    name = "MeshMaterial",
+    construct = function(model: integer?, index: integer?): MeshMaterial
+        return new MeshMaterial(model ?? 0, index ?? 0)
+    end,
+    default = function(): MeshMaterial
+        return new MeshMaterial()
+    end,
+    save = function(value: MeshMaterial): any
+        return {asset = registry.name(value.model), index = value.index}
+    end,
+    load = function(value: any): MeshMaterial
+        const saved = value as {
+            asset: string?,
+            index: integer
+        }
+
+        return new MeshMaterial(saved.asset ~= nil and registry.find(saved.asset) or 0, saved.index)
+    end,
+
+})
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export record MeshSkin
+    matrices: {number}
+end
+export const MeshSkinComponent: components.TableComponent<MeshSkin> = components.newComponent({
+    name = "MeshSkin",
+    construct = function(matrices: {number}): MeshSkin
+        return new MeshSkin(matrices = matrices)
+    end,
+    default = function(): MeshSkin
+        return new MeshSkin(matrices = {})
+    end,
+})
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export record MeshMorph
+    weights: {number}
+end
+export const MeshMorphComponent: components.TableComponent<MeshMorph> = components.newComponent({
+    name = "MeshMorph",
+    construct = function(weights: {number}): MeshMorph
+        return new MeshMorph(weights = weights)
+    end,
+    default = function(): MeshMorph
+        return new MeshMorph(weights = {})
+    end,
+})
+export const Renderable3D = components.newTagComponent({
+    name = "Renderable3D",
+    requires = {Transform3DComponent, Bounds3DComponent, rendercomponents.TintComponent}
+})
+
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct PointLight3D
+    --- Caller-writable. Sets the positive reach in world units.
+    radius: number = 10
+
+    --- Caller-writable. Sets non-negative linear red radiance.
+    r: number = 1
+
+    --- Caller-writable. Sets non-negative linear green radiance.
+    g: number = 1
+
+    --- Caller-writable. Sets non-negative linear blue radiance.
+    b: number = 1
+
+    --- Caller-writable. Scales non-negative radiance.
+    intensity: number = 1
+
+    --- Caller-writable. Combines LIGHT_* flags; zero disables shadow casting.
+    flags: integer = 0
+end
+export const PointLight3DComponent: components.FFIComponent<PointLight3D> = components.newFFIComponent({
+    name = "PointLight3D",
+    requires = {Transform3DComponent},
+    construct = function(
+        radius: number?,
+        r: number?,
+        g: number?,
+        b: number?,
+        intensity: number?,
+        flags: integer?
+    ): PointLight3D
+        return new PointLight3D(radius ?? 10, r ?? 1, g ?? 1, b ?? 1, intensity ?? 1, flags ?? 0)
+    end,
+    default = function(): PointLight3D
+        return new PointLight3D()
+    end,
+})
+
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export struct SpotLight3D
+    --- Caller-writable. Sets the positive reach in world units.
+    radius: number = 10
+
+    --- Caller-writable. Sets the fully lit half-angle in radians.
+    innerAngle: number = 0.3490658503988659
+
+    --- Caller-writable. Sets the cutoff half-angle in radians, below pi over two.
+    outerAngle: number = 0.5235987755982988
+
+    --- Caller-writable. Sets non-negative linear red radiance.
+    r: number = 1
+
+    --- Caller-writable. Sets non-negative linear green radiance.
+    g: number = 1
+
+    --- Caller-writable. Sets non-negative linear blue radiance.
+    b: number = 1
+
+    --- Caller-writable. Scales non-negative radiance.
+    intensity: number = 1
+
+    --- Caller-writable. Combines LIGHT_* flags; zero disables shadow casting.
+    flags: integer = 0
+end
+export const SpotLight3DComponent: components.FFIComponent<SpotLight3D> = components.newFFIComponent({
+    name = "SpotLight3D",
+    requires = {Transform3DComponent},
+    construct = function(
+        radius: number?,
+        innerAngle: number?,
+        outerAngle: number?,
+        r: number?,
+        g: number?,
+        b: number?,
+        intensity: number?,
+        flags: integer?
+    ): SpotLight3D
+        return new SpotLight3D(
+            radius ?? 10,
+            innerAngle ?? math.rad(20),
+            outerAngle ?? math.rad(30),
+            r ?? 1,
+            g ?? 1,
+            b ?? 1,
+            intensity ?? 1,
+            flags ?? 0
+        )
+    end,
+    default = function(): SpotLight3D
+        return new SpotLight3D()
+    end,
+})

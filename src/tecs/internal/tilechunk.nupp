@@ -1,7 +1,7 @@
 module tecs.internal.tilechunk
 
 --[[Native 16 by 16 tile grids, uploaded as compact GPU tile IDs without
-creating an ECS entity for each tile. Tile IDs are one-based atlas indices;
+creating an ECS entity for each tile. Tile IDs are one-based atlas indices
 zero is empty. Bits 31, 30 and 29 retain Tiled's H, V and diagonal flips.]]
 
 local components = require("tecs.internal.components")
@@ -139,7 +139,7 @@ export const TileChunkComponent: components.FFIComponent<TileChunk> = components
 --- Counts occupied cells; called only when a chunk run changes.
 --- @param value the grid to inspect
 --- @return the number of drawable tiles
-export function count(value: TileChunk): integer
+export function count(borrows value: TileChunk): integer
     local total: integer = 0
     unsafe do
         for index = 1, 256 do
@@ -153,7 +153,7 @@ export function count(value: TileChunk): integer
 end
 
 --- Encodes the atlas geometry followed by 256 packed tile IDs for the GPU.
-export function packed(value: TileChunk): string
+export function packed(borrows value: TileChunk): string
     local buffer = nupp.io.newBuffer()
     local writer = nupp.io.newScalarWriter(buffer)
     const width, height = images.sizeOf(value.tileset)
@@ -186,7 +186,7 @@ export function packed(value: TileChunk): string
 end
 
 --- Gives a conservative radius including oversized and diagonally flipped tiles.
-export function radius(value: TileChunk, pose: rendercomponents.Transform2D): number
+export function radius(borrows value: TileChunk, borrows pose: rendercomponents.Transform2D): number
     const sx, sy = math.abs(pose.scaleX), math.abs(pose.scaleY)
     return (
         16 * value.cellWidth + math.abs(value.offsetX) + value.tileWidth

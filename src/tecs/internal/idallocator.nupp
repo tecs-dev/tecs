@@ -45,7 +45,7 @@ export record IdAllocator
     maxGeneration: integer
 end
 
-local function slotEntry(exclusive allocator: IdAllocator, slot: integer): EntitySlot
+local function slotEntry(exclusive allocator: IdAllocator, slot: integer): EntitySlot borrows (allocator)
     if slot < 1 or slot > allocator.maxSlotCount or slot % 1 ~= 0 then
         error("idallocator: slot is out of range", 3)
     end

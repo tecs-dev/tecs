@@ -82,6 +82,7 @@ struct VertexOutput {
     // normal out of the quad's space and into the world's.
     @location(5) @interpolate(flat) basis: vec2<f32>,
     @location(6) @interpolate(flat) clipBounds: vec4<f32>,
+    @location(7) @interpolate(flat) additive: u32,
 }
 
 @vertex
@@ -90,7 +91,7 @@ fn vertexMain(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) 
     // survivors. The compaction preserves packet order, so a single-lane batch
     // is one contiguous run and the draw's own instance index indexes into it.
     let source = visible[batchBase[batch.value] + drawIndex];
-    let instance = tileInstance(instances[source], vertexIndex / 6u);
+    let instance = animatedInstance(tileInstance(instances[source], vertexIndex / 6u));
 
     var corners = array<vec2<f32>, 6>(
         vec2<f32>(-0.5, -0.5), vec2<f32>(0.5, -0.5), vec2<f32>(-0.5, 0.5),
@@ -112,10 +113,12 @@ fn vertexMain(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) 
     let c = cos(scene.rotation);
     let s = sin(scene.rotation);
     let offset = world - scene.camera;
-    let clip = vec2<f32>(
+    var clip = vec2<f32>(
         sx * c * offset.x + sx * s * offset.y,
         -sy * s * offset.x + sy * c * offset.y,
     );
+
+    if ((instance.flags & 128u) != 0u) { clip = vec2<f32>(world.x * 2.0 / scene.viewport.x - 1.0, 1.0 - world.y * 2.0 / scene.viewport.y); }
 
     // The UV rectangle runs left to right and top to bottom, and the corner at
     // (-0.5, -0.5) is the top left one because world y runs down.
@@ -123,6 +126,7 @@ fn vertexMain(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) 
     var output: VertexOutput;
     output.position = vec4<f32>(clip, instance.position.w, 1.0);
     output.color = instance.color;
+    output.additive = instance.flags & 64u;
     output.uv = mix(instance.uvRect.xy, instance.uvRect.zw, uvWeight);
     output.local = corner;
     output.material = instance.material;
@@ -208,5 +212,5 @@ fn forwardMain(input: VertexOutput) -> @location(0) vec4<f32> {
     // after the G-buffer has been resolved. It therefore glows, and it does not
     // reach a later pass that reads the attachment.
     let emitted = shaded.emission.rgb * shaded.emission.a;
-    return vec4<f32>(shaded.albedo.rgb + emitted, shaded.albedo.a);
+    return vec4<f32>((shaded.albedo.rgb + emitted) * shaded.albedo.a, select(shaded.albedo.a, 0.0, input.additive != 0u));
 }

@@ -325,4 +325,37 @@ function suite.readsTheSharedDepthAttachmentByName(): nil
     passes.reset()
 end
 
+function suite.customShadersCopyParametersAndInvalidateOnlyOnChange(): nil
+    passes.reset()
+    const values: {number} = {1, 0, 0, 1}
+    passes.insertPassBefore("present", {
+        name = "grade",
+        shader = "fn postprocess(uv: vec2<f32>) -> vec4<f32> { return params.values[0]; }",
+        parameters = values
+    })
+    values[1] = 0
+    test.equal(passes.passes()[12].parameters[1], 1)
+    const revision = passes.revision()
+    const section = passes.section()
+    passes.setParameters("grade", {1, 0, 0, 1})
+    test.equal(passes.revision(), revision)
+    test.equal(passes.section(), section)
+    passes.setParameters("grade", {0, 1, 0, 1})
+    test.assert(passes.revision() > revision)
+    test.notEqual(passes.section(), section)
+    test.raises(
+        function(): nil
+            passes.setParameters("present", {1})
+        end,
+        "parameters require a custom shader"
+    )
+    test.raises(
+        function(): nil
+            passes.setShader("present", "")
+        end,
+        "invalid shader"
+    )
+    passes.reset()
+end
+
 return suite

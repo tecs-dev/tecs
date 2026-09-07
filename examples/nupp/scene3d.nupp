@@ -1,0 +1,295 @@
+module scene3d
+
+const VERTICES: {
+    {number}
+} = {{-1, -1, -1}, {1, -1, -1}, {1, 1, -1}, {-1, 1, -1}, {-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1},}
+
+const TRIANGLES: {
+    integer
+} = {0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5,}
+
+const FLOOR_VERTICES: {
+    number
+} = {
+    -5,
+    0,
+    -5,
+    0,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    0,
+    5,
+    0,
+    -5,
+    0,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    5,
+    0,
+    5,
+    0,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    1,
+    -5,
+    0,
+    5,
+    0,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1,
+}
+
+const FLOOR_TRIANGLES: {integer} = {0, 2, 1, 0, 3, 2}
+
+local function install(exclusive app: tecs.application.Application): nil
+    const world = app.world
+    const camera = tecs.gfx.newCamera3D()
+    const lighting = tecs.gfx.meshes.newLighting()
+    lighting.ambient = 0
+    lighting.probe = {
+        0.12,
+        0.13,
+        0.16,
+        0.12,
+        0.13,
+        0.16,
+        0.12,
+        0.13,
+        0.16,
+        0.12,
+        0.13,
+        0.16,
+        0.12,
+        0.13,
+        0.16,
+        0.12,
+        0.13,
+        0.16
+    }
+    lighting.fog = true
+    lighting.fogStart = 8
+    lighting.fogFinish = 32
+    lighting.fogR = 0.10
+    lighting.fogG = 0.14
+    lighting.fogB = 0.22
+    lighting.shadows = true
+    lighting.shadowDistance = 12
+    lighting.directionX = -0.45
+    lighting.directionY = -1
+    lighting.directionZ = -0.3
+    lighting.intensity = 1.4
+    lighting.shadowStrength = 0.85
+    lighting.shadowSoftness = 1.5
+    tecs.gfx.lighting.setBloom({threshold = 0.72, knee = 0.12, intensity = 0.65})
+    camera.y = 1.5
+    camera.z = 7
+    camera.rotationX = math.sin(math.rad(-12) * 0.5)
+    camera.rotationW = math.cos(math.rad(-12) * 0.5)
+    camera.verticalFov = math.rad(55)
+    camera.near = 0.1
+    camera.far = 100
+
+    const controller = tecs.gfx.flycamera3d.new(app.input, app.window, camera, {moveSpeed = 5, sprintMultiplier = 4})
+    world:addSystem({
+        name = "example.SceneFlyCamera",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number): nil
+            controller:update(dt)
+        end,
+    })
+
+    const sideCamera = tecs.gfx.newCamera3D({
+        x = 5.5,
+        y = 2.5,
+        z = 5.5,
+        rotationY = math.sin(math.rad(42) * 0.5),
+        rotationW = math.cos(math.rad(42) * 0.5),
+        verticalFov = math.rad(55),
+        near = 0.1,
+        far = 100,
+    })
+    world:spawn(
+        tecs.gfx.View({
+            camera3D = camera,
+            lighting = lighting,
+            x = 0,
+            y = 0,
+            width = 0.5,
+            height = 1,
+            order = 0
+        })
+    )
+    world:spawn(
+        tecs.gfx.View({
+            camera3D = sideCamera,
+            lighting = lighting,
+            x = 0.5,
+            y = 0,
+            width = 0.5,
+            height = 1,
+            order = 1
+        })
+    )
+    world:spawn(tecs.gfx.View({camera2D = tecs.gfx.newCamera2D(), order = 2}))
+
+    local meshVertices: {number} = {}
+    local meshColors: {number} = {}
+    for index = 1, #VERTICES do
+        const vertex = VERTICES[index]
+        const base = #meshVertices
+        const inverseLength = 1.0 / math.sqrt(vertex[1] * vertex[1] + vertex[2] * vertex[2] + vertex[3] * vertex[3])
+        meshVertices[base + 1] = vertex[1]
+        meshVertices[base + 2] = vertex[2]
+        meshVertices[base + 3] = vertex[3]
+        meshVertices[base + 4] = vertex[1] * inverseLength
+        meshVertices[base + 5] = vertex[2] * inverseLength
+        meshVertices[base + 6] = vertex[3] * inverseLength
+        meshVertices[base + 7] = 1
+        meshVertices[base + 8] = 0
+        meshVertices[base + 9] = 0
+        meshVertices[base + 10] = 1
+        meshVertices[base + 11] = vertex[1] * 0.5 + 0.5
+        meshVertices[base + 12] = vertex[2] * 0.5 + 0.5
+        const colorBase = #meshColors
+        meshColors[colorBase + 1] = vertex[1] * 0.25 + 0.65
+        meshColors[colorBase + 2] = vertex[2] * 0.25 + 0.65
+        meshColors[colorBase + 3] = vertex[3] * 0.25 + 0.65
+        meshColors[colorBase + 4] = 1.0
+    end
+
+    local mesh, bounds = tecs.gfx.models.newMesh({
+        name = "example://unit-cube",
+        vertices = meshVertices,
+        indices = TRIANGLES,
+        colors = meshColors,
+    })
+    const pbr = tecs.gfx.models.newMaterial({
+        name = "example://vertex-colored-pbr",
+        model = tecs.gfx.models.MATERIAL_METALLIC_ROUGHNESS,
+        metallic = 0.15,
+        roughness = 0.55,
+    })
+    const cube = world:spawn(
+        tecs.ecs.Transform3D(),
+        mesh,
+        bounds,
+        pbr,
+        tecs.gfx.Tint(0.45, 0.9, 1.0, 1.0),
+        tecs.gfx.Renderable3D
+    )
+
+    const glow = tecs.gfx.models.newMaterial({
+        name = "example://unlit-glow",
+        model = tecs.gfx.models.MATERIAL_UNLIT,
+        baseR = 0.15,
+        baseG = 0.55,
+        baseB = 1.0,
+        emissiveR = 0.25,
+        emissiveG = 0.8,
+        emissiveB = 1.0,
+    })
+    world:spawn(
+        tecs.ecs.Transform3D(2.5, 0.2, -3, 0, 0, 0, 1, 0.6, 0.6, 0.6),
+        mesh,
+        bounds,
+        glow,
+        tecs.gfx.Tint(1, 1, 1, 1),
+        tecs.gfx.Renderable3D
+    )
+
+    local floor, floorBounds = tecs.gfx.models.newMesh({
+        name = "example://shadow-floor",
+        vertices = FLOOR_VERTICES,
+        indices = FLOOR_TRIANGLES,
+    })
+    world:spawn(
+        tecs.ecs.Transform3D(0, -1.1),
+        floor,
+        floorBounds,
+        tecs.gfx.MeshMaterial(),
+        tecs.gfx.Tint(0.5, 0.53, 0.58, 1.0),
+        tecs.gfx.Renderable3D
+    )
+
+    -- Screen-space, unlit, and explicitly routed through the sprite forward
+    -- lane after every mesh and bloom pass. This is the HUD recipe for a mixed
+    -- 2D/3D application; tecs.ui produces the same 2D entities.
+    tecs.gfx.layers.configure(16, {sort = "z", screenSpace = true, unlit = true, overlay = true})
+    world:spawn(
+        tecs.ecs.Transform2D(142, 44, 0, 16, 0, 252, 56),
+        tecs.gfx.Tint(0.02, 0.04, 0.08, 1.0),
+        tecs.gfx.Renderable2D
+    )
+    world:spawn(
+        tecs.ecs.Transform2D(70, 44, 1, 16, 0, 88, 10),
+        tecs.gfx.Tint(0.2, 0.9, 1.0, 1.0),
+        tecs.gfx.Renderable2D
+    )
+    world:spawn(
+        tecs.ecs.Transform2D(170, 44, 1, 16, 0, 88, 10),
+        tecs.gfx.Tint(1.0, 0.45, 0.2, 1.0),
+        tecs.gfx.Renderable2D
+    )
+
+    print("scene3d: two 3D cameras, Cook-Torrance materials, fog, bloom, shadow, and 2D HUD")
+    print("scene3d: click the left view to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
+
+    local elapsed = 0.0
+    world:addSystem({
+        name = "example.Rotate3D",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number): nil
+            elapsed = elapsed + dt
+            const halfAngle = elapsed * 0.35
+            const transform = assert(world:getMut(cube, tecs.ecs.Transform3D))
+            transform.rotationY = math.sin(halfAngle)
+            transform.rotationW = math.cos(halfAngle)
+        end,
+    })
+end
+
+--- Creates the original Tecs 3D mesh shadows showcase.
+--- @param title optional window title
+--- @param width logical width
+--- @param height logical height
+--- @param debug enable guarded application failures
+--- @param maxFrames optional bounded run
+--- @return the native host session
+export function create(
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?
+): tecs.host.Session
+    return tecs.host.createWithPlugin(
+        install,
+        title or "Tecs 3D mesh shadows",
+        width or 960,
+        height or 640,
+        debug,
+        maxFrames
+    )
+end

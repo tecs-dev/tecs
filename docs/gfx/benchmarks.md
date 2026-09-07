@@ -180,3 +180,20 @@ also exceeds the entire frame budget. The retained results above measure the res
 
 [Raw samples and machine/build metadata](https://github.com/tecs-dev/tecs/blob/main/bench/results/render-macos-arm64-2026-09-06.json)
 retain all observations, compiler identity and artifact hashes.
+
+## Graphics restoration validation
+
+On 2026-09-07, the restored renderer completed all four million visible static
+instances with zero instance uploads per measured frame. The Apple M5 Pro Metal
+run used the release host, a Nupp component built at `-O2`, a 1280 by 720 target,
+ten warmup frames and sixty measured frames. These serial offscreen timings
+include GPU completion and exclude swapchain and desktop presentation.
+
+| Shape     | Instances | Completed frame p50 | Completed frame p95 | Instance upload/frame |
+| --------- | --------: | ------------------: | ------------------: | --------------------: |
+| Rectangle | 4,000,000 |            13.99 ms |            14.42 ms |               0 bytes |
+| Circle    | 4,000,000 |            14.18 ms |            14.65 ms |               0 bytes |
+
+Both p95 results are below the 16.67 ms budget for 60 FPS for this workload.
+The complete samples are in
+[the validation report](https://github.com/tecs-dev/tecs/blob/main/bench/results/gfx-parity-macos-arm64-2026-09-07.json).

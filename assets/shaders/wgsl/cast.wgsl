@@ -189,7 +189,7 @@ fn castVertexMain(
         }
     }
 
-    let instance = tileInstance(instances[entry >> CAST_LIGHT_BITS], vertexIndex / 6u);
+    let instance = animatedInstance(tileInstance(instances[entry >> CAST_LIGHT_BITS], vertexIndex / 6u));
     let angle = instance.position.z;
     let scaleX = instance.scale.x;
     let scaleY = instance.scale.y;

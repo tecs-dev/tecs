@@ -15,7 +15,10 @@ local function word(bytes: string, offset: integer): integer
 end
 
 local function base(bytes: string): integer
-    return 128 + word(bytes, 20) + word(bytes, 68) * 32 + word(bytes, 124) * 1076
+    return word(
+        bytes,
+        8
+    ) + word(bytes, 132) + word(bytes, 136) + word(bytes, 20) + word(bytes, 68) * 32 + word(bytes, 124) * 1076
 end
 
 local function body(bytes: string): string
@@ -240,7 +243,8 @@ function suite.tileChunksRetainAndPatchIndependentlyWithinOneArchetype(): nil
     test.equal(word(clean, 12), framepacket.FRAME_RETAINED)
     test.equal(#clean, base(clean))
     unsafe do
-        assert(world:getMut(first, tecs.gfx.TileChunk)).tiles[1] = 2
+        const chunk1 = assert(world:getMut(first, tecs.gfx.TileChunk))
+        chunk1.tiles[1] = 2
     end
     const patch = extractor:frame(640, 360, revision)
     test.equal(word(patch, 12), framepacket.FRAME_DELTA)
@@ -249,7 +253,8 @@ function suite.tileChunksRetainAndPatchIndependentlyWithinOneArchetype(): nil
     test.equal(word(patch, base(patch) + 12), 80)
     -- A shared nested edit can request synchronization through the old tag.
     unsafe do
-        assert(world:get(first, tecs.gfx.TileChunk)).tiles[1] = 3
+        const chunk2 = assert(world:get(first, tecs.gfx.TileChunk))
+        chunk2.tiles[1] = 3
     end
     world:set(first, tecs.gfx.DirtyTileChunk)
     world:commit()
@@ -258,7 +263,8 @@ function suite.tileChunksRetainAndPatchIndependentlyWithinOneArchetype(): nil
     const snapshot = extractor:packet(640, 360)
     test.equal(word(snapshot, 36), 2)
     unsafe do
-        assert(world:getMut(first, tecs.gfx.TileChunk)).tiles[1] = 0
+        const chunk3 = assert(world:getMut(first, tecs.gfx.TileChunk))
+        chunk3.tiles[1] = 0
     end
     test.equal(word(extractor:packet(640, 360), 36), 2)
     world:shutdown()
@@ -291,7 +297,7 @@ function suite.tileChunksPreservePackedAtlasGeometryAndEveryFlip(): nil
     const packet = extractor:packet(640, 360)
     test.equal(word(packet, 36), 1)
     test.equal(word(packet, 124), 1)
-    const start = 128 + word(packet, 20) + word(packet, 68) * 32
+    const start = word(packet, 8) + word(packet, 132) + word(packet, 136) + word(packet, 20) + word(packet, 68) * 32
     test.equal(word(packet, start), 0)
     local reader = nupp.io.newScalarReader(packet)
     reader:skip(start + 4)
@@ -305,7 +311,8 @@ function suite.tileChunksPreservePackedAtlasGeometryAndEveryFlip(): nil
     const saved = world:saveSnapshot()
     world:loadSnapshot(saved)
     unsafe do
-        test.equal(assert(world:get(id, tecs.gfx.TileChunk)).tiles[8], tiles[8])
+        const restoredChunk = assert(world:get(id, tecs.gfx.TileChunk))
+        test.equal(restoredChunk.tiles[8], tiles[8])
     end
     const restoredExtractor = framepacket.new(world)
     const restored = restoredExtractor:packet(640, 360)

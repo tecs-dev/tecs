@@ -114,7 +114,12 @@ end
 --- carries false is the server unwinding, and it raises rather than returning.
 --- @raises when the server is being destroyed
 local function park(): nil
-    local keepRunning = coroutine.yield()
+    -- This driver owns every resumption and resumes false during shutdown so
+    -- parked handlers unwind their subscriptions and connection owners.
+    local keepRunning: any
+    unsafe do
+        keepRunning = coroutine.yield()
+    end
     if keepRunning == false then
         error(SHUTDOWN, 0)
     end

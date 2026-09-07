@@ -144,7 +144,10 @@ function suite.switchesEveryOriginalSceneThroughPointerInput(): nil
     frame(session)
     local cameras = world:newQuery({include = {tecs.gfx.Camera2D, tecs.gfx.ActiveCamera}})
     for candidate, _ in cameras:iter() do
-        nupp.test.equal(assert(candidate:get(tecs.gfx.Camera2D))[1].zoom, 2)
+        unsafe do
+            const cameras = assert(candidate:get(tecs.gfx.Camera2D))
+            nupp.test.equal(cameras[1].zoom, 2)
+        end
     end
     local heading = assert(world:get(textEntity(world, "Tecs UI"), tecs.gfx.Text))
     nupp.test.equal(assert(heading.font).size, 64)

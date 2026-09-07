@@ -16,13 +16,13 @@ Every field is little or big endian to match the host, every integer is
 unsigned, and every real is a 32-bit float. Offsets are in bytes from the start
 of the packet.
 
-## Header, 128 bytes
+## Header, 140 bytes
 
 | Offset | Type  | Field             | Contract                                             |
 | ------ | ----- | ----------------- | ---------------------------------------------------- |
 | 0      | `u32` | `magic`           | `0x54454353`, and nothing else is a Tecs packet.      |
-| 4      | `u32` | `version`         | `7`. A reader rejects every other value.              |
-| 8      | `u32` | `headerSize`      | `128`. The graph section starts after it.             |
+| 4      | `u32` | `version`         | `9`. A reader rejects every other value.              |
+| 8      | `u32` | `headerSize`      | `140`. Frame-table and particle sections follow it.             |
 | 12     | `u32` | `flags`           | Bits 0/1 enable shadows/bloom; bits 2/3 retain/patch instances.           |
 | 16     | `u32` | `graphRevision`   | A reader rebuilds its graph when this changes.        |
 | 20     | `u32` | `graphBytes`      | Byte length of the graph section.                     |
@@ -53,11 +53,18 @@ of the packet.
 | 120    | `f32` | `bloomIntensity`  | Scales the blurred contribution.                      |
 | 124    | `u32` | `tileUpdates`     | Number of compact grid updates after the lights.                                                 |
 
+Version 9 adds `animationClock` (f32) at offset 128, `frameTableBytes` (u32)
+at 132 and `particleBytes` (u32) at 136. The shared float frame table follows
+the 140-byte header, then the particle emitter packet, then the graph. Empty
+frame-table bytes retain the receiver's table. Particle packets carry one
+allocation token and configuration record per emitter; individual particles
+never cross this boundary.
+
 The shadow and bloom fields are written whether or not their flag is set, so a
 backend reads one layout and the flag alone decides. A reader validates them
 only when the flag they belong to is set.
 
-## Graph section, `graphBytes` bytes at offset 128
+## Graph section, `graphBytes` bytes at offset `140 + frameTableBytes + particleBytes`
 
 The pass and target declaration, as `tecs.gpu.passes.section` encodes it. It
 rides in every packet rather than being sent once, so a backend that lost its
@@ -88,7 +95,7 @@ than the ceiling keeps the lowest ids and drops the rest.
 After the lights, `tileUpdates` records each carry a `u32` slot and 1,072 bytes:
 twelve floats (tile width, height, atlas columns, spacing, margin, cell width,
 cell height, offset x, offset y, atlas width, atlas height, zero), then 256
-packed `u32` tile IDs. Full frames provide slots zero through count minus one;
+packed `u32` tile IDs. Full frames provide slots zero through count minus one
 deltas update existing slots; retained frames provide none.
 
 Instance flag bit 4 selects a chunk. Its position/scale are the top-left chunk
@@ -101,7 +108,7 @@ vertices per chunk instance or six per quad, including the shadow lane.
 This is the old SpriteFramePacket dirty-range seam adapted to the managed ABI:
 persistent instance storage and dirty ranges cross in place of a full snapshot.
 A full frame carries the batch table and all instances. A retained frame (bit 2)
-ends after the lights and names the receiver's already-validated scene revision;
+ends after the lights and names the receiver's already-validated scene revision
 it carries no batch or instance bytes. A delta frame (bit 3) also omits the batch
 table, then carries a base revision, a range count (1 to 64), and that many
 `u32 offset, u32 size` pairs followed by their bytes. Ranges are sorted,
@@ -198,15 +205,16 @@ local world = require("tecs.internal.world")
 local zone = require("nupp.profile.zone")
 local array = require("nupp.mem.array")
 local ffi = require("ffi")
+local frametable = require("tecs.gfx.frametable")
 
 --- Identifies a Tecs frame packet, and is a compatibility surface.
 export const MAGIC: uint32 = 0x54454353
 
 --- The packet layout this module writes.
-export const VERSION: uint32 = 7
+export const VERSION: uint32 = 9
 
 --- The byte length of the packet header.
-export const HEADER_SIZE: uint32 = 128
+export const HEADER_SIZE: uint32 = 140
 
 --- The byte length of one batch table entry.
 export const BATCH_STRIDE: uint32 = 20
@@ -285,6 +293,9 @@ end
 --- Clean runs preserve their packed bytes; the receiver supplies the generation
 --- it has already validated and uploaded.
 export record Extractor
+    private cameraOverride: rendercomponents.Camera2D? = nil
+    setCamera: function(exclusive self: Extractor, camera: rendercomponents.Camera2D): nil
+    revision: function(borrows self: Extractor): integer
     private world: world.World
     private drawCapacity: integer
     private lightCapacity: integer
@@ -318,6 +329,7 @@ export record Extractor
     private relayout: boolean
     private batchDirty: boolean
     private rewritten: integer
+    private frameTableAt: integer = -1
     private cachedAlpha: number
     private cachedView: {number}
     private cachedLayers: integer
@@ -454,7 +466,10 @@ end
 --- @raises when the selected camera's zoom is not greater than zero, or when
 ---     any of its four values is not finite
 local function view(borrows self: Extractor, width: number, height: number): number, number, number, number
-    local camera = cameraselection.pick(self.activeCameras)
+    local camera = self.cameraOverride
+    if camera == nil then
+        camera = cameraselection.pick(self.activeCameras)
+    end
     if camera == nil then
         camera = cameraselection.pick(self.cameras)
     end
@@ -472,19 +487,24 @@ local function view(borrows self: Extractor, width: number, height: number): num
 end
 
 --- Interpolates an extractor-owned native pose, never a borrowed simulation row.
+local emptyChunks = carray(tilechunk.TileChunk, 1)
+
+local emptyPrevious = carray(rendercomponents.PreviousTransform2D, 1)
+local chunkSprite = carray(rendercomponents.Sprite, 1)
+
 local function presented(
-    current: rendercomponents.Transform2D,
-    previous: rendercomponents.PreviousTransform2D?,
-    alpha: number
-): rendercomponents.Transform2D
-    if previous ~= nil then
+    exclusive current: rendercomponents.Transform2D,
+    borrows previous: rendercomponents.PreviousTransform2D?,
+    alpha: number,
+    interpolate: boolean
+): nil
+    if interpolate and previous ~= nil then
         current.x = previous.x + (current.x - previous.x) * alpha
         current.y = previous.y + (current.y - previous.y) * alpha
         const angle = (current.rotation - previous.rotation + math.pi) % (2 * math.pi) - math.pi
         current.rotation = previous.rotation + angle * alpha
     end
 
-    return current
 end
 
 -- Ordinary sprites retain archetype runs. A chunk owns one run so editing
@@ -561,35 +581,39 @@ local function collect(exclusive self: Extractor): nil
                 local rowTransforms: rendercomponents.Transform2D[
                     ?
                 ] = assert(active:get(rendercomponents.Transform2DComponent))
-                const previous = active:get(rendercomponents.PreviousTransform2DComponent)
+                const authoredPrevious = active:get(rendercomponents.PreviousTransform2DComponent)
+                const previous = authoredPrevious or emptyPrevious
                 local rowTints: rendercomponents.Tint[?] = assert(active:get(rendercomponents.TintComponent))
                 local rowClips = active:get(clips.ClipComponent)
+                const rowPivots = active:get(tecs.gfx.sheet.Pivot)
                 local rowSprites = active:get(rendercomponents.SpriteComponent) as rendercomponents.Sprite[?]?
                 local rowMaterials = active:get(materials.MaterialComponent) as materials.Material[?]?
                 local rowOccluders = active:get(lighting.Occluder2DComponent) as lighting.Occluder2D[?]?
                 local rowDropShadows = active:get(lighting.DropShadow2DComponent) as lighting.DropShadow2D[?]?
-                const rowChunks = active:get(tilechunk.TileChunkComponent)
+                const authoredChunks = active:get(tilechunk.TileChunkComponent)
+                const rowChunks = authoredChunks or emptyChunks
                 for index = assert(first), assert(last) do
-                    const chunk = rowChunks ~= nil and rowChunks[index] or nil
-                    if chunk ~= nil and archetype.has(active, tilechunk.DirtyTileChunk) then
+                    const hasChunk = authoredChunks ~= nil
+                    const chunk = rowChunks[hasChunk and index or 0]
+                    if hasChunk and archetype.has(active, tilechunk.DirtyTileChunk) then
                         self.world:remove(active.entities[index], tilechunk.DirtyTileChunk)
                     end
                     do
-                        if chunk ~= nil and run.length == 0 then
+                        if hasChunk and run.length == 0 then
                             goto nextTile
                         end
                         rows = rows + 1
                         transforms[rows] = rowTransforms[index]
-                        const transform = presented(transforms[rows], previous ~= nil and previous[index] or nil, alpha)
-                        self.chunkKinds[rows] = chunk ~= nil
-                        const tileSprite = chunk ~= nil and new rendercomponents.Sprite(
-                            chunk.tileset,
-                            0,
-                            0,
-                            1,
-                            1
-                        ) or nil
-                        if chunk ~= nil then
+                        const transform = transforms[rows]
+                        presented(
+                            transform,
+                            previous[authoredPrevious ~= nil and index or 0],
+                            alpha,
+                            authoredPrevious ~= nil
+                        )
+                        self.chunkKinds[rows] = hasChunk
+                        const tileSprite = hasChunk and new rendercomponents.Sprite(chunk.tileset, 0, 0, 1, 1) or nil
+                        if hasChunk then
                             run.tileBytes = tilechunk.packed(chunk)
                         end
                         self.clipIds[rows] = rowClips and rowClips[index].index or 0
@@ -655,7 +679,11 @@ local function collect(exclusive self: Extractor): nil
                             u1[rows] = 1.0
                             v1[rows] = 1.0
                         else
-                            const sprite = tileSprite or assert(rowSprites)[index]
+                            if tileSprite ~= nil then
+                                chunkSprite[0] = tileSprite
+                            end
+                            const sprites = tileSprite ~= nil and chunkSprite or assert(rowSprites)
+                            const sprite = sprites[tileSprite ~= nil and 0 or index]
                             const image = sprite.image
                             -- An image that never became resident draws against the
                             -- backend's white fallback rather than dropping the entity.
@@ -671,11 +699,27 @@ local function collect(exclusive self: Extractor): nil
                             u1[rows] = sprite.u1
                             v1[rows] = sprite.v1
                         end
-                        if chunk ~= nil then
+                        if hasChunk then
                             u0[
                                 rows
                             ], v0[rows], u1[rows], v1[rows] = run.tileSlot, tilechunk.radius(chunk, transform), 0, 0
                         end
+                        if rowPivots ~= nil and not hasChunk then
+                            const pivot = rowPivots[index]
+                            if u0[
+                                rows
+                            ] >= 0 or not tecs.gfx.frametable.hasPivot(
+                                (-u0[rows]) as integer,
+                                pivot.sheet,
+                                pivot.slice
+                            ) then
+                                const dx, dy = (0.5 - pivot.x) * transform.scaleX, (0.5 - pivot.y) * transform.scaleY
+                                const c, sine = math.cos(transform.rotation), math.sin(transform.rotation)
+                                transform.x = transform.x + dx * c - dy * sine
+                                transform.y = transform.y + dx * sine + dy * c
+                            end
+                        end
+
                         if oldImage ~= imageIds[
                             rows
                         ] or oldSampler ~= samplers[rows] or oldLane ~= lanes[rows] or oldFlag ~= castFlags[rows] then
@@ -717,7 +761,8 @@ local function collectLights(exclusive self: Extractor): nil
             local rowTransforms: rendercomponents.Transform2D[
                 ?
             ] = assert(active:get(rendercomponents.Transform2DComponent))
-            const previous = active:get(rendercomponents.PreviousTransform2DComponent)
+            const authoredPrevious = active:get(rendercomponents.PreviousTransform2DComponent)
+            const previous = authoredPrevious or emptyPrevious
             local rowLights: lighting.PointLight2D[?] = assert(active:get(lighting.PointLight2DComponent))
             for index = 1, count as integer do
                 const light = rowLights[index]
@@ -734,7 +779,12 @@ local function collectLights(exclusive self: Extractor): nil
                 found = found + 1
                 lightEntities[found] = active.entities[index]
                 lightTransforms[found] = rowTransforms[index]
-                presented(lightTransforms[found], previous ~= nil and previous[index] or nil, alpha)
+                presented(
+                    lightTransforms[found],
+                    previous[authoredPrevious ~= nil and index or 0],
+                    alpha,
+                    authoredPrevious ~= nil
+                )
                 lightValues[found] = light
             end
         end
@@ -784,6 +834,7 @@ local watched: {
     rendercomponents.TintComponent,
     rendercomponents.PreviousTransform2DComponent,
     rendercomponents.SpriteComponent,
+    tecs.gfx.sheet.Pivot,
     materials.MaterialComponent,
     lighting.Occluder2DComponent,
     lighting.DropShadow2DComponent,
@@ -994,6 +1045,13 @@ local function prefix(exclusive self: Extractor, eye: View, mode: integer, revis
             end
         end
     end
+    const tableRevision = frametable.revision()
+    local tableBytes = ""
+    if mode == 0 or self.frameTableAt ~= tableRevision then
+        tableBytes = frametable.packed()
+    end
+    self.frameTableAt = tableRevision
+    const particleBytes = tecs.gfx.particles.section(self.world)
     const graph = passes.section()
     local buffer = nupp.io.newBuffer()
     local writer = nupp.io.newScalarWriter(buffer)
@@ -1029,7 +1087,10 @@ local function prefix(exclusive self: Extractor, eye: View, mode: integer, revis
         :writeFloat32(narrow(bloomTuning ~= nil and bloomTuning.knee or 0.1))
         :writeFloat32(narrow(bloomTuning ~= nil and bloomTuning.intensity or 0.7))
         :writeUint32(wrap(#tileUpdates))
-    writer:writeBytes(graph)
+        :writeFloat32(narrow(frametable.clockOf(self.world)))
+        :writeUint32(wrap(#tableBytes))
+        :writeUint32(wrap(#particleBytes))
+    writer:writeBytes(tableBytes):writeBytes(particleBytes):writeBytes(graph)
 
     const lightOrder = self.lightOrder
     const lightTransforms = self.lightTransforms
@@ -1255,4 +1316,18 @@ end
 
 function Extractor.frame(exclusive self: Extractor, width: integer, height: integer, residentRevision: integer): string
     return encode(self, width, height, residentRevision)
+end
+
+function Extractor.setCamera(exclusive self: Extractor, camera: rendercomponents.Camera2D): nil
+    self.cameraOverride = camera
+end
+
+function Extractor.revision(borrows self: Extractor): integer
+    return self.sceneRevision
+end
+
+export function close(exclusive value: Extractor): nil
+    for _, owned in ipairs({value.drawables, value.activeCameras, value.cameras, value.lights}) do
+        world.releaseQuery(value.world, owned)
+    end
 end

@@ -1,0 +1,210 @@
+module tecs.gfx.frametable
+
+--[[
+Shared sprite animation tables. A playback names a sheet, tag and slice; every
+entity playing it shares one millisecond lookup table. Instances carry a start
+step and rate, so changing frames performs no CPU work and uploads no instances.
+The clock re-anchors every 524288 fixed steps to preserve millisecond precision.
+]]
+local sheet = require("tecs.gfx.sheet")
+local ecs = require("tecs.ecs")
+local rendercomponents = require("tecs.internal.rendercomponents")
+
+export const TICK_HZ: number = 1000
+export const REBASE_STEPS: integer = 524288
+local record Playback
+    source: sheet.Sheet
+    tag: integer
+    slice: integer
+    frames: {integer} = {}
+    entries: {integer} = {}
+    ticks: {integer} = {}
+end
+local playbacks: {Playback} = {}
+local ids: {[string]: integer} = {}
+local changes: integer = 0
+local sheetsAt: integer = -1
+local assembled: integer = -1
+local bytes: string = ""
+local origins: {[ecs.World]: integer} = setmetatable({}, {__mode = "k"}) as {[ecs.World]: integer}
+
+--- Returns fixed steps since this world's animation clock origin.
+--- @param world the world whose sprites are playing
+--- @return the clock shared by the CPU queries and GPU lookup
+export function clockOf(borrows world: ecs.World): number
+    return world:fixedStepCount() - (origins[world] or 0)
+end
+
+--- Re-anchors a clock that reached the precision limit. The animation plugin
+--- rewrites running starts in the same step.
+--- @param world the world whose clock may move
+--- @return the shift, or zero before the limit
+export function rebaseClock(borrows world: ecs.World): number
+    const shift = clockOf(world)
+    if shift < REBASE_STEPS then
+        return 0
+    end
+    origins[world] = world:fixedStepCount()
+
+    return shift
+end
+
+local function plan(exclusive value: Playback): nil
+    const count = math.max(1, math.floor(value.source:cycle(value.tag) * TICK_HZ + 0.5)) as integer
+    assert(count <= 16777216, "animation cycle exceeds the GPU millisecond table limit")
+    value.frames, value.entries, value.ticks = {}, {}, {}
+    local indices: {[integer]: integer} = {}
+    for tick = 0, count - 1 do
+        const frame = value.source:frameAt(value.tag, (tick + 0.5) / TICK_HZ)
+        local entry = indices[frame]
+        if entry == nil then
+            entry = #value.entries + 1
+            indices[frame] = entry
+            value.entries[entry] = frame
+        end
+        value.frames[tick + 1] = frame
+        value.ticks[tick + 1] = entry
+    end
+end
+
+--- Registers a shared sheet/tag/slice playback, or returns its existing id.
+--- @param source the authored sheet
+--- @param tag its tag id, or zero for the whole sheet
+--- @param slice its slice id, or nil for the center pivot
+--- @return a stable process-local playback id
+export function register(source: sheet.Sheet, tag: integer, slice: integer?): integer
+    assert(tag >= 0 and tag <= source:tagCount(), "invalid animation tag")
+    const sliceId = slice or 0
+    const key = tostring(source.id) .. ":" .. tostring(tag) .. ":" .. tostring(sliceId)
+    const old = ids[key]
+    if old ~= nil then
+        return old
+    end
+    local value = new Playback(source = source, tag = tag, slice = sliceId)
+    plan(value)
+    const id = #playbacks + 1
+    playbacks[id], ids[key] = value, id
+    changes = changes + 1
+
+    return id
+end
+
+--- Returns the generation of the shared table, including sheet reloads.
+--- @return a generation suitable for an upload cache
+export function revision(): integer
+    const current = sheet.revision()
+    if current ~= sheetsAt then
+        sheetsAt = current
+        for _, value in ipairs(playbacks) do
+            plan(value)
+        end
+        changes = changes + 1
+    end
+
+    return changes
+end
+
+--- Returns the number of authored millisecond ticks in a playback.
+--- @param id a playback id
+--- @return its cycle length, or zero for an unknown id
+export function tickCount(id: integer): integer
+    revision()
+    const value = playbacks[id]
+    return value ~= nil and #value.ticks or 0
+end
+
+--- Resolves the same frame the GPU selects.
+--- @param id a playback id
+--- @param tick the elapsed milliseconds
+--- @param loop whether the cycle repeats
+--- @return a one-based sheet frame, or zero for an unknown playback
+export function frameAt(id: integer, tick: number, loop: boolean): integer
+    const count = tickCount(id)
+    if count == 0 then
+        return 0
+    end
+    const at = loop and tick % count or math.max(0, math.min(count - 1, tick))
+
+    return playbacks[id].frames[math.floor(at) + 1]
+end
+
+--- Identifies the playback encoded in a sprite.
+--- @param target a sprite component
+--- @return a playback id, or zero for an ordinary UV region
+export function playbackOf(borrows target: rendercomponents.Sprite): integer
+    return target.u0 < 0 and math.floor(-target.u0 + 0.5) or 0
+end
+
+--- Writes a playback's start/rate into a sprite, replacing its static UVs.
+--- @param target the mutable sprite
+--- @param id a registered playback
+--- @param start the start step, or the held tick when rate is zero
+--- @param rate milliseconds advanced per fixed step
+--- @param loop whether to wrap at the end
+export function encode(
+    exclusive target: rendercomponents.Sprite,
+    id: integer,
+    start: number,
+    rate: number,
+    loop: boolean
+): nil
+    target.u0, target.v0, target.u1, target.v1 = -id, start, rate, loop and 1 or 0
+end
+
+--- Returns the GPU buffer: count, four-float directory entries, millisecond
+--- lookup offsets and eight-float frame entries (UV, image, pivot, padding).
+--- @return immutable host-endian float32 bytes, rebuilt only on change
+export function packed(): string
+    const current = revision()
+    if assembled == current then
+        return bytes
+    end
+    local data: {number} = {#playbacks}
+    local at = 1 + #playbacks * 4
+    for index, value in ipairs(playbacks) do
+        const tickBase = at
+        for _, entry in ipairs(value.ticks) do
+            data[at + 1] = entry - 1
+            at = at + 1
+        end
+        const entryBase = at
+        local reach = 0.0
+        for _, frame in ipairs(value.entries) do
+            const px, py = value.source:pivotOf(value.slice, frame)
+            reach = math.max(reach, math.abs(px - 0.5), math.abs(py - 0.5))
+        end
+        for _, frame in ipairs(value.entries) do
+            const u0, v0, u1, v1 = value.source:uv(frame)
+            const px, py = value.source:pivotOf(value.slice, frame)
+            local values = {u0, v0, u1, v1, value.source:boundImage(), px - 0.5, py - 0.5, reach}
+            for _, number in ipairs(values) do
+                data[at + 1] = number
+                at = at + 1
+            end
+        end
+        const base = 2 + (index - 1) * 4
+        data[base], data[base + 1], data[base + 2], data[base + 3] = entryBase, tickBase, #value.ticks, #value.entries
+    end
+    assert(at <= 16777216, "animation tables exceed exact float32 addressing")
+    local buffer = nupp.io.newBuffer()
+    local writer = nupp.io.newScalarWriter(buffer)
+    for _, value in ipairs(data) do
+        writer:writeFloat32(nupp.math.f32.narrow(value))
+    end
+    writer:drop()
+    bytes = buffer:getString()
+    buffer:drop()
+    assembled = current
+
+    return bytes
+end
+
+--- Reports whether GPU playback already applies the supplied slice pivot.
+--- @param id shared playback identifier
+--- @param sheetId owning sheet
+--- @param sliceId animated slice
+--- @return true when this playback resolves that anchor
+export function hasPivot(id: integer, sheetId: integer, sliceId: integer): boolean
+    const value = playbacks[id]
+    return value ~= nil and value.source.id == sheetId and value.slice == sliceId and sliceId ~= 0
+end

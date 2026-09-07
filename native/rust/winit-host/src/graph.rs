@@ -94,6 +94,8 @@ pub enum Input {
 /// One pass, with its names resolved to target indices.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Pass {
+    pub shader: Option<String>,
+    pub parameters: [f32; 16],
     pub name: String,
     pub inputs: Vec<Input>,
     /// Empty renders to the swapchain.
@@ -112,6 +114,20 @@ pub struct Graph {
 }
 
 impl Graph {
+    pub fn same_pipelines(&self, other: &Self) -> bool {
+        self.targets == other.targets
+            && self.passes.len() == other.passes.len()
+            && self.passes.iter().zip(&other.passes).all(|(a, b)| {
+                a.name == b.name
+                    && a.shader == b.shader
+                    && a.inputs == b.inputs
+                    && a.outputs == b.outputs
+                    && a.depth == b.depth
+                    && a.depth_clear == b.depth_clear
+                    && a.clear == b.clear
+            })
+    }
+
     pub fn targets(&self) -> &[Target] {
         &self.targets
     }
@@ -255,7 +271,7 @@ pub fn parse_graph(bytes: &[u8]) -> Result<Graph> {
             inputs.push(Input::Target(index));
         }
 
-        let mut outputs = Vec::with_capacity(output_count);
+        let mut outputs: Vec<usize> = Vec::with_capacity(output_count);
         for _ in 0..output_count {
             let referenced = names
                 .get(reader.u32()? as usize)
@@ -270,6 +286,15 @@ pub fn parse_graph(bytes: &[u8]) -> Result<Graph> {
                     "render graph pass '{name}' uses depth but writes '{referenced}' below frame \
                      scale, and the depth attachment is frame sized"
                 );
+            }
+            if inputs.contains(&Input::Target(index)) {
+                bail!("pass reads and writes the same target");
+            }
+            if outputs
+                .iter()
+                .any(|other| targets[*other].scale != targets[index].scale)
+            {
+                bail!("pass output dimensions differ");
             }
             outputs.push(index);
         }
@@ -291,6 +316,8 @@ pub fn parse_graph(bytes: &[u8]) -> Result<Graph> {
         }
 
         passes.push(Pass {
+            shader: None,
+            parameters: [0.; 16],
             name,
             inputs,
             outputs,
@@ -298,6 +325,45 @@ pub fn parse_graph(bytes: &[u8]) -> Result<Graph> {
             depth_clear: (has_depth_clear == 1).then_some(depth_clear),
             clear,
         });
+    }
+    if bytes.len() - reader.at < 8 {
+        reader.finish()?;
+    }
+    if reader.at < bytes.len() {
+        if reader.u32()? != 0x50504658 {
+            bail!("unknown render graph extension");
+        }
+        let count = reader.u32()? as usize;
+        if count > passes.len() {
+            bail!("too many custom shaders");
+        }
+        for _ in 0..count {
+            let index = reader.u32()? as usize;
+            let pass = passes
+                .get_mut(index)
+                .context("custom shader names unknown pass")?;
+            if pass.shader.is_some() || pass.outputs.len() > 1 {
+                bail!("invalid custom shader pass");
+            }
+            let length = reader.u32()? as usize;
+            if length == 0 || length > 1048576 {
+                bail!("invalid custom shader source size");
+            }
+            pass.shader = Some(std::str::from_utf8(reader.bytes(length)?)?.to_owned());
+            if reader
+                .bytes((4 - length % 4) % 4)?
+                .iter()
+                .any(|byte| *byte != 0)
+            {
+                bail!("nonzero shader padding");
+            }
+            for value in &mut pass.parameters {
+                *value = reader.f32()?;
+                if !value.is_finite() {
+                    bail!("nonfinite shader parameter");
+                }
+            }
+        }
     }
     reader.finish()?;
 
@@ -797,6 +863,34 @@ pub mod tests {
         let bad_scale = GraphBuilder::new().target("albedo", 0, 0.0, None).build();
         let message = parse_graph(&bad_scale).unwrap_err().to_string();
         assert!(message.contains("not above zero"), "{message}");
+    }
+
+    pub fn custom(mut graph: Vec<u8>, index: u32, shader: &str, parameters: [f32; 16]) -> Vec<u8> {
+        for value in [0x50504658_u32, 1, index, shader.len() as u32] {
+            graph.extend_from_slice(&value.to_ne_bytes());
+        }
+        graph.extend_from_slice(shader.as_bytes());
+        graph.extend(std::iter::repeat_n(0, (4 - shader.len() % 4) % 4));
+        for value in parameters {
+            graph.extend_from_slice(&value.to_ne_bytes());
+        }
+        graph
+    }
+
+    #[test]
+    fn validates_custom_shader_extension_and_reuses_parameter_pipelines() {
+        let source = "fn postprocess(uv: vec2<f32>) -> vec4<f32> { return params.values[0]; }";
+        let original = custom(deferred(), 11, source, [0.; 16]);
+        let first = parse_graph(&original).unwrap();
+        let second = parse_graph(&custom(deferred(), 11, source, [1.; 16])).unwrap();
+        assert!(first.same_pipelines(&second));
+        assert!(!first.same_pipelines(&parse_graph(&deferred()).unwrap()));
+        assert!(parse_graph(&custom(deferred(), 0, source, [0.; 16])).is_err());
+        assert!(parse_graph(&custom(deferred(), 12, source, [0.; 16])).is_err());
+        assert!(parse_graph(&custom(deferred(), 11, source, [f32::NAN; 16])).is_err());
+        for cut in 1..68 {
+            assert!(parse_graph(&original[..original.len() - cut]).is_err());
+        }
     }
 
     #[test]

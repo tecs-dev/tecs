@@ -1,0 +1,21 @@
+module tecs.internal.meshregistry
+local names: {string} = {}
+local ids: {[string]: integer} = {}
+export function register(name: string): integer
+    const held = ids[name]
+    if held ~= nil then
+        return held
+    end
+    const id = #names + 1
+    names[id], ids[name] = name, id
+
+    return id
+end
+
+export function name(id: integer): string?
+    return names[id]
+end
+
+export function find(assetName: string): integer
+    return assert(ids[assetName], "load model before restoring its entities: " .. assetName)
+end

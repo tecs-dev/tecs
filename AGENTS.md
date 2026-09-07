@@ -77,9 +77,7 @@ Windows release is built on Windows.
 Two things a packager learns the hard way. The five service libraries resolve in a release through the
 _executable's_ run path, not through the ancestor walk in `tecs.internal.nativelibrary`: that walk starts at
 the module's source directory, which a compiled component no longer has, so what actually finds them is a load
-by bare name reaching the loader's search of `lib/`. And a guarded plugin failure is invisible to `--headless`,
-because `run_headless` in the Rust host never calls `tecs.host.crashed`, so the smoke component prints a line
-on success and the packaging test matches that line rather than trusting the exit status.
+by bare name reaching the loader's search of `lib/`. The headless host checks `tecs.host.crashed` and fails on guarded application errors. The smoke component also prints a success line, which the packaging test verifies.
 
 Both `nupp task run` and the host's own `cargo build` need a Nupp embedding SDK, which
 `native/rust/winit-host/build.rs` stages through the Nupp compiler's `scripts/toolchain` in a checkout beside
@@ -186,8 +184,8 @@ A module with children lives in `name/init.nupp`. Prefer a flat `module.nupp` wh
 ### Rendering
 
 Deferred and GPU-driven. A compute pass culls and compacts a visible list, one indirect draw consumes it, and
-the material dispatch is compiled into a single fragment shader from `assets/materials/*.wgsl`. Shaders are
-WGSL with no translation step; a release consumes a prebuilt pack.
+the material dispatch is compiled into a single fragment shader from `assets/materials/*.wgsl`. Material shaders are WGSL and a release consumes a prebuilt pack. The particle
+compute stages preserve the original GLSL algorithms, compiled through wgpu/Naga.
 
 Compaction is an ordered three-pass scan rather than an `atomicAdd`, because draw order has to be deterministic.
 
@@ -210,7 +208,10 @@ map rendering, animation, edits, object factories and collision outlines;
 retained UI with a native Taffy tree, text/image measurement, scrolling and interaction.
 See `docs/tiled/index.md` and `docs/ui/index.md`. Run `nupp task ex-tiled` and `nupp task ex-ui`.
 
-Missing from the Nupp engine: 3D rendering, custom post-processing and multiple cameras.
+Working too: indexed 3D meshes, skinning, morph targets, local lights and shadows,
+ambient probes, environments, SSAO, custom post-processing, ordered camera views,
+GPU particles and shared GPU sprite frame tables. See `docs/gfx/3d.md` and
+`docs/gfx/particles.md`.
 
 Intentionally removed: gamepad motion sensors and touchpads,
 trigger rumble, LED, player index, and standalone sensors. Each is recorded at its declaration or in the

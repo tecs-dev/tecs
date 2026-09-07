@@ -1,0 +1,5 @@
+<!-- SPDX-License-Identifier: CC0-1.0 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs><radialGradient id="zenith"><stop stop-color="#70b7df"/><stop offset="1" stop-color="#315b92"/></radialGradient></defs>
+  <rect width="64" height="64" fill="url(#zenith)"/><circle cx="48" cy="48" r="8" fill="#ffd8a1" opacity=".45"/>
+</svg>

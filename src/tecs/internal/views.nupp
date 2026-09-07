@@ -1,0 +1,134 @@
+module tecs.internal.views
+
+local meshes = require("tecs.gfx.meshes")
+local components = require("tecs.internal.components")
+local rendercomponents = require("tecs.internal.rendercomponents")
+
+--- Describes one ordered viewport as fractions of the frame.
+export record View
+    --- Caller-writable. Selects the camera drawn into this viewport.
+    camera2D: rendercomponents.Camera2D?
+
+    --- Caller-writable. Selects a 3D camera, or nil to omit meshes.
+    camera3D: tecs.gfx.camera3d.Camera3D? = nil
+
+    --- Caller-writable. Controls mesh lighting in this viewport.
+    lighting: meshes.Lighting
+
+    --- Caller-writable. Sets the left edge as a fraction of the frame.
+    x: number = 0
+
+    --- Caller-writable. Sets the top edge as a fraction of the frame.
+    y: number = 0
+
+    --- Caller-writable. Sets the width as a fraction of the frame.
+    width: number = 1
+
+    --- Caller-writable. Sets the height as a fraction of the frame.
+    height: number = 1
+
+    --- Caller-writable. Sets composition order; equal orders use entity ID.
+    order: integer = 0
+
+    --- Caller-writable. Enables this viewport.
+    enabled: boolean = true
+end
+
+export type Options = {
+    camera2D: rendercomponents.Camera2D?,
+    camera3D: tecs.gfx.camera3d.Camera3D?,
+    lighting: meshes.Lighting?,
+    x: number?,
+    y: number?,
+    width: number?,
+    height: number?,
+    order: integer?,
+    enabled: boolean?
+}
+
+export function validate(value: View): nil
+    assert(value.camera2D ~= nil or value.camera3D ~= nil, "View requires a 2D or 3D camera")
+    assert(
+        value.x >= 0
+        and value.y >= 0
+        and value.width > 0
+        and value.height > 0
+        and value.x
+        + value.width <= 1
+        and value.y
+        + value.height <= 1,
+        "View viewport must be positive and contained within the frame"
+    )
+end
+
+export function make(options: Options): View
+    const value = new View(
+        camera2D = options.camera2D,
+        camera3D = options.camera3D,
+        lighting = options.lighting ?? new meshes.Lighting(),
+        x = options.x ?? 0,
+        y = options.y ?? 0,
+        width = options.width ?? 1,
+        height = options.height ?? 1,
+        order = options.order ?? 0,
+        enabled = options.enabled ?? true
+    )
+    validate(value)
+
+    return value
+end
+
+export const Component: components.TableComponent<View> = components.newComponent({
+    name = "View",
+    construct = make,
+    save = function(value: View): any
+        const c2, c3 = value.camera2D, value.camera3D
+        return {
+            lighting = value.lighting,
+            x = value.x,
+            y = value.y,
+            width = value.width,
+            height = value.height,
+            order = value.order,
+            enabled = value.enabled,
+            camera2D = c2 ~= nil and {x = c2.x, y = c2.y, zoom = c2.zoom, rotation = c2.rotation} or nil,
+            camera3D = c3 ~= nil and {
+                x = c3.x,
+                y = c3.y,
+                z = c3.z,
+                rotationX = c3.rotationX,
+                rotationY = c3.rotationY,
+                rotationZ = c3.rotationZ,
+                rotationW = c3.rotationW,
+                verticalFov = c3.verticalFov,
+                near = c3.near,
+                far = c3.far
+            } or nil
+        }
+    end,
+    load = function(value: any): View
+        const saved = value as {[string]: any}
+        const c2 = saved.camera2D as {
+            x: number,
+            y: number,
+            zoom: number,
+            rotation: number
+        }?
+        const c3 = saved.camera3D as tecs.gfx.camera3d.Options?
+
+        return make({
+            lighting = saved.lighting as meshes.Lighting?,
+            x = saved.x as number,
+            y = saved.y as number,
+            width = saved.width as number,
+            height = saved.height as number,
+            order = saved.order as integer,
+            enabled = saved.enabled as boolean,
+            camera2D = c2 ~= nil and new rendercomponents.Camera2D(c2.x, c2.y, c2.zoom, c2.rotation) or nil,
+            camera3D = c3 ~= nil and tecs.gfx.camera3d.newCamera3D(c3) or nil
+        })
+    end,
+    default = function(): View
+        return new View(camera2D = new rendercomponents.Camera2D(0, 0, 1, 0), lighting = new meshes.Lighting())
+    end,
+})

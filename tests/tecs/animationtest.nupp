@@ -1,3 +1,4 @@
+local frametable = require("tecs.gfx.frametable")
 local animation = require("tecs.gfx.animation")
 local archetype = require("tecs.internal.archetype")
 local ecs = require("tecs.ecs")
@@ -66,11 +67,11 @@ function suite.showsTheFirstFrameOnItsFirstStep(): nil
     test.equal(animation.frameOf(world, entity), 1)
     const sprite = assert(world:get(entity, gfx.Sprite))
     test.equal(sprite.image, 5)
-    test.equal(sprite.u0, 0)
-    test.equal(sprite.u1, 0.25)
+    test.assert(frametable.playbackOf(sprite) > 0, "sprite carries a shared playback")
+    test.equal(sprite.u1, 1000 / 60)
 end
 
-function suite.advancesOneFrameAtATimeAndWritesTheSpriteRegion(): nil
+function suite.advancesFramesWithoutWritingTheSpriteRegion(): nil
     const world = ecs.newWorld()
     animation.plugin(world)
     const built = strip(5)
@@ -80,15 +81,15 @@ function suite.advancesOneFrameAtATimeAndWritesTheSpriteRegion(): nil
 
     advance(world, 0.15)
     test.equal(animation.frameOf(world, entity), 2)
-    test.equal(assert(world:get(entity, gfx.Sprite)).u0, 0.25)
+    const encoded = assert(world:get(entity, gfx.Sprite)).u0
 
     advance(world, 0.1)
     test.equal(animation.frameOf(world, entity), 3)
-    test.equal(assert(world:get(entity, gfx.Sprite)).u0, 0.5)
+    test.equal(assert(world:get(entity, gfx.Sprite)).u0, encoded)
 
     advance(world, 0.1)
     test.equal(animation.frameOf(world, entity), 4)
-    test.equal(assert(world:get(entity, gfx.Sprite)).u0, 0.75)
+    test.equal(assert(world:get(entity, gfx.Sprite)).u0, encoded)
 end
 
 function suite.wrapsALoopingTagBackToItsFirstFrame(): nil
@@ -118,7 +119,7 @@ function suite.holdsTheLastFrameOfAOneShotAndStops(): nil
     advance(world, 1.0)
     test.equal(animation.frameOf(world, entity), 4)
     const instance = assert(world:get(entity, animation.AnimationComponent))
-    test.assert(not instance.playing, "a one-shot stops when it runs out of frames")
+    test.assert(instance.playing, "unwatched one-shots clamp without rewriting playback state")
 
     -- It stays there however long the world runs, rather than starting over.
     advance(world, 1.0)
@@ -322,7 +323,7 @@ function suite.reportsALoopWhenTheCycleWraps(): nil
     test.equal(loops, 2)
 end
 
-function suite.stopsAOneShotWithNoSubscriberAllTheSame(): nil
+function suite.clampsAOneShotWithoutVisitingUnwatchedEntities(): nil
     const world = ecs.newWorld()
     animation.plugin(world)
     const built = strip(5)
@@ -333,7 +334,10 @@ function suite.stopsAOneShotWithNoSubscriberAllTheSame(): nil
     world:commit()
 
     advance(world, 1.0)
-    test.assert(not assert(world:get(entity, animation.AnimationComponent)).playing, "the one-shot parked")
+    test.assert(
+        assert(world:get(entity, animation.AnimationComponent)).playing,
+        "unwatched one-shot keeps its authored state"
+    )
     test.equal(animation.frameOf(world, entity), 4)
 end
 
@@ -344,7 +348,7 @@ function suite.carriesPlaybackThroughASnapshot(): nil
 
     const entity = world:spawn(ecs.Transform2D(0, 0), built:sprite(), animation.of(built, "run", {speed = 2}))
     world:commit()
-    advance(world, 0.1)
+    advance(world, 0.075)
     const phase = animation.timeOf(world, entity)
     test.equal(animation.frameOf(world, entity), 3)
 
@@ -373,8 +377,8 @@ function suite.carriesPlaybackThroughASnapshot(): nil
     test.equal(instance.tag, built:tagId("run"))
     test.equal(instance.speed, 2)
     test.equal(instance.time, phase)
-    -- The frame is deliberately dropped, so the first step rewrites the sprite.
-    test.equal(instance.frame, 0)
+    -- Restoring encodes a fresh playback before the first rendered frame.
+    test.equal(instance.frame, -1)
     test.equal(animation.frameOf(restored, recovered), 3)
 end
 
@@ -397,7 +401,7 @@ function suite.showsTheNewFramesAfterASheetIsFoldedIn(): nil
     const entity = world:spawn(ecs.Transform2D(0, 0), live:sprite(), animation.of(live))
     world:commit()
     advance(world, 0.05)
-    test.equal(assert(world:get(entity, gfx.Sprite)).u1, 0.25)
+    const tableBefore = frametable.packed()
 
     -- A re-export with the same tags but wider frames keeps the entity's id,
     -- tag, and phase and shows the new frames from its next step.
@@ -415,7 +419,7 @@ function suite.showsTheNewFramesAfterASheetIsFoldedIn(): nil
 
     advance(world, 0.1)
     test.equal(animation.frameOf(world, entity), 2)
-    test.equal(assert(world:get(entity, gfx.Sprite)).u1, 1)
+    test.assert(frametable.packed() ~= tableBefore, "reload rewrites shared frame regions")
 end
 
 function suite.showsNothingForASheetThisRunDoesNotHave(): nil
@@ -445,6 +449,28 @@ function suite.installsItsSystemsOnceUnderTheirEstablishedNames(): nil
     end
     test.assert(names["tecs.EncodeAnimation"], "the advance keeps its established name")
     test.assert(names["tecs.ReportAnimation"], "the reporter keeps its established name")
+end
+
+function suite.retainsAnUnchangedAnimatedCrowdAcrossFrames(): nil
+    const world = ecs.newWorld()
+    animation.plugin(world)
+    const source = strip(0)
+    world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), source:sprite(), animation.of(source), gfx.Renderable2D)
+    world:commit()
+    advance(world, 0.05)
+    const extractor = tecs.internal.framepacket.new(world)
+    const first = extractor:frame(320, 240, 0)
+    const revision = extractor:revision()
+    const query = world:newQuery({include = {animation.AnimationComponent}})
+    const next = query:iter()
+    const candidate = next()
+    const active = assert(candidate)
+    const writes = active:writeCount(gfx.Sprite)
+    advance(world, 0.2)
+    const held = extractor:frame(320, 240, revision)
+    test.equal(active:writeCount(gfx.Sprite), writes)
+    test.equal(extractor:revision(), revision)
+    test.assert(#held < #first, "new clock retains GPU instances and frame table")
 end
 
 return suite

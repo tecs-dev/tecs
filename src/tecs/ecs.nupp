@@ -805,3 +805,9 @@ end
 export function declaredComponents(): {[string]: Component}
     return components.declared()
 end
+
+--- Places an entity in a right-handed 3D world using a quaternion and per-axis scale.
+export type Transform3D = tecs.internal.meshcomponents.Transform3D
+
+--- Constructs a 3D transform, defaulting to the identity at the origin.
+export const Transform3D = tecs.internal.meshcomponents.Transform3DComponent

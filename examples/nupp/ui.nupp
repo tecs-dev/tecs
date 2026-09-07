@@ -83,7 +83,9 @@ local function backdrop(exclusive app: tecs.application.Application): nil
             for candidate, count in spinning:iter() do
                 const transforms = assert(candidate:getMut(tecs.ecs.Transform2D))
                 for row = 1, count as integer do
-                    transforms[row].rotation = transforms[row].rotation + dt * 1.5
+                    unsafe do
+                        transforms[row].rotation = transforms[row].rotation + dt * 1.5
+                    end
                 end
             end
             local index = 0
@@ -91,8 +93,10 @@ local function backdrop(exclusive app: tecs.application.Application): nil
                 const transforms = assert(candidate:getMut(tecs.ecs.Transform2D))
                 for row = 1, count as integer do
                     const angle = elapsed * 0.6 + index * 2.094
-                    transforms[row].x = width * (0.5 + 0.3 * math.cos(angle))
-                    transforms[row].y = height * (0.5 + 0.3 * math.sin(angle))
+                    unsafe do
+                        transforms[row].x = width * (0.5 + 0.3 * math.cos(angle))
+                        transforms[row].y = height * (0.5 + 0.3 * math.sin(angle))
+                    end
                     index = index + 1
                 end
             end

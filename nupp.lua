@@ -1,6 +1,7 @@
 -- Nupp owns the development workflow; Cargo only builds native artifacts.
 local developmentTasks = {}
 local descriptions = {
+    fetch = "Fetch and prepare the pinned Sponza or Bistro example assets",
     deps = "Install the development formatters",
     run = "Build and run a game component through the native host",
     bench = "Run an optimized benchmark or performance acceptance",
@@ -21,6 +22,18 @@ end
 for _, name in ipairs({
     "host",
     "flatcolor",
+    "views",
+    "postprocess",
+    "gltf3d",
+    "skinning3d",
+    "morph3d",
+    "shadows3d",
+    "sponza3d",
+    "bistro3d",
+    "animated3d",
+    "scene3d",
+    "ibl3d",
+    "particles",
     "sprites",
     "lighting",
     "nativesmoke",
@@ -102,6 +115,7 @@ local hostExports = {
     "tecs.host.imageCommandResult",
     "tecs.host.nextCapture",
     "tecs.host.captureResult",
+    "tecs.host.nextModelUpload",
 }
 
 local flatcolorExports = {}
@@ -109,6 +123,61 @@ for index = 1, #hostExports do
     flatcolorExports[index] = hostExports[index]
 end
 flatcolorExports[#flatcolorExports + 1] = "flatcolor.create"
+
+local viewsExports, postprocessExports = {}, {}
+for index = 1, #hostExports do
+    viewsExports[index] = hostExports[index]
+    postprocessExports[index] = hostExports[index]
+end
+viewsExports[#viewsExports + 1] = "views.create"
+postprocessExports[#postprocessExports + 1] = "postprocess.create"
+
+local scene3dExports, ibl3dExports, particlesExports = {}, {}, {}
+for index = 1, #hostExports do
+    scene3dExports[index], ibl3dExports[index], particlesExports[index] =
+        hostExports[index], hostExports[index], hostExports[index]
+end
+scene3dExports[#scene3dExports + 1] = "scene3d.create"
+ibl3dExports[#ibl3dExports + 1] = "ibl3d.create"
+particlesExports[#particlesExports + 1] = "particles.create"
+local gltf3dExports = {}
+for index = 1, #hostExports do
+    gltf3dExports[index] = hostExports[index]
+end
+gltf3dExports[#gltf3dExports + 1] = "gltf3d.create"
+
+local skinning3dExports = {}
+for index = 1, #hostExports do
+    skinning3dExports[index] = hostExports[index]
+end
+skinning3dExports[#skinning3dExports + 1] = "skinning3d.create"
+
+local morph3dExports = {}
+for index = 1, #hostExports do
+    morph3dExports[index] = hostExports[index]
+end
+morph3dExports[#morph3dExports + 1] = "morph3d.create"
+
+local shadows3dExports = {}
+for index = 1, #hostExports do
+    shadows3dExports[index] = hostExports[index]
+end
+shadows3dExports[#shadows3dExports + 1] = "shadows3d.create"
+local sponza3dExports = {}
+for index = 1, #hostExports do
+    sponza3dExports[index] = hostExports[index]
+end
+sponza3dExports[#sponza3dExports + 1] = "sponza3d.create"
+local bistro3dExports = {}
+for index = 1, #hostExports do
+    bistro3dExports[index] = hostExports[index]
+end
+bistro3dExports[#bistro3dExports + 1] = "bistro3d.create"
+local animated3dExports = {}
+for index = 1, #hostExports do
+    animated3dExports[index] = hostExports[index]
+end
+animated3dExports[#animated3dExports + 1] = "animated3d.create"
 
 local spritesExports = {}
 for index = 1, #hostExports do
@@ -177,6 +246,11 @@ return {
                     "tecs.files",
                     "tecs.gfx",
                     "tecs.gfx.animation",
+                    "tecs.gfx.frametable",
+                    "tecs.gfx.particles",
+                    "tecs.gfx.camera3d",
+                    "tecs.gfx.flycamera3d",
+                    "tecs.gfx.models",
                     "tecs.gfx.clips",
                     "tecs.internal.tilechunk",
                     "tecs.gfx.fonts",
@@ -211,6 +285,11 @@ return {
                     "tecs.internal.events",
                     "tecs.internal.framepump",
                     "tecs.internal.framepacket",
+                    "tecs.internal.views",
+                    "tecs.internal.meshcomponents",
+                    "tecs.internal.meshregistry",
+                    "tecs.internal.meshpacket",
+                    "tecs.internal.viewpacket",
                     "tecs.internal.dirtyranges",
                     "tecs.internal.hostcancellation",
                     "tecs.internal.idallocator",
@@ -256,6 +335,90 @@ return {
                 description = "Build the animated flat-color Nupp example",
                 entries = { "tecs.host", "flatcolor" },
                 exports = flatcolorExports,
+            },
+            ["ex-views"] = {
+                kind = "component",
+                output = "out/nupp/views.nuppc",
+                description = "Build the split-screen camera example",
+                entries = { "tecs.host", "views" },
+                exports = viewsExports,
+            },
+            ["ex-postprocess"] = {
+                kind = "component",
+                output = "out/nupp/postprocess.nuppc",
+                description = "Build the custom WGSL color-grading example",
+                entries = { "tecs.host", "postprocess" },
+                exports = postprocessExports,
+            },
+            ["ex-scene3d"] = {
+                kind = "component",
+                output = "out/nupp/scene3d.nuppc",
+                description = "Build the scene3d showcase",
+                entries = { "tecs.host", "scene3d" },
+                exports = scene3dExports,
+            },
+            ["ex-ibl3d"] = {
+                kind = "component",
+                output = "out/nupp/ibl3d.nuppc",
+                description = "Build the ibl3d showcase",
+                entries = { "tecs.host", "ibl3d" },
+                exports = ibl3dExports,
+            },
+            ["ex-particles"] = {
+                kind = "component",
+                output = "out/nupp/particles.nuppc",
+                description = "Build the particles showcase",
+                entries = { "tecs.host", "particles" },
+                exports = particlesExports,
+            },
+            ["ex-gltf3d"] = {
+                kind = "component",
+                output = "out/nupp/gltf3d.nuppc",
+                description = "Build the original gltf3d example",
+                entries = { "tecs.host", "gltf3d" },
+                exports = gltf3dExports,
+            },
+            ["ex-skinning3d"] = {
+                kind = "component",
+                output = "out/nupp/skinning3d.nuppc",
+                description = "Build the original skinning3d example",
+                entries = { "tecs.host", "skinning3d" },
+                exports = skinning3dExports,
+            },
+            ["ex-morph3d"] = {
+                kind = "component",
+                output = "out/nupp/morph3d.nuppc",
+                description = "Build the original morph3d example",
+                entries = { "tecs.host", "morph3d" },
+                exports = morph3dExports,
+            },
+            ["ex-shadows3d"] = {
+                kind = "component",
+                output = "out/nupp/shadows3d.nuppc",
+                description = "Build the original shadows3d example",
+                entries = { "tecs.host", "shadows3d" },
+                exports = shadows3dExports,
+            },
+            ["ex-sponza3d"] = {
+                kind = "component",
+                output = "out/nupp/sponza3d.nuppc",
+                description = "Build the original sponza3d example",
+                entries = { "tecs.host", "sponza3d" },
+                exports = sponza3dExports,
+            },
+            ["ex-bistro3d"] = {
+                kind = "component",
+                output = "out/nupp/bistro3d.nuppc",
+                description = "Build the original bistro3d example",
+                entries = { "tecs.host", "bistro3d" },
+                exports = bistro3dExports,
+            },
+            ["ex-animated3d"] = {
+                kind = "component",
+                output = "out/nupp/animated3d.nuppc",
+                description = "Build the animated glTF hero and morph-cube showcase",
+                entries = { "tecs.host", "animated3d" },
+                exports = animated3dExports,
             },
             ["ex-sprites"] = {
                 kind = "component",

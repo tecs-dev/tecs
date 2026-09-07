@@ -1,0 +1,114 @@
+module sponza3d
+
+local function install(exclusive app: tecs.application.Application): nil
+    const world, input = app.world, app.input
+    const camera = tecs.gfx.newCamera3D()
+    const lighting = tecs.gfx.meshes.newLighting()
+    world:spawn(tecs.gfx.View({camera3D = camera, lighting = lighting}))
+    -- Sponza's long gallery runs along X. Start inside it and look toward the
+    -- center rather than placing the camera outside its positive-Z wall.
+    camera.x = 6.0
+    camera.y = 2.5
+    camera.z = 0.0
+    camera.rotationY = math.sin(math.rad(90) * 0.5)
+    camera.rotationW = math.cos(math.rad(90) * 0.5)
+    camera.verticalFov = math.rad(58)
+    camera.near = 0.1
+    camera.far = 120
+
+    local controller = tecs.gfx.flycamera3d.new(input, app.window, camera, {moveSpeed = 5, sprintMultiplier = 4})
+    world:addSystem({
+        name = "example.SponzaFlyCamera",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number): nil
+            controller:update(dt)
+        end,
+    })
+
+    local pointColors: {
+        {number}
+    } = {{-8, 4.0, 1.5, 1.0, 0.48, 0.20}, {0, 4.5, -1.0, 0.25, 0.52, 1.0}, {8, 4.0, 1.5, 1.0, 0.32, 0.16},}
+    for _, light in ipairs(pointColors) do
+        world:spawn(
+            tecs.ecs.Transform3D(light[1], light[2], light[3], 0, 0, 0, 1, 1, 1, 1),
+            tecs.gfx.PointLight3D(13, light[4], light[5], light[6], 6)
+        )
+    end
+    world:spawn(
+        tecs.ecs.Transform3D(0, 11, -2, math.sin(math.rad(-90) * 0.5), 0, 0, math.cos(math.rad(-90) * 0.5), 1, 1, 1),
+        tecs.gfx.SpotLight3D(20, math.rad(18), math.rad(32), 0.75, 0.85, 1.0, 8)
+    )
+
+    lighting.ambient = 0
+    lighting.probe = {
+        0.08,
+        0.09,
+        0.11,
+        0.08,
+        0.09,
+        0.11,
+        0.08,
+        0.09,
+        0.11,
+        0.08,
+        0.09,
+        0.11,
+        0.08,
+        0.09,
+        0.11,
+        0.08,
+        0.09,
+        0.11
+    }
+    lighting.fog, lighting.fogStart, lighting.fogFinish = true, 45, 90
+    lighting.fogR, lighting.fogG, lighting.fogB = 0.07, 0.09, 0.13
+    lighting.shadows, lighting.shadowDistance = true, 42
+    lighting.directionX, lighting.directionY, lighting.directionZ = -0.35, -1, -0.25
+    lighting.r, lighting.g, lighting.b, lighting.intensity = 1, 0.88, 0.72, 1
+    lighting.shadowStrength, lighting.shadowSoftness = 0.75, 1.5
+    tecs.gfx.lighting.setBloom({threshold = 0.55, knee = 0.18, intensity = 0.9})
+    const loaded = assert(
+        tecs.gfx.models.load(tecs.files.assetPath("external/sponza/Sponza.tecs.gltf"), {
+            material = function(exclusive value: tecs.gfx.models.MaterialInfo): nil
+                value.model, value.metallic, value.roughness = tecs.gfx.models.MATERIAL_LAMBERT, 0, 1
+            end,
+        })
+    )
+    const instance = loaded:newInstance()
+    for _, primitive in ipairs(instance.primitives) do
+        world:spawn(
+            primitive.transform,
+            primitive.mesh,
+            primitive.bounds,
+            primitive.material,
+            tecs.gfx.Tint(1, 1, 1, 1),
+            tecs.gfx.Renderable3D
+        )
+    end
+    print(("sponza3d: loaded %d cullable primitives under point and spot lights"):format(#instance.primitives))
+    print("sponza3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
+end
+
+--- Creates the Tecs Sponza lighting example.
+--- @param title optional title
+--- @param width logical width
+--- @param height logical height
+--- @param debug guarded failures
+--- @param maxFrames optional frame limit
+--- @return native host session
+export function create(
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?
+): tecs.host.Session
+    return tecs.host.createWithPlugin(
+        install,
+        title or "Tecs Sponza lighting",
+        width or 1280,
+        height or 720,
+        debug,
+        maxFrames
+    )
+end

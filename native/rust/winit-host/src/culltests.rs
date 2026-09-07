@@ -257,6 +257,10 @@ impl Harness {
         }))
         .ok()?;
         let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor {
+            required_limits: wgpu::Limits {
+                max_storage_buffers_per_shader_stage: 9,
+                ..Default::default()
+            },
             label: Some("tecs cull test"),
             ..Default::default()
         }))
@@ -409,12 +413,22 @@ impl Harness {
                     count: None,
                 },
                 entry(8, true),
+                entry(9, true),
             ],
+        });
+        let frames = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("test empty frame table"),
+            contents: &[0; 4],
+            usage: BufferUsages::STORAGE,
         });
         let group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("cull group"),
             layout: &layout,
             entries: &[
+                BindGroupEntry {
+                    binding: 9,
+                    resource: frames.as_entire_binding(),
+                },
                 BindGroupEntry {
                     binding: 0,
                     resource: instance_buffer.as_entire_binding(),

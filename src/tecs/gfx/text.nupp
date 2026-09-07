@@ -45,7 +45,7 @@ despawns the restored ones on its next run because no live text owns them, so a
 loaded world rebuilds its text rather than doubling it.
 
 A layout reserves missing glyphs in one batch and initializes their native
-component columns at the following barrier. Existing glyphs retain their IDs;
+component columns at the following barrier. Existing glyphs retain their IDs
 shortening a label releases only its surplus, and unchanged labels do no layout
 or glyph-creation work.
 ]]
@@ -455,7 +455,7 @@ local placedCount: integer = 0
 --- Composes the text's own transform into every glyph, because a glyph entity
 --- carries an absolute position rather than a parent.
 --- @return the number of placed glyphs
-local function place(item: Text, font: fonts.Font, transform: rendercomponents.Transform2D): integer
+local function place(item: Text, font: fonts.Font, borrows transform: rendercomponents.Transform2D): integer
     const size = item.size
     const width, height = shape(font, item.text, item.wrapWidth, size)
     item.width = width * size
@@ -553,11 +553,17 @@ local function stateFor(exclusive world: ecs.World): Install
 end
 
 --- Reports whether `item` differs from what its glyphs were built from.
+local neutralTint = carray(rendercomponents.Tint, 1)
+
+unsafe do
+    neutralTint[0] = new rendercomponents.Tint(1, 1, 1, 1)
+end
+
 local function stale(
     built: Built?,
     item: Text,
-    transform: rendercomponents.Transform2D,
-    tint: rendercomponents.Tint?
+    borrows transform: rendercomponents.Transform2D,
+    borrows tint: rendercomponents.Tint?
 ): boolean
     if built == nil then
         return true
@@ -594,7 +600,7 @@ local function remember(
     state: Install,
     entity: integer,
     item: Text,
-    transform: rendercomponents.Transform2D,
+    borrows transform: rendercomponents.Transform2D,
     r: number,
     g: number,
     b: number,
@@ -853,12 +859,13 @@ local function run(exclusive world: ecs.World, state: Install): nil
                 ] = assert(active:get(rendercomponents.Transform2DComponent))
                 -- Absent on a text nobody tinted, which is one test for the whole
                 -- archetype rather than one per row.
-                const tints = active:get(rendercomponents.TintComponent) as rendercomponents.Tint[?]?
+                const authoredTints = active:get(rendercomponents.TintComponent) as rendercomponents.Tint[?]?
+                const tints = authoredTints or neutralTint
                 for index = 1, rows do
                     const entity = active.entities[index]
                     const item = column[index]
                     const transform = transforms[index]
-                    const tint = tints ~= nil and tints[index] or nil
+                    const tint = tints[authoredTints ~= nil and index or 0]
                     if repacked or stale(state.built[entity], item, transform, tint) then
                         local r, g, b, a = 1.0, 1.0, 1.0, 1.0
                         if tint ~= nil then

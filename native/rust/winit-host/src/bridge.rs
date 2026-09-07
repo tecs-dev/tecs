@@ -29,6 +29,7 @@ const EXPORT_NAMES: &[&str] = &[
     "tecs.host.imageCommandResult",
     "tecs.host.nextCapture",
     "tecs.host.captureResult",
+    "tecs.host.nextModelUpload",
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -142,6 +143,7 @@ struct Exports {
     image_command_result: ManagedHandle,
     next_capture: ManagedHandle,
     capture_result: ManagedHandle,
+    next_model_upload: ManagedHandle,
 }
 
 pub struct Bridge {
@@ -512,6 +514,19 @@ impl Bridge {
         }))
     }
 
+    pub fn next_model_upload(&mut self) -> Result<Option<(u32, Vec<u8>)>> {
+        let values = self.call(self.exports.next_model_upload, &[])?;
+        let id = required_number(&values, 0, "model id")? as u32;
+        if id == 0 {
+            return Ok(None);
+        }
+        let data = match values.get(1) {
+            Some(ManagedValue::Bytes(bytes)) => bytes.clone(),
+            _ => bail!("model upload has no geometry bytes"),
+        };
+        Ok(Some((id, data)))
+    }
+
     pub fn next_capture(&mut self) -> Result<Option<u64>> {
         let values = self.call(self.exports.next_capture, &[])?;
         let id = exact_u64(
@@ -647,6 +662,7 @@ impl Exports {
             image_command_result: handles[22],
             next_capture: handles[23],
             capture_result: handles[24],
+            next_model_upload: handles[25],
         })
     }
 }

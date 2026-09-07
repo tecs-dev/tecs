@@ -349,7 +349,7 @@ end
 --- Appends live rows directly to the buffer without intermediate strings.
 export function writeRows(storage: Storage, column: any, first: integer, count: integer, output: buffer.Buffer): nil
     const pointer, bytes = rowBytes(storage, column, first, count)
-    output:putcdata(pointer as voidptr, bytes as uint64)
+    output:putcdata(pointer as voidptr, bytes)
 end
 
 --- Validates the entire range before consuming bytes or touching the destination.

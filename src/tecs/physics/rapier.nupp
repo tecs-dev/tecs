@@ -476,7 +476,7 @@ export function create(options: contract.Options?): contract.Simulation
         return def.sensor and COLLIDER_SENSOR or 0
     end
 
-    local function writeColliderDef(target: TecsPhysicsColliderDef, def: contract.ColliderDef): nil
+    local function writeColliderDef(exclusive target: TecsPhysicsColliderDef, def: contract.ColliderDef): nil
         target.entity = def.entity as uint64
         target.shape = def.shape as uint32
         target.flags = colliderFlags(def) as uint32
@@ -930,51 +930,61 @@ export function create(options: contract.Options?): contract.Simulation
     end
 
     --- Returns the state slot for a live body, or nil for a stale handle.
-    local function slotOf(index1: integer, generation: integer): TecsPhysicsBodyState?
+    local function liveSlot(index1: integer, generation: integer): integer?
         if index1 < 1 or index1 > buffers.stateCount then
             return nil
         end
         unsafe do
-            local slot = buffers.states[index1 - 1]
-            if (tonumber(slot.flags) as integer) & STATE_LIVE == 0 then
+            const slot = buffers.states[index1 - 1]
+            if (
+                tonumber(slot.flags) as integer
+            ) & STATE_LIVE == 0 or (tonumber(slot.generation) as integer) ~= generation then
                 return nil
             end
-            if (tonumber(slot.generation) as integer) ~= generation then
-                return nil
-            end
-
-            return slot
         end
+
+        return index1 - 1
     end
 
     local function isLive(index1: integer, generation: integer): boolean
-        return slotOf(index1, generation) ~= nil
+        return liveSlot(index1, generation) ~= nil
     end
 
     local function isAwake(index1: integer, generation: integer): boolean
-        local slot = slotOf(index1, generation)
-
-        return slot ~= nil and (tonumber(slot.flags) as integer) & STATE_AWAKE ~= 0
+        const index = liveSlot(index1, generation)
+        if index == nil then
+            return false
+        end
+        unsafe do
+            return (tonumber(buffers.states[index].flags) as integer) & STATE_AWAKE ~= 0
+        end
     end
 
     local function poseOf(index1: integer, generation: integer): (number?, number, number, number)
-        local slot = slotOf(index1, generation)
-        if slot == nil or (tonumber(slot.flags) as integer) & STATE_MOVED == 0 then
+        const index = liveSlot(index1, generation)
+        if index == nil then
             return nil, 0, 0, 0
         end
-
-        return tonumber(
-            slot.x
-        ) as number, tonumber(slot.y) as number, tonumber(slot.cosine) as number, tonumber(slot.sine) as number
+        unsafe do
+            const slot = buffers.states[index]
+            if (tonumber(slot.flags) as integer) & STATE_MOVED == 0 then
+                return nil, 0, 0, 0
+            end
+            return tonumber(
+                slot.x
+            ) as number, tonumber(slot.y) as number, tonumber(slot.cosine) as number, tonumber(slot.sine) as number
+        end
     end
 
     local function velocityOf(index1: integer, generation: integer): (number, number, number)
-        local slot = slotOf(index1, generation)
-        if slot == nil then
+        const index = liveSlot(index1, generation)
+        if index == nil then
             return 0, 0, 0
         end
-
-        return tonumber(slot.vx) as number, tonumber(slot.vy) as number, tonumber(slot.omega) as number
+        unsafe do
+            const slot = buffers.states[index]
+            return tonumber(slot.vx) as number, tonumber(slot.vy) as number, tonumber(slot.omega) as number
+        end
     end
 
     local function eventCount(): integer

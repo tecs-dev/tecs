@@ -6,9 +6,9 @@ Fixed-step sprite-sheet playback.
 A [`Sheet`](tecs.gfx.sheet.Sheet) divides one image into frames and
 names frame spans with tags. An `Animation` selects a sheet and a tag and
 carries the speed, the loop flag, and where the cycle has got to. Playback
-advances on the fixed clock and writes the frame it resolves into the entity's
-[`Sprite`](tecs.gfx.Sprite), so two machines fed the same fixed steps
-select the same frames.
+advances on the fixed clock. The GPU resolves the shared frame table from the
+entity's [`Sprite`](tecs.gfx.Sprite) playback encoding, so clean animated crowds
+perform no per-entity CPU work or instance uploads as frames change.
 
 ```nupp
 const hero = tecs.gfx.sheet.grid({
@@ -41,8 +41,8 @@ nothing.
 `Completed` fires once when a one-shot passes its last frame, and `Looped` fires
 when a looping tag wraps. Both reach only entities carrying `AnimationEvents`,
 so a game watches a handful of animations without walking the rest of an
-animated crowd. `Completed` also stops playback and holds the last frame,
-whether or not anything is listening.
+animated crowd. `Completed` also clears `playing` on watched entities. Unwatched one-shots
+clamp to the last frame entirely on the GPU.
 
 # Reloads
 
@@ -57,6 +57,7 @@ local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
 local rendercomponents = require("tecs.internal.rendercomponents")
 local sheet = require("tecs.gfx.sheet")
+local frametable = require("tecs.gfx.frametable")
 
 const SpriteComponent = rendercomponents.SpriteComponent
 
@@ -66,11 +67,9 @@ export const DEFAULT_SPEED: number = 1.0
 
 --- What `Animation.crossed` holds when the last step ended a cycle that
 --- repeats.
-const CROSSED_LOOPED: integer = 1
 
 --- What `Animation.crossed` holds when the last step ended a cycle that does
 --- not.
-const CROSSED_COMPLETED: integer = 2
 
 --- Stores playback state for one entity.
 ---
@@ -98,12 +97,12 @@ export struct Animation
     --- frame with a long duration, which no single rate can express.
     speed: number
 
-    --- Caller-writable. Carries the seconds into the cycle. Writing it seeks,
-    --- and the next fixed step resolves the frame from wherever it now points.
+    --- Caller-writable. Supplies the phase used when frame is zero. To seek,
+    --- write time and reset frame to zero. Read live phase with timeOf.
     time: number
 
-    --- Engine-owned. Reports the sheet frame the entity's `Sprite` was last
-    --- written from, and zero before playback has written one. Ordinary game
+    --- Engine-owned. Holds -1 for encoded GPU playback, or zero to request
+    --- re-encoding from time. Ordinary game
     --- code should call `frameOf`, which answers for an entity carrying no
     --- `Animation` too. Writing zero asks playback to rewrite the `Sprite`,
     --- which is what `play`, `restart`, `of`, and a restored snapshot do.
@@ -115,8 +114,8 @@ export struct Animation
     --- Caller-writable. Controls whether time advances.
     playing: boolean
 
-    --- Engine-owned. Records whether the last fixed step ended a cycle, so the
-    --- reporting system can emit without advancing anything a second time.
+    --- Engine-owned. Retains the serialized component layout; GPU playback
+    --- leaves this legacy event scratch field at zero.
     --- Ordinary game code should observe `Completed` and `Looped` instead. The
     --- reporting system clears it, and a snapshot drops it.
     crossed: integer
@@ -359,124 +358,101 @@ end
 -- Playback
 -------------------------------------------------------------------------------
 
---- Writes one frame's region into a sprite.
-local function showFrame(target: rendercomponents.Sprite, source: sheet.Sheet, frame: integer): nil
-    const u0, v0, u1, v1 = source:uv(frame)
-    target.image = source:boundImage()
-    target.u0 = u0
-    target.v0 = v0
-    target.u1 = u1
-    target.v1 = v1
+-- Playback keeps no per-frame entity cursor. Only changed archetype columns
+-- are encoded; the GPU and queries derive phase from one fixed-step clock.
+local record EncodedRun
+    structural: integer = -1
+    animation: integer = -1
+    sprite: integer = -1
+    pivot: integer = -1
+    sheets: integer = -1
+    timestep: number = -1
 end
-
---- Advances every playing animation by one fixed step and shows its frame.
----
---- The `Sprite` column is marked dirty once for the archetype and only when a
---- frame actually changed, because a crowd holding one frame writes nothing and
---- a dirty-gated consumer should not have to find that out per row.
-local function advance(query: ecs.Query, dt: number): nil
-    unsafe do
-        for candidate, count in query:iter() do
-            const active = candidate as archetype.Archetype
-            const animations: Animation[?] = assert(active:get(AnimationComponent))
-            const sprites: rendercomponents.Sprite[?] = assert(active:get(SpriteComponent))
-            local movedAnimation = false
-            local movedSprite = false
-            -- A crowd playing one cycle shares its sheet, and neighbouring rows
-            -- tend to as well.
-            local cachedId: integer = 0
-            local cached: sheet.Sheet? = nil
-
-            for row = 1, count as integer do
-                const instance = animations[row]
-                const sheetId = instance.sheet
-                if sheetId ~= cachedId then
-                    cached = sheet.byId(sheetId)
-                    cachedId = sheetId
-                end
-                const source = cached
-                if source ~= nil then
-                    const cycle = source:cycle(instance.tag)
-                    if instance.playing and instance.speed > 0.0 and cycle > 0.0 then
-                        if not movedAnimation then
-                            active:markComponentDirty(AnimationComponent)
-                            movedAnimation = true
-                        end
-                        local time = instance.time + dt * instance.speed
-                        if time >= cycle then
-                            if instance.loop then
-                                time = time % cycle
-                                instance.crossed = CROSSED_LOOPED
-                            else
-                                -- Held at the cycle's end, which is the last frame,
-                                -- rather than wrapped: a one-shot that finished
-                                -- shows what it finished on until something
-                                -- restarts it.
-                                time = cycle
-                                instance.playing = false
-                                instance.crossed = CROSSED_COMPLETED
-                            end
-                        end
-                        instance.time = time
-                    end
-
-                    const frame = source:frameAt(instance.tag, instance.time)
-                    if frame ~= instance.frame then
-                        if not movedAnimation then
-                            active:markComponentDirty(AnimationComponent)
-                            movedAnimation = true
-                        end
-                        if not movedSprite then
-                            active:markComponentDirty(SpriteComponent)
-                            movedSprite = true
-                        end
-                        instance.frame = frame
-                        showFrame(sprites[row], source, frame)
-                    end
-                end
-            end
-        end
+local function ticksOf(borrows sprite: rendercomponents.Sprite, clock: number): number
+    if sprite.u1 == 0 then
+        return sprite.v0
     end
+    return nupp.math.f32.narrow(nupp.math.f32.narrow(clock - sprite.v0) * sprite.u1)
 end
 
---- Emits `Completed` and `Looped` for the entities that asked for them.
----
---- Reads what the advance above already decided rather than recomputing it, so
---- an entity crossing its cycle costs one field per step and an entity that did
---- not costs a comparison.
----
---- The one write is clearing that record, which is declared once per archetype
---- rather than per row because a crowd that crossed nothing writes nothing.
---- Stopping a finished one-shot is the advance's, whether or not anything
---- observes, so `Completed` reports a stop that has already happened rather
---- than causing one.
-local function report(exclusive world: ecs.World, query: ecs.Query): nil
+local function encode(query: ecs.Query, borrows world: ecs.World, clock: number, runs: {[integer]: EncodedRun}): nil
+    const timestep = world:getFixedTiming()
+    const changedSheets = sheet.revision()
     unsafe do
         for candidate, count in query:iter() do
             const active = candidate as archetype.Archetype
-            const animations: Animation[?] = assert(active:get(AnimationComponent))
-            const entities = active.entities
-            local moved = false
-
-            for row = 1, count as integer do
-                const instance = animations[row]
-                const crossed = instance.crossed
-                if crossed ~= 0 then
-                    if not moved then
-                        active:markComponentDirty(AnimationComponent)
-                        moved = true
-                    end
-                    instance.crossed = 0
+            local run = runs[active.id]
+            if run == nil then
+                run = new EncodedRun()
+                runs[active.id] = run
+            end
+            if run.structural ~= active:structuralCount() or run.animation ~= active:writeCount(
+                AnimationComponent
+            ) or run.sprite ~= active:writeCount(
+                SpriteComponent
+            ) or run.sheets ~= changedSheets or run.timestep ~= timestep then
+                const pivots = active:get(sheet.Pivot)
+                const animations = assert(active:get(AnimationComponent))
+                const sprites = assert(active:get(SpriteComponent))
+                const held = archetype.has(active, ecs.Paused) or archetype.has(active, ecs.Disabled)
+                for row = 1, count as integer do
+                    const instance = animations[row]
                     const source = sheet.byId(instance.sheet)
                     if source ~= nil then
-                        const name = source:tagName(instance.tag)
-                        -- An emit with nobody observing constructs nothing, so the
-                        -- crowd without observers costs the registration count and
-                        -- two lookups here.
-                        if crossed == CROSSED_COMPLETED then
-                            world:emit(0, Completed, entities[row], source, name)
-                        else
-                            world:emit(0, Looped, entities[row], source, name)
+                        const target = sprites[row]
+                        const slice = pivots ~= nil and pivots[row].sheet == source.id and pivots[row].slice or 0
+                        const id = frametable.register(source, instance.tag, slice)
+                        local ticks = instance.time * frametable.TICK_HZ
+                        if instance.frame ~= 0 and frametable.playbackOf(target) ~= 0 then
+                            ticks = ticksOf(target, clock)
+                        end
+                        const rate = not held
+                            and instance.playing
+                            and instance.speed > 0
+                            and timestep
+                            * instance.speed
+                            * frametable.TICK_HZ
+                            or 0
+                        assert(rate == rate and rate < math.huge, "animation speed must be finite")
+                        target.image = source:boundImage()
+                        frametable.encode(target, id, rate > 0 and clock - ticks / rate or ticks, rate, instance.loop)
+                        instance.frame = -1
+                    end
+                end
+                active:markComponentDirty(SpriteComponent)
+                active:markComponentDirty(AnimationComponent)
+                run.structural, run.animation, run.sprite = active:structuralCount(), active:writeCount(
+                    AnimationComponent
+                ), active:writeCount(SpriteComponent)
+                run.sheets, run.timestep, run.pivot = changedSheets, timestep, active:writeCount(sheet.Pivot)
+            end
+        end
+    end
+end
+
+local function report(exclusive world: ecs.World, query: ecs.Query, before: number, after: number): nil
+    unsafe do
+        for candidate, count in query:iter() do
+            const active = candidate as archetype.Archetype
+            const animations = assert(active:get(AnimationComponent))
+            const sprites = assert(active:get(SpriteComponent))
+            for row = 1, count as integer do
+                const target = sprites[row]
+                const id = frametable.playbackOf(target)
+                if id ~= 0 and target.u1 > 0 then
+                    const cycle = frametable.tickCount(id)
+                    const from = math.max(0, ticksOf(target, before))
+                    const to = ticksOf(target, after)
+                    const instance = animations[row]
+                    const source = sheet.byId(instance.sheet)
+                    if cycle > 0 and source ~= nil and to > from then
+                        if not instance.loop and from < cycle and to >= cycle then
+                            instance.playing = false
+                            instance.time = cycle / frametable.TICK_HZ
+                            active:markComponentDirty(AnimationComponent)
+                            world:emit(0, Completed, active.entities[row], source, source:tagName(instance.tag))
+                        elseif instance.loop and math.floor(to / cycle) > math.floor(from / cycle) then
+                            world:emit(0, Looped, active.entities[row], source, source:tagName(instance.tag))
                         end
                     end
                 end
@@ -485,99 +461,139 @@ local function report(exclusive world: ecs.World, query: ecs.Query): nil
     end
 end
 
--------------------------------------------------------------------------------
--- Asking what an entity is showing
--------------------------------------------------------------------------------
+local function rebase(query: ecs.Query, clock: number, shift: number): nil
+    unsafe do
+        for candidate, count in query:iter() do
+            const active = candidate as archetype.Archetype
+            const sprites = assert(active:get(SpriteComponent))
+            local changed = false
+            for row = 1, count as integer do
+                const target = sprites[row]
+                const id = frametable.playbackOf(target)
+                if id ~= 0 and target.u1 > 0 then
+                    const cycle = frametable.tickCount(id)
+                    local ticks = ticksOf(target, clock + shift)
+                    ticks = target.v1 ~= 0 and ticks % cycle or math.min(ticks, cycle)
+                    target.v0 = clock - ticks / target.u1
+                    changed = true
+                end
+            end
+            if changed then
+                active:markComponentDirty(SpriteComponent)
+            end
+        end
+    end
+end
 
---- Returns an animation's position in its tag cycle.
---- @param world the world the entity lives in
+--- Returns elapsed seconds within an entity's animation cycle. The answer is
+--- derived from its start and the fixed clock; no component needs advancing.
+--- @param world the entity's world
 --- @param entity a live entity
---- @return the seconds into the cycle, which is zero for an entity carrying no
----     `Animation`
+--- @return cycle seconds, or zero without an animation
 export function timeOf(borrows world: ecs.World, entity: integer): number
     const instance = world:get(entity, AnimationComponent)
     if instance == nil then
-        return 0.0
+        return 0
     end
+    const target = world:get(entity, SpriteComponent)
+    if instance.frame == 0 or target == nil or frametable.playbackOf(target) == 0 then
+        return instance.time
+    end
+    const cycle = frametable.tickCount(frametable.playbackOf(target))
+    if cycle == 0 then
+        return instance.time
+    end
+    local ticks = ticksOf(target, frametable.clockOf(world))
+    ticks = instance.loop and ticks % cycle or math.max(0, math.min(ticks, cycle))
 
-    return instance.time
+    return ticks / frametable.TICK_HZ
 end
 
---- Returns the sheet frame an entity's animation shows.
----
---- The same frame the entity's [`Sprite`](tecs.gfx.Sprite) is sampling,
---- because playback writes both together. What a hitbox on frame five, a
---- footstep on frame three, or a muzzle on an animated hand asks for.
---- @param world the world the entity lives in
+--- Returns exactly the sheet frame selected by the shared GPU table.
+--- @param world the entity's world
 --- @param entity a live entity
---- @return a frame index into the whole sheet, counting from one, or zero for an
----     entity with nothing to play; an entity spawned this frame answers the
----     frame its phase names rather than waiting for the next fixed step
+--- @return the one-based sheet frame, or zero without a known sheet
 export function frameOf(borrows world: ecs.World, entity: integer): integer
     const instance = world:get(entity, AnimationComponent)
     if instance == nil then
         return 0
     end
-    if instance.frame ~= 0 then
-        return instance.frame
-    end
     const source = sheet.byId(instance.sheet)
     if source == nil then
         return 0
     end
+    const id = frametable.register(source, instance.tag)
 
-    return source:frameAt(instance.tag, instance.time)
+    return frametable.frameAt(id, timeOf(world, entity) * frametable.TICK_HZ, instance.loop)
 end
 
--------------------------------------------------------------------------------
--- Plugin
--------------------------------------------------------------------------------
-
 local installed: {[ecs.World]: boolean} = setmetatable({}, {__mode = "k"}) as {[ecs.World]: boolean}
+local record SavedPhase
+    entity: integer
+    time: number
+end
 
---- Adds the systems that drive playback.
----
---- Installing twice on the same world does nothing, so a world that animates
---- may install this itself rather than relying on the application having done
---- it.
----
---- Both systems run in `FixedPostUpdate`, which is what makes playback
---- deterministic: a frame runs the fixed phases zero times or several, and an
---- animation advances once per step either way, so two machines fed the same
---- steps show the same frames. `tecs.EncodeAnimation` advances every playing
---- animation and writes the frame it resolves into the entity's
---- [`Sprite`](tecs.gfx.Sprite). `tecs.ReportAnimation` then emits
---- `Completed` and `Looped` for the entities carrying `AnimationEvents`.
---- @param world the world receiving the playback systems
+--- Installs dirty-gated GPU playback and events for AnimationEvents entities.
+--- One-shots clamp on the GPU without a CPU visit; add AnimationEvents when
+--- game code needs Completed or the playing flag cleared. Installing twice is
+--- harmless. Snapshots save live phases and restore against a fresh clock.
+--- @param world the world receiving the animation systems
 export function plugin(exclusive world: ecs.World): nil
     if installed[world] then
         return
     end
     installed[world] = true
-
-    -- A paused entity holds its frame, so it is left out rather than tested per
-    -- row: moving in and out of `Paused` is an archetype move, which is what
-    -- decides the query.
-    const playing = world:newQuery({type = "logic", include = {AnimationComponent, SpriteComponent}})
+    const playing = world:newQuery({include = {AnimationComponent, SpriteComponent}})
     const subscribed = world:newQuery({include = {AnimationComponent, SpriteComponent, AnimationEvents}})
-
-    -- These two system names are a compatibility surface: the debug server
-    -- reports them and an agent selects on them.
+    local runs: {[integer]: EncodedRun} = {}
     world:addSystem({
         name = "tecs.EncodeAnimation",
         phase = ecs.phases.FixedPostUpdate,
-        run = function(dt: number, exclusive _running: ecs.World): nil
-            advance(playing, dt)
-        end,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            encode(playing, running, frametable.clockOf(running) - 1, runs)
+        end
     })
-    -- After the advance, and declared here rather than left to a game's
-    -- registration order, because what says an entity crossed its cycle is what
-    -- the advance just wrote.
     world:addSystem({
         name = "tecs.ReportAnimation",
         phase = ecs.phases.FixedPostUpdate,
         run = function(_dt: number, exclusive running: ecs.World): nil
-            report(running, subscribed)
+            const clock = frametable.clockOf(running)
+            report(running, subscribed, clock - 1, clock)
+        end
+    })
+    world:addSystem({
+        name = "tecs.RebaseAnimation",
+        phase = ecs.phases.FixedPostUpdate,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            const shift = frametable.rebaseClock(running)
+            if shift > 0 then
+                rebase(playing, frametable.clockOf(running), shift)
+            end
+        end
+    })
+    world:addSnapshotHandler({
+        name = "tecs.animation",
+        save = function(exclusive running: ecs.World): any
+            local phases: {SavedPhase} = {}
+            for candidate, count in playing:iter() do
+                const active = candidate as archetype.Archetype
+                for row = 1, count as integer do
+                    const entity = active.entities[row]
+                    phases[#phases + 1] = new SavedPhase(entity = entity, time = timeOf(running, entity))
+                end
+            end
+
+            return phases
         end,
+        load = function(exclusive running: ecs.World, stored: any): nil
+            for _, entry in ipairs(stored as {SavedPhase}) do
+                const value = running:getMut(entry.entity, AnimationComponent)
+                if value ~= nil then
+                    value.time, value.frame = entry.time, 0
+                end
+            end
+            runs = {}
+            encode(playing, running, frametable.clockOf(running), runs)
+        end
     })
 end

@@ -1,0 +1,160 @@
+module tecs.gfx.meshes
+
+--[[
+Per-view 3D lighting, shadows, ambient probes and environments.
+
+A [`View`](tecs.gfx.View) owns one lighting configuration. Directional rays,
+point lights and spotlights illuminate all mesh materials except unlit ones.
+Three texel-snapped directional cascades and a local-light shadow atlas retain
+their maps until the scene, camera or relevant settings change. Ambient cubes
+and environments are independent: one provides diffuse irradiance, the other
+roughness-dependent specular reflections and the sky.
+
+```nupp
+const lighting = tecs.gfx.meshes.newLighting()
+lighting.shadows = true
+lighting.ssao = true
+world:spawn(tecs.gfx.View({
+    camera3D = tecs.gfx.newCamera3D({y = 2, z = 6}),
+    lighting = lighting
+}))
+```
+]]
+
+--- Lights meshes with a directional source, optional fog and an ambient cube.
+--- A View owns these settings. Changes take effect on its next rendered frame.
+@derive(nupp.derive.Debug, nupp.derive.Serde)
+export record Lighting
+    --- Caller-writable. Sets the X direction in which light rays travel.
+    directionX: number = -0.5
+
+    --- Caller-writable. Sets the Y direction in which light rays travel.
+    directionY: number = -1
+
+    --- Caller-writable. Sets the Z direction in which light rays travel.
+    directionZ: number = -0.5
+
+    --- Caller-writable. Sets non-negative directional red in linear space.
+    r: number = 1
+
+    --- Caller-writable. Sets non-negative directional green in linear space.
+    g: number = 1
+
+    --- Caller-writable. Sets non-negative directional blue in linear space.
+    b: number = 1
+
+    --- Caller-writable. Scales directional radiance.
+    intensity: number = 1
+
+    --- Caller-writable. Sets uniform ambient irradiance before the cube probe.
+    ambient: number = 0.15
+
+    --- Caller-writable. Enables linear camera-distance fog for meshes.
+    fog: boolean = false
+
+    --- Caller-writable. Sets the world distance where fog begins.
+    fogStart: number = 20
+
+    --- Caller-writable. Sets the world distance where fog becomes opaque.
+    fogFinish: number = 100
+
+    --- Caller-writable. Sets linear fog red from zero through one.
+    fogR: number = 0
+
+    --- Caller-writable. Sets linear fog green from zero through one.
+    fogG: number = 0
+
+    --- Caller-writable. Sets linear fog blue from zero through one.
+    fogB: number = 0
+
+    --- Caller-writable. Supplies 18 non-negative irradiance values, RGB for
+    --- positive X, negative X, positive Y, negative Y, positive Z, negative Z.
+    --- An empty array disables the probe. The normal's squared axes blend faces.
+    probe: {number} = {}
+
+    --- Caller-writable. Scales the six ambient-cube faces.
+    probeIntensity: number = 1
+
+    --- Caller-writable. Enables three texel-snapped directional shadow cascades.
+    shadows: boolean = false
+
+    --- Caller-writable. Sets shadow-map resolution relative to the larger viewport
+    --- dimension.
+    shadowScale: number = 1
+
+    --- Caller-writable. Limits shadow coverage in world units beyond the camera near
+    --- plane.
+    shadowDistance: number = 100
+
+    --- Caller-writable. Blends uniform and logarithmic cascade spacing from zero
+    --- through one.
+    shadowSplitLambda: number = 0.7
+
+    --- Caller-writable. Sets cascade cross-fade width from zero through one half.
+    shadowSplitBlend: number = 0.1
+
+    --- Caller-writable. Adds non-negative light-space depth for off-camera casters.
+    shadowDepthPadding: number = 20
+
+    --- Caller-writable. Scales shadow occlusion from zero through one.
+    shadowStrength: number = 1
+
+    --- Caller-writable. Offsets receiver depth to suppress self-shadow acne.
+    shadowBias: number = 0.0015
+
+    --- Caller-writable. Sets the 3 by 3 PCF radius in shadow texels; zero uses one
+    --- location.
+    shadowSoftness: number = 1
+
+    --- Caller-writable. Enables mesh-only screen-space ambient occlusion.
+    ssao: boolean = false
+
+    --- Caller-writable. Sets AO resolution relative to the viewport, up to one.
+    ssaoScale: number = 0.5
+
+    --- Caller-writable. Sets the positive hemisphere radius in world units.
+    ssaoRadius: number = 0.5
+
+    --- Caller-writable. Offsets the occlusion comparison in world units.
+    ssaoBias: number = 0.025
+
+    --- Caller-writable. Scales non-negative ambient occlusion strength.
+    ssaoIntensity: number = 1
+
+    --- Caller-writable. Sets positive AO contrast before the edge-aware blur.
+    ssaoPower: number = 1.5
+
+    --- Caller-writable. Enables shadows for lights carrying LIGHT_CASTS_SHADOWS.
+    localShadows: boolean = false
+
+    --- Caller-writable. Sets each local shadow face edge in pixels.
+    localShadowSize: integer = 256
+
+    --- Caller-writable. Limits shadow-casting lights in stable extraction order.
+    localShadowCapacity: integer = 4
+
+    --- Caller-writable. Offsets local shadow receiver depth.
+    localShadowBias: number = 0.002
+
+    --- Caller-writable. Sets the local-shadow PCF radius in texels.
+    localShadowSoftness: number = 1
+
+    --- Caller-writable. Selects the stable name returned by models.loadEnvironment.
+    environment: string? = nil
+
+    --- Caller-writable. Scales non-negative specular environment radiance.
+    environmentIntensity: number = 1
+
+    --- Caller-writable. Scales the sky background; zero hides it while retaining
+    --- reflections.
+    skyboxIntensity: number = 1
+
+    --- Caller-writable. Rotates the environment around world Y in radians.
+    environmentRotation: number = 0
+end
+
+--- Creates independently mutable lighting settings with the documented defaults.
+--- @return caller-owned settings to attach to a View
+export function newLighting(): Lighting
+    return new Lighting()
+end

@@ -98,6 +98,7 @@ pub struct Header {
     pub camera: [f32; 2],
     pub zoom: f32,
     pub rotation: f32,
+    pub animation_clock: f32,
     /// The light every surface receives before any light entity is counted.
     pub ambient: [f32; 3],
     /// March samples at full attenuation.
@@ -188,7 +189,7 @@ impl Header {
             self.camera[1],
             self.zoom,
             self.rotation,
-            0.0,
+            self.animation_clock,
             0.0,
             self.ambient[0],
             self.ambient[1],
@@ -221,6 +222,8 @@ impl Header {
 /// One parsed packet, borrowing the caller's bytes.
 #[derive(Debug)]
 pub struct Packet<'a> {
+    pub particles: &'a [u8],
+    pub frame_table: &'a [u8],
     pub header: Header,
     pub scene_revision: u32,
     pub retained: bool,
@@ -295,13 +298,40 @@ pub fn parse_frame<'a>(
         bail!("render packet has unknown magic {magic:#010x}");
     }
     let version = read_u32(bytes, 4);
-    if version != PACKET_VERSION {
+    if version != PACKET_VERSION && version != 8 && version != 9 {
         bail!("render packet version {version} is not supported");
     }
     let header_size = read_u32(bytes, 8) as usize;
-    if header_size != PACKET_HEADER_SIZE {
+    if header_size
+        != if version == 9 {
+            140
+        } else if version == 8 {
+            136
+        } else {
+            PACKET_HEADER_SIZE
+        }
+        || bytes.len() < header_size
+    {
         bail!("render packet header size {header_size} is not {PACKET_HEADER_SIZE}");
     }
+    let animation_clock = if version >= 8 {
+        read_f32(bytes, 128)
+    } else {
+        0.
+    };
+    let frame_table_bytes = if version >= 8 {
+        read_u32(bytes, 132) as usize
+    } else {
+        0
+    };
+    if !animation_clock.is_finite() || frame_table_bytes % 4 != 0 {
+        bail!("invalid animation clock or table length");
+    }
+    let particle_bytes = if version >= 9 {
+        read_u32(bytes, 136) as usize
+    } else {
+        0
+    };
     let flags = read_u32(bytes, 12);
     if flags & !FRAME_ALL != 0 {
         bail!("render packet frame flags {flags:#010x} set bits this backend does not know");
@@ -437,8 +467,10 @@ pub fn parse_frame<'a>(
     let instance_bytes = (instance_count as usize)
         .checked_mul(instance_stride)
         .context("render packet instance byte count overflowed")?;
-    let prefix = PACKET_HEADER_SIZE
-        .checked_add(graph_bytes)
+    let prefix = header_size
+        .checked_add(frame_table_bytes)
+        .and_then(|size| size.checked_add(particle_bytes))
+        .and_then(|size| size.checked_add(graph_bytes))
         .and_then(|size| size.checked_add(light_table_bytes))
         .and_then(|size| size.checked_add(tile_bytes))
         .and_then(|size| size.checked_add(batch_table_bytes))
@@ -452,8 +484,13 @@ pub fn parse_frame<'a>(
             bytes.len()
         );
     }
-    let graph = &bytes[PACKET_HEADER_SIZE..PACKET_HEADER_SIZE + graph_bytes];
-    let light_start = PACKET_HEADER_SIZE + graph_bytes;
+    let frame_table = &bytes[header_size..header_size + frame_table_bytes];
+    validate_frame_table(frame_table)?;
+    let particle_start = header_size + frame_table_bytes;
+    let particles = &bytes[particle_start..particle_start + particle_bytes];
+    let graph_start = particle_start + particle_bytes;
+    let graph = &bytes[graph_start..graph_start + graph_bytes];
+    let light_start = graph_start + graph_bytes;
     let tile_start = light_start + light_table_bytes;
     let table_start = tile_start + tile_bytes;
     let instance_start = table_start + batch_table_bytes;
@@ -689,6 +726,8 @@ pub fn parse_frame<'a>(
         }
     }
     Ok(Packet {
+        particles,
+        frame_table,
         tile_count,
         tile_updates,
         scene_revision,
@@ -702,6 +741,7 @@ pub fn parse_frame<'a>(
             camera,
             zoom,
             rotation,
+            animation_clock,
             ambient,
             shadow_steps,
             shadow_height,
@@ -788,6 +828,54 @@ fn read_f32(bytes: &[u8], offset: usize) -> f32 {
             .try_into()
             .expect("checked header"),
     )
+}
+
+fn validate_frame_table(bytes: &[u8]) -> Result<()> {
+    if bytes.is_empty() {
+        return Ok(());
+    }
+    let words = bytes.len() / 4;
+    let integer = |at: usize| -> Result<usize> {
+        if at >= words {
+            bail!("truncated animation table");
+        }
+        let value = read_f32(bytes, at * 4);
+        if !value.is_finite() || value < 0. || value.fract() != 0. || value > 16777216. {
+            bail!("invalid animation table integer");
+        }
+        Ok(value as usize)
+    };
+    let count = integer(0)?;
+    if 1 + count * 4 > words {
+        bail!("truncated animation directory");
+    }
+    for id in 0..count {
+        let base = 1 + id * 4;
+        let entries = integer(base)?;
+        let ticks = integer(base + 1)?;
+        let duration = integer(base + 2)?;
+        let frames = integer(base + 3)?;
+        if duration == 0
+            || frames == 0
+            || entries < 1 + count * 4
+            || ticks < 1 + count * 4
+            || entries + frames * 8 > words
+            || ticks + duration > words
+        {
+            bail!("invalid animation table range");
+        }
+        for tick in ticks..ticks + duration {
+            if integer(tick)? >= frames {
+                bail!("invalid animation frame index");
+            }
+        }
+        for entry in entries..entries + frames * 8 {
+            if !read_f32(bytes, entry * 4).is_finite() {
+                bail!("nonfinite animation frame");
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1411,6 +1499,7 @@ pub mod tests {
 
     fn header(target: [f32; 2], camera: [f32; 2], zoom: f32, rotation: f32) -> Header {
         Header {
+            animation_clock: 0.,
             graph_revision: 0,
             flags: 0,
             target,

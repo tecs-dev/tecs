@@ -179,6 +179,17 @@ fn render(harness: &Harness, instances: &[TestInstance]) -> Vec<u8> {
         layout: &layouts.image,
         entries: &[
             BindGroupEntry {
+                binding: 6,
+                resource: device
+                    .create_buffer(&BufferDescriptor {
+                        label: Some("empty animation table"),
+                        size: 4,
+                        usage: BufferUsages::STORAGE,
+                        mapped_at_creation: false,
+                    })
+                    .as_entire_binding(),
+            },
+            BindGroupEntry {
                 binding: 0,
                 resource: BindingResource::TextureView(
                     &white.create_view(&TextureViewDescriptor::default()),

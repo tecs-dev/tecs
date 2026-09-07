@@ -1,0 +1,89 @@
+module particles
+
+local function install(exclusive app: tecs.application.Application): nil
+    const world, input = app.world, app.input
+    world:spawn(tecs.gfx.View({camera2D = tecs.gfx.newCamera2D()}))
+    tecs.gfx.layers.configure(1, {sort = "z", unlit = true})
+    tecs.gfx.lighting.setBloom({threshold = 0.5, knee = 0.15, intensity = 0.7})
+    tecs.gfx.particles.plugin(world, {capacity = 32768})
+    const effect = tecs.gfx.particles.newEffect({
+        name = "example://embers",
+        capacity = 16384,
+        schedule = {rate = 2400},
+        spawn = {shape = "ring", width = 55, height = 55, direction = -math.pi / 2, spread = 1.3, space = "world"},
+        initial = {
+            lifetime = {min = 1, max = 3},
+            speed = {min = 50, max = 200},
+            size = {min = 2, max = 9},
+            accelerationY = -15
+        },
+        update = {
+            drag = 0.35,
+            size = tecs.gfx.particles.newCurve({
+                {0, 0.2},
+                {0.1, 1},
+                {1, 0}
+            }),
+            color = tecs.gfx.particles.newGradient({{0, "#ffffbfff"}, {0.4, "#ff792aff"}, {1, "#e62a0800"}})
+        },
+        render = {blend = "additive", layer = 1},
+    })
+    const emitter = world:spawn(
+        tecs.ecs.Transform2D(0, 120),
+        tecs.gfx.particles.ParticleEmitter({
+            effect = effect,
+            seed = 17
+        })
+    )
+    local elapsed = 0.0
+    world:addSystem({
+        name = "example.ParticleControls",
+        phase = tecs.ecs.phases.Update,
+        run = function(dt: number): nil
+            elapsed = elapsed + dt
+            assert(world:getMut(emitter, tecs.ecs.Transform2D)).x = math.sin(elapsed * 0.8) * 160
+            const field = assert(world:get(emitter, tecs.gfx.particles.ParticleEmitter))
+            if input:keyPressed("Space") then
+                if field.state == "paused" then
+                    field:play()
+                else
+                    field:pause()
+                end
+            end
+            if input:keyPressed("KeyB") then
+                field:burst(1000)
+            end
+            if input:keyPressed("KeyR") then
+                field:restart()
+            end
+            if input:keyPressed("KeyC") then
+                field:clear()
+            end
+        end
+    })
+    print("particles: Space pauses, B bursts, R restarts, C clears; simulation stays on the GPU")
+end
+
+--- Creates the Tecs GPU particles example.
+--- @param title optional window title
+--- @param width logical width
+--- @param height logical height
+--- @param debug enable guarded failures
+--- @param maxFrames optional bounded run
+--- @return native host session
+export function create(
+    title: string?,
+    width: integer?,
+    height: integer?,
+    debug: boolean?,
+    maxFrames: integer?
+): tecs.host.Session
+    return tecs.host.createWithPlugin(
+        install,
+        title or "Tecs GPU particles",
+        width or 960,
+        height or 640,
+        debug,
+        maxFrames
+    )
+end

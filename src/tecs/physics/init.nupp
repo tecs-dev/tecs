@@ -758,7 +758,7 @@ local function gather(state: State, from: ecs.Query): integer
     return count
 end
 
-local function colliderDefOf(entity: integer, shape: ColliderValue): contract.ColliderDef
+local function colliderDefOf(entity: integer, borrows shape: ColliderValue): contract.ColliderDef
     return new contract.ColliderDef(
         entity = entity,
         shape = shape.shape,

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "native/rust/example-assets",
     "native/rust/build-support",
     "native/rust/physics",
     "native/rust/tecs-audio",

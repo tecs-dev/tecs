@@ -1,5 +1,7 @@
 //! File-format decoding for the Tecs asset boundary.
 mod maps;
+pub mod model;
+mod modelimage;
 use std::{
     cell::RefCell,
     ffi::{c_char, CString},
@@ -7,8 +9,11 @@ use std::{
     slice,
 };
 thread_local! { static ERROR: RefCell<CString> = RefCell::new(CString::new("").unwrap()); }
-fn fail(message: impl ToString) -> *mut AssetResult {
+fn set_error(message: impl ToString) {
     ERROR.with(|e| *e.borrow_mut() = CString::new(message.to_string().replace('\0', " ")).unwrap());
+}
+fn fail(message: impl ToString) -> *mut AssetResult {
+    set_error(message);
     std::ptr::null_mut()
 }
 pub struct AssetResult {
@@ -44,26 +49,35 @@ pub unsafe extern "C" fn tecsAssetLoad(
             width: 0,
             height: 0,
         }),
-        1 => image::open(path)
-            .map(|image| {
-                let mut image = image.to_rgba8();
+        1 => std::fs::read(path)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| modelimage::decode(&bytes))
+            .and_then(|image| {
+                if image.format != 0 {
+                    return Err("this image consumer requires RGBA8, not compressed BC3".to_owned());
+                }
+                let mut data = image.pixels.into_vec();
                 if transparent & 0x1000000 != 0 {
-                    for pixel in image.pixels_mut() {
-                        if pixel[0] as u32 == (transparent >> 16) & 255
-                            && pixel[1] as u32 == (transparent >> 8) & 255
-                            && pixel[2] as u32 == transparent & 255
+                    for pixel in data.as_chunks_mut::<4>().0 {
+                        if u32::from(pixel[0]) == (transparent >> 16) & 255
+                            && u32::from(pixel[1]) == (transparent >> 8) & 255
+                            && u32::from(pixel[2]) == transparent & 255
                         {
                             pixel[3] = 0;
                         }
                     }
                 }
-                AssetResult {
-                    width: image.width(),
-                    height: image.height(),
-                    data: image.into_raw(),
-                }
-            })
-            .map_err(|e| e.to_string()),
+                Ok(AssetResult {
+                    width: image.width,
+                    height: image.height,
+                    data,
+                })
+            }),
+        2 => model::load_packet(path).map(|data| AssetResult {
+            data,
+            width: 0,
+            height: 0,
+        }),
         _ => Err("unknown asset kind".into()),
     };
     match result {

@@ -1,0 +1,1694 @@
+module tecs.gfx.particles
+
+--[[
+GPU particle effects, emitter playback, pool sizing, and rendering limits.
+
+An entity represents an emitter. The GPU owns individual particles, so game
+code controls an effect and its emitter rather than inspecting particles one
+at a time.
+
+```nupp
+const sparks = tecs.gfx.particles.newEffect({
+    name = "game.sparks",
+    capacity = 256,
+    schedule = {rate = 120, duration = 0.3},
+    spawn = {shape = "disc", width = 4, outward = true},
+    initial = {
+        lifetime = {min = 0.2, max = 0.5},
+        speed = {min = 40, max = 120},
+        size = 3,
+    },
+    update = {
+        drag = 2.0,
+        size = tecs.gfx.particles.newCurve({
+            {0.0, 1.0},
+            {1.0, 0.0},
+        }),
+    },
+})
+
+tecs.gfx.particles.plugin(world, {capacity = 4096})
+
+world:spawn(
+    tecs.ecs.Transform2D(120, 80, 0, 1, 0, 1, 1),
+    tecs.gfx.particles.ParticleEmitter({effect = sparks})
+)
+```
+
+An immutable [`Effect`](tecs.gfx.particles.Effect) describes schedule,
+spawn, initial state, updates, and rendering. A
+[`ParticleEmitter`](tecs.gfx.particles.ParticleEmitter) names the
+effect and carries playback state. Effect names form a snapshot compatibility
+surface.
+
+## Emission and motion
+
+Schedules combine rate, delay, duration, looping, and timed bursts.
+`duration = 0` keeps a cycle open. An emission that finds no free effect slot
+either drops the new particle or replaces the oldest, according to `overflow`.
+
+Spawn shapes include point, line, rectangle, rectangle edge, disc, ring, and
+cone. World-space particles detach from later emitter movement. Local-space
+particles follow the emitter for their full life. `inheritVelocity` applies
+only in world space.
+
+Curves and gradients sample normalized age from zero to one. Numeric properties
+accept a constant or a `{min, max}` range.
+
+## Playback
+
+`play` starts or resumes emission. `stop` resets the schedule while live
+particles drain. `pause` holds the schedule and live field. `clear` kills the
+field without changing emission. `restart` resets schedule and randomness.
+`burst` queues a count for the next step.
+
+`finished` derives its answer from the schedule and the longest lifetime.
+`estimatedCount` integrates the schedule over the mean lifetime, and may differ
+after overflow or a truncated burst. Game code cannot inspect, move, kill, or
+count individual particles.
+
+## Pool and snapshots
+
+The plugin fixes world capacity and maximum emitters at installation. Each
+emitter reserves its effect capacity. An emitter that cannot fit draws nothing
+and logs the refusal.
+
+Snapshots store effect name, seed, configuration, and playback state. They do
+not store individual particles, so a restored emitter starts empty and refills.
+
+## Blending
+
+`render.blend` selects `"alpha"`, `"additive"`, or `"opaque"`, and defaults to
+`"alpha"`. The first two draw in the forward pass over the composited image,
+depth tested and not written, so alpha means what it says: a gradient that ends
+transparent fades out, and `"additive"` adds light instead of covering, which is
+what fire, glow, and sparks want. `"opaque"` keeps the effect in the G-buffer.
+
+A blended effect is not in the G-buffer, so it casts no shadow and no light's
+occluder mask sees it, and it is not shadowed by one either. It also draws after
+compositing, so all of one effect's particles composite as one group in pool-slot
+order rather than being sorted against each other: an effect names one layer and
+its particles take one depth within it. Sorting within a pool is a separate
+feature.
+
+The GPU runs emit, spawn and simulate passes, followed by ordered visibility
+compaction and indirect draws. A paused, unchanged field skips simulation and
+reuses its visibility list while the camera is unchanged. Installing no pool
+allocates no particle storage.
+
+Run the interactive example with `nupp task ex-particles`: Space pauses, B
+bursts, R restarts and C clears. A pool can reserve up to four million slots
+its frame packet contains emitter records rather than individual particles.
+
+]]
+
+local ecs = require("tecs.ecs")
+local sheet = require("tecs.gfx.sheet")
+local frametable = require("tecs.gfx.frametable")
+local layers = require("tecs.gfx.layers")
+local materials = require("tecs.gpu.materials")
+local rendercomponents = require("tecs.internal.rendercomponents")
+local floor = math.floor
+
+const EFFECT_FLOATS: integer = 69
+
+--- Bursts one effect's schedule holds.
+const MAX_BURSTS = 4
+
+--- Where each field sits within one effect record. A table rather than a
+--- constant apiece because the function that fills one touches nearly every
+--- offset, and fifty upvalues in one closure is past what LuaJIT allows.
+const EFFECT = {
+    RATE = 0,
+    DURATION = 1,
+    LOOPING = 2,
+    DELAY = 3,
+    OVERFLOW = 4,
+    BURST_COUNT = 5,
+    SHAPE = 6,
+    SHAPE_WIDTH = 7,
+    SHAPE_HEIGHT = 8,
+    SHAPE_ARC = 9,
+    SHAPE_ROTATION = 10,
+    DISTRIBUTION = 11,
+    DIRECTION = 12,
+    SPREAD = 13,
+    SPACE = 14,
+    INHERIT = 15,
+    BURSTS = 16,
+    LIFETIME_MIN = 24,
+    LIFETIME_MAX = 25,
+    SPEED_MIN = 26,
+    SPEED_MAX = 27,
+    SIZE_MIN = 28,
+    SIZE_MAX = 29,
+    ROTATION_MIN = 30,
+    ROTATION_MAX = 31,
+    ANGULAR_MIN = 32,
+    ANGULAR_MAX = 33,
+    ACCEL_X_MIN = 34,
+    ACCEL_X_MAX = 35,
+    ACCEL_Y_MIN = 36,
+    ACCEL_Y_MAX = 37,
+    DRAG = 38,
+    RADIAL_MIN = 39,
+    RADIAL_MAX = 40,
+    TANGENTIAL_MIN = 41,
+    TANGENTIAL_MAX = 42,
+    SIZE_CURVE = 43,
+    COLOR_GRADIENT = 44,
+    COLOR_R = 45,
+    COLOR_G = 46,
+    COLOR_B = 47,
+    COLOR_A = 48,
+    U0 = 49,
+    V0 = 50,
+    U1 = 51,
+    V1 = 52,
+    SLOT = 53,
+    MATERIAL = 54,
+    DEPTH = 55,
+    UNBOUNDED = 56,
+    PLAYBACK = 57,
+    PLAYBACK_TICKS = 58,
+    PIVOT_X = 59,
+    PIVOT_Y = 60,
+    ALIGNMENT = 61,
+    STRETCH = 62,
+    OUTWARD = 63,
+    BLENDED = 64,
+}
+
+--- Floats per emitter record, and where each field sits.
+
+--- Where each field sits within one emitter record.
+
+--- Floats of per-particle state, and uints of per-emitter runtime state.
+
+--- Samples a compiled curve or gradient holds.
+---
+--- Thirty-two, which removes both the eight-key cap and the even spacing a CPU
+--- particle system's ramps have, for the same trade the frame table already
+--- made: the public surface stays a curve with keys wherever the author put
+--- them, and the shader does one lookup rather than walking a graph per
+--- particle per frame.
+const CURVE_SAMPLES = 32
+
+--- Threads per workgroup, matching the local size the three shaders declare.
+
+--- Fixed steps one frame is allowed to advance an emitter by.
+---
+--- A ceiling on the integration loop rather than a policy: a frame that fell
+--- far behind catches a particle up by this much and no more, which bounds the
+--- work rather than letting a stall compound into a longer one.
+const MAX_STEPS = 8
+
+--- Floats the effect table is sized for.
+---
+--- A ceiling rather than a hint, for the reason the frame table's is one:
+--- growing it would mean a second device buffer while a frame in flight is
+--- still reading the first. A quarter of a megabyte holds several hundred
+--- effects, since one costs sixty-five floats plus thirty-two per curve and a
+--- hundred and twenty-eight per gradient.
+const EFFECT_TABLE_FLOATS = 65536
+
+--- Emitters one pool holds, unless the plugin was told otherwise.
+const DEFAULT_EMITTERS = 256
+
+--- Live particles one pool holds, unless the plugin was told otherwise.
+const DEFAULT_CAPACITY = 16384
+
+--- Defines a uniform distribution between two bounds.
+export type Range = {
+    --- Caller-writable. Sets the inclusive lower bound.
+    min: number,
+
+    --- Caller-writable. Sets the inclusive upper bound.
+    max: number
+}
+
+--- A property that takes either a constant or a range. `300` and
+--- `{ min = 180, max = 420 }` are both accepted everywhere one of these is,
+--- and cost the same: the shader draws between two bounds either way, and
+--- equal bounds are a constant. Bounds the wrong way round are swapped rather
+--- than refused, and a non-finite bound raises with the field named.
+export type Value = number | Range
+
+--- Stores a curve over normalized age as a compiled lookup table.
+export type Curve = {
+    --- Read-only. Provides evenly spaced samples over normalized age from zero
+    --- to one.
+    samples: {number}
+}
+
+--- Stores a color gradient over normalized age as a compiled lookup table.
+---
+--- Alpha is carried and used: a blended effect fades with it, and an effect whose
+--- `render.blend` is `"opaque"` writes it to a target that has nowhere to put it.
+export type Gradient = {
+    --- Read-only. Provides evenly spaced RGBA samples over normalized age,
+    --- with four floats per sample.
+    samples: {number}
+}
+
+--- A color, as `#rrggbb`, `#rrggbbaa`, `0xrrggbbaa`, or up to four numbers in
+--- zero to one. A channel the list leaves out reads as one, so `{1, 0, 0}` is
+--- opaque red, and a string that is neither six nor eight hex digits raises.
+export type Color = string | number | {number}
+
+--- One key of a curve or a gradient. Heterogeneous by design: the first entry
+--- is a normalized age and the second is whatever the table is of, so this is
+--- one of the few places a list of `any` is the honest declaration rather than
+--- a missing one.
+export type CurveKey = {any}
+
+--- Configures where particles spawn.
+export type SpawnOptions = {
+    --- Caller-writable. Selects `"point"`, `"line"`, `"rectangle"`,
+    --- `"rectangleEdge"`, `"disc"`, `"ring"`, or `"cone"`. Defaults to
+    --- `"point"`, and anything else raises.
+    shape: string?,
+
+    --- Caller-writable. Sets width for a line or rectangle and radius for a
+    --- disc, ring, or cone. Defaults to zero.
+    width: number?,
+
+    --- Caller-writable. Sets height for a rectangle. Every other shape ignores
+    --- it. Defaults to zero.
+    height: number?,
+
+    --- Caller-writable. Sets the sampled sector of a disc, ring, or cone in
+    --- radians. Defaults to a full turn.
+    arc: number?,
+
+    --- Caller-writable. Rotates the sampled area in radians, independently of
+    --- launch direction. Defaults to zero.
+    rotation: number?,
+
+    --- Caller-writable. Selects `"uniform"` or `"normal"` sampling. A gaussian
+    --- spread makes a column read as a column rather than as a slab. Defaults to
+    --- `"uniform"`, and anything else raises.
+    distribution: string?,
+
+    --- Caller-writable. Sets the launch direction in radians and centers the
+    --- full cone on it, so a particle leaves within plus or minus half of
+    --- `spread`. Half-angle is the other plausible reading of `spread` and a
+    --- mismatch is silent, so it is said here. Defaults to zero.
+    direction: number?,
+
+    --- Caller-writable. Sets the full cone width in radians. Defaults to zero,
+    --- which launches every particle along `direction`.
+    spread: number?,
+
+    --- Caller-writable. Launches along the shape's outward normal rather than
+    --- along `direction`. Meaningful for the shapes that have one: disc, ring,
+    --- cone and a rectangle's edge. Defaults to false.
+    outward: boolean?,
+
+    --- Caller-writable. Selects `"local"` or `"world"` space. Local particles
+    --- follow the emitter's transform for their whole life; world particles read
+    --- it once, at spawn, and then move independently. Neither is a good
+    --- universal default, so it is explicit and defaults to `"world"`. Anything
+    --- else raises.
+    space: string?,
+
+    --- Caller-writable. Sets how much emitter velocity a particle inherits, from
+    --- zero to one. Defaults to zero, and world space is the only space it means
+    --- anything in: a local particle is already carried by the emitter, so
+    --- inheriting would carry it twice.
+    inheritVelocity: number?
+}
+
+--- Configures when particles emit.
+export type ScheduleOptions = {
+    --- Caller-writable. Sets the continuous emission rate in particles per
+    --- second. Defaults to zero, which emits only what `bursts` asks for.
+    rate: number?,
+
+    --- Caller-writable. Sets the emission cycle duration in seconds. Defaults to
+    --- zero, which leaves the cycle open.
+    duration: number?,
+
+    --- Caller-writable. Controls whether the emission cycle repeats. Defaults to
+    --- false.
+    looping: boolean?,
+
+    --- Caller-writable. Sets the delay before emission starts in seconds.
+    --- Defaults to zero.
+    delay: number?,
+
+    --- Caller-writable. Defines at most four timed burst counts measured from
+    --- the start of the cycle. A muzzle flash is one burst at time zero.
+    --- Defaults to none, and a fifth raises.
+    bursts: {ScheduleBurst}?
+}
+
+--- Defines one scheduled burst.
+export type ScheduleBurst = {
+    --- Caller-writable. Sets the burst time in seconds from the cycle start.
+    time: number,
+
+    --- Caller-writable. Sets how many particles the burst emits.
+    count: number
+}
+
+--- Configures a particle's initial properties.
+export type InitialOptions = {
+    --- Caller-writable. Sets particle lifetime in seconds. Defaults to one, and
+    --- its upper bound is the effect's `maxLifetime`.
+    lifetime: Value?,
+
+    --- Caller-writable. Sets initial speed in world units per second. Defaults to
+    --- zero.
+    speed: Value?,
+
+    --- Caller-writable. Sets initial size in world units. Defaults to one.
+    size: Value?,
+
+    --- Caller-writable. Sets initial rotation in radians. Defaults to zero.
+    rotation: Value?,
+
+    --- Caller-writable. Sets initial angular velocity in radians per second.
+    --- Defaults to zero.
+    angularVelocity: Value?,
+
+    --- Caller-writable. Sets constant horizontal acceleration. Independent axes
+    --- make a plume drift apart instead of translating as a block. Defaults to
+    --- zero.
+    accelerationX: Value?,
+
+    --- Caller-writable. Sets constant vertical acceleration. Defaults to zero.
+    accelerationY: Value?,
+
+    --- Caller-writable. Sets the color every particle starts with, multiplied by
+    --- the gradient and by the emitter's tint. Defaults to opaque white.
+    color: Color?
+}
+
+--- Configures how a particle changes over its normalized lifetime.
+export type UpdateOptions = {
+    --- Caller-writable. Sets damping in units of one over seconds, applied as
+    --- `velocity = velocity / (1 + drag * dt)`, so it composes with any step.
+    --- Defaults to zero.
+    drag: number?,
+
+    --- Caller-writable. Sets acceleration away from the emitter. This and
+    --- `tangentialAcceleration` are the difference between a fountain and a
+    --- vortex. Defaults to zero.
+    radialAcceleration: Value?,
+
+    --- Caller-writable. Sets acceleration at right angles to the emitter.
+    --- Defaults to zero.
+    tangentialAcceleration: Value?,
+
+    --- Caller-writable. Multiplies each particle's size over its life. An absent
+    --- curve multiplies by one, so leaving it out costs nothing.
+    size: Curve?,
+
+    --- Caller-writable. Multiplies each particle's color over its life. An absent
+    --- gradient multiplies by white, so leaving it out costs nothing. Its alpha
+    --- fades a blended effect and is ignored by an effect whose `render.blend` is
+    --- `"opaque"`.
+    color: Gradient?
+}
+
+--- Configures how particles draw.
+export type RenderOptions = {
+    --- Caller-writable. Selects the material that shades the quad by name. An
+    --- absent value samples the image array and covers the whole quad.
+    material: string?,
+
+    --- Caller-writable. Passes one number to the material, clamped to zero
+    --- through `0.999` and ignored unless `material` names one. The instance
+    --- carries the material as `id + param` in one float, and the vertex shader
+    --- reads the integer part as the selector and the fraction as the
+    --- parameter, so `1.0` would arrive as the next material's id with a
+    --- parameter of zero. Defaults to zero.
+    materialParam: number?,
+
+    --- Caller-writable. Selects a registered image from `renderer.sprites:sprite`. An
+    --- absent value draws a white quad.
+    sprite: rendercomponents.Sprite?,
+
+    --- Caller-writable. Selects a sheet to animate instead of a still region.
+    --- The cycle is played exactly once over each particle's own life and clamps
+    --- at the end, so a randomized lifetime randomizes the playback speed.
+    ---
+    --- Uses the same frame table an animated entity does, so per-frame
+    --- durations, reverse and pingpong all arrive already spent.
+    sheet: sheet.Sheet?,
+
+    --- Caller-writable. Selects the sheet tag to animate. An absent value
+    --- animates the whole sheet. A name the sheet does not carry animates the
+    --- whole sheet too, and the sheet reports it at error level under the
+    --- `tecs.gfx` logger, naming the tags it does carry. Defining the effect
+    --- still succeeds, so a sheet re-exported without a tag keeps drawing.
+    tag: string?,
+
+    --- Caller-writable. Selects the render layer from one to `layers.MAX`.
+    --- Defaults to one, and anything outside the range raises.
+    layer: integer?,
+
+    --- Caller-writable. Sets the horizontal pivot as a fraction of the
+    --- frame from its top left. Defaults to `0.5`, the middle.
+    pivotX: number?,
+
+    --- Caller-writable. Sets the vertical pivot as a fraction of the frame
+    --- from its top edge. Defaults to `0.5`, the middle.
+    pivotY: number?,
+
+    --- Caller-writable. Selects `"fixed"` or `"velocity"` alignment. Velocity
+    --- alignment adds the path's angle to the particle's own rotation, so a
+    --- spinning spark aligned to its path still spins. Defaults to `"fixed"`,
+    --- and anything else raises.
+    alignment: string?,
+
+    --- Caller-writable. Multiplies the along-path axis when aligned to
+    --- velocity. Defaults to one.
+    stretch: number?,
+
+    --- Caller-writable. Selects `"alpha"`, `"additive"`, or `"opaque"`. Defaults
+    --- to `"alpha"`, and anything else raises.
+    ---
+    --- `"alpha"` and `"additive"` draw in the forward pass over the composited
+    --- image, depth tested and not written, so a particle is still hidden by
+    --- geometry in front of it. `"alpha"` keeps that much less of what is behind
+    --- it and `"additive"` adds to it, so a dark additive particle changes
+    --- nothing and overlapping ones brighten.
+    ---
+    --- `"opaque"` draws into the G-buffer instead. What it gives up is alpha,
+    --- which the G-buffer is written with replace and has nowhere to put: a fade
+    --- to transparent writes opaque over what was behind it, and the only fade
+    --- left is a size curve reaching zero. What it buys is everything that reads
+    --- the G-buffer, which is the occluder mask and being shadowed by one.
+    blend: string?,
+
+    --- Caller-writable. Selects the clip region that contains the fragments.
+    --- Defaults to zero, which is no clipping.
+    clip: integer?
+}
+
+--- Defines a complete effect.
+export type EffectOptions = {
+    --- Caller-writable. Sets the required process-wide unique effect name.
+    --- Snapshots use this name to identify the effect.
+    name: string,
+
+    --- Caller-writable. Sets how many live particles one emitter can hold.
+    --- Defaults to 256, and under one raises. A steady-state emitter needs at
+    --- least `rate * maxLifetime`; a smaller capacity registers, drops the
+    --- emissions that find no slot, and logs a warning saying so, because a
+    --- spray thinner than the one authored is otherwise found by eye.
+    capacity: integer?,
+
+    --- Caller-writable. Selects `"drop"` or `"replace"` when an emission arrives
+    --- with no free slot: give way, or take the oldest live particle's. Defaults
+    --- to `"replace"`, and anything else raises.
+    overflow: string?,
+
+    --- Caller-writable. Configures when the effect emits particles. An absent
+    --- section takes every default below it.
+    schedule: ScheduleOptions?,
+
+    --- Caller-writable. Configures where the effect spawns particles. An absent
+    --- section takes every default below it.
+    spawn: SpawnOptions?,
+
+    --- Caller-writable. Configures each particle's initial properties. An absent
+    --- section takes every default below it.
+    initial: InitialOptions?,
+
+    --- Caller-writable. Configures how particles change over their lifetime. An
+    --- absent section leaves a particle on its launch velocity.
+    update: UpdateOptions?,
+
+    --- Caller-writable. Configures how particles draw. An absent section draws
+    --- white quads on layer one.
+    render: RenderOptions?
+}
+
+--- Represents an immutable registered effect shared by its emitters.
+export type Effect = {
+    --- Read-only. Reports the effect name and the only property that outlives the
+    --- process. Everything a save, a tool or a person identifies an effect by
+    --- is this.
+    name: string,
+
+    --- Read-only. Reports where its record sits in the assembled effect table, counting
+    --- from one. A position in registration order, so it means nothing outside the
+    --- process that assigned it and nothing stores one.
+    index: integer,
+
+    --- Read-only. Reports how many live particles one emitter can hold.
+    capacity: integer,
+
+    --- Read-only. Reports the blend mode the effect resolved to, which is one of
+    --- the three `render.blend` names and never nil. The pool reads it to say how
+    --- many of its slots may reach the forward pass.
+    blend: string,
+
+    --- Read-only. Reports the longest particle lifetime in seconds, which decides when
+    --- an emitter that has stopped emitting has finished.
+    maxLifetime: number,
+
+    --- Read-only. Reports the mean particle lifetime in seconds, halfway between the
+    --- bounds `initial.lifetime` was authored with. This is the window `estimatedCount`
+    --- integrates the schedule over, and it is the steady-state live count divided by
+    --- the emission rate.
+    meanLifetime: number,
+
+    --- Read-only. Reports seconds from `play` to the last emission, or -1 for an effect
+    --- that never stops emitting.
+    emitFor: number,
+
+    --- Read-only. Reports the continuous emission rate used by `finished` and
+    --- `estimatedCount`.
+    rate: number,
+
+    --- Read-only. Reports the emission delay in seconds.
+    delay: number,
+
+    --- Read-only. Reports the emission duration in seconds.
+    duration: number,
+
+    --- Read-only. Reports whether the emission cycle repeats.
+    looping: boolean,
+
+    --- Read-only. Provides the compiled burst schedule.
+    bursts: {number},
+
+    --- Engine-owned. Stores the compiled effect record. Ordinary game code
+    --- should ignore this field.
+    _record: {number},
+
+    --- Engine-owned. Stores curve and gradient samples. Ordinary game code
+    --- should ignore this field.
+    _extra: {number},
+
+    --- Engine-owned. Stores the size-curve offset. Ordinary game code should
+    --- ignore this field.
+    _sizeCurveAt: integer,
+
+    --- Engine-owned. Stores the color-gradient offset. Ordinary game code
+    --- should ignore this field.
+    _colorGradientAt: integer,
+
+    --- Engine-owned. Keeps the authored image and clipping sources for reloads.
+    _render: RenderOptions
+}
+
+--- Registered effects by position, the same effects by name, and how many times
+--- the registry has changed.
+---
+--- Two views of one set rather than two sets. The array is what `assemble` lays
+--- out and what the shaders index; the map is how a name is resolved back, and
+--- an effect is in both or in neither.
+local registry: {Effect} = {}
+
+local byName: {[string]: Effect} = {}
+local revision: integer = 0
+
+--- Every registered effect's name, in registration order.
+
+--- The effect registered under `name`, or nil when nothing has that name.
+---
+--- The non-raising lookup, for a caller with somewhere better to put the
+--- refusal than an error raised from here. Restoring a `ParticleEmitter` is
+--- that caller: the name it holds is a fact about a file rather than about the
+--- call site, and the message it raises says so.
+local function findEffect(name: string): Effect?
+    if name == nil then
+        return nil
+    end
+    return byName[name]
+end
+
+-- Fails with a message naming the field, since a bad number in a table of
+-- forty of them is otherwise reported against the whole call.
+local function checkNumber(value: number, field: string, level: integer): number
+    if value ~= value or value == math.huge or value == -math.huge then
+        error(("tecs: %s must be a finite number"):format(field), level + 1)
+    end
+    return value
+end
+
+-- A constant or a range, as two bounds.
+local function boundsOf(value: Value?, lo: number, hi: number, field: string, level: integer): number, number
+    if value == nil then
+        return lo, hi
+    end
+    if value is number then
+        checkNumber(value, field, level + 1)
+        return value, value
+    end
+    local low = value.min
+    local high = value.max
+    if low == nil or high == nil then
+        error(("tecs: %s is a number or { min = , max = }"):format(field), level + 1)
+    end
+    checkNumber(low, field .. ".min", level + 1)
+    checkNumber(high, field .. ".max", level + 1)
+    if high < low then
+        low, high = high, low
+    end
+
+    return low, high
+end
+
+--- One hex pair of a color string, as a channel in zero to one.
+local function channelAt(body: string, at: integer): number
+    return (tonumber(body:sub(at, at + 1), 16) as number) / 255.0
+end
+
+-- A color as four channels in zero to one.
+local function colorOf(value: Color?, field: string, level: integer): number, number, number, number
+    if value == nil then
+        return 1.0, 1.0, 1.0, 1.0
+    end
+    if value is string then
+        local body = value:match("^#?(%x+)$")
+        if body == nil or (#body ~= 6 and #body ~= 8) then
+            error(("tecs: %s is #rrggbb or #rrggbbaa, not '%s'"):format(field, value), level + 1)
+        end
+        return channelAt(body, 1), channelAt(body, 3), channelAt(body, 5), #body == 8 and channelAt(body, 7) or 1.0
+    end
+    if value is number then
+        local packed = floor(value)
+        return floor(
+            packed / 0x1000000
+        ) % 256 / 255.0, floor(
+            packed / 0x10000
+        ) % 256 / 255.0, floor(packed / 0x100) % 256 / 255.0, packed % 256 / 255.0
+    end
+
+    return value[1] or 1.0, value[2] or 1.0, value[3] or 1.0, value[4] or 1.0
+end
+
+-- Samples a list of keys onto an evenly spaced table.
+--
+-- Keys may sit anywhere in zero to one and need not be sorted; what comes out
+-- is the piecewise-linear curve through them, sampled at a fixed resolution
+-- the shader indexes without searching.
+local function sampleKeys(
+    keys: {CurveKey},
+    width: integer,
+    read: function(key: CurveKey, into: {number}): nil,
+    level: integer
+): {number}
+    if keys == nil or #keys == 0 then
+        error("tecs: a curve needs at least one key", level + 1)
+    end
+
+    local sorted: {CurveKey} = {}
+    for index = 1, #keys do
+        const time = checkNumber(keys[index][1] as number, "curve age", level + 1)
+        assert(time >= 0 and time <= 1, "curve ages must be between zero and one")
+        sorted[index] = keys[index]
+    end
+    table.sort(sorted, function(a: CurveKey, b: CurveKey): boolean
+        return (a[1] as number) < (b[1] as number)
+    end)
+
+    local values: {number} = {}
+    local scratch: {number} = {}
+    local samples: {number} = {}
+    for index = 1, #sorted do
+        read(sorted[index], scratch)
+        local base = (index - 1) * width
+        for lane = 1, width do
+            values[base + lane] = scratch[lane]
+        end
+    end
+
+    const count = #sorted
+    for sample = 0, CURVE_SAMPLES - 1 do
+        const t = sample / (CURVE_SAMPLES - 1)
+        local upper = count
+        for index = 1, count do
+            if (sorted[index][1] as number) >= t then
+                upper = index
+                break
+            end
+        end
+        local lower = upper > 1 and upper - 1 or 1
+        const t0 = sorted[lower][1] as number
+        const t1 = sorted[upper][1] as number
+        local mix = t1 > t0 and (t - t0) / (t1 - t0) or 0.0
+        if mix < 0.0 then
+            mix = 0.0
+        elseif mix > 1.0 then
+            mix = 1.0
+        end
+        for lane = 1, width do
+            const a = values[(lower - 1) * width + lane]
+            const b = values[(upper - 1) * width + lane]
+            samples[sample * width + lane] = a + (b - a) * mix
+        end
+    end
+
+    return samples
+end
+
+--- Compiles keyframes into a scalar curve.
+---
+--- Keys are `{ age, value }` with age in zero to one, placed wherever the
+--- author wants them rather than spaced evenly.
+--- @param keys nonempty age/value keys with ages in zero through one
+--- @return compiled scalar samples
+--- @raises when keys contain invalid ages or values
+export function newCurve(keys: {CurveKey}): Curve
+    return {
+        samples = sampleKeys(
+            keys,
+            1,
+            function(key: CurveKey, into: {number}): nil
+                into[1] = checkNumber(key[2] as number, "a curve value", 4)
+            end,
+            3
+        ),
+    }
+end
+
+--- Compiles keyframes into a color gradient.
+---
+--- Keys are `{ age, color }`. The alpha channel fades a blended effect and is
+--- inert on one whose `render.blend` is `"opaque"`, where a fade to transparent
+--- writes opaque and the only fade that works is the size curve going to zero.
+--- @param keys nonempty age/value keys with ages in zero through one
+--- @return compiled RGBA samples
+--- @raises when keys contain invalid ages or values
+export function newGradient(keys: {CurveKey}): Gradient
+    return {
+        samples = sampleKeys(
+            keys,
+            4,
+            function(key: CurveKey, into: {number}): nil
+                into[1], into[2], into[3], into[4] = colorOf(key[2] as Color, "a gradient color", 4)
+            end,
+            3
+        ),
+    }
+end
+
+--- Spawn shapes, as the record holds them.
+const SHAPES: {
+    [string]: number
+} = {point = 0.0, line = 1.0, rectangle = 2.0, rectangleEdge = 3.0, disc = 4.0, ring = 5.0, cone = 6.0,}
+
+-- Opaque fields write the G-buffer; alpha and additive fields use the forward lane.
+local type Blending = {forward: number}
+const BLENDING: {[string]: Blending} = {opaque = {forward = 0}, alpha = {forward = 1}, additive = {forward = 1}}
+
+--- Registers an effect and answers the handle an emitter names it by.
+--- @param options The caller supplies a named schedule, spawn, simulation and rendering
+---     recipe.
+--- @return Returns the shared effect for ParticleEmitter.
+--- @raises When the name is duplicated or any option is invalid.
+export function newEffect(options: EffectOptions): Effect
+    if options == nil then
+        error("tecs: an effect needs options", 2)
+    end
+
+    -- Before any of the forty fields are worked out, so a nameless or a
+    -- duplicated effect is refused where it was written rather than after the
+    -- capacity warning has already been logged about it.
+    const name = options.name
+    if name == nil or name == "" then
+        error(
+            "tecs: an effect needs a name; it is what a snapshot names it "
+            .. "by, and there is nothing else about an effect that survives "
+            .. "the process that registered it",
+            2
+        )
+    end
+    if byName[name] ~= nil then
+        error(
+            (
+                "tecs: an effect named '%s' is already registered; two under "
+                .. "one name cannot be told apart again by anything that saved "
+                .. "either"
+            ):format(name),
+            2
+        )
+    end
+
+    const schedule = options.schedule or {}
+    const spawn = options.spawn or {}
+    const initial = options.initial or {}
+    const update = options.update or {}
+    const render = options.render or {}
+
+    local fields: {number} = {}
+    for index = 0, EFFECT_FLOATS - 1 do
+        fields[index] = 0.0
+    end
+
+    -- Schedule.
+    const rate = schedule.rate or 0.0
+    fields[EFFECT.RATE] = checkNumber(rate, "schedule.rate", 2)
+    fields[EFFECT.DURATION] = schedule.duration or 0.0
+    fields[EFFECT.LOOPING] = schedule.looping and 1.0 or 0.0
+    fields[EFFECT.DELAY] = schedule.delay or 0.0
+
+    const bursts: {number} = {}
+    const list = schedule.bursts or {}
+    if #list > MAX_BURSTS then
+        error(("tecs: an effect schedules at most %d bursts, not %d"):format(MAX_BURSTS, #list), 2)
+    end
+    fields[EFFECT.BURST_COUNT] = #list
+    for index = 1, #list do
+        const burst = list[index]
+        const at = (EFFECT.BURSTS as integer) + (index - 1) * 2
+        fields[at] = burst.time or 0.0
+        fields[at + 1] = burst.count or 0.0
+        assert(
+            fields[at] >= 0 and fields[at + 1] >= 0 and fields[at + 1] % 1 == 0,
+            "particle bursts need nonnegative times and integer counts"
+        )
+        bursts[#bursts + 1] = fields[at]
+        bursts[#bursts + 1] = fields[at + 1]
+    end
+
+    -- Spawn.
+    const shape = spawn.shape or "point"
+    if SHAPES[shape] == nil then
+        error(("tecs: '%s' is not a spawn shape"):format(tostring(shape)), 2)
+    end
+    fields[EFFECT.SHAPE] = assert(SHAPES[shape])
+    fields[EFFECT.SHAPE_WIDTH] = spawn.width or 0.0
+    fields[EFFECT.SHAPE_HEIGHT] = spawn.height or 0.0
+    fields[EFFECT.SHAPE_ARC] = spawn.arc or math.pi * 2.0
+    fields[EFFECT.SHAPE_ROTATION] = spawn.rotation or 0.0
+    if spawn.distribution ~= nil and spawn.distribution ~= "uniform" and spawn.distribution ~= "normal" then
+        error(("tecs: '%s' is not a distribution; use uniform or normal"):format(tostring(spawn.distribution)), 2)
+    end
+    fields[EFFECT.DISTRIBUTION] = spawn.distribution == "normal" and 1.0 or 0.0
+    fields[EFFECT.DIRECTION] = spawn.direction or 0.0
+    fields[EFFECT.SPREAD] = spawn.spread or 0.0
+    fields[EFFECT.OUTWARD] = spawn.outward and 1.0 or 0.0
+    if spawn.space ~= nil and spawn.space ~= "local" and spawn.space ~= "world" then
+        error(("tecs: '%s' is not a simulation space; use local or world"):format(tostring(spawn.space)), 2)
+    end
+    fields[EFFECT.SPACE] = spawn.space == "local" and 0.0 or 1.0
+    fields[EFFECT.INHERIT] = spawn.inheritVelocity or 0.0
+
+    -- Initial state.
+    fields[
+        EFFECT.LIFETIME_MIN
+    ], fields[EFFECT.LIFETIME_MAX] = boundsOf(initial.lifetime, 1.0, 1.0, "initial.lifetime", 2)
+    fields[EFFECT.SPEED_MIN], fields[EFFECT.SPEED_MAX] = boundsOf(initial.speed, 0.0, 0.0, "initial.speed", 2)
+    fields[EFFECT.SIZE_MIN], fields[EFFECT.SIZE_MAX] = boundsOf(initial.size, 1.0, 1.0, "initial.size", 2)
+    fields[
+        EFFECT.ROTATION_MIN
+    ], fields[EFFECT.ROTATION_MAX] = boundsOf(initial.rotation, 0.0, 0.0, "initial.rotation", 2)
+    fields[
+        EFFECT.ANGULAR_MIN
+    ], fields[EFFECT.ANGULAR_MAX] = boundsOf(initial.angularVelocity, 0.0, 0.0, "initial.angularVelocity", 2)
+    fields[
+        EFFECT.ACCEL_X_MIN
+    ], fields[EFFECT.ACCEL_X_MAX] = boundsOf(initial.accelerationX, 0.0, 0.0, "initial.accelerationX", 2)
+    fields[
+        EFFECT.ACCEL_Y_MIN
+    ], fields[EFFECT.ACCEL_Y_MAX] = boundsOf(initial.accelerationY, 0.0, 0.0, "initial.accelerationY", 2)
+    fields[
+        EFFECT.COLOR_R
+    ], fields[
+        EFFECT.COLOR_G
+    ], fields[EFFECT.COLOR_B], fields[EFFECT.COLOR_A] = colorOf(initial.color, "initial.color", 2)
+
+    -- Evolution.
+    fields[EFFECT.DRAG] = update.drag or 0.0
+    fields[
+        EFFECT.RADIAL_MIN
+    ], fields[EFFECT.RADIAL_MAX] = boundsOf(update.radialAcceleration, 0.0, 0.0, "update.radialAcceleration", 2)
+    fields[
+        EFFECT.TANGENTIAL_MIN
+    ], fields[
+        EFFECT.TANGENTIAL_MAX
+    ] = boundsOf(update.tangentialAcceleration, 0.0, 0.0, "update.tangentialAcceleration", 2)
+
+    -- A negative base is what the shader reads as "no table", answering one
+    -- for a curve and white for a gradient, so the multiply is unconditional.
+    local extra: {number} = {}
+    local sizeCurveAt: integer = -1
+    local colorGradientAt: integer = -1
+    if update.size ~= nil then
+        sizeCurveAt = #extra
+        for index = 1, #update.size.samples do
+            extra[#extra + 1] = update.size.samples[index]
+        end
+    end
+    if update.color ~= nil then
+        colorGradientAt = #extra
+        for index = 1, #update.color.samples do
+            extra[#extra + 1] = update.color.samples[index]
+        end
+    end
+
+    -- Rendering.
+    if render.material ~= nil then
+        -- The selector and its parameter share one float, so the parameter is
+        -- the fraction: `instance.vert.glsl` reads the id back with `floor` and
+        -- the parameter with `fract`. One is not a value the fraction can hold,
+        -- and left alone it would carry to the integer part and select the next
+        -- material instead, so the top of the range stops short of it.
+        local param = render.materialParam or 0.0
+        if param < 0.0 then
+            param = 0.0
+        elseif param > 0.999 then
+            param = 0.999
+        end
+        fields[EFFECT.MATERIAL] = materials.id(render.material) + param
+    end
+
+    const blend = render.blend or "alpha"
+    const blendEntry = BLENDING[blend]
+    if blendEntry == nil then
+        error(("tecs: '%s' is not a blend mode; use alpha, additive or opaque"):format(tostring(blend)), 2)
+    end
+    fields[EFFECT.BLENDED] = blendEntry.forward
+
+    const layer = render.layer or 1
+    if layer < 1 or layer > layers.MAX then
+        error(("tecs: render.layer is 1 to %d, not %d"):format(layers.MAX, layer), 2)
+    end
+    -- One depth for the effect rather than one per particle. An effect names
+    -- one layer, so its band and sort mode are constant, and what a per
+    -- particle depth would buy is sorting within the band, which is a
+    -- separate feature and not implied by this one. It is what decides where a
+    -- blended effect's particles sort against the blended entities on the same
+    -- layer, and they take the depth an entity at the world origin would.
+    fields[EFFECT.DEPTH] = layers.depthOf(layer, 0.0, 0.0, 0.0)
+    fields[EFFECT.UNBOUNDED] = not layers.isScreenSpace(layer) and 0.0 or 1.0
+
+    -- An effect that names no image keeps the region it was zeroed with, which
+    -- is a degenerate rect at the origin of array layer zero. That is where the
+    -- backend puts its white pixel, and the sampler is nearest, so every corner
+    -- of the quad reads that one texel and an untextured particle is white.
+    -- The effect registry has no renderer to ask for the pixel's real extent,
+    -- and does not need one: a rect with no width cannot reach past it.
+    local arrayLayer = 0.0
+    if render.sprite ~= nil then
+        const sprite = render.sprite
+        fields[EFFECT.U0] = sprite.u0
+        fields[EFFECT.V0] = sprite.v0
+        fields[EFFECT.U1] = sprite.u1
+        fields[EFFECT.V1] = sprite.v1
+        arrayLayer = sprite.image
+    end
+    -- No cast height, because a particle casts nothing: the two roles that do
+    -- are chosen by a bound's signs and the simulate pass writes neither of them.
+    fields[EFFECT.SLOT] = arrayLayer
+    fields[EFFECT.BLENDED] = blend == "additive" and 2 or blendEntry.forward
+
+    if render.sheet ~= nil then
+        const tag = render.sheet:tagId(render.tag)
+        const playback = frametable.register(render.sheet, tag)
+        fields[EFFECT.SLOT] = render.sheet:boundImage()
+        fields[EFFECT.PLAYBACK] = playback
+        fields[EFFECT.PLAYBACK_TICKS] = frametable.tickCount(playback)
+    end
+
+    fields[EFFECT.PIVOT_X] = render.pivotX or 0.5
+    fields[EFFECT.PIVOT_Y] = render.pivotY or 0.5
+    if render.alignment ~= nil and render.alignment ~= "fixed" and render.alignment ~= "velocity" then
+        error(("tecs: '%s' is not an alignment; use fixed or velocity"):format(tostring(render.alignment)), 2)
+    end
+    fields[EFFECT.ALIGNMENT] = render.alignment == "velocity" and 1.0 or 0.0
+    fields[EFFECT.STRETCH] = render.stretch or 1.0
+
+    if options.overflow ~= nil and options.overflow ~= "drop" and options.overflow ~= "replace" then
+        error(("tecs: '%s' is not an overflow policy; use drop or replace"):format(tostring(options.overflow)), 2)
+    end
+    fields[EFFECT.OVERFLOW] = options.overflow == "drop" and 0.0 or 1.0
+
+    const capacity = options.capacity or 256
+    if capacity < 1 or capacity > 4000000 then
+        error("tecs: an effect's capacity is at least one particle", 2)
+    end
+
+    for index = 0, EFFECT_FLOATS - 1 do
+        checkNumber(fields[index], "effect field " .. tostring(index), 2)
+    end
+    assert(
+        fields[
+            EFFECT.LIFETIME_MIN
+        ] > 0 and fields[
+            EFFECT.RATE
+        ] >= 0 and fields[EFFECT.DRAG] >= 0 and fields[EFFECT.DURATION] >= 0 and fields[EFFECT.DELAY] >= 0,
+        "particle lifetime must be positive; rate, drag and schedule times must be nonnegative"
+    )
+    const maxLifetime = fields[EFFECT.LIFETIME_MAX]
+    -- Halfway between the bounds, which is the mean of the uniform draw the
+    -- spawn pass makes between them, so a constant lifetime has a mean equal to
+    -- itself. `estimatedCount` integrates over this and the check below uses
+    -- the longest, because a prediction wants the average and a capacity wants
+    -- the worst case.
+    const meanLifetime = (fields[EFFECT.LIFETIME_MIN] + maxLifetime) * 0.5
+    -- Checked here, where every number is in hand, rather than left to be
+    -- discovered as a spray that is thinner than it was authored to be. A CPU
+    -- system drops the emission with no diagnostic and that is the single most
+    -- common way one of them is quietly wrong.
+
+    const duration = fields[EFFECT.DURATION]
+    local emitFor = -1.0
+    if not schedule.looping and duration > 0 then
+        emitFor = fields[EFFECT.DELAY] + duration
+    elseif rate == 0 and (not schedule.looping or duration == 0) then
+        emitFor = fields[EFFECT.DELAY]
+        for index = 1, #bursts, 2 do
+            emitFor = math.max(emitFor, fields[EFFECT.DELAY] + bursts[index])
+        end
+    end
+
+    const effect: Effect = {
+        name = name,
+        index = #registry + 1,
+        capacity = capacity,
+        blend = blend,
+        maxLifetime = maxLifetime,
+        meanLifetime = meanLifetime,
+        emitFor = emitFor,
+        rate = rate,
+        delay = fields[EFFECT.DELAY],
+        duration = duration,
+        looping = schedule.looping == true,
+        bursts = bursts,
+        _record = fields,
+        _render = render,
+        _extra = extra,
+        _sizeCurveAt = sizeCurveAt,
+        _colorGradientAt = colorGradientAt,
+    }
+    registry[effect.index] = effect
+    byName[name] = effect
+    revision = revision + 1
+
+    return effect
+end
+
+--- Configures one independently controlled emitter before it is spawned.
+export type EmitterOptions = {
+    --- Caller-writable. Selects the registered immutable effect.
+    effect: Effect,
+
+    --- Caller-writable. Starts playing, paused, or stopped and defaults to playing.
+    state: string?,
+
+    --- Caller-writable. Seeds deterministic emission with an integer from zero through
+    --- 16777215.
+    seed: number?,
+
+    --- Caller-writable. Scales the scheduled emission rate and defaults to one.
+    rateScale: number?,
+
+    --- Caller-writable. Scales particle size and defaults to one.
+    sizeScale: number?,
+
+    --- Caller-writable. Scales simulation seconds and defaults to one.
+    timeScale: number?,
+
+    --- Caller-writable. Multiplies particle RGBA and defaults to white.
+    tint: Color?
+}
+
+--- An emitter is an ECS entity; its individual particles exist only on the GPU.
+export record Emitter
+    --- Caller-writable before spawning. Selects the immutable effect.
+    effect: Effect
+
+    --- Read-only playback state; use play, stop or pause to change it.
+    state: string = "playing"
+
+    --- Caller-writable random seed, an integer from zero through 16777215.
+    seed: number = 1
+
+    --- Caller-writable multipliers for emission rate, size and simulation time.
+    rateScale: number = 1
+
+    --- Caller-writable. Multiplies particle size and defaults to one.
+    sizeScale: number = 1
+
+    --- Caller-writable. Multiplies simulation seconds and defaults to one.
+    timeScale: number = 1
+
+    --- Caller-writable color multiplier.
+    tint: Color? = nil
+
+    private clock: number = 0
+    private start: number = 0
+    private clearAt: number = -1
+    private generation: number = 1
+    private queued: number = 0
+    private timestep: number = 0.016666666666666666
+
+    --- Starts or resumes emission. A stopped emitter starts its schedule again.
+    --- @return The operation returns no value.
+    play: function(exclusive self: Emitter): nil
+
+    --- Stops emission while live particles drain.
+    --- @return The operation returns no value.
+    stop: function(exclusive self: Emitter): nil
+
+    --- Holds both the schedule and live particle field.
+    --- @return The operation returns no value.
+    pause: function(exclusive self: Emitter): nil
+
+    --- Kills the live field without changing playback.
+    --- @return The operation returns no value.
+    clear: function(exclusive self: Emitter): nil
+
+    --- Restarts the schedule and deterministic random sequence with an empty field.
+    --- @return The operation returns no value.
+    restart: function(exclusive self: Emitter): nil
+
+    --- Queues a burst for the next fixed step; stopped emitters ignore it.
+    --- @param count a nonnegative count, truncated to the emitter's capacity
+    --- @return The operation returns no value.
+    burst: function(exclusive self: Emitter, count: integer): nil
+
+    --- Answers whether the last possible particle has expired, without GPU readback.
+    --- @return Returns whether the schedule and longest particle lifetime have elapsed.
+    finished: function(borrows self: Emitter): boolean
+
+    --- Estimates the live count from the schedule and mean lifetime. Overflow and
+    --- explicit bursts can make it differ from the GPU field.
+    --- @return Returns the estimated live count, which may differ after overflow.
+    estimatedCount: function(borrows self: Emitter): integer
+end
+
+function Emitter.play(exclusive self: Emitter): nil
+    if self.state == "stopped" then
+        self.start = self.clock
+        self.generation = self.generation + 1
+    end
+    self.state = "playing"
+end
+
+function Emitter.stop(exclusive self: Emitter): nil
+    if self.state ~= "stopped" then
+        self.start = self.clock
+        self.generation = self.generation + 1
+    end
+    self.state, self.queued = "stopped", 0
+end
+
+function Emitter.pause(exclusive self: Emitter): nil
+    if self.state ~= "stopped" then
+        self.state = "paused"
+    end
+end
+
+function Emitter.clear(exclusive self: Emitter): nil
+    self.clearAt = self.clock + 0.5
+end
+
+function Emitter.restart(exclusive self: Emitter): nil
+    self:clear()
+    self.start, self.generation, self.queued = self.clock, self.generation + 1, 0
+    self.state = "playing"
+end
+
+function Emitter.burst(exclusive self: Emitter, count: integer): nil
+    assert(count >= 0, "particle burst count must be nonnegative")
+    if self.state == "playing" then
+        self.queued = math.min(self.effect.capacity, self.queued + count)
+    end
+end
+
+function Emitter.finished(borrows self: Emitter): boolean
+    if self.state == "paused" or (self.state == "playing" and self.effect.emitFor < 0) then
+        return false
+    end
+    const age = (self.clock - self.start) * self.timestep * self.timeScale
+
+    return age >= (self.state == "playing" and self.effect.emitFor or 0) + self.effect.maxLifetime
+end
+
+local function emittedBy(borrows item: Emitter, at: number): number
+    const effect = item.effect
+    if at <= effect.delay then
+        return 0
+    end
+    local into = at - effect.delay
+    if effect.duration > 0 and not effect.looping then
+        into = math.min(into, effect.duration)
+    end
+    local total = effect.rate * item.rateScale * into
+    for index = 1, #effect.bursts, 2 do
+        const cycles = effect.looping and effect.duration > 0 and math.max(
+            0,
+            math.floor((into - effect.bursts[index]) / effect.duration) + 1
+        ) or (into >= effect.bursts[index] and 1 or 0)
+        total = total + effect.bursts[index + 1] * cycles
+    end
+
+    return total
+end
+
+function Emitter.estimatedCount(borrows self: Emitter): integer
+    const now = (self.clock - self.start) * self.timestep * self.timeScale
+    return math.floor(
+        math.max(
+            0,
+            math.min(self.effect.capacity, emittedBy(self, now) - emittedBy(self, now - self.effect.meanLifetime))
+        ) + 0.5
+    )
+end
+
+local function makeEmitter(options: EmitterOptions): Emitter
+    const state = options.state or "playing"
+    assert(state == "playing" or state == "paused" or state == "stopped", "invalid particle playback state")
+    return new Emitter(
+        effect = options.effect,
+        state = state,
+        seed = options.seed ?? 1,
+        rateScale = options.rateScale ?? 1,
+        sizeScale = options.sizeScale ?? 1,
+        timeScale = options.timeScale ?? 1,
+        tint = options.tint
+    )
+end
+
+--- Spawns an effect emitter; requires a Transform2D. Snapshots name the effect
+--- and preserve playback, then refill an empty GPU field after restoration.
+export const ParticleEmitter = ecs.newComponent({
+    name = "ParticleEmitter",
+    construct = makeEmitter,
+    requires = {rendercomponents.Transform2DComponent},
+    default = function(): Emitter
+        error("ParticleEmitter requires an effect", 2)
+    end,
+    save = function(value: Emitter): any
+        return {
+            effect = value.effect.name,
+            state = value.state,
+            seed = value.seed,
+            rateScale = value.rateScale,
+            sizeScale = value.sizeScale,
+            timeScale = value.timeScale,
+            tint = value.tint,
+            clock = value.clock,
+            start = value.start,
+            generation = value.generation,
+            queued = value.queued
+        }
+    end,
+    load = function(stored: any): Emitter
+        const data = stored as {[string]: any}
+        const effect = assert(findEffect(data.effect as string), "snapshot names an unregistered particle effect")
+        local value = makeEmitter({
+            effect = effect,
+            state = data.state as string?,
+            seed = data.seed as number?,
+            rateScale = data.rateScale as number?,
+            sizeScale = data.sizeScale as number?,
+            timeScale = data.timeScale as number?,
+            tint = data.tint as Color?
+        })
+        value.clock, value.start, value.generation, value.queued = (
+            data.clock as number?
+        ) ?? 0, (data.start as number?) ?? 0, (data.generation as number?) ?? 1, (data.queued as number?) ?? 0
+
+        return value
+    end,
+})
+
+local record RangeSlot
+    base: integer
+    count: integer
+end
+local record Holding
+    token: integer
+    value: Emitter
+    effect: Effect
+    index: integer
+    base: integer
+    count: integer
+    seen: boolean = false
+    draining: boolean = false
+    x: number = 0
+    y: number = 0
+    rotation: number = 0
+    positioned: boolean = false
+    previousX: number = 0
+    previousY: number = 0
+    steps: number = 0
+    advancing: boolean = false
+    burst: number = 0
+end
+
+--- Configures a world's GPU pool; capacity is fixed until the world is dropped.
+export type PoolOptions = {
+    --- Caller-writable. Reserves 1 to 4000000 slots and defaults to 16384.
+    capacity: integer?,
+
+    --- Caller-writable. Reserves emitter records and defaults to 256.
+    maxEmitters: integer?
+}
+
+--- Retains one world's GPU field allocation and emitter schedule.
+export record Pool
+    --- Read-only maximum number of simultaneous particle slots in this world.
+    capacity: integer
+
+    --- Read-only maximum number of simultaneous emitters, including draining ones.
+    maxEmitters: integer
+
+    private id: integer
+    private serial: integer = 0
+    private step: integer
+    private timestep: number = 0.016666666666666666
+    private alpha: number = 0
+    private query: ecs.Query
+    private nextToken: integer = 0
+    private holdings: {[Emitter]: Holding} = {}
+    private refused: {[Emitter]: boolean} = {}
+    private indices: {[integer]: Holding} = {}
+    private free: {RangeSlot}
+    private bytes: string = ""
+    private packedSerial: integer = -1
+    private packedRevision: integer = -1
+end
+
+local pools: {[ecs.World]: Pool} = setmetatable({}, {__mode = "k"}) as {[ecs.World]: Pool}
+local nextPool: integer = 0
+local effectBytes: string = ""
+local effectAt: integer = -1
+local sheetAt: integer = -1
+local clipAt: integer = -1
+local layerAt: integer = -1
+
+local function packedEffects(): string
+    const sheetVersion, clipVersion, layerVersion = sheet.revision(), tecs.gfx.clips.revision(), layers.revision()
+    if sheetAt ~= sheetVersion or clipAt ~= clipVersion or layerAt ~= layerVersion then
+        sheetAt, clipAt, layerAt = sheetVersion, clipVersion, layerVersion
+        revision = revision + 1
+    end
+    if effectAt == revision then
+        return effectBytes
+    end
+    local data: {number} = {}
+    local tail = #registry * EFFECT_FLOATS
+    for index, effect in ipairs(registry) do
+        const render = effect._render
+        const source = render.sheet
+        if source ~= nil then
+            const playback = frametable.register(source, source:tagId(render.tag))
+            effect._record[EFFECT.SLOT] = source:boundImage()
+            effect._record[EFFECT.PLAYBACK] = playback
+            effect._record[EFFECT.PLAYBACK_TICKS] = frametable.tickCount(playback)
+        end
+        const layer = render.layer ?? 1
+        effect._record[EFFECT.DEPTH] = layers.depthOf(layer, 0, 0, 0)
+        effect._record[EFFECT.UNBOUNDED] = layers.isScreenSpace(layer) and 1 or 0
+        local left, top, right, bottom = 0, 0, 65535, 65535
+        if render.clip ~= nil and render.clip ~= 0 then
+            left, top, right, bottom = tecs.gfx.clips.regionOf(render.clip)
+        end
+        for lane, value in ipairs({left, top, right, bottom}) do
+            effect._record[64 + lane] = math.max(0, math.min(65535, math.ceil(value - 0.5)))
+        end
+        const base = (index - 1) * EFFECT_FLOATS
+        for field = 0, EFFECT_FLOATS - 1 do
+            data[base + field + 1] = effect._record[field]
+        end
+        data[base + (EFFECT.SIZE_CURVE as integer) + 1] = effect._sizeCurveAt < 0 and -1 or tail + effect._sizeCurveAt
+        data[
+            base + (EFFECT.COLOR_GRADIENT as integer) + 1
+        ] = effect._colorGradientAt < 0 and -1 or tail + effect._colorGradientAt
+        for _, sample in ipairs(effect._extra) do
+            data[tail + 1] = sample
+            tail = tail + 1
+        end
+    end
+    assert(tail <= EFFECT_TABLE_FLOATS, "particle effect table is full")
+    local buffer = nupp.io.newBuffer()
+    local writer = nupp.io.newScalarWriter(buffer)
+    for _, value in ipairs(data) do
+        writer:writeFloat32(nupp.math.f32.narrow(value))
+    end
+    writer:drop()
+    effectBytes = buffer:getString()
+    buffer:drop()
+    effectAt = revision
+
+    return effectBytes
+end
+
+local function admit(exclusive pool: Pool, item: Emitter): Holding?
+    local index: integer = 0
+    while pool.indices[index] ~= nil and index < pool.maxEmitters do
+        index = index + 1
+    end
+    if index == pool.maxEmitters then
+        return nil
+    end
+    for at, range in ipairs(pool.free) do
+        if range.count >= item.effect.capacity then
+            pool.nextToken = pool.nextToken + 1
+            assert(pool.nextToken < 4294967295, "particle allocation identity exhausted")
+            local holding = new Holding(
+                token = pool.nextToken,
+                value = item,
+                effect = item.effect,
+                index = index,
+                base = range.base,
+                count = item.effect.capacity
+            )
+            range.base, range.count = range.base + holding.count, range.count - holding.count
+            if range.count == 0 then
+                table.remove(pool.free, at)
+            end
+            pool.holdings[item], pool.indices[index] = holding, holding
+            return holding
+        end
+    end
+
+    return nil
+end
+
+local function release(exclusive pool: Pool, holding: Holding): nil
+    pool.holdings[holding.value], pool.indices[holding.index] = nil, nil
+    pool.free[#pool.free + 1] = new RangeSlot(base = holding.base, count = holding.count)
+    table.sort(pool.free, function(a: RangeSlot, b: RangeSlot): boolean
+        return a.base < b.base
+    end)
+    local at: integer = 1
+    while at < #pool.free do
+        const left, right = pool.free[at], pool.free[at + 1]
+        if left.base + left.count == right.base then
+            left.count = left.count + right.count
+            table.remove(pool.free, at + 1)
+        else
+            at = at + 1
+        end
+    end
+end
+
+local function sync(exclusive pool: Pool, borrows world: ecs.World): nil
+    const step = world:fixedStepCount()
+    const elapsed = math.min(MAX_STEPS, math.max(0, step - pool.step))
+    pool.step = step
+    pool.timestep, _, pool.alpha = world:getFixedTiming()
+    pool.serial = pool.serial + 1
+    for _, holding in pairs(pool.holdings) do
+        holding.seen = false
+        holding.steps = 0
+        holding.burst = 0
+        holding.advancing = false
+    end
+    for candidate, count in pool.query:iter() do
+        const active = candidate as tecs.internal.archetype.Archetype
+        const values = assert(active:get(ParticleEmitter))
+        const transforms = assert(active:get(rendercomponents.Transform2DComponent))
+        const held = tecs.internal.archetype.has(
+            active,
+            ecs.Paused
+        ) or tecs.internal.archetype.has(active, ecs.Disabled)
+        for row = 1, count as integer do
+            const item = values[row]
+            local holding = pool.holdings[item]
+            if holding == nil then
+                holding = admit(pool, item)
+            end
+            if holding == nil then
+                if not pool.refused[item] then
+                    pool.refused[item] = true
+                    io.stderr:write(
+                        "Tecs particle pool cannot reserve " .. tostring(
+                            item.effect.capacity
+                        ) .. " slots for " .. item.effect.name .. "\n"
+                    )
+                end
+            else
+                assert(item.effect == holding.effect, "an admitted emitter cannot change effect; spawn a new emitter")
+                holding.seen, holding.draining = true, false
+                holding.previousX, holding.previousY = holding.x, holding.y
+                unsafe do
+                    holding.x, holding.y, holding.rotation = transforms[
+                        row
+                    ].x, transforms[row].y, transforms[row].rotation
+                end
+                if not holding.positioned then
+                    holding.previousX, holding.previousY = holding.x, holding.y
+                    holding.positioned = true
+                end
+                pool.refused[item] = nil
+                holding.advancing = not held and item.state ~= "paused"
+                if holding.advancing then
+                    holding.steps = elapsed
+                end
+                item.clock = item.clock + holding.steps
+                item.timestep = pool.timestep
+                if holding.steps > 0 then
+                    holding.burst, item.queued = item.queued, 0
+                end
+            end
+        end
+    end
+    local expired: {Holding} = {}
+    for _, holding in pairs(pool.holdings) do
+        if not holding.seen then
+            if not holding.draining then
+                holding.value:stop()
+                holding.draining = true
+            end
+            holding.steps = elapsed
+            holding.advancing = true
+            holding.value.clock = holding.value.clock + elapsed
+            if holding.value:finished() then
+                expired[#expired + 1] = holding
+            end
+        end
+    end
+    for _, holding in ipairs(expired) do
+        release(pool, holding)
+    end
+end
+
+--- Installs a GPU particle pool. No plugin means no allocations or dispatches.
+--- @param world The caller supplies the world that owns the emitters.
+--- @param options The caller sets fixed pool limits, defaulting to 16384 slots and 256
+---     emitters.
+--- @return The operation returns no value.
+--- @raises When pool limits are outside the supported range.
+export function plugin(exclusive world: ecs.World, options: PoolOptions?): nil
+    if pools[world] ~= nil then
+        return
+    end
+    const capacity = options ~= nil and options.capacity or DEFAULT_CAPACITY
+    const maxEmitters = options ~= nil and options.maxEmitters or DEFAULT_EMITTERS
+    assert(
+        capacity >= 1 and capacity <= 4000000 and maxEmitters >= 1 and maxEmitters <= 65536,
+        "invalid particle pool limits"
+    )
+    nextPool = nextPool + 1
+    local pool = new Pool(
+        capacity = capacity,
+        maxEmitters = maxEmitters,
+        id = nextPool,
+        step = world:fixedStepCount(),
+        query = world:newQuery({include = {ParticleEmitter, rendercomponents.Transform2DComponent}}),
+        free = {new RangeSlot(base = 0, count = capacity)}
+    )
+    pools[world] = pool
+    world:addSystem({
+        name = "tecs.ParticleEmitterSync",
+        phase = ecs.phases.PostUpdate,
+        run = function(_dt: number, exclusive running: ecs.World): nil
+            sync(pool, running)
+        end
+    })
+end
+
+--- Returns the installed pool, or nil for a world without GPU particles.
+--- @param world The caller supplies the world to inspect.
+--- @return Returns the pool and its configured limits, or nil when uninstalled.
+export function poolOf(borrows world: ecs.World): Pool?
+    return pools[world]
+end
+
+--- Serializes emitter configuration for the native renderer. Particle state is
+--- absent: it never leaves the GPU. Multiple views share a pool and sequence.
+--- @param world The host supplies the world being rendered.
+--- @return Returns a packet, or an empty string when no pool is installed.
+export function section(borrows world: ecs.World): string
+    local pool = pools[world]
+    if pool == nil then
+        return ""
+    end
+    const effects = packedEffects()
+    if pool.packedSerial == pool.serial and pool.packedRevision == revision then
+        return pool.bytes
+    end
+    local buffer = nupp.io.newBuffer()
+    local writer = nupp.io.newScalarWriter(buffer)
+    local count: integer = 0
+    for _ in pairs(pool.holdings) do
+        count = count + 1
+    end
+    writer:writeUint32(nupp.math.u32.wrap(0x54505443))
+        :writeUint32(nupp.math.u32.wrap(2))
+        :writeUint32(nupp.math.u32.wrap(pool.id))
+        :writeUint32(nupp.math.u32.wrap(pool.serial))
+        :writeUint32(nupp.math.u32.wrap(pool.capacity))
+        :writeUint32(nupp.math.u32.wrap(pool.maxEmitters))
+        :writeFloat32(nupp.math.f32.narrow(pool.timestep))
+        :writeFloat32(nupp.math.f32.narrow(pool.alpha))
+        :writeUint32(nupp.math.u32.wrap(#effects))
+        :writeUint32(nupp.math.u32.wrap(count))
+    writer:writeBytes(effects)
+    for index = 0, pool.maxEmitters - 1 do
+        const holding = pool.indices[index]
+        if holding ~= nil then
+            const item = holding.value
+            checkNumber(item.seed, "seed", 2)
+            assert(
+                item.seed >= 0 and item.seed < 16777216 and item.seed == math.floor(item.seed),
+                "particle seed must be a 24-bit integer"
+            )
+            assert(
+                item.rateScale >= 0 and item.sizeScale >= 0 and item.timeScale >= 0,
+                "particle scales must be nonnegative"
+            )
+            const r, g, b, a = colorOf(item.tint, "tint", 2)
+            local data = {
+                item.effect.index - 1,
+                holding.base,
+                holding.count,
+                item.state == "playing" and 1 or 0,
+                item.seed,
+                item.generation,
+                item.start,
+                item.clearAt,
+                holding.previousX,
+                holding.previousY,
+                holding.x,
+                holding.y,
+                holding.rotation,
+                item.rateScale,
+                item.sizeScale,
+                item.timeScale,
+                r,
+                g,
+                b,
+                a,
+                holding.burst,
+                item.clock,
+                holding.steps,
+                holding.advancing and 1 or 0
+            }
+            writer:writeUint32(nupp.math.u32.wrap(index)):writeUint32(nupp.math.u32.wrap(holding.token))
+            for _, value in ipairs(data) do
+                writer:writeFloat32(nupp.math.f32.narrow(checkNumber(value, "emitter field", 2)))
+            end
+        end
+    end
+    writer:drop()
+    pool.bytes = buffer:getString()
+    buffer:drop()
+    pool.packedSerial, pool.packedRevision = pool.serial, revision
+
+    return pool.bytes
+end

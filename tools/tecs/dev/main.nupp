@@ -23,6 +23,14 @@ local function host(args: {string}, build: boolean): nil
     if args[1] == "--" then
         table.remove(args, 1)
     end
+    if componentName == "sponza3d" or componentName == "bistro3d" then
+        const name = componentName:sub(1, -3)
+        const model = name == "sponza" and "Sponza" or "Bistro"
+        assert(
+            files.isFile(commands.root .. "/assets/external/" .. name .. "/" .. model .. ".tecs.gltf"),
+            "fetch the original scene first: nupp task fetch " .. name
+        )
+    end
     if build then
         commands.run({commands.compiler(), "build", "--target", target})
     end
@@ -115,6 +123,13 @@ elseif task == "host" or task == "run" then
     host(args, task == "run")
 elseif task == "physicssmoke" then
     commands.run({commands.compiler(), "run", "examples/nupp/physicssmoke.nupp"}, native.libraries())
+elseif task == "fetch" then
+    assert(#args == 1 and (args[1] == "sponza" or args[1] == "bistro"), "usage: nupp task fetch sponza|bistro")
+    local command = {"cargo", "run", "--locked", "--release", "-p", "tecs-example-assets"}
+    if args[1] == "bistro" then
+        commands.append(command, {"--features", "bistro-import"})
+    end
+    commands.run(commands.append(command, {"--", args[1]}))
 elseif task == "bench" then
     require("tecs.dev.bench").run(args)
 elseif task == "format" or task == "format-check" then

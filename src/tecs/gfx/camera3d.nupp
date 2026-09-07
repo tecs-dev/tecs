@@ -1,0 +1,300 @@
+module tecs.gfx.camera3d
+
+--[=[
+A perspective camera maps a right-handed 3D world to one viewport.
+
+World +X points right, +Y points up, and the default camera looks along -Z.
+The camera orientation is a quaternion in `(x, y, z, w)` order that turns
+camera-local coordinates into world coordinates. Position and orientation are
+caller-writable fields:
+
+```nupp
+const camera = tecs.gfx.newCamera3D({
+    x = 0,
+    y = 2,
+    z = 6,
+    verticalFov = math.rad(60),
+})
+camera.rotationY = math.sin(math.rad(15) * 0.5)
+camera.rotationW = math.cos(math.rad(15) * 0.5)
+```
+
+`matrix` writes a column-major world-to-clip matrix with depth in `[0, 1]`,
+and `inverseMatrix` writes its clip-to-world inverse. `matrices` writes both
+from one camera calculation for code that needs the pair. Each result uses a
+separate camera-owned sixteen-float array and remains valid until that same
+result is written again.
+]=]
+
+const sqrt, tan = math.sqrt, math.tan
+const PI = math.pi
+
+--- Defines optional perspective-camera construction values.
+export type Options = {
+    --- Caller-writable. Sets the world-space x coordinate and defaults to zero.
+    x: number?,
+
+    --- Caller-writable. Sets the world-space y coordinate and defaults to zero.
+    y: number?,
+
+    --- Caller-writable. Sets the world-space z coordinate and defaults to zero.
+    z: number?,
+
+    --- Caller-writable. Sets the orientation quaternion x component and
+    --- defaults to zero.
+    rotationX: number?,
+
+    --- Caller-writable. Sets the orientation quaternion y component and
+    --- defaults to zero.
+    rotationY: number?,
+
+    --- Caller-writable. Sets the orientation quaternion z component and
+    --- defaults to zero.
+    rotationZ: number?,
+
+    --- Caller-writable. Sets the orientation quaternion scalar component and
+    --- defaults to one.
+    rotationW: number?,
+
+    --- Caller-writable. Sets the vertical field of view in radians and
+    --- defaults to pi divided by three.
+    verticalFov: number?,
+
+    --- Caller-writable. Sets the positive near-plane distance and defaults to
+    --- 0.1 world units.
+    near: number?,
+
+    --- Caller-writable. Sets the far-plane distance and defaults to 1000 world units.
+    far: number?
+}
+
+--- Represents one perspective view into a right-handed 3D world.
+export record Camera3D
+    --- Names the options accepted by `newCamera3D`.
+
+    --- Caller-writable. Sets the world-space x coordinate.
+    x: number = 0
+
+    --- Caller-writable. Sets the world-space y coordinate.
+    y: number = 0
+
+    --- Caller-writable. Sets the world-space z coordinate.
+    z: number = 0
+
+    --- Caller-writable. Sets the local-to-world orientation quaternion x
+    --- component.
+    rotationX: number = 0
+
+    --- Caller-writable. Sets the local-to-world orientation quaternion y
+    --- component.
+    rotationY: number = 0
+
+    --- Caller-writable. Sets the local-to-world orientation quaternion z
+    --- component.
+    rotationZ: number = 0
+
+    --- Caller-writable. Sets the local-to-world orientation quaternion scalar
+    --- component.
+    rotationW: number = 1
+
+    --- Caller-writable. Sets the vertical field of view in radians between
+    --- zero and pi.
+    verticalFov: number = 1.0471975511965976
+
+    --- Caller-writable. Sets the positive near-plane distance.
+    near: number = 0.1
+
+    --- Caller-writable. Sets the far-plane distance, which must exceed `near`.
+    far: number = 1000
+
+    --- Engine-owned. Stores the sixteen floats that `matrix` rewrites.
+    --- Ordinary game code should ignore this field.
+    _matrix: {[integer]: number} = {}
+
+    --- Engine-owned. Stores the sixteen floats that `inverseMatrix` rewrites.
+    --- Ordinary game code should ignore this field.
+    _inverseMatrix: {[integer]: number} = {}
+
+    --- Creates a perspective camera.
+    --- @param options Omit for an identity camera at the origin looking along negative
+    ---     z.
+    --- @return A camera whose fields the caller assigns directly.
+
+    --- Writes the column-major world-to-clip matrix for a viewport.
+    ---
+    --- The method normalizes the camera quaternion while calculating the view,
+    --- without modifying the caller's fields. Clip depth maps `near` to zero
+    --- and `far` to one.
+    --- @param width The positive viewport width in pixels.
+    --- @param height The positive viewport height in pixels.
+    --- @return The camera's own sixteen-float array, valid until the next call
+    ---     on this camera.
+    matrix: function(exclusive self: Camera3D, width: number, height: number): {[integer]: number}
+
+    --- Writes the column-major clip-to-world matrix for a viewport.
+    ---
+    --- This is the exact inverse of `matrix` at the same dimensions. Clip x
+    --- and y range from negative one to one, clip z ranges from zero to one,
+    --- and the caller divides the resulting xyz by w.
+    --- @param width The positive viewport width in pixels.
+    --- @param height The positive viewport height in pixels.
+    --- @return The camera's own sixteen-float array, valid until the next call
+    ---     to `inverseMatrix` on this camera.
+    inverseMatrix: function(exclusive self: Camera3D, width: number, height: number): {[integer]: number}
+
+    --- Writes the world-to-clip matrix and its clip-to-world inverse.
+    ---
+    --- This method normalizes the camera quaternion and derives the projection
+    --- once, then writes both arrays. Use it when both matrices describe the
+    --- same view.
+    --- @param width The positive viewport width in pixels.
+    --- @param height The positive viewport height in pixels.
+    --- @return The camera's own world-to-clip sixteen-float array, valid until
+    ---     the next call to `matrix` or `matrices` on this camera.
+    --- @return The camera's own clip-to-world sixteen-float array, valid until
+    ---     the next call to `inverseMatrix` or `matrices` on this camera.
+    matrices: function(
+        exclusive self: Camera3D,
+        width: number,
+        height: number
+    ): ({[integer]: number}, {[integer]: number})
+end
+
+local function validateProjection(verticalFov: number, near: number, far: number, level: integer?)
+    level = level or 3
+    if verticalFov <= 0.0 or verticalFov >= PI then
+        error("Camera3D verticalFov must be greater than 0 and less than pi", level)
+    end
+    if near <= 0.0 then
+        error("Camera3D near must be greater than 0", level)
+    end
+    if far <= near then
+        error("Camera3D far must be greater than near", level)
+    end
+end
+
+export function newCamera3D(options: Options?): Camera3D
+    options = options or {}
+    const verticalFov = options.verticalFov or PI / 3.0
+    const near = options.near or 0.1
+    const far = options.far or 1000.0
+    validateProjection(verticalFov, near, far)
+
+    local self = new Camera3D()
+    self.x = options.x or 0.0
+    self.y = options.y or 0.0
+    self.z = options.z or 0.0
+    self.rotationX = options.rotationX or 0.0
+    self.rotationY = options.rotationY or 0.0
+    self.rotationZ = options.rotationZ or 0.0
+    self.rotationW = options.rotationW or 1.0
+    self.verticalFov = verticalFov
+    self.near = near
+    self.far = far
+    self._matrix = {}
+    self._inverseMatrix = {}
+
+    return self
+end
+
+local function writeMatrices(
+    exclusive self: Camera3D,
+    width: number,
+    height: number,
+    writeView: boolean,
+    writeInverse: boolean
+)
+    if width <= 0.0 or height <= 0.0 then
+        error("Camera3D viewport width and height must be greater than 0", 3)
+    end
+    validateProjection(self.verticalFov, self.near, self.far, 4)
+
+    local qx, qy, qz, qw = self.rotationX, self.rotationY, self.rotationZ, self.rotationW
+    const magnitude = sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
+    if magnitude == 0.0 then
+        error("Camera3D rotation quaternion must not be zero", 3)
+    end
+    const inverseMagnitude = 1.0 / magnitude
+    qx, qy, qz, qw = qx * inverseMagnitude, qy * inverseMagnitude, qz * inverseMagnitude, qw * inverseMagnitude
+
+    local xx, yy, zz = qx * qx, qy * qy, qz * qz
+    local xy, xz, yz = qx * qy, qx * qz, qy * qz
+    local wx, wy, wz = qw * qx, qw * qy, qw * qz
+    local r00, r01, r02 = 1.0 - 2.0 * (yy + zz), 2.0 * (xy - wz), 2.0 * (xz + wy)
+    local r10, r11, r12 = 2.0 * (xy + wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz - wx)
+    local r20, r21, r22 = 2.0 * (xz - wy), 2.0 * (yz + wx), 1.0 - 2.0 * (xx + yy)
+
+    const focal = 1.0 / tan(self.verticalFov * 0.5)
+    const horizontal = focal * height / width
+    const depth = self.far / (self.near - self.far)
+    const depthOffset = self.far * self.near / (self.near - self.far)
+    if writeView then
+        const tx = -(r00 * self.x + r10 * self.y + r20 * self.z)
+        const ty = -(r01 * self.x + r11 * self.y + r21 * self.z)
+        const tz = -(r02 * self.x + r12 * self.y + r22 * self.z)
+        const m = self._matrix
+
+        -- Projection multiplied by the inverse camera transform, written
+        -- directly in column-major order without temporary matrices.
+        m[0], m[1], m[2], m[3] = horizontal * r00, focal * r01, depth * r02, -r02
+        m[4], m[5], m[6], m[7] = horizontal * r10, focal * r11, depth * r12, -r12
+        m[8], m[9], m[10], m[11] = horizontal * r20, focal * r21, depth * r22, -r22
+        m[12], m[13], m[14], m[15] = horizontal * tx, focal * ty, depth * tz + depthOffset, -tz
+    end
+    if writeInverse then
+        const inverseDepthOffset = 1.0 / depthOffset
+        const m = self._inverseMatrix
+
+        -- Inverse projection followed by the local-to-world camera transform.
+        -- Written by columns so it is directly consumable by GLSL.
+        m[0], m[1], m[2], m[3] = r00 / horizontal, r10 / horizontal, r20 / horizontal, 0.0
+        m[4], m[5], m[6], m[7] = r01 / focal, r11 / focal, r21 / focal, 0.0
+        m[
+            8
+        ], m[
+            9
+        ], m[
+            10
+        ], m[
+            11
+        ] = self.x * inverseDepthOffset, self.y * inverseDepthOffset, self.z * inverseDepthOffset, inverseDepthOffset
+        m[
+            12
+        ], m[
+            13
+        ], m[
+            14
+        ], m[
+            15
+        ] = -r02
+            + self.x
+            * depth
+            * inverseDepthOffset, -r12
+            + self.y
+            * depth
+            * inverseDepthOffset, -r22
+            + self.z
+            * depth
+            * inverseDepthOffset, depth
+            * inverseDepthOffset
+    end
+end
+
+function Camera3D.matrix(exclusive self: Camera3D, width: number, height: number): {[integer]: number}
+    writeMatrices(self, width, height, true, false)
+    return self._matrix
+end
+
+function Camera3D.inverseMatrix(exclusive self: Camera3D, width: number, height: number): {[integer]: number}
+    writeMatrices(self, width, height, false, true)
+    return self._inverseMatrix
+end
+
+function Camera3D.matrices(
+    exclusive self: Camera3D,
+    width: number,
+    height: number
+): ({[integer]: number}, {[integer]: number})
+    writeMatrices(self, width, height, true, true)
+    return self._matrix, self._inverseMatrix
+end

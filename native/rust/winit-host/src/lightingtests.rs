@@ -187,6 +187,7 @@ fn header(scene: &Scene) -> Header {
         flags |= FRAME_BLOOM;
     }
     Header {
+        animation_clock: 0.,
         graph_revision: 1,
         flags,
         target: [SIZE as f32, SIZE as f32],
@@ -644,6 +645,7 @@ fn close(left: f32, right: f32, tolerance: f32) -> bool {
 /// Runs the bloom threshold or one axis of its blur over a target filled with
 /// one value per column, and reads what it wrote.
 fn bloom(harness: &Harness, pass: &str, columns: &[f32], tuning: [f32; 3]) -> Vec<[f32; 4]> {
+    let is_extract = pass == "bloomExtract";
     let device = &harness.device;
     let scope = device.push_error_scope(ErrorFilter::Validation);
     let mut header = header(&Scene {
@@ -747,6 +749,20 @@ fn bloom(harness: &Harness, pass: &str, columns: &[f32], tuning: [f32; 3]) -> Ve
         ],
     });
 
+    let mesh = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("bloom mesh input"),
+        layout: &layouts.mesh_composite,
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::Sampler(&sampler),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: BindingResource::TextureView(&source.1),
+            },
+        ],
+    });
     let readback = device.create_buffer(&BufferDescriptor {
         label: Some("readback"),
         size: u64::from(SIZE) * u64::from(SIZE) * 8,
@@ -771,6 +787,9 @@ fn bloom(harness: &Harness, pass: &str, columns: &[f32], tuning: [f32; 3]) -> Ve
         pass.set_pipeline(runtime.pipeline.as_ref().expect("a bloom pass has one"));
         pass.set_bind_group(0, &scene_group, &[]);
         pass.set_bind_group(1, &inputs, &[]);
+        if is_extract {
+            pass.set_bind_group(2, &mesh, &[]);
+        }
         pass.draw(0..3, 0..1);
     }
     encoder.copy_texture_to_buffer(

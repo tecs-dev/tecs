@@ -1,0 +1,136 @@
+module tecs.internal.meshlights
+local mesh = require("tecs.internal.meshcomponents")
+local components = require("tecs.internal.components")
+local world = require("tecs.internal.world")
+local query = require("tecs.internal.query")
+local archetype = require("tecs.internal.archetype")
+local record Version
+    transform: integer = -1
+    light: integer = -1
+    structure: integer = -1
+    visit: integer = 0
+end
+export record Collector
+    private points: query.Query
+    private spots: query.Query
+    private versions: {[integer]: Version} = {}
+    private visit: integer = 0
+    private payload: string = ""
+    frame: function(exclusive self: Collector): string
+end
+export function new(exclusive value: world.World): Collector
+    return new Collector(
+        points = value:newQuery({
+            include = {mesh.PointLight3DComponent},
+            exclude = {components.Disabled}
+        }),
+        spots = value:newQuery({include = {mesh.SpotLight3DComponent}, exclude = {components.Disabled}})
+    )
+end
+
+function Collector.frame(exclusive self: Collector): string
+    self.visit = self.visit + 1
+    local dirty = self.visit == 1
+    for lane, query in ipairs({self.points, self.spots}) do
+        for candidate in query:iter() do
+            const active = candidate as archetype.Archetype
+            const key = active.id * 2 + lane
+            local version = self.versions[key]
+            if version == nil then
+                version = new Version()
+                self.versions[key] = version
+            end
+            const transform = active:writeCount(mesh.Transform3DComponent)
+            const light = active:writeCount(lane == 1 and mesh.PointLight3DComponent or mesh.SpotLight3DComponent)
+            const structure = active:structuralCount()
+            if version.transform ~= transform or version.light ~= light or version.structure ~= structure then
+                dirty = true
+            end
+            version.transform, version.light, version.structure, version.visit = transform, light, structure, self.visit
+        end
+    end
+    for key, version in pairs(self.versions) do
+        if version.visit ~= self.visit then
+            self.versions[key] = nil
+            dirty = true
+        end
+    end
+    if not dirty then
+        return self.payload
+    end
+    local buffer = nupp.io.newBuffer()
+    local writer = nupp.io.newScalarWriter(buffer)
+    unsafe do
+        for lane, query in ipairs({self.points, self.spots}) do
+            for candidate, size in query:iter() do
+                const active = candidate as archetype.Archetype
+                const transforms = assert(active:get(mesh.Transform3DComponent))
+                const points, spots = active:get(mesh.PointLight3DComponent), active:get(mesh.SpotLight3DComponent)
+                for index = 1, size as integer do
+                    const t = transforms[index]
+                    local radius, r, g, b, intensity, flags = 0, 0, 0, 0, 0, 0
+                    local inner, outer = 1, -1
+                    if lane == 1 then
+                        const light = assert(points)[index]
+                        radius, r, g, b, intensity, flags = light.radius, light.r, light.g, light.b, light.intensity, light.flags
+                    else
+                        const light = assert(spots)[index]
+                        radius, r, g, b, intensity, flags = light.radius, light.r, light.g, light.b, light.intensity, light.flags
+                        assert(
+                            light.innerAngle >= 0
+                            and light.innerAngle <= light.outerAngle
+                            and light.outerAngle > 0
+                            and light.outerAngle < math.pi
+                            / 2,
+                            "invalid spot light cone"
+                        )
+                        inner, outer = math.cos(light.innerAngle), math.cos(light.outerAngle)
+                    end
+                    assert(radius > 0 and r >= 0 and g >= 0 and b >= 0 and intensity >= 0, "invalid mesh light range")
+                    const length = math.sqrt(
+                        t.rotationX
+                        * t.rotationX
+                        + t.rotationY
+                        * t.rotationY
+                        + t.rotationZ
+                        * t.rotationZ
+                        + t.rotationW
+                        * t.rotationW
+                    )
+                    assert(length > 0, "mesh light rotation must be a nonzero quaternion")
+                    const x, y, z, w = t.rotationX
+                        / length, t.rotationY
+                        / length, t.rotationZ
+                        / length, t.rotationW
+                        / length
+                    for _, value in ipairs({
+                        t.x,
+                        t.y,
+                        t.z,
+                        radius,
+                        r,
+                        g,
+                        b,
+                        intensity,
+                        -2 * (x * z + w * y),
+                        -2 * (y * z - w * x),
+                        -1 + 2 * (x * x + y * y),
+                        outer,
+                        inner,
+                        lane - 1,
+                        flags,
+                        0
+                    }) do
+                        assert(value == value and math.abs(value) < math.huge, "mesh light values must be finite")
+                        writer:writeFloat32(nupp.math.f32.narrow(value))
+                    end
+                end
+            end
+        end
+    end
+    writer:drop()
+    self.payload = buffer:getString()
+    buffer:drop()
+
+    return self.payload
+end

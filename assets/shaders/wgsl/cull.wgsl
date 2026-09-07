@@ -122,6 +122,7 @@ struct Cull {
 @group(0) @binding(5) var<storage, read_write> drawArgs: array<u32>;
 @group(0) @binding(6) var<storage, read_write> batchBase: array<u32>;
 @group(0) @binding(7) var<uniform> cull: Cull;
+@group(0) @binding(9) var<storage, read> frameTable: array<f32>;
 @group(0) @binding(8) var<storage, read> lights: array<Light>;
 
 fn laneShift(lane: u32) -> u32 {
@@ -163,7 +164,15 @@ fn markMain(
         // A rotated quad's axis-aligned bound, which is conservative: the cull
         // may keep something it would have dropped and may never drop
         // something it would have kept.
-        let half = abs(instance.scale.xy) * 0.5;
+        var reach = 0.5;
+        if (instance.uvRect.x < 0.0 && (instance.flags & 16u) == 0u) {
+            let id = u32(-instance.uvRect.x + 0.5);
+            if (id > 0u && id <= u32(frameTable[0])) {
+                let entry = u32(frameTable[1u + (id - 1u) * 4u]);
+                reach += frameTable[entry + 7u];
+            }
+        }
+        let half = abs(instance.scale.xy) * reach;
         let c = abs(cos(instance.position.z));
         let s = abs(sin(instance.position.z));
         let extent = select(vec2<f32>(half.x * c + half.y * s, half.x * s + half.y * c), vec2<f32>(instance.uvRect.y), (instance.flags & 16u) != 0u);
@@ -172,7 +181,7 @@ fn markMain(
         // rather than only what is drawn.
         let outside = center.x + extent.x < cull.view.x || center.x - extent.x > cull.view.z
             || center.y + extent.y < cull.view.y || center.y - extent.y > cull.view.w;
-        if (!outside) {
+        if (!outside || (instance.flags & 128u) != 0u) {
             // A survivor goes to one drawing lane or the other and never to
             // both, so the two lists partition what the view kept rather than
             // overlapping.

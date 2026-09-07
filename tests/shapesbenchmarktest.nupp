@@ -7,7 +7,11 @@ local function eye(session: tecs.host.Session): tecs.gfx.Camera2D
     const cameras = session.app.world:newQuery({include = {tecs.gfx.Camera2D, tecs.gfx.ActiveCamera}})
     for candidate, count in cameras:iter() do
         test.equal(count, 1)
-        return assert(candidate:get(tecs.gfx.Camera2D))[1]
+        unsafe do
+            const rows = assert(candidate:get(tecs.gfx.Camera2D))
+            const c = rows[1]
+            return tecs.gfx.newCamera2D({x = c.x, y = c.y, zoom = c.zoom, rotation = c.rotation})
+        end
     end
     error("benchmark camera was not spawned")
 end
@@ -16,32 +20,37 @@ function suite.zoomsPansAndResetsWithoutChangingTheScene(): nil
     const session = shapes.create(nil, 800, 450, false, nil, true)
     test.assert(tecs.host.init(session))
     test.equal(tecs.host.iterate(session, 1 / 60), "continue")
-    const camera = eye(session)
+    local camera = eye(session)
     const count = session.app.world.liveCount
     const originalX, originalY = camera.x, camera.y
     test.equal(camera.zoom, 1)
 
     tecs.host.pushWheel(session, 0, 1, 0, 1, 400, 225, 0, 1)
     tecs.host.iterate(session, 1 / 60)
+    camera = eye(session)
     test.assert(camera.zoom > 1)
     tecs.host.pushWheel(session, 0, -1, 0, -1, 400, 225, 0, 2)
     tecs.host.iterate(session, 1 / 60)
+    camera = eye(session)
     test.assert(math.abs(camera.zoom - 1) < 0.00001)
 
     -- A smooth trackpad delta uses pixels, not wheel notches.
     tecs.host.pushWheel(session, 0, 40, 0, 0, 400, 225, 0, 3)
     tecs.host.iterate(session, 1 / 60)
+    camera = eye(session)
     test.assert(camera.zoom > 1 and camera.zoom < 1.2)
 
     -- A quick tap can arrive and finish within one host frame.
     tecs.host.pushKey(session, true, "KeyD", nil, nil, 0, false, 0, 4)
     tecs.host.pushKey(session, false, "KeyD", nil, nil, 0, false, 0, 5)
     tecs.host.iterate(session, 1 / 60)
+    camera = eye(session)
     test.assert(camera.x > originalX)
     test.equal(camera.y, originalY)
 
     tecs.host.pushKey(session, true, "KeyR", nil, nil, 0, false, 0, 6)
     tecs.host.iterate(session, 1 / 60)
+    camera = eye(session)
     test.equal(camera.x, originalX)
     test.equal(camera.y, originalY)
     test.equal(camera.zoom, 1)

@@ -106,7 +106,10 @@ local function header(borrows reader: nupp.io.ScalarReader): Header
         bloomIntensity = reader:readFloat32()
     )
     test.equal(reader:readUint32(), 0)
-    reader:skip(read.graphBytes)
+    reader:readFloat32()
+    const tableBytes = reader:readUint32() as integer
+    const particleBytes = reader:readUint32() as integer
+    reader:skip(tableBytes + particleBytes + read.graphBytes)
 
     return read
 end
@@ -599,7 +602,7 @@ function suite.encodesAnEmptyScene(): nil
     world:commit()
 
     local packed = extractor:packet(16, 9)
-    test.equal(#packed, (framepacket.HEADER_SIZE as integer) + #passes.section())
+    test.equal(#packed, (framepacket.HEADER_SIZE as integer) + #tecs.gfx.frametable.packed() + #passes.section())
     local reader = nupp.io.newScalarReader(packed)
     local read = header(reader)
     test.equal(read.batches, 0)
