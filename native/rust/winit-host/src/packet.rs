@@ -547,8 +547,8 @@ pub fn parse_frame<'a>(
                 .checked_add(length)
                 .context("delta range overflowed")?;
             if length == 0
-                || offset % INSTANCE_STRIDE != 0
-                || length % INSTANCE_STRIDE != 0
+                || !offset.is_multiple_of(INSTANCE_STRIDE)
+                || !length.is_multiple_of(INSTANCE_STRIDE)
                 || offset < previous_end
                 || end > instance_bytes
             {
@@ -632,7 +632,8 @@ fn validate_instances(
 ) -> Result<Vec<u8>> {
     let mut flags = Vec::with_capacity(bytes.len() / INSTANCE_STRIDE);
     let mut batch = batches.partition_point(|batch| batch.first + batch.count <= first);
-    for (at, instance) in bytes.chunks_exact(INSTANCE_STRIDE).enumerate() {
+    let (instances, _) = bytes.as_chunks::<INSTANCE_STRIDE>();
+    for (at, instance) in instances.iter().enumerate() {
         let slot = first + at as u32;
         while batch < batches.len() && slot >= batches[batch].first + batches[batch].count {
             batch += 1;

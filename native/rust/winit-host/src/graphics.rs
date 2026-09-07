@@ -1215,8 +1215,9 @@ impl Graphics {
             Err(error) => return Err(error.into()),
         }
         let bytes = readback.buffer.slice(..).get_mapped_range()?;
-        let count = bytes
-            .chunks_exact(16)
+        let (args, _) = bytes[..].as_chunks::<16>();
+        let count = args
+            .iter()
             .map(|args| u32::from_ne_bytes(args[4..8].try_into().expect("draw args")))
             .sum();
         drop(bytes);
@@ -2167,7 +2168,9 @@ fn dynamic_uniform_entry(binding: u32, visibility: ShaderStages) -> BindGroupLay
 /// Rejects a scene whose rounded instance buffer exceeds the device's limits.
 fn validate_instance_capacity(count: u32, limits: &wgpu::Limits) -> Result<()> {
     let required = u64::from(capacity(count.max(1))) * INSTANCE_STRIDE as u64;
-    let limit = u64::from(limits.max_storage_buffer_binding_size).min(limits.max_buffer_size);
+    let limit = limits
+        .max_storage_buffer_binding_size
+        .min(limits.max_buffer_size);
     if required > limit {
         bail!("{count} instances need a {required} byte GPU buffer; this adapter allows {limit} bytes");
     }
