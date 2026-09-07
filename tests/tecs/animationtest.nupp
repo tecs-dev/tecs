@@ -462,9 +462,12 @@ function suite.retainsAnUnchangedAnimatedCrowdAcrossFrames(): nil
     const first = extractor:frame(320, 240, 0)
     const revision = extractor:revision()
     const query = world:newQuery({include = {animation.AnimationComponent}})
-    const next = query:iter()
-    const candidate = next()
-    const active = assert(candidate)
+    local firstArchetype: tecs.internal.archetype.Archetype? = nil
+    for candidate in query:iter() do
+        firstArchetype = candidate
+        break
+    end
+    const active = assert(firstArchetype)
     const writes = active:writeCount(gfx.Sprite)
     advance(world, 0.2)
     const held = extractor:frame(320, 240, revision)
