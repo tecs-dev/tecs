@@ -43,6 +43,11 @@ spawning, despawning, or writing one by hand is undone the next time its text
 changes. A snapshot stores them like any other entity, and the layout system
 despawns the restored ones on its next run because no live text owns them, so a
 loaded world rebuilds its text rather than doubling it.
+
+A layout reserves missing glyphs in one batch and initializes their native
+component columns at the following barrier. Existing glyphs retain their IDs;
+shortening a label releases only its surplus, and unchanged labels do no layout
+or glyph-creation work.
 ]]
 
 local ecs = require("tecs.ecs")
@@ -652,10 +657,25 @@ local function releaseGlyphs(exclusive world: ecs.World, state: Install, entity:
     state.ownerCount = state.ownerCount - 1
 end
 
+-- A batch outlives the shared layout scratch arrays: another label may be
+-- placed before the commit barrier invokes its initializer. Keep only the
+-- missing glyphs' quads in one native allocation owned by that callback.
+local struct StagedGlyph
+    entity: integer
+    x: number
+    y: number
+    width: number
+    height: number
+    u0: number
+    v0: number
+    u1: number
+    v1: number
+end
+
 --- Writes the placed quads into one text's glyph entities.
 ---
---- Reuses the entities the text already holds, spawns what it is short, and
---- despawns what it no longer needs, so a label whose string keeps its length
+--- Reuses the entities the text already holds, batch-spawns what it is short,
+--- and despawns what it no longer needs, so a label whose string keeps its length
 --- costs no structural change at all.
 local function publish(
     exclusive world: ecs.World,
@@ -677,6 +697,7 @@ local function publish(
         state.ownerCount = state.ownerCount + 1
     end
     const count = placedCount
+    local missing: {integer} = {}
     for index = 1, count do
         const existing = held[index]
         if existing ~= nil and world:isAlive(existing) then
@@ -703,31 +724,65 @@ local function publish(
                 sprite.v1 = placedV1[index]
             end
         else
-            const spawned = world:spawn(
-                rendercomponents.Transform2DComponent(
-                    placedX[index],
-                    placedY[index],
-                    z,
-                    layer,
-                    rotation,
-                    placedW[index],
-                    placedH[index]
-                ),
+            if existing ~= nil and state.resident[existing] then
+                state.resident[existing] = nil
+                state.residentCount = state.residentCount - 1
+            end
+            missing[#missing + 1] = index
+        end
+    end
+    const needed = #missing
+    if needed > 0 then
+        const staged = carray(StagedGlyph, needed + 1)
+        unsafe do
+            for index = 1, needed do
+                const source = missing[index]
+                staged[index].x, staged[index].y = placedX[source], placedY[source]
+                staged[index].width, staged[index].height = placedW[source], placedH[source]
+                staged[index].u0, staged[index].v0 = placedU0[source], placedV0[source]
+                staged[index].u1, staged[index].v1 = placedU1[source], placedV1[source]
+            end
+        end
+        const firstId, ids = world:batchSpawn(
+            needed,
+            {
+                rendercomponents.Transform2DComponent(0, 0, z, layer, rotation),
                 rendercomponents.TintComponent(r, g, b, a),
-                rendercomponents.SpriteComponent(
-                    image,
-                    placedU0[index],
-                    placedV0[index],
-                    placedU1[index],
-                    placedV1[index]
-                ),
+                rendercomponents.SpriteComponent(image),
                 rendercomponents.Renderable2D,
                 TextGlyph
-            )
-            held[index] = spawned
-            state.resident[spawned] = true
-            state.residentCount = state.residentCount + 1
+            },
+            function(candidate: archetype.Archetype, first: integer, last: integer): nil
+                const transforms = assert(candidate:getMut(rendercomponents.Transform2DComponent))
+                const sprites = assert(candidate:getMut(rendercomponents.SpriteComponent))
+                local source: integer = 1
+                unsafe do
+                    for row = first, last do
+                        -- Publication preserves reservation order, but a glyph
+                        -- canceled before the barrier leaves a hole in it.
+                        while source <= needed and staged[source].entity ~= candidate.entities[row] do
+                            source = source + 1
+                        end
+                        assert(source <= needed, "text batch published an unreserved glyph")
+                        const value = staged[source]
+                        transforms[row].x, transforms[row].y = value.x, value.y
+                        transforms[row].scaleX, transforms[row].scaleY = value.width, value.height
+                        sprites[row].u0, sprites[row].v0 = value.u0, value.v0
+                        sprites[row].u1, sprites[row].v1 = value.u1, value.v1
+                        source = source + 1
+                    end
+                end
+            end
+        )
+        unsafe do
+            for index = 1, needed do
+                const spawned = firstId ~= nil and firstId + index - 1 or assert(ids)[index]
+                staged[index].entity = spawned
+                held[missing[index]] = spawned
+                state.resident[spawned] = true
+            end
         end
+        state.residentCount = state.residentCount + needed
     end
     for index = #held, count + 1, -1 do
         discard(world, state, held[index])

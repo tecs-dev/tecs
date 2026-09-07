@@ -43,7 +43,10 @@ window's scale factor and reuse each named atlas.
 
 Text supports explicit newlines and left, center, or right alignment. The fifth `Text` argument sets a wrap width; zero disables wrapping. It does
 not anchor outside the top-left corner or style individual glyphs. Glyphs are
-sprite entities and inherit the text's layer. `Transform2D.scaleX` and `scaleY`
+sprite entities and inherit the text's layer. Missing glyphs are created in one
+batch per label, with direct native-column initialization. Existing glyph IDs
+are reused when text changes; shortening it releases only the surplus.
+Unchanged labels do no layout or glyph-creation work. `Transform2D.scaleX` and `scaleY`
 multiply the whole text block; glyph dimensions come from `Text.size`.
 
 See [Building interfaces](../ui/index.md) for the complete screen UI and

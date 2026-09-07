@@ -496,4 +496,139 @@ function suite.roundsACoordinateForAScreenSpaceLabel(): nil
     test.equal(text.snap(-3.2), -3.0)
 end
 
+--- Captures both placement and atlas/tint data for a label.
+local function glyphData(world: ecs.World, entity: integer): {number}
+    local out: {number} = {}
+    for _, id in ipairs(text.glyphsOf(world, entity)) do
+        const pose = assert(world:get(id, ecs.Transform2D))
+        const sprite = assert(world:get(id, gfx.Sprite))
+        const tint = assert(world:get(id, gfx.Tint))
+        for _, value in ipairs({
+            pose.x,
+            pose.y,
+            pose.z,
+            pose.layer,
+            pose.rotation,
+            pose.scaleX,
+            pose.scaleY,
+            sprite.image,
+            sprite.u0,
+            sprite.v0,
+            sprite.u1,
+            sprite.v1,
+            tint.r,
+            tint.g,
+            tint.b,
+            tint.a
+        }) do
+            out[#out + 1] = value
+        end
+    end
+
+    return out
+end
+
+function suite.initializesTheWholeGlyphBatchBeforeSpawnObservers(): nil
+    const world = newWorld()
+    local observed: integer = 0
+    local owner: integer = 0
+    world:observe(0, ecs.OnSpawn, function(event: ecs.OnSpawn, exclusive running: ecs.World): nil
+        if not running:has(event.entity, gfx.TextGlyph) then
+            return
+        end
+        observed = observed + 1
+        const held = text.glyphsOf(running, owner)
+        test.equal(#held, 12)
+        for _, id in ipairs(held) do
+            test.assert(running:isAlive(id))
+            test.assert(assert(running:get(id, ecs.Transform2D)).scaleX > 0)
+            test.equal(assert(running:get(id, gfx.Sprite)).image, fonts.imageOf(font()))
+        end
+    end)
+    owner = world:spawn(gfx.Text("abcdefghijkl", font(), 20), ecs.Transform2D(50, 80))
+    world:update(0)
+    test.equal(observed, 12)
+    world:shutdown()
+end
+
+function suite.keepsDeferredPlacementsSeparateForMultipleLabels(): nil
+    const labels = {"AAAA", "BBBBBBBB", "C C"}
+    for codepoint = 65, 67 do
+        fonts.glyph(font(), codepoint)
+    end
+    local expected: {{number}} = {}
+    for index, label in ipairs(labels) do
+        const reference = newWorld()
+        const id = reference:spawn(
+            gfx.Text(label, font(), 10 + index * 5),
+            ecs.Transform2D(index * 100, index * 40, index, index, index * 0.2, index, 1),
+            gfx.Tint(index * 0.2, 0.5, 0.75, 0.8)
+        )
+        reference:update(0)
+        expected[index] = glyphData(reference, id)
+        reference:shutdown()
+    end
+    const world = newWorld()
+    local owners: {integer} = {}
+    for index, label in ipairs(labels) do
+        owners[
+            index
+        ] = world:spawn(
+            gfx.Text(label, font(), 10 + index * 5),
+            ecs.Transform2D(index * 100, index * 40, index, index, index * 0.2, index, 1),
+            gfx.Tint(index * 0.2, 0.5, 0.75, 0.8)
+        )
+    end
+    world:update(0)
+    for index, id in ipairs(owners) do
+        const actual = glyphData(world, id)
+        test.equal(#actual, #expected[index])
+        for field, value in ipairs(expected[index]) do
+            test.equal(actual[field], value)
+        end
+    end
+    world:shutdown()
+end
+
+function suite.growsAndRepairsGlyphsUsingFragmentedEntitySlots(): nil
+    const world = ecs.newWorld({maxEntities = 12})
+    text.install(world)
+    const owner = world:spawn(gfx.Text("abc", font(), 20), ecs.Transform2D())
+    world:update(0)
+    const previous = text.glyphsOf(world, owner)
+    local fillers: {integer} = {}
+    for index = 1, 8 do
+        fillers[index] = world:spawn(ecs.Transform2D())
+    end
+    world:commit()
+    world:despawn(previous[2]);
+    world:despawn(previous[3])
+    world:despawn(fillers[2]);
+    world:despawn(fillers[4])
+    world:commit()
+    assert(world:getMut(owner, gfx.Text)).text = "abcde"
+    world:update(0)
+    const held = text.glyphsOf(world, owner)
+    test.equal(#held, 5)
+    test.equal(held[1], previous[1])
+    const reference = newWorld()
+    const expected = reference:spawn(gfx.Text("abcde", font(), 20), ecs.Transform2D())
+    reference:update(0)
+    const actualData, expectedData = glyphData(world, owner), glyphData(reference, expected)
+    for index, value in ipairs(expectedData) do
+        test.equal(actualData[index], value)
+    end
+    test.equal(world.liveCount, 12)
+    const layouts = text.layouts(world)
+    world:update(0)
+    test.equal(text.layouts(world), layouts)
+    world:despawn(owner)
+    world:update(0)
+    for _, id in ipairs(held) do
+        test.equal(world:isAlive(id), false)
+    end
+    world:shutdown();
+    reference:shutdown()
+end
+
 return suite
