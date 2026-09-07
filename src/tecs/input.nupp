@@ -1099,11 +1099,11 @@ end
 --- @return the new input state, also available through `of`
 --- @raises when the world already owns input state
 export function install(exclusive world: ecs.World, backend: gamepadbackend.Backend?): Input
-    if world.resources[worldInputKey] ~= nil then
+    if world.resources:get(worldInputKey) ~= nil then
         error("input.install: world input state is already installed", 2)
     end
     local state = newInput(backend ?? devices())
-    world.resources[worldInputKey] = state
+    world.resources:set(worldInputKey, state)
     -- Compatibility surface: system names are what the debug server reports
     -- and what an agent selects on.
     world:addSystem({name = "tecs.PollGamepads", phase = ecs.phases.Ingress, run = assert(state.pollSystem),})
@@ -1121,5 +1121,5 @@ end
 --- @param world the world to inspect
 --- @return its input state, or nil when none is installed
 export function of(borrows world: ecs.World): Input?
-    return world.resources[worldInputKey]
+    return world.resources:get(worldInputKey)
 end

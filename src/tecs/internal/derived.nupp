@@ -22,9 +22,10 @@ end
 
 --- Selects the column exposed by a declaration, including wildcard relationship views.
 --- @param T The declared component or edge value type.
+--- @param EdgeType The relationship declaration contract.
 --- @return Returns a native component column or a managed wildcard edge view.
-export comptime function Column(T: type): type
-    if nupp.derive.claims(T, Edge) then
+export comptime function Column(T: type, EdgeType: type): type
+    if nupp.derive.claims(T, EdgeType) then
         return nupp.types.array(T)
     end
     return StorageColumn(T)

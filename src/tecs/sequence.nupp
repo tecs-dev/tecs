@@ -206,12 +206,12 @@ local DEFAULT_HOLDER: string = "user"
 local stateKey: nupp.data.Key<sequencetypes.WorldState> = nupp.data.newKey("tecs.sequence.state")
 
 local function stateFor(exclusive world: ecs.World): sequencetypes.WorldState
-    local existing = world.resources[stateKey]
+    local existing = world.resources:get(stateKey)
     if existing ~= nil then
         return existing
     end
     local created = sequencecursors.newState()
-    world.resources[stateKey] = created
+    world.resources:set(stateKey, created)
 
     return created
 end

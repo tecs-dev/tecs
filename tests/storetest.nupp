@@ -5,11 +5,11 @@ local suite = {}
 function suite.storesValuesUnderTypedKeys(): nil
     local speed: nupp.data.Key<number> = nupp.data.newKey("test.store.speed")
     local store = nupp.data.newStore()
-    store[speed] = 120
-    local current: number? = store[speed]
+    store:set(speed, 120)
+    local current: number? = store:get(speed)
     test.equal(current as number, 120)
-    store[speed] = nil
-    test.assert(store[speed] == nil)
+    store:remove(speed)
+    test.assert(store:get(speed) == nil)
 end
 
 function suite.registersANameOnceAndFindsItByLookup(): nil
@@ -34,37 +34,37 @@ function suite.keepsStoresAndWorldsIndependent(): nil
     local score: nupp.data.Key<number> = nupp.data.newKey("test.store.world.score")
     local first = ecs.newWorld({maxEntities = 2})
     local second = ecs.newWorld({maxEntities = 2})
-    first.resources[score] = 10
-    second.resources[score] = 20
-    test.equal(first.resources[score] as number, 10)
-    test.equal(second.resources[score] as number, 20)
+    first.resources:set(score, 10)
+    second.resources:set(score, 20)
+    test.equal(first.resources:get(score) as number, 10)
+    test.equal(second.resources:get(score) as number, 20)
 end
 
 function suite.preservesResourcesWhenEntitiesAreCleared(): nil
     local label: nupp.data.Key<string> = nupp.data.newKey("test.store.clear.label")
     local world = ecs.newWorld({maxEntities = 2})
-    world.resources[label] = "ready"
+    world.resources:set(label, "ready")
     world:spawn()
     world:commit()
     world:clearEntities()
-    test.equal(world.resources[label] as string, "ready")
+    test.equal(world.resources:get(label) as string, "ready")
     test.equal(world.liveCount, 0)
 end
 
 function suite.sharesTypedStateBetweenSystems(): nil
     local frames: nupp.data.Key<number> = nupp.data.newKey("test.store.system.frames")
     local world = ecs.newWorld({maxEntities = 2})
-    world.resources[frames] = 0
+    world.resources:set(frames, 0)
     world:addSystem({
         name = "test.resource.writer",
         phase = ecs.phases.Update,
         run = function(_dt: number, exclusive running: ecs.World): nil
-            running.resources[frames] = (running.resources[frames] or 0) + 1
+            running.resources:set(frames, (running.resources:get(frames) or 0) + 1)
         end
     })
     world:update(0)
     world:update(0)
-    test.equal(world.resources[frames] as number, 2)
+    test.equal(world.resources:get(frames) as number, 2)
 end
 
 return suite

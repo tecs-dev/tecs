@@ -524,7 +524,7 @@ end
 -------------------------------------------------------------------------------
 
 local function stateFor(exclusive world: ecs.World): Install
-    local existing = world.resources[stateKey]
+    local existing = world.resources:get(stateKey)
     if existing ~= nil then
         return existing
     end
@@ -547,7 +547,7 @@ local function stateFor(exclusive world: ecs.World): Install
         epoch = fonts.epoch(),
         layouts = 0
     )
-    world.resources[stateKey] = created
+    world.resources:set(stateKey, created)
 
     return created
 end
@@ -927,7 +927,7 @@ end
 --- than relying on the application having done so.
 --- @param world the world receiving the layout system and its ownership tables
 export function install(exclusive world: ecs.World): nil
-    if world.resources[stateKey] ~= nil then
+    if world.resources:get(stateKey) ~= nil then
         return
     end
     const state = stateFor(world)
@@ -962,7 +962,7 @@ end
 --- @param world the world to inspect
 --- @return a count that only increases, or zero before installation
 export function layouts(borrows world: ecs.World): integer
-    const state = world.resources[stateKey]
+    const state = world.resources:get(stateKey)
 
     return state ~= nil and (state as Install).layouts or 0
 end
@@ -972,7 +972,7 @@ end
 --- @param entity an entity carrying `Text`
 --- @return a fresh array the caller owns, empty for a text with no glyphs
 export function glyphsOf(borrows world: ecs.World, entity: integer): {integer}
-    const state = world.resources[stateKey]
+    const state = world.resources:get(stateKey)
     local out: {integer} = {}
     if state == nil then
         return out
@@ -1000,7 +1000,7 @@ end
 --- @return the glyph width in world units, or nil with the first return
 --- @return the glyph height in world units, or nil with the first return
 export function glyphAt(borrows world: ecs.World, entity: integer, index: integer): number?, number?, number?, number?
-    const state = world.resources[stateKey]
+    const state = world.resources:get(stateKey)
     if state == nil then
         return nil, nil, nil, nil
     end

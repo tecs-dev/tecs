@@ -78,8 +78,8 @@ function suite.inspectionReadsCommittedArchetypesAndAnonymousResources(): nil
     world:commit()
     local key: nupp.data.Key<string> = nupp.data.newKey("test.mcp.resource")
     local anonymous: nupp.data.Key<integer> = nupp.data.newKey(nil)
-    world.resources[key] = "data"
-    world.resources[anonymous] = 4
+    world.resources:set(key, "data")
+    world.resources:set(anonymous, 4)
     mcp.bind(world)
     local listed = content("archetypes_list")
     test.assert(listed.total > 0)

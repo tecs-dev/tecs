@@ -670,7 +670,7 @@ end
 --- @param entity the requested entity
 --- @return whether focus moved
 export function focus(exclusive world: tecs.ecs.World, entity: integer): boolean
-    local state = world.resources[stateKey]
+    local state = world.resources:get(stateKey)
     if state == nil then
         return false
     end
@@ -703,7 +703,7 @@ end
 --- @param world the installed world
 --- @return whether focus changed
 export function blur(exclusive world: tecs.ecs.World): boolean
-    local state = world.resources[stateKey]
+    local state = world.resources:get(stateKey)
     if state == nil or state.focused == 0 then
         return false
     end
@@ -722,7 +722,7 @@ end
 --- @param world the installed world
 --- @return the focused entity
 export function focused(borrows world: tecs.ecs.World): integer
-    local state = world.resources[stateKey]
+    local state = world.resources:get(stateKey)
     return state and state.focused or 0
 end
 
@@ -731,7 +731,7 @@ end
 --- @param entity an entity carrying FocusScope
 --- @return whether the scope was pushed
 export function pushFocusScope(exclusive world: tecs.ecs.World, entity: integer): boolean
-    local state = world.resources[stateKey]
+    local state = world.resources:get(stateKey)
     if state == nil or not world:has(entity, FocusScope) then
         return false
     end
@@ -747,7 +747,7 @@ end
 --- @param entity the expected scope, or nil
 --- @return whether a scope was popped
 export function popFocusScope(exclusive world: tecs.ecs.World, entity: integer?): boolean
-    local state = world.resources[stateKey]
+    local state = world.resources:get(stateKey)
     if state == nil or #state.scopes == 0 then
         return false
     end
@@ -1550,7 +1550,7 @@ end
 --- @param height the logical viewport height
 --- @param density the target pixels per logical point
 export function resize(exclusive world: tecs.ecs.World, width: number, height: number, density: number?): nil
-    local state = assert(world.resources[stateKey], "ui is not installed")
+    local state = assert(world.resources:get(stateKey), "ui is not installed")
     assert(width > 0 and height > 0 and (density or 1) > 0, "ui viewport must be positive")
     state.width, state.height, state.density = width, height, density or 1
     state.previous = ""
@@ -1559,7 +1559,7 @@ end
 --- Runs layout, geometry and pending interaction for the current world state.
 --- @param world the installed world
 export function update(exclusive world: tecs.ecs.World): nil
-    local state = assert(world.resources[stateKey], "ui is not installed")
+    local state = assert(world.resources:get(stateKey), "ui is not installed")
     local ids = collect(world, state)
     for entity in pairs(state.hidden) do
         if not world:isAlive(entity) then
@@ -1619,7 +1619,7 @@ end
 --- @param world the world to install into
 --- @param options viewport, clip allocation and input settings
 export function install(exclusive world: tecs.ecs.World, options: Options?): nil
-    if world.resources[stateKey] then
+    if world.resources:get(stateKey) then
         return
     end
     local values = options or {}
@@ -1668,7 +1668,7 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
         inputLayer = values.inputLayer,
         updates = 0
     )
-    world.resources[stateKey] = state
+    world.resources:set(stateKey, state)
     assert(
         state.firstClip >= 1 and state.lastClip <= 255 and state.firstClip <= state.lastClip,
         "invalid UI clip range"
@@ -1867,14 +1867,14 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
         name = "tecs.UiShutdown",
         phase = tecs.ecs.phases.Shutdown,
         run = function(_dt: number, exclusive running: tecs.ecs.World): nil
-            if running.resources[stateKey] ~= state then
+            if running.resources:get(stateKey) ~= state then
                 return
             end
             tecs.internal.uinative.destroy(state.tree)
             for index in pairs(state.clips) do
                 tecs.gfx.clips.clearRegion(index)
             end
-            running.resources[stateKey] = nil
+            running.resources:remove(stateKey)
         end
     })
 end
@@ -1894,6 +1894,6 @@ end
 --- @param world the installed world
 --- @return the synchronization count
 export function layouts(borrows world: tecs.ecs.World): integer
-    local state = world.resources[stateKey]
+    local state = world.resources:get(stateKey)
     return state and state.updates or 0
 end

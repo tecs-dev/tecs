@@ -9,8 +9,9 @@ order: 20
 
 Three things, and only one of them is installed for you:
 
-- **The Nupp compiler on `PATH`.** Use a build that provides `nupp.events`
-  and `nupp.data.Store`; the CI workflow pins a compatible revision. With sibling
+- **The Nupp compiler on `PATH`.** Use a build that provides declaration witnesses,
+  exported derive providers, and the method-based `nupp.data.Store` API;
+  the CI workflow pins the compiler revision. With sibling
   checkouts, run `export PATH="$(cd ../nupp/bin && pwd):$PATH"` from the Tecs
   root to select that compiler.
 - **The Rust toolchain** `rust-toolchain.toml` pins. `rustup` fetches it on the

@@ -100,7 +100,7 @@ end)
 --- output always has.
 local function resourceRows(borrows resources: nupp.data.Store): {any}
     local rows: {any} = {}
-    for id, name, valueType in nupp.data.storeEntries(resources) do
+    for id, name, valueType in resources:entries() do
         rows[#rows + 1] = {id = id, name = name or ("#" .. tostring(id)), valueType = valueType}
     end
 

@@ -46,9 +46,9 @@ jobs:
                 os: [macos-15, ubuntu-latest]
         runs-on: ${{ matrix.os }}
         env:
-            # This revision includes the cold file-reader repair and the bounded
-            # binary codec used by snapshot_save and snapshot_load.
-            NUPP_REF: c0a31f2b00b1486cc7b43be7bebdbb60ecf8c9cf
+            # The ECS requires declaration witnesses, exported derive providers,
+            # and the method-based Store API.
+            NUPP_REF: 73eb6d86144760e517cf21884f874123e1a19052
         steps:
             - uses: actions/checkout@v4
               with:
@@ -111,7 +111,7 @@ jobs:
     host:
         runs-on: macos-15
         env:
-            NUPP_REF: c0a31f2b00b1486cc7b43be7bebdbb60ecf8c9cf
+            NUPP_REF: 73eb6d86144760e517cf21884f874123e1a19052
         steps:
             # Two checkouts side by side. The Nupp compiler release installed by
             # Homebrew ships no `libnupp.a`, so it cannot satisfy
@@ -194,7 +194,7 @@ jobs:
                       preset: linux-x64
         runs-on: ${{ matrix.os }}
         env:
-            NUPP_REF: c0a31f2b00b1486cc7b43be7bebdbb60ecf8c9cf
+            NUPP_REF: 73eb6d86144760e517cf21884f874123e1a19052
         steps:
             - uses: actions/checkout@v4
               with:
@@ -254,7 +254,7 @@ jobs:
             pages: write
             id-token: write
         env:
-            NUPP_REF: c0a31f2b00b1486cc7b43be7bebdbb60ecf8c9cf
+            NUPP_REF: 73eb6d86144760e517cf21884f874123e1a19052
         steps:
             - uses: actions/checkout@v4
               with:

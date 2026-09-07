@@ -829,7 +829,7 @@ end
 --- @param world the world to inspect
 --- @return the world's physics state, or nil
 local function stateOf(borrows world: ecs.World): State?
-    return world.resources[stateKey]
+    return world.resources:get(stateKey)
 end
 
 --- Returns the simulation installed in a world.
@@ -1859,7 +1859,7 @@ end
 --- @return the installed simulation, also available through `of`
 --- @raises when the world already has a simulation
 export function install(exclusive world: ecs.World, options: Options?): contract.Simulation
-    if world.resources[stateKey] ~= nil then
+    if world.resources:get(stateKey) ~= nil then
         error("physics.install: this world already has a simulation", 2)
     end
     local settings = options or {}
@@ -1950,7 +1950,7 @@ export function install(exclusive world: ecs.World, options: Options?): contract
         shapeUpdateOrder = {},
         shapeUpdateCount = 0
     )
-    world.resources[stateKey] = state
+    world.resources:set(stateKey, state)
 
     -- These system names are reported by tooling and selected on by name, so
     -- they are compatibility surfaces rather than identifiers.
@@ -2050,7 +2050,7 @@ export function install(exclusive world: ecs.World, options: Options?): contract
         name = "tecs.ShutdownPhysics",
         phase = ecs.phases.Shutdown,
         run = function(_dt: number, exclusive running: ecs.World): nil
-            running.resources[stateKey] = nil
+            running.resources:remove(stateKey)
             state.simulation.destroy()
         end,
     })

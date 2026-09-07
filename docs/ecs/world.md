@@ -140,7 +140,7 @@ use ordinary functions for composition:
 local RATE = nupp.data.newKey<number>("game.spinRate")
 
 local function spinPlugin(exclusive world: tecs.ecs.World): nil
-    world.resources[RATE] = 1.5
+    world.resources:set(RATE, 1.5)
     -- Build queries and register systems here.
 end
 

@@ -152,9 +152,9 @@ export record Archetype
     set: function(self: Archetype, row: integer, input: components.Input): nil
 
     get: (function<C is components.Component>(self: Archetype, component: C): C.Column?)
-        & (function<T is derived.Value>(self: Archetype, component: Type<T>): derived.Column(T)?)
+        & (function<T is derived.Value>(self: Archetype, component: Type<T>): derived.Column(T, derived.Edge)?)
     getMut: (function<C is components.Component>(self: Archetype, component: C): C.Column?)
-        & (function<T is derived.Value>(self: Archetype, component: Type<T>): derived.Column(T)?)
+        & (function<T is derived.Value>(self: Archetype, component: Type<T>): derived.Column(T, derived.Edge)?)
     isComponentDirty: function(self: Archetype, component: components.Selector): boolean
     anyComponentDirty: function(self: Archetype): boolean
     markComponentDirty: function(self: Archetype, component: components.Selector): nil

@@ -88,14 +88,14 @@ Register a handler for durable resource state outside component columns:
 
 ```nupp
 local SCORE = nupp.data.newKey<number>("game.score")
-world.resources[SCORE] = 0
+world.resources:set(SCORE, 0)
 world:addSnapshotHandler({
     name = "game.score",
     save = function(exclusive world: tecs.ecs.World): number
-        return world.resources[SCORE] or 0
+        return world.resources:get(SCORE) or 0
     end,
     load = function(exclusive world: tecs.ecs.World, value: any): nil
-        world.resources[SCORE] = value as number
+        world.resources:set(SCORE, value as number)
     end,
 })
 ```
