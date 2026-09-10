@@ -1,3 +1,7 @@
+const ecs = require("tecs.ecs")
+const {type RelationshipValue} = require("tecs.ecs")
+const {type Archetype} = require("tecs.ecs")
+
 local test = require("nupp.test")
 local components = require("tecs.internal.components")
 local world = require("tecs.internal.world")
@@ -149,18 +153,18 @@ end
 
 function suite.supportsMultipleTargetsInBothStorageModes(): nil
     for mode = 1, 2 do
-        const relationship = tecs.ecs.newRelationship({
+        const relationship = ecs.newRelationship({
             name = "test.MultiRelationship" .. tostring(mode),
             sparse = mode == 1,
             reverseIndex = true
         })
-        const value = tecs.ecs.newWorld()
+        const value = ecs.newWorld()
         const first, second, third = value:spawn(), value:spawn(), value:spawn()
         const source = value:spawn(relationship(second), relationship(first))
         value:commit()
         const before = value.archetypeCount
         local targets: {integer} = {}
-        value:forEachRelationship(source, relationship, function(edge: tecs.ecs.RelationshipValue): nil
+        value:forEachRelationship(source, relationship, function(edge: RelationshipValue): nil
             targets[#targets + 1] = edge.target
         end)
         test.equal(#targets, 2)
@@ -178,7 +182,7 @@ function suite.supportsMultipleTargetsInBothStorageModes(): nil
         const saved = value:saveSnapshot()
         value:loadSnapshot(saved)
         targets = {}
-        value:forEachRelationship(source, relationship, function(edge: tecs.ecs.RelationshipValue): nil
+        value:forEachRelationship(source, relationship, function(edge: RelationshipValue): nil
             targets[#targets + 1] = edge.target
         end)
         test.equal(#targets, 2)
@@ -191,18 +195,18 @@ function suite.supportsMultipleTargetsInBothStorageModes(): nil
 end
 
 function suite.matchesConcreteDenseTargetsAndSuppressesWildcardMoveCallbacks(): nil
-    const relationship = tecs.ecs.newRelationship({name = "test.DenseTarget", exclusive = true})
-    const value = tecs.ecs.newWorld()
+    const relationship = ecs.newRelationship({name = "test.DenseTarget", exclusive = true})
+    const value = ecs.newWorld()
     const first, second = value:spawn(), value:spawn()
     const selected = relationship:targeting(first)
     const concrete = value:newQuery({include = {selected}})
     local entries, exits = 0, 0
     value:newQuery({
         include = {relationship},
-        onEntitiesAdded = function(_a: tecs.ecs.Archetype, _f: integer, _l: integer, count: integer): nil
+        onEntitiesAdded = function(_a: Archetype, _f: integer, _l: integer, count: integer): nil
             entries = entries + count
         end,
-        onEntitiesRemoved = function(_a: tecs.ecs.Archetype, _f: integer, _l: integer, count: integer): nil
+        onEntitiesRemoved = function(_a: Archetype, _f: integer, _l: integer, count: integer): nil
             exits = exits + count
         end
     })
@@ -234,7 +238,7 @@ function suite.preservesTypedEdgePayloadsThroughUpdatesMovesAndSnapshots(): nil
         return new WeightedEdge(target = data.target as integer, weight = data.weight as number)
     end
     for mode = 1, 2 do
-        const relationship = tecs.ecs.newRelationship(WeightedEdge, {
+        const relationship = ecs.newRelationship(WeightedEdge, {
             name = "test.WeightedEdges" .. tostring(mode),
             sparse = mode == 1,
             reverseIndex = true,
@@ -242,8 +246,8 @@ function suite.preservesTypedEdgePayloadsThroughUpdatesMovesAndSnapshots(): nil
             save = save,
             load = load
         })
-        const value = tecs.ecs.newWorld()
-        const tag = tecs.ecs.newTagComponent({name = "test.WeightedTag" .. tostring(mode)})
+        const value = ecs.newWorld()
+        const tag = ecs.newTagComponent({name = "test.WeightedTag" .. tostring(mode)})
         const first, second = value:spawn(), value:spawn()
         const source = value:spawn(relationship(first, 2), relationship(second, 5))
         value:commit()
@@ -271,12 +275,12 @@ function suite.preservesTypedEdgePayloadsThroughUpdatesMovesAndSnapshots(): nil
 end
 
 function suite.traversesBothDirectionsAndBoundsCycles(): nil
-    const value = tecs.ecs.newWorld()
+    const value = ecs.newWorld()
     const root = value:spawn()
-    const child = value:spawn(tecs.ecs.ChildOf(root))
-    const leaf = value:spawn(tecs.ecs.ChildOf(child))
+    const child = value:spawn(ecs.ChildOf(root))
+    const leaf = value:spawn(ecs.ChildOf(child))
     value:commit()
-    const visit = value:traverse(root, tecs.ecs.ChildOf)
+    const visit = value:traverse(root, ecs.ChildOf)
     local depth, id = visit()
     test.equal(depth as integer, 0);
     test.equal(id as integer, child)
@@ -287,7 +291,7 @@ function suite.traversesBothDirectionsAndBoundsCycles(): nil
     const ancestors: {integer} = {}
     value:walkUp(
         leaf,
-        tecs.ecs.ChildOf,
+        ecs.ChildOf,
         function(ancestor: integer, level: integer, context: {integer}): boolean
             context[level] = ancestor;
             return true
@@ -296,13 +300,13 @@ function suite.traversesBothDirectionsAndBoundsCycles(): nil
     )
     test.equal(ancestors[1], child);
     test.equal(ancestors[2], root)
-    value:set(root, tecs.ecs.ChildOf(leaf));
+    value:set(root, ecs.ChildOf(leaf));
     value:commit()
     test.raises(
         function(): nil
             value:walkUp(
                 leaf,
-                tecs.ecs.ChildOf,
+                ecs.ChildOf,
                 function(_ancestor: integer, _level: integer, _context: {integer}): boolean
                     return true
                 end,
@@ -314,8 +318,8 @@ function suite.traversesBothDirectionsAndBoundsCycles(): nil
 end
 
 function suite.removesDeletedDenseTargetsWithoutDeletingOtherEdges(): nil
-    const value = tecs.ecs.newWorld()
-    const relationship = tecs.ecs.newRelationship({name = "test.DeletedDenseTarget", reverseIndex = true})
+    const value = ecs.newWorld()
+    const relationship = ecs.newRelationship({name = "test.DeletedDenseTarget", reverseIndex = true})
     const first, second = value:spawn(), value:spawn()
     const source = value:spawn(relationship(first), relationship(second))
     value:commit()
@@ -328,25 +332,25 @@ function suite.removesDeletedDenseTargetsWithoutDeletingOtherEdges(): nil
 end
 
 function suite.preservesSparseRowsAndIndexesThroughSwapRemovalAndCascade(): nil
-    const value = tecs.ecs.newWorld()
+    const value = ecs.newWorld()
     const ancestor = value:spawn()
-    const parent = value:spawn(tecs.ecs.ChildOf(ancestor))
-    const child = value:spawn(tecs.ecs.ChildOf(parent))
-    const survivor = value:spawn(tecs.ecs.ChildOf(ancestor))
+    const parent = value:spawn(ecs.ChildOf(ancestor))
+    const child = value:spawn(ecs.ChildOf(parent))
+    const survivor = value:spawn(ecs.ChildOf(ancestor))
     value:commit()
     value:despawn(parent)
     value:commit()
     test.assert(value:isAlive(survivor))
     test.assert(not value:isAlive(child))
     test.assert(not value:isAlive(parent))
-    test.equal(assert(value:get(survivor, tecs.ecs.ChildOf)).target, ancestor)
-    test.equal(value:relationshipSources(tecs.ecs.ChildOf, ancestor)[1], survivor)
+    test.equal(assert(value:get(survivor, ecs.ChildOf)).target, ancestor)
+    test.equal(value:relationshipSources(ecs.ChildOf, ancestor)[1], survivor)
     test.equal(value.liveCount, 2)
 end
 
 function suite.marksWildcardAndTargetColumnsDirtyTogether(): nil
-    const value = tecs.ecs.newWorld()
-    const relationship = tecs.ecs.newRelationship({name = "test.DirtyDenseEdges"})
+    const value = ecs.newWorld()
+    const relationship = ecs.newRelationship({name = "test.DirtyDenseEdges"})
     const target = value:spawn()
     const source = value:spawn(relationship(target))
     value:commit()
@@ -364,12 +368,12 @@ end
 
 function suite.keepsNewRelationshipStoresIsolatedAcrossWorldsAndGenerations(): nil
     for mode = 1, 2 do
-        const relationship = tecs.ecs.newRelationship({
+        const relationship = ecs.newRelationship({
             name = "test.IsolatedMulti" .. tostring(mode),
             sparse = mode == 1,
             reverseIndex = true
         })
-        const first, second = tecs.ecs.newWorld(), tecs.ecs.newWorld()
+        const first, second = ecs.newWorld(), ecs.newWorld()
         const targetA, targetB = first:spawn(), second:spawn()
         const sourceA, sourceB = first:spawn(relationship(targetA)), second:spawn(relationship(targetB))
         first:commit();

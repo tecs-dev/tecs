@@ -482,9 +482,8 @@ export function resolveEasing(value: EasingName | EasingFunction): string, Easin
 end
 
 local function newTarget(component: components.Component, fields: {string}, mode: TargetMode, id: string?): Target
-    local resolved = id
-    if resolved == nil then
-        resolved = component.componentName
+    local resolved = id or component.componentName
+    if id == nil then
         for index = 1, #fields do
             resolved = resolved .. "." .. fields[index]
         end

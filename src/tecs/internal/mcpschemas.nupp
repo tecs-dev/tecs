@@ -2,7 +2,7 @@ module tecs.internal.mcpschemas
 
 -- Input schemas recovered from tools/list at historical commit 70549c8e.
 -- Names and argument schemas are external compatibility contracts.
-local json = require("nupp.data.json")
+local json = require("nupp.codec.json")
 export const inputs: {
     [string]: any
 } = {

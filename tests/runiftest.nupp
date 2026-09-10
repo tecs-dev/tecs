@@ -1,13 +1,18 @@
+const ecs = require("tecs.ecs")
+const {type RunIf} = require("tecs.ecs")
+const {type World} = require("tecs.ecs")
+const random = require("nupp.random")
+
 local test = require("nupp.test")
 
 local suite = {}
 
 function suite.removesDelayedAnonymousSystemsAfterOneRun(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     local calls = 0
     const name = world:addSystem({
-        phase = tecs.ecs.phases.Update,
-        runIf = tecs.ecs.runif.after(0.25),
+        phase = ecs.phases.Update,
+        runIf = ecs.runif.after(0.25),
         run = function(): nil
             calls = calls + 1
         end
@@ -22,8 +27,8 @@ function suite.removesDelayedAnonymousSystemsAfterOneRun(): nil
 end
 
 function suite.retainsIntervalOvershootButRunsOncePerDispatch(): nil
-    const world = tecs.ecs.newWorld()
-    const predicate = tecs.ecs.runif.every(0.25)
+    const world = ecs.newWorld()
+    const predicate = ecs.runif.every(0.25)
     test.assert(not predicate(0.125, world, "timer"))
     test.assert(predicate(0.625, world, "timer"))
     test.assert(predicate(0, world, "timer"))
@@ -32,25 +37,25 @@ function suite.retainsIntervalOvershootButRunsOncePerDispatch(): nil
 end
 
 function suite.cooldownFiresImmediatelyAndDiscardsOvershoot(): nil
-    const world = tecs.ecs.newWorld()
-    const predicate = tecs.ecs.runif.cooldown(0.25)
+    const world = ecs.newWorld()
+    const predicate = ecs.runif.cooldown(0.25)
     test.assert(predicate(0, world, "timer"))
     test.assert(not predicate(0.125, world, "timer"))
     test.assert(predicate(1, world, "timer"))
     test.assert(not predicate(0, world, "timer"))
     test.assert(not predicate(0.125, world, "timer"))
     test.assert(predicate(0.125, world, "timer"))
-    test.assert(tecs.ecs.runif.cooldown(0)(0, world, "zero"))
-    test.assert(tecs.ecs.runif.after(0)(0, world, "zero"))
+    test.assert(ecs.runif.cooldown(0)(0, world, "zero"))
+    test.assert(ecs.runif.after(0)(0, world, "zero"))
 end
 
 function suite.pausesTimersWhenTheirSystemOrPhaseIsDisabled(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     local calls = 0
     world:addSystem({
         name = "timer",
-        phase = tecs.ecs.phases.Update,
-        runIf = tecs.ecs.runif.every(0.25),
+        phase = ecs.phases.Update,
+        runIf = ecs.runif.every(0.25),
         run = function(): nil
             calls = calls + 1
         end
@@ -59,19 +64,19 @@ function suite.pausesTimersWhenTheirSystemOrPhaseIsDisabled(): nil
     world:setSystemEnabled("timer", false)
     world:update(1)
     world:setSystemEnabled("timer", true)
-    world:disablePhase(tecs.ecs.phases.Update)
+    world:disablePhase(ecs.phases.Update)
     world:update(1)
-    world:enablePhase(tecs.ecs.phases.Update)
+    world:enablePhase(ecs.phases.Update)
     world:update(0.125)
     test.equal(calls, 1)
 end
 
 function suite.fixedTimersConsumeTheFixedDelta(): nil
-    const world = tecs.ecs.newWorld({timestep = 0.125})
+    const world = ecs.newWorld({timestep = 0.125})
     local calls = 0
     world:addSystem({
-        phase = tecs.ecs.phases.FixedUpdate,
-        runIf = tecs.ecs.runif.every(0.25),
+        phase = ecs.phases.FixedUpdate,
+        runIf = ecs.runif.every(0.25),
         run = function(): nil
             calls = calls + 1
         end
@@ -81,12 +86,12 @@ function suite.fixedTimersConsumeTheFixedDelta(): nil
 end
 
 function suite.stateGateOrderControlsTimerProgress(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     world:createState("game")
     world:createState("menu")
     world:pushState("menu")
-    const paused = tecs.ecs.runif.both(tecs.ecs.runif.inState("game"), tecs.ecs.runif.every(0.25))
-    const advancing = tecs.ecs.runif.both(tecs.ecs.runif.every(0.25), tecs.ecs.runif.inState("game"))
+    const paused = ecs.runif.both(ecs.runif.inState("game"), ecs.runif.every(0.25))
+    const advancing = ecs.runif.both(ecs.runif.every(0.25), ecs.runif.inState("game"))
     test.assert(not paused(0.125, world, "paused"))
     test.assert(not advancing(0.125, world, "advancing"))
     world:pushState("game")
@@ -96,10 +101,10 @@ function suite.stateGateOrderControlsTimerProgress(): nil
 end
 
 function suite.shortCircuitsAndPassesPredicateArguments(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     local leftCalls = 0
     local rightCalls = 0
-    const left: tecs.ecs.RunIf = function(dt: number, exclusive value: tecs.ecs.World, name: string): boolean
+    const left: RunIf = function(dt: number, exclusive value: World, name: string): boolean
         test.equal(dt, 0.125)
         test.assert(value == world)
         test.equal(name, "combined")
@@ -107,25 +112,25 @@ function suite.shortCircuitsAndPassesPredicateArguments(): nil
 
         return true
     end
-    const right: tecs.ecs.RunIf = function(): boolean
+    const right: RunIf = function(): boolean
         rightCalls = rightCalls + 1;
         return false
     end
-    test.assert(tecs.ecs.runif.either(left, right)(0.125, world, "combined"))
+    test.assert(ecs.runif.either(left, right)(0.125, world, "combined"))
     test.equal(rightCalls, 0)
-    test.assert(not tecs.ecs.runif.both(tecs.ecs.runif.negate(left), right)(0.125, world, "combined"))
+    test.assert(not ecs.runif.both(ecs.runif.negate(left), right)(0.125, world, "combined"))
     test.equal(rightCalls, 0)
-    test.assert(not tecs.ecs.runif.both(left, right)(0.125, world, "combined"))
+    test.assert(not ecs.runif.both(left, right)(0.125, world, "combined"))
     test.equal(rightCalls, 1)
-    test.assert(tecs.ecs.runif.either(right, left)(0.125, world, "combined"))
+    test.assert(ecs.runif.either(right, left)(0.125, world, "combined"))
     test.equal(rightCalls, 2)
     test.equal(leftCalls, 4)
 end
 
 function suite.jitterUsesTheSuppliedReproducibleGenerator(): nil
-    const world = tecs.ecs.newWorld()
-    const first = tecs.ecs.runif.every(0.25, 0.125, nupp.data.random.newRandom(42))
-    const second = tecs.ecs.runif.every(0.25, 0.125, nupp.data.random.newRandom(42))
+    const world = ecs.newWorld()
+    const first = ecs.runif.every(0.25, 0.125, random.newRandom(42))
+    const second = ecs.runif.every(0.25, 0.125, random.newRandom(42))
     local runs = 0
     for index = 1, 256 do
         const fired = first(0.03125, world, "first")
@@ -135,7 +140,7 @@ function suite.jitterUsesTheSuppliedReproducibleGenerator(): nil
         end
     end
     test.assert(runs > 20 and runs < 50)
-    const clamp = tecs.ecs.runif.every(1, 1000, nupp.data.random.newRandom(42))
+    const clamp = ecs.runif.every(1, 1000, random.newRandom(42))
     test.assert(clamp(1, world, "clamp"))
     test.assert(not clamp(0, world, "clamp"))
 end
@@ -143,43 +148,43 @@ end
 function suite.rejectsInvalidTimerArgumentsAtConstruction(): nil
     test.raises(
         function(): nil
-            tecs.ecs.runif.every(0)
+            ecs.runif.every(0)
         end,
         "positive and finite"
     )
     test.raises(
         function(): nil
-            tecs.ecs.runif.every(-1)
+            ecs.runif.every(-1)
         end,
         "positive and finite"
     )
     test.raises(
         function(): nil
-            tecs.ecs.runif.every(math.huge)
+            ecs.runif.every(math.huge)
         end,
         "positive and finite"
     )
     test.raises(
         function(): nil
-            tecs.ecs.runif.every(1, -1)
+            ecs.runif.every(1, -1)
         end,
         "non%-negative and finite"
     )
     test.raises(
         function(): nil
-            tecs.ecs.runif.every(1, 0.1)
+            ecs.runif.every(1, 0.1)
         end,
-        "requires a nupp.data.random.Random"
+        "requires a nupp.random.Random"
     )
     test.raises(
         function(): nil
-            tecs.ecs.runif.after(-1)
+            ecs.runif.after(-1)
         end,
         "non%-negative and finite"
     )
     test.raises(
         function(): nil
-            tecs.ecs.runif.cooldown(0 / 0)
+            ecs.runif.cooldown(0 / 0)
         end,
         "non%-negative and finite"
     )

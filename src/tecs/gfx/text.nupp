@@ -49,6 +49,9 @@ component columns at the following barrier. Existing glyphs retain their IDs
 shortening a label releases only its surplus, and unchanged labels do no layout
 or glyph-creation work.
 ]]
+const {type Key} = require("nupp.store")
+const store = require("nupp.store")
+const world2 = require("tecs.internal.world")
 
 local ecs = require("tecs.ecs")
 local archetype = require("tecs.internal.archetype")
@@ -58,7 +61,7 @@ local images = require("tecs.gfx.images")
 local query = require("tecs.internal.query")
 local rendercomponents = require("tecs.internal.rendercomponents")
 
-const utf8 = nupp.data.utf8
+const utf8 = require("nupp.text.utf8")
 const cos, sin = math.cos, math.sin
 const floor = math.floor
 
@@ -228,7 +231,7 @@ export const TextGlyph: components.Component = ecs.newTagComponent({name = "Text
 --- The world resource the layout system keeps its ownership tables in.
 ---
 --- The key name reaches the resource registry and is a compatibility surface.
-local stateKey: nupp.data.Key<Install> = nupp.data.newKey("tecs.text.state")
+local stateKey: Key<Install> = store.newKey("tecs.text.state")
 
 -------------------------------------------------------------------------------
 -- Shaping
@@ -533,7 +536,7 @@ local function stateFor(exclusive world: ecs.World): Install
             include = {TextComponent, rendercomponents.Transform2DComponent},
             exclude = {ecs.Disabled}
         }),
-        glyphs = tecs.internal.world.newUnfilteredQuery(world, {
+        glyphs = world2.newUnfilteredQuery(world, {
             include = {TextGlyph}
         }),
         owned = {},

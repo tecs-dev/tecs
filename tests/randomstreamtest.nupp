@@ -1,5 +1,9 @@
+const {type Snapshot} = require("tecs.ecs")
+const ecs = require("tecs.ecs")
+const json = require("nupp.codec.json")
+
 local test = require("nupp.test")
-local random = require("nupp.data.random")
+local random = require("nupp.random")
 
 local suite = {}
 
@@ -16,7 +20,7 @@ local function sameDraws(first: random.Random, second: random.Random): nil
     end
 end
 
-local function payload(snapshot: tecs.ecs.Snapshot): any
+local function payload(snapshot: Snapshot): any
     for _, entry in ipairs(snapshot.data) do
         if entry.key == "tecs.random" then
             return entry.value
@@ -26,8 +30,8 @@ local function payload(snapshot: tecs.ecs.Snapshot): any
 end
 
 function suite.retainsIdentityAndKeepsWorldsIndependent(): nil
-    const first = tecs.ecs.newWorld()
-    const second = tecs.ecs.newWorld()
+    const first = ecs.newWorld()
+    const second = ecs.newWorld()
     const loot: random.Random = first:randomStream("game.loot")
     test.assert(loot == first:randomStream("game.loot"))
     test.assert(loot ~= first:randomStream("game.Loot"))
@@ -36,14 +40,14 @@ function suite.retainsIdentityAndKeepsWorldsIndependent(): nil
 end
 
 function suite.pinsTheLegacyNameSeedAndStateContract(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     world:seedRandom(42)
     equalWords(world:randomStream("game.loot"):state(), {1782179806, -635290933, 1046902905, -1667463104})
 end
 
 function suite.ignoresOtherStreamsCreationAndDrawOrder(): nil
-    const first = tecs.ecs.newWorld()
-    const second = tecs.ecs.newWorld()
+    const first = ecs.newWorld()
+    const second = ecs.newWorld()
     first:seedRandom(999)
     second:seedRandom(999)
     for index = 1, 20 do
@@ -56,8 +60,8 @@ function suite.ignoresOtherStreamsCreationAndDrawOrder(): nil
 end
 
 function suite.reseedsExistingAndFutureStreamsWithoutReplacingObjects(): nil
-    const world = tecs.ecs.newWorld()
-    const expected = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
+    const expected = ecs.newWorld()
     const loot = world:randomStream("game.loot")
     const weather = world:randomStream("game.weather")
     loot:next()
@@ -72,8 +76,8 @@ function suite.reseedsExistingAndFutureStreamsWithoutReplacingObjects(): nil
 end
 
 function suite.wrapsSeedsAndUsesAFixedDefault(): nil
-    const first = tecs.ecs.newWorld()
-    const second = tecs.ecs.newWorld()
+    const first = ecs.newWorld()
+    const second = ecs.newWorld()
     second:seedRandom(0x5EED1234)
     sameDraws(first:randomStream("default"), second:randomStream("default"))
     first:seedRandom(2147483648)
@@ -85,7 +89,7 @@ function suite.wrapsSeedsAndUsesAFixedDefault(): nil
 end
 
 function suite.rejectsBadArgumentsWithoutInstallingRandomState(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     test.raises(
         function(): nil
             world:randomStream("")
@@ -104,17 +108,17 @@ function suite.rejectsBadArgumentsWithoutInstallingRandomState(): nil
 end
 
 function suite.savesSeedOnlyAndLoadsWithoutPriorInitialization(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     world:seedRandom(42)
     const saved = world:saveSnapshot()
     test.equal(payload(saved).seed, 42)
-    const fresh = tecs.ecs.newWorld()
+    const fresh = ecs.newWorld()
     fresh:loadSnapshot(saved)
     sameDraws(world:randomStream("later"), fresh:randomStream("later"))
 end
 
 function suite.restoresCapturedAndNotYetRequestedStreams(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     world:seedRandom(31337)
     const loot = world:randomStream("loot")
     const weather = world:randomStream("weather")
@@ -132,17 +136,17 @@ function suite.restoresCapturedAndNotYetRequestedStreams(): nil
     test.assert(world:randomStream("loot") == loot)
     equalWords(loot:state(), lootState)
     equalWords(weather:state(), weatherState)
-    const fresh = tecs.ecs.newWorld()
+    const fresh = ecs.newWorld()
     fresh:loadSnapshot(saved)
     sameDraws(loot, fresh:randomStream("loot"))
     sameDraws(weather, fresh:randomStream("weather"))
 end
 
 function suite.restartsUnsavedStreamsFromTheRestoredSeed(): nil
-    const source = tecs.ecs.newWorld()
+    const source = ecs.newWorld()
     source:seedRandom(42)
     const saved = source:saveSnapshot()
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const extra = world:randomStream("extra")
     extra:next()
     world:loadSnapshot(saved)
@@ -151,7 +155,7 @@ function suite.restartsUnsavedStreamsFromTheRestoredSeed(): nil
 end
 
 function suite.detachesSnapshotsAndDoesNotAdvanceOnSave(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const stream = world:randomStream("loot")
     const original = stream:state()
     const saved = world:saveSnapshot()
@@ -165,7 +169,7 @@ function suite.detachesSnapshotsAndDoesNotAdvanceOnSave(): nil
 end
 
 function suite.leavesStreamsAloneWhenClearingEntitiesOrLoadingNoRandomData(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const stream = world:randomStream("loot")
     stream:next()
     const state = stream:state()
@@ -173,13 +177,13 @@ function suite.leavesStreamsAloneWhenClearingEntitiesOrLoadingNoRandomData(): ni
     world:commit()
     world:clearEntities()
     equalWords(stream:state(), state)
-    const empty = tecs.ecs.newWorld()
+    const empty = ecs.newWorld()
     world:loadSnapshot(empty:saveSnapshot())
     equalWords(stream:state(), state)
 end
 
 function suite.validatesAllRandomDataBeforeClearingEntitiesOrMovingStreams(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const live = world:spawn()
     world:commit()
     const stream = world:randomStream("loot")
@@ -203,6 +207,7 @@ function suite.validatesAllRandomDataBeforeClearingEntitiesOrMovingStreams(): ni
         {seed = 1, streams = {loot = {[1] = 1, [2] = 2, [3] = 3, [4] = 4, extra = 5}}}
     }
     const pending = world:spawn()
+
     local function loadInvalid(): nil
         world:loadSnapshot(saved)
     end
@@ -219,7 +224,7 @@ function suite.validatesAllRandomDataBeforeClearingEntitiesOrMovingStreams(): ni
 end
 
 function suite.acceptsTheLegacyPayloadAndUnsignedStateWords(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     world:seedRandom(0)
     const saved = world:saveSnapshot()
     test.equal(saved.data[1].key, "tecs.random")
@@ -231,7 +236,7 @@ function suite.acceptsTheLegacyPayloadAndUnsignedStateWords(): nil
 end
 
 function suite.reservesThePersistedKey(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     test.raises(
         function(): nil
             world:addSnapshotHandler({name = "tecs.random"})
@@ -247,7 +252,7 @@ function suite.reservesThePersistedKey(): nil
 end
 
 function suite.restoresBeforeUserSnapshotHandlersRun(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const loot = world:randomStream("loot")
     const savedState = loot:state()
     local restored = false
@@ -268,25 +273,25 @@ function suite.restoresBeforeUserSnapshotHandlersRun(): nil
 end
 
 function suite.roundTripsThroughJsonWithoutLosingSignedWords(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     world:seedRandom(42)
     const stream = world:randomStream("game.loot")
     stream:next()
-    const encoded = nupp.data.json.encode(world:saveSnapshot())
-    const restored = tecs.ecs.newWorld()
+    const encoded = json.encode(world:saveSnapshot())
+    const restored = ecs.newWorld()
     -- JSON decoding is the dynamic serialization boundary; loadSnapshot validates it.
-    restored:loadSnapshot(nupp.data.json.decode(encoded) as tecs.ecs.Snapshot)
+    restored:loadSnapshot(json.decode(encoded) as Snapshot)
     sameDraws(stream, restored:randomStream("game.loot"))
 end
 
 function suite.suppliesTheNuppGeneratorDirectlyToJitterPredicates(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const stream = world:randomStream("game.jitter")
     const expected = random.newRandom()
     expected:setState(stream:state())
     world:addSystem({
-        phase = tecs.ecs.phases.Update,
-        runIf = tecs.ecs.runif.every(1, 0.2, stream),
+        phase = ecs.phases.Update,
+        runIf = ecs.runif.every(1, 0.2, stream),
         run = function(): nil
         end
     })

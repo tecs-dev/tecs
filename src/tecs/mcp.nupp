@@ -80,7 +80,7 @@ refuse unsupported framing or physics encodings.
 ]]
 
 local ecs = require("tecs.ecs")
-local json = require("nupp.data.json")
+local json = require("nupp.codec.json")
 local bindings = require("tecs.internal.mcpbindings")
 local registry = require("tecs.internal.mcpregistry")
 local sandbox = require("tecs.internal.mcpsandbox")

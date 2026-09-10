@@ -2,11 +2,11 @@ module tecs.internal.randomstreams
 
 --[[
 World ownership, stable name-derived seeds and snapshot state for Nupp generators.
-Generation and state transitions belong to `nupp.data.random`; this module owns
+Generation and state transitions belong to `nupp.random`; this module owns
 only the Tecs stream naming and persistence contract.
 ]]
 
-local random = require("nupp.data.random")
+local random = require("nupp.random")
 
 -- This persisted key and seed derivation are compatibility surfaces from Teal.
 

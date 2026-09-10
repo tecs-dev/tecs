@@ -31,7 +31,7 @@ allocates nothing.
 
 local input = require("tecs.input")
 local window = require("tecs.platform.window")
-local type Camera3D = tecs.gfx.camera3d.Camera3D
+const {type Camera3D} = require("tecs.gfx.camera3d")
 
 const sqrt, asin, atan2 = math.sqrt, math.asin, math.atan2
 const sin, cos = math.sin, math.cos

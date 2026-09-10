@@ -1,5 +1,7 @@
 module tecs.internal.mcpsubsystems
 
+const {type Store} = require("nupp.store")
+
 -- Subsystem tools. Input schemas and tool names are compatibility surfaces.
 local registry = require("tecs.internal.mcpregistry")
 local bindings = require("tecs.internal.mcpbindings")
@@ -15,7 +17,7 @@ local audio = require("tecs.audio")
 local paths = require("tecs.files")
 local files = require("nupp.io.files")
 local path = require("nupp.io.path")
-local json = require("nupp.data.json")
+local json = require("nupp.codec.json")
 local profile = require("nupp.profile")
 local buffer = require("string.buffer")
 
@@ -98,7 +100,7 @@ end)
 
 --- Detached resource rows, labelling an anonymous key `#<id>` as the tool
 --- output always has.
-local function resourceRows(borrows resources: nupp.data.Store): {any}
+local function resourceRows(borrows resources: Store): {any}
     local rows: {any} = {}
     for id, name, valueType in resources:entries() do
         rows[#rows + 1] = {id = id, name = name or ("#" .. tostring(id)), valueType = valueType}
@@ -208,6 +210,7 @@ register(
     end,
     true
 )
+
 local function layerInfo(index: integer): {[string]: any}
     local mode, parallax, ignoreZoom, lit = layers.entryOf(index)
     local sort = layers.sortOf(index)
@@ -436,6 +439,7 @@ local families: {
     systems = true,
     states = true
 }
+
 local function groupOf(name: string): string
     local prefix = name:match("^([^_]+)_")
     return prefix ~= nil and families[prefix] and prefix or name

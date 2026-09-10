@@ -20,6 +20,28 @@ tecs.tiled.setTile(map, 1, 4, 3, {tileset = 1, id = 7})
 belong to the map through `ChildOf`; snapshots preserve their gameplay state.
 Tile visuals are derived from map data and rebuilt after a snapshot load.
 ]]
+const assetnative = require("tecs.internal.assetnative")
+const json = require("nupp.codec.json")
+const {type ComponentDefinition} = require("tecs.ecs")
+const ecs = require("tecs.ecs")
+const {type World} = require("tecs.ecs")
+const {type FFIInstance} = require("tecs.internal.components")
+const {type TileChunk} = require("tecs.gfx")
+const {type Query} = require("tecs.ecs")
+const {type Key} = require("nupp.store")
+const store = require("nupp.store")
+const images2 = require("tecs.gfx.images")
+const {type MaterialMaps} = require("tecs.gfx.images")
+const files = require("nupp.io.files")
+const {type Sprite} = require("tecs.gfx")
+const gfx = require("tecs.gfx")
+const physics = require("tecs.physics")
+const {type BodyOptions} = require("tecs.physics")
+const {type Camera2D} = require("tecs.gfx")
+const cameraselection = require("tecs.internal.cameraselection")
+const {type ResizeEvent} = require("tecs.platform.events")
+const {WindowResized} = require("tecs.platform.events")
+const {WindowScaleChanged} = require("tecs.platform.events")
 
 --- A file-backed image and its authored dimensions.
 export type Image = {
@@ -154,8 +176,8 @@ export type Map = {
 --- @return the editable map
 --- @raises when the library cannot load the map or its orientation is unsupported
 export function load(path: string): Map
-    local source = tecs.internal.assetnative.load(path, 0)
-    local value = nupp.data.json.decode(source)
+    local source = assetnative.load(path, 0)
+    local value = json.decode(source)
     value.revision, value.changes = 0, {}
     local map = value as Map
 
@@ -292,9 +314,9 @@ export type Options = {
 export type Tilemap = TilemapValue
 
 --- Loads a map as static TileChunks and animated sprite entities.
-export const Tilemap: tecs.ecs.ComponentDefinition<TilemapValue> = tecs.ecs.newComponent(TilemapValue, {
+export const Tilemap: ComponentDefinition<TilemapValue> = ecs.newComponent(TilemapValue, {
     name = "Tilemap",
-    requires = {tecs.ecs.Transform2D},
+    requires = {ecs.Transform2D},
     construct = function(options: Options?): TilemapValue
         local values = options or {}
         return new TilemapValue(
@@ -310,7 +332,7 @@ export const Tilemap: tecs.ecs.ComponentDefinition<TilemapValue> = tecs.ecs.newC
 })
 
 --- Marks generated map visuals, which are replaced on snapshot restoration.
-export const TileVisual = tecs.ecs.newTagComponent({name = "TiledVisual"})
+export const TileVisual = ecs.newTagComponent({name = "TiledVisual"})
 
 local record TileSourceValue
     --- Read-only. Reports the tileset's local tile ID.
@@ -330,7 +352,7 @@ end
 export type TileSource = TileSourceValue
 
 --- Constructs metadata identifying a tile's authored source.
-export const TileSource: tecs.ecs.ComponentDefinition<TileSourceValue> = tecs.ecs.newComponent(TileSourceValue, {
+export const TileSource: ComponentDefinition<TileSourceValue> = ecs.newComponent(TileSourceValue, {
     name = "TileSource",
     construct = function(id: integer, name: string, class: string?, properties: {[string]: any}?): TileSourceValue
         return new TileSourceValue(localId = id, tilesetName = name, class = class or "", properties = properties or {})
@@ -341,7 +363,7 @@ export const TileSource: tecs.ecs.ComponentDefinition<TileSourceValue> = tecs.ec
 })
 
 --- A callback that spawns a gameplay entity for an authored object class.
-export type ObjectFactory = function(exclusive world: tecs.ecs.World, object: Object): integer
+export type ObjectFactory = function(exclusive world: World, object: Object): integer
 
 local factories: {[string]: ObjectFactory} = {}
 
@@ -373,7 +395,7 @@ local record Row
 end
 local record Chunk
     row: Row
-    value: tecs.internal.components.FFIInstance<tecs.gfx.TileChunk, tecs.ecs.ComponentDefinition<tecs.gfx.TileChunk>>
+    value: FFIInstance<TileChunk, ComponentDefinition<TileChunk>>
     cells: {[string]: Cell}
     tileset: integer
     layerIndex: integer
@@ -390,29 +412,30 @@ local record Instance
     collision: boolean
 end
 local record State
-    maps: tecs.ecs.Query
-    cameras: tecs.ecs.Query
+    maps: Query
+    cameras: Query
     instances: {[integer]: Instance}
     width: number
     height: number
 end
-local stateKey: nupp.data.Key<State> = nupp.data.newKey("tecs.tiled.state")
+local stateKey: Key<State> = store.newKey("tecs.tiled.state")
 local images: {[string]: integer} = {}
+
 local function imageOf(source: Image): integer
     local name = source.path .. (source.transparent and ":transparent:" .. table.concat(source.transparent, ",") or "")
     local id = images[name]
-    if id and tecs.gfx.images.stateOf(id) ~= "released" then
+    if id and images2.stateOf(id) ~= "released" then
         return id
     end
-    local pixels, width, height = tecs.internal.assetnative.load(source.path, 1, source.transparent)
-    id = tecs.gfx.images.upload({name = name, width = width, height = height, pixels = pixels})
+    local pixels, width, height = assetnative.load(source.path, 1, source.transparent)
+    id = images2.upload({name = name, width = width, height = height, pixels = pixels})
     images[name] = id
     const stem = source.path:gsub("%.[^./]+$", "")
-    local maps: tecs.gfx.images.MaterialMaps = {}
+    local maps: MaterialMaps = {}
     for _, suffix in ipairs({"_n", "_e", "_orm"}) do
         const path = stem .. suffix .. ".png"
-        if nupp.io.files.exists(path) then
-            const map = tecs.gfx.images.load(path)
+        if files.exists(path) then
+            const map = images2.load(path)
             if suffix == "_n" then
                 maps.normalMap = map
             elseif suffix == "_e" then
@@ -422,7 +445,7 @@ local function imageOf(source: Image): integer
             end
         end
     end
-    tecs.gfx.images.setMaterialMaps(id, maps)
+    images2.setMaterialMaps(id, maps)
 
     return id
 end
@@ -437,15 +460,12 @@ local function tileOf(set: Tileset, id: integer): Tile?
     return nil
 end
 
-local function sprite(
-    set: Tileset,
-    id: integer
-): tecs.internal.components.FFIInstance<tecs.gfx.Sprite, tecs.ecs.ComponentDefinition<tecs.gfx.Sprite>>, number, number
+local function sprite(set: Tileset, id: integer): FFIInstance<Sprite, ComponentDefinition<Sprite>>, number, number
     local tile = tileOf(set, id)
     local source = tile and tile.image or set.image
     assert(source, "tiled: tile has no image")
     local image = imageOf(assert(source))
-    local iw, ih = tecs.gfx.images.sizeOf(image)
+    local iw, ih = images2.sizeOf(image)
     local x, y, width, height = 0.0, 0.0, set.tileWidth as number, set.tileHeight as number
     if tile and tile.image then
         width, height = iw, ih
@@ -458,11 +478,11 @@ local function sprite(
         y = set.margin + math.floor(id / set.columns) * (set.tileHeight + set.spacing)
     end
 
-    return tecs.gfx.Sprite(image, x / iw, y / ih, (x + width) / iw, (y + height) / ih), width, height
+    return gfx.Sprite(image, x / iw, y / ih, (x + width) / iw, (y + height) / ih), width, height
 end
 
 local function collisionBodies(
-    exclusive world: tecs.ecs.World,
+    exclusive world: World,
     root: integer,
     map: Map,
     layer: Layer,
@@ -474,10 +494,10 @@ local function collisionBodies(
     if tile == nil or #tile.collision == 0 then
         return bodies
     end
-    if tecs.physics.of(world) == nil then
-        tecs.physics.install(world)
+    if physics.of(world) == nil then
+        physics.install(world)
     end
-    local pose = assert(world:get(root, tecs.ecs.Transform2D))
+    local pose = assert(world:get(root, ecs.Transform2D))
     for _, object in ipairs(tile.collision) do
         local points: {{number}} = {}
         if object.shape == "polygon" or object.shape == "polyline" then
@@ -520,18 +540,18 @@ local function collisionBodies(
         for i = 1, last do
             local a, b = transformed[i], transformed[i % #transformed + 1]
             if a[1] ~= b[1] or a[2] ~= b[2] then
-                local options: tecs.physics.BodyOptions = {kind = "static", segment = {a[1], a[2], b[1], b[2]}}
+                local options: BodyOptions = {kind = "static", segment = {a[1], a[2], b[1], b[2]}}
                 if body == 0 then
                     body = world:spawn(
-                        tecs.ecs.ChildOf(root),
+                        ecs.ChildOf(root),
                         TileVisual,
-                        tecs.ecs.Transform2D(pose.x, pose.y, 0, pose.layer, pose.rotation)
+                        ecs.Transform2D(pose.x, pose.y, 0, pose.layer, pose.rotation)
                     )
-                    tecs.physics.attach(world, body, options)
+                    physics.attach(world, body, options)
                     bodies[#bodies + 1] = body
                 else
-                    local collider = world:spawn(tecs.ecs.ChildOf(body), TileVisual)
-                    tecs.physics.attachCollider(world, collider, body, options)
+                    local collider = world:spawn(ecs.ChildOf(body), TileVisual)
+                    physics.attachCollider(world, collider, body, options)
                 end
             end
         end
@@ -541,7 +561,7 @@ local function collisionBodies(
 end
 
 local function cellRow(
-    exclusive world: tecs.ecs.World,
+    exclusive world: World,
     root: integer,
     map: Map,
     layer: Layer,
@@ -571,17 +591,12 @@ local function cellRow(
         end
     end
     local entity = world:spawn(
-        tecs.ecs.ChildOf(root),
+        ecs.ChildOf(root),
         TileVisual,
-        tecs.ecs.Transform2D(),
+        ecs.Transform2D(),
         value,
-        tecs.gfx.Tint(
-            layer.tint[1] / 255,
-            layer.tint[2] / 255,
-            layer.tint[3] / 255,
-            layer.opacity * layer.tint[4] / 255
-        ),
-        tecs.gfx.Renderable2D,
+        gfx.Tint(layer.tint[1] / 255, layer.tint[2] / 255, layer.tint[3] / 255, layer.opacity * layer.tint[4] / 255),
+        gfx.Renderable2D,
         TileSource(cell.id, set.name, tile and tile.class or "", tile and tile.properties or {})
     )
     local bodies: {integer} = {}
@@ -626,7 +641,7 @@ local function chunkIndex(cell: Cell): integer
 end
 
 local function addStatic(
-    exclusive world: tecs.ecs.World,
+    exclusive world: World,
     root: integer,
     map: Map,
     instance: Instance,
@@ -639,7 +654,7 @@ local function addStatic(
     if chunk == nil then
         const layer = map.layers[layerIndex]
         const set = map.tilesets[cell.tileset]
-        const input = tecs.gfx.TileChunk({
+        const input = gfx.TileChunk({
             tileset = imageOf(assert(set.image)),
             tileWidth = set.tileWidth,
             tileHeight = set.tileHeight,
@@ -652,15 +667,10 @@ local function addStatic(
             offsetY = set.y
         })
         const entity = world:spawn(
-            tecs.ecs.ChildOf(root),
+            ecs.ChildOf(root),
             TileVisual,
             input,
-            tecs.gfx.Tint(
-                layer.tint[1] / 255,
-                layer.tint[2] / 255,
-                layer.tint[3] / 255,
-                layer.opacity * layer.tint[4] / 255
-            )
+            gfx.Tint(layer.tint[1] / 255, layer.tint[2] / 255, layer.tint[3] / 255, layer.opacity * layer.tint[4] / 255)
         )
         const row = new Row(
             entity = entity,
@@ -694,13 +704,7 @@ local function addStatic(
     end
 end
 
-local function syncChunk(
-    exclusive world: tecs.ecs.World,
-    root: integer,
-    map: Map,
-    instance: Instance,
-    group: string
-): nil
+local function syncChunk(exclusive world: World, root: integer, map: Map, instance: Instance, group: string): nil
     const chunk = assert(instance.chunks[group])
     for _, body in ipairs(chunk.row.collisions) do
         world:despawn(body)
@@ -731,17 +735,17 @@ local function syncChunk(
     end
 end
 
-local function clear(exclusive world: tecs.ecs.World, root: integer): nil
-    for _, child in ipairs(world:relationshipSources(tecs.ecs.ChildOf, root)) do
+local function clear(exclusive world: World, root: integer): nil
+    for _, child in ipairs(world:relationshipSources(ecs.ChildOf, root)) do
         if world:has(child, TileVisual) then
             world:despawn(child)
         end
     end
 end
 
-local function build(exclusive world: tecs.ecs.World, root: integer, value: TilemapValue, map: Map): Instance
+local function build(exclusive world: World, root: integer, value: TilemapValue, map: Map): Instance
     clear(world, root)
-    local pose = assert(world:get(root, tecs.ecs.Transform2D))
+    local pose = assert(world:get(root, ecs.Transform2D))
     local result = new Instance(
         map = map,
         rows = {},
@@ -768,19 +772,19 @@ local function build(exclusive world: tecs.ecs.World, root: integer, value: Tile
             elseif layer.kind == "image" and layer.image and not layer.repeatX and not layer.repeatY then
                 local source = assert(layer.image)
                 local image = imageOf(source)
-                local width, height = tecs.gfx.images.sizeOf(image)
+                local width, height = images2.sizeOf(image)
                 local entity = world:spawn(
-                    tecs.ecs.ChildOf(root),
+                    ecs.ChildOf(root),
                     TileVisual,
-                    tecs.ecs.Transform2D(),
-                    tecs.gfx.Sprite(image),
-                    tecs.gfx.Tint(
+                    ecs.Transform2D(),
+                    gfx.Sprite(image),
+                    gfx.Tint(
                         layer.tint[1] / 255,
                         layer.tint[2] / 255,
                         layer.tint[3] / 255,
                         layer.opacity * layer.tint[4] / 255
                     ),
-                    tecs.gfx.Renderable2D
+                    gfx.Renderable2D
                 )
                 result.rows[
                     "image:" .. index
@@ -859,7 +863,7 @@ local function build(exclusive world: tecs.ecs.World, root: integer, value: Tile
                     item.width, item.height, item.rotation = width, height, item.rotation + angle
                     world:set(
                         item.entity,
-                        tecs.gfx.Tint(
+                        gfx.Tint(
                             layer.tint[1] / 255,
                             layer.tint[2] / 255,
                             layer.tint[3] / 255,
@@ -875,7 +879,7 @@ local function build(exclusive world: tecs.ecs.World, root: integer, value: Tile
                 local factory = factories[object.class]
                 if factory then
                     local entity = factory(world, object)
-                    world:set(entity, tecs.ecs.ChildOf(root))
+                    world:set(entity, ecs.ChildOf(root))
                     local angle = object.rotation * math.pi / 180
                     local x, y = object.x + layer.x, object.y + layer.y
                     local dx, dy = object.width * 0.5, object.height * 0.5
@@ -885,8 +889,8 @@ local function build(exclusive world: tecs.ecs.World, root: integer, value: Tile
                     x, y = x + dx * math.cos(
                         angle
                     ) - dy * math.sin(angle), y + dx * math.sin(angle) + dy * math.cos(angle)
-                    world:set(entity, tecs.ecs.Transform2D(x, y, index))
-                    world:set(entity, tecs.ecs.RelativeTransform2D(x, y, index, angle))
+                    world:set(entity, ecs.Transform2D(x, y, index))
+                    world:set(entity, ecs.RelativeTransform2D(x, y, index, angle))
                 end
             end
         end
@@ -901,19 +905,13 @@ local function build(exclusive world: tecs.ecs.World, root: integer, value: Tile
 end
 
 -- Reuse image-layer quads while the camera remains in the same repeat cells.
-local function repeats(
-    exclusive world: tecs.ecs.World,
-    state: State,
-    root: integer,
-    instance: Instance,
-    camera: tecs.gfx.Camera2D?
-): nil
+local function repeats(exclusive world: World, state: State, root: integer, instance: Instance, camera: Camera2D?): nil
     local map = instance.map
-    local pose = assert(world:get(root, tecs.ecs.Transform2D))
+    local pose = assert(world:get(root, ecs.Transform2D))
     for index, layer in ipairs(map.layers) do
         if layer.visible and layer.image and (layer.repeatX or layer.repeatY) then
             local image = imageOf(assert(layer.image))
-            local width, height = tecs.gfx.images.sizeOf(image)
+            local width, height = images2.sizeOf(image)
             local zoom = camera and math.abs(camera.zoom) or 1
             local radius = math.sqrt(
                 state.width * state.width + state.height * state.height
@@ -946,17 +944,17 @@ local function repeats(
                     live[name] = true
                     if instance.rows[name] == nil then
                         local entity = world:spawn(
-                            tecs.ecs.ChildOf(root),
+                            ecs.ChildOf(root),
                             TileVisual,
-                            tecs.ecs.Transform2D(),
-                            tecs.gfx.Sprite(image),
-                            tecs.gfx.Tint(
+                            ecs.Transform2D(),
+                            gfx.Sprite(image),
+                            gfx.Tint(
                                 layer.tint[1] / 255,
                                 layer.tint[2] / 255,
                                 layer.tint[3] / 255,
                                 layer.opacity * layer.tint[4] / 255
                             ),
-                            tecs.gfx.Renderable2D
+                            gfx.Renderable2D
                         )
                         instance.rows[
                             name
@@ -991,8 +989,8 @@ local function repeats(
     end
 end
 
-local function step(exclusive world: tecs.ecs.World, state: State, dt: number): nil
-    local camera = tecs.internal.cameraselection.pick(state.cameras)
+local function step(exclusive world: World, state: State, dt: number): nil
+    local camera = cameraselection.pick(state.cameras)
     local live: {[integer]: boolean} = {}
     for candidate, count in state.maps:iter() do
         local values = assert(assert(candidate):get(Tilemap))
@@ -1007,7 +1005,7 @@ local function step(exclusive world: tecs.ecs.World, state: State, dt: number): 
                 world:markComponentDirty(root, Tilemap)
             end
             local instance = state.instances[root]
-            local currentPose = assert(world:get(root, tecs.ecs.Transform2D))
+            local currentPose = assert(world:get(root, ecs.Transform2D))
             if instance == nil or instance.map ~= map or instance.collision ~= value.collision or (
                 value.collision and (instance.scaleX ~= currentPose.scaleX or instance.scaleY ~= currentPose.scaleY)
             ) then
@@ -1070,17 +1068,17 @@ local function step(exclusive world: tecs.ecs.World, state: State, dt: number): 
             end
             repeats(world, state, root, active, camera)
             active.clock = active.clock + dt
-            local rootPose = assert(world:get(root, tecs.ecs.Transform2D))
+            local rootPose = assert(world:get(root, ecs.Transform2D))
             for _, item in pairs(active.rows) do
                 for _, body in ipairs(item.collisions) do
-                    local bodyPose = world:get(body, tecs.ecs.Transform2D)
+                    local bodyPose = world:get(body, ecs.Transform2D)
                     if bodyPose and (
                         bodyPose.x ~= rootPose.x or bodyPose.y ~= rootPose.y or bodyPose.rotation ~= rootPose.rotation
                     ) then
-                        tecs.physics.teleport(world, body, rootPose.x, rootPose.y, rootPose.rotation)
+                        physics.teleport(world, body, rootPose.x, rootPose.y, rootPose.rotation)
                     end
                 end
-                local pose = world:get(item.entity, tecs.ecs.Transform2D)
+                local pose = world:get(item.entity, ecs.Transform2D)
                 if pose then
                     local c, s = math.cos(rootPose.rotation), math.sin(rootPose.rotation)
                     local x = rootPose.x + item.x * rootPose.scaleX * c - item.y * rootPose.scaleY * s + (
@@ -1100,7 +1098,7 @@ local function step(exclusive world: tecs.ecs.World, state: State, dt: number): 
                         or pose.rotation ~= rootPose.rotation
                         + item.rotation
                     then
-                        pose = assert(world:getMut(item.entity, tecs.ecs.Transform2D))
+                        pose = assert(world:getMut(item.entity, ecs.Transform2D))
                         pose.x, pose.y, pose.scaleX, pose.scaleY = x, y, sx, sy
                         pose.rotation, pose.layer, pose.z = rootPose.rotation
                             + item.rotation, rootPose.layer, rootPose.z
@@ -1145,53 +1143,54 @@ end
 
 --- Installs tile projection and animation in the world.
 --- @param world the world receiving maps
-export function install(exclusive world: tecs.ecs.World): nil
+export function install(exclusive world: World): nil
     if world.resources:get(stateKey) then
         return
     end
     local state = new State(
         maps = world:newQuery({
-            include = {Tilemap, tecs.ecs.Transform2D}
+            include = {Tilemap, ecs.Transform2D}
         }),
         cameras = world:newQuery({
-            include = {tecs.gfx.Camera2D, tecs.gfx.ActiveCamera}
+            include = {gfx.Camera2D, gfx.ActiveCamera}
         }),
         instances = {},
         width = 1280,
         height = 720
     )
     world.resources:set(stateKey, state)
-    local function resized(borrows event: tecs.platform.events.ResizeEvent): nil
+
+    local function resized(borrows event: ResizeEvent): nil
         if event.width > 0 and event.height > 0 then
             state.width, state.height = event.width * event.scaleFactor, event.height * event.scaleFactor
         end
     end
 
-    world:observe(0, tecs.platform.events.WindowResized, resized)
-    world:observe(0, tecs.platform.events.WindowScaleChanged, resized)
+    world:observe(0, WindowResized, resized)
+    world:observe(0, WindowScaleChanged, resized)
     world:addSystem({
         name = "tecs.Tiled",
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         commitBefore = true,
         commitAfter = true,
-        run = function(dt: number, exclusive running: tecs.ecs.World): nil
+        run = function(dt: number, exclusive running: World): nil
             step(running, state, dt)
         end
     })
     world:addSystem({
         name = "tecs.TiledPresentation",
-        phase = tecs.ecs.phases.RenderFirst,
+        phase = ecs.phases.RenderFirst,
         commitAfter = true,
-        run = function(_dt: number, exclusive running: tecs.ecs.World): nil
+        run = function(_dt: number, exclusive running: World): nil
             step(running, state, 0)
         end
     })
     world:addSnapshotHandler({
         name = "tecs.tiled",
-        load = function(exclusive _world: tecs.ecs.World, _value: any): nil
+        load = function(exclusive _world: World, _value: any): nil
             state.instances = {}
         end,
-        save = function(exclusive _world: tecs.ecs.World): any
+        save = function(exclusive _world: World): any
             return true
         end
     })
@@ -1202,7 +1201,7 @@ end
 --- @param map the loaded map
 --- @param options optional collision settings
 --- @return the parent map entity
-export function spawn(exclusive world: tecs.ecs.World, map: Map, options: Options?): integer
+export function spawn(exclusive world: World, map: Map, options: Options?): integer
     install(world)
     local values = options or {}
     values.map = map

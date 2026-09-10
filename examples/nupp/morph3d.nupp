@@ -1,5 +1,15 @@
 module morph3d
 
+const {type Application} = require("tecs.application")
+const gfx = require("tecs.gfx")
+const meshes = require("tecs.gfx.meshes")
+const flycamera3d = require("tecs.gfx.flycamera3d")
+const ecs = require("tecs.ecs")
+const models = require("tecs.gfx.models")
+const files = require("tecs.files")
+const {type Session} = require("tecs.host")
+const host = require("tecs.host")
+
 const FLOOR_VERTICES: {
     number
 } = {
@@ -54,10 +64,10 @@ const FLOOR_VERTICES: {
 }
 const FLOOR_INDICES: {integer} = {0, 2, 1, 0, 3, 2}
 
-local function install(exclusive app: tecs.application.Application): nil
+local function install(exclusive app: Application): nil
     const world = app.world
-    const camera = tecs.gfx.newCamera3D()
-    const lighting = tecs.gfx.meshes.newLighting()
+    const camera = gfx.newCamera3D()
+    const lighting = meshes.newLighting()
     lighting.ambient = 0
     lighting.probe = {
         0.08,
@@ -90,39 +100,39 @@ local function install(exclusive app: tecs.application.Application): nil
     lighting.intensity = 2.6
     lighting.shadowStrength = 0.82
     lighting.shadowSoftness = 1.5
-    world:spawn(tecs.gfx.View({camera3D = camera, lighting = lighting}))
+    world:spawn(gfx.View({camera3D = camera, lighting = lighting}))
     camera.y = 0.35
     camera.z = 5.5
     camera.verticalFov = math.rad(50)
 
-    const controller = tecs.gfx.flycamera3d.new(app.input, app.window, camera, {moveSpeed = 3, sprintMultiplier = 4})
+    const controller = flycamera3d.new(app.input, app.window, camera, {moveSpeed = 3, sprintMultiplier = 4})
     world:addSystem({
         name = "example.MorphFlyCamera",
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(dt: number): nil
             controller:update(dt)
         end,
     })
     print("morph3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
 
-    const floor, floorBounds = tecs.gfx.models.newMesh({
+    const floor, floorBounds = models.newMesh({
         name = "example://morph-floor",
         vertices = FLOOR_VERTICES,
         indices = FLOOR_INDICES,
     })
     world:spawn(
-        tecs.ecs.Transform3D(),
+        ecs.Transform3D(),
         floor,
         floorBounds,
-        tecs.gfx.MeshMaterial(),
-        tecs.gfx.Tint(0.22, 0.25, 0.3, 1),
-        tecs.gfx.Renderable3D
+        gfx.MeshMaterial(),
+        gfx.Tint(0.22, 0.25, 0.3, 1),
+        gfx.Renderable3D
     )
 
-    const loaded = assert(tecs.gfx.models.load(tecs.files.assetPath("models/morph-cube.gltf")))
+    const loaded = assert(models.load(files.assetPath("models/morph-cube.gltf")))
     const model = loaded
     const instance = model:newInstance()
-    const placement = tecs.ecs.Transform3D().value
+    const placement = ecs.Transform3D().value
     instance.transform = placement
     local entities: {integer} = {}
     for index, primitive in ipairs(instance.primitives) do
@@ -134,8 +144,8 @@ local function install(exclusive app: tecs.application.Application): nil
             primitive.bounds,
             primitive.material,
             primitive.morph,
-            tecs.gfx.Tint(1, 1, 1, 1),
-            tecs.gfx.Renderable3D
+            gfx.Tint(1, 1, 1, 1),
+            gfx.Renderable3D
         )
     end
     world:commit()
@@ -146,7 +156,7 @@ local function install(exclusive app: tecs.application.Application): nil
     local turn = 0.0
     world:addSystem({
         name = "example.AnimateMorph",
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(dt: number): nil
             turn = (turn + dt * 0.45) % (math.pi * 2)
             placement.rotationY = math.sin(turn * 0.5)
@@ -164,14 +174,8 @@ end
 --- @param debug enable guarded failures
 --- @param maxFrames optional bounded run
 --- @return native host session
-export function create(
-    title: string?,
-    width: integer?,
-    height: integer?,
-    debug: boolean?,
-    maxFrames: integer?
-): tecs.host.Session
-    return tecs.host.createWithPlugin(
+export function create(title: string?, width: integer?, height: integer?, debug: boolean?, maxFrames: integer?): Session
+    return host.createWithPlugin(
         install,
         title or "Tecs glTF morph targets",
         width or 960,

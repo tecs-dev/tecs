@@ -138,7 +138,6 @@ when adding or removing files, because the sorted set determines numbering.
 See [Shapes](shapes.md) for the built-in geometry and [the material reference](tecs.gpu.materials)
 for registration and lookup.
 
-
 ## Image material maps
 
 The default `textured` material can read normal, emission and packed ORM maps

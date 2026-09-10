@@ -57,6 +57,8 @@ standalone motion sensors are not part of the input surface. A game that wants a
 `"cross"` glyph rather than a `"south"` name reads the pad's `name` and chooses
 its own art.
 ]]
+const {type Key} = require("nupp.store")
+const store = require("nupp.store")
 
 local ecs = require("tecs.ecs")
 local gamepadbackend = require("tecs.platform.gamepadbackend")
@@ -228,7 +230,7 @@ export record Input
     beginFrame: function(exclusive self: Input): nil
     enterFixedPhase: function(exclusive self: Input): nil
     exitFixedPhase: function(exclusive self: Input): nil
-    handleEvent: function(exclusive self: Input, event: platformevents.Event): nil
+    handleEvent: function(self: Input, event: platformevents.Event): nil
     keyDown: function(borrows self: Input, key: string, layer: Layer?): boolean
     keyPressed: function(borrows self: Input, key: string, layer: Layer?): boolean
     keyReleased: function(borrows self: Input, key: string, layer: Layer?): boolean
@@ -244,7 +246,7 @@ export record Input
     gamepads: function(borrows self: Input): {Gamepad}
     gamepad: function(borrows self: Input, index: integer?): Gamepad?
     gamepadById: function(borrows self: Input, id: integer): Gamepad?
-    refreshDevices: function(exclusive self: Input): nil
+    refreshDevices: function(self: Input): nil
     pollDevices: function(exclusive self: Input): {platformevents.Event}
     destroy: function(exclusive self: Input): nil
 end
@@ -325,7 +327,7 @@ local function devices(): gamepadbackend.Backend
     return opened
 end
 
-local worldInputKey: nupp.data.Key<Input> = nupp.data.newKey("tecs.input")
+local worldInputKey: Key<Input> = store.newKey("tecs.input")
 
 --- Clears one pad's frame-local edges.
 local function padBeginFrame(exclusive pad: Gamepad): nil
@@ -583,7 +585,11 @@ local function fingerKey(event: platformevents.TouchEvent): string
 end
 
 --- Opens a device Input has not seen, or leaves the one it has.
-local function connect(exclusive self: Input, id: integer): nil
+---
+--- The receiver is plain rather than `exclusive` here and in the two public
+--- calls that reach it, because the gamepad this records gates its reads
+--- through Input and so outlives a call-scoped borrow of it.
+local function connect(self: Input, id: integer): nil
     if self.pads[id] ~= nil then
         return
     end
@@ -630,7 +636,7 @@ end
 --- Folds one translated platform event into live and edge state.
 --- @param self the input state to update
 --- @param event the translated event, in host sequence order
-function Input.handleEvent(exclusive self: Input, event: platformevents.Event): nil
+function Input.handleEvent(self: Input, event: platformevents.Event): nil
     if event is platformevents.KeyEvent then
         self.modifierMask = event.modifiers
         if event.down then
@@ -898,7 +904,7 @@ end
 --- the device list without emitting the events an ordinary attach produces,
 --- because the world it would emit into is not this call's to reach.
 --- @param self the input state to reconcile
-function Input.refreshDevices(exclusive self: Input): nil
+function Input.refreshDevices(self: Input): nil
     local attached = self.backend.attached()
     local present: {[integer]: boolean} = {}
     for index = 1, #attached do

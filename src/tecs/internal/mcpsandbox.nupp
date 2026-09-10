@@ -21,7 +21,7 @@ by `loadstring` under `setfenv`. Both are reached through the global table
 because the Nupp standard library does not declare them.
 ]]
 
-local json = require("nupp.data.json")
+local json = require("nupp.codec.json")
 
 local globals = _G as {[string]: any}
 

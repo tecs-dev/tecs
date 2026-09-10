@@ -42,7 +42,7 @@ Built-in transforms, tint, shape material, camera, lights, animation, sound,
 physics values and numeric UI components use this storage and derive
 `nupp.derive.Debug` and `nupp.derive.Serde`. Derived methods work on constructed
 values and borrowed rows without changing column layout. Use
-`nupp.data.serde.json():prepare(nupp.data.serde.of(Velocity))` for a typed JSON
+`nupp.serde.json():prepare(nupp.serde.of(Velocity))` for a typed JSON
 codec; Nupp's separate `nupp.derive.JSON` provider currently admits records only.
 Generic Serde encoding describes physical component fields, whereas world
 snapshots use the component's registered codecs. Asset-bearing built-ins keep
@@ -352,7 +352,7 @@ alive, but it will not adopt a new archetype that later reuses the same ID.
 
 ## World-managed random streams
 
-`world:randomStream(name)` returns a `nupp.data.random.Random` owned by the world.
+`world:randomStream(name)` returns a `nupp.random.Random` owned by the world.
 The world seed and the non-empty stream name determine its sequence, independently
 of which other streams exist or how many values they draw. Repeated calls return
 the same generator. Use namespaced names and capture streams during setup.
@@ -372,7 +372,7 @@ The initial world seed is the fixed value `0x5EED1234`, not a clock reading.
 `seedRandom(seed)` reads a 32-bit word and restarts all existing streams in
 place; future streams derive their seeds from the new world seed too. Drawing,
 shuffling, ranges and individual state access use Nupp's generator methods
-directly. Independent generators outside a world use `nupp.data.random.newRandom`.
+directly. Independent generators outside a world use `nupp.random.newRandom`.
 Generators are mutable and must not be shared across concurrent workers.
 
 The first stream or seed call enables snapshot persistence under `tecs.random`.
@@ -468,11 +468,14 @@ Combinators short-circuit, including their operands' side effects. The example
 pauses its timer outside `game`; swapping the operands keeps the timer advancing
 and spends ticks outside that state. A disabled system or phase never evaluates
 its predicates. Use `every(interval, jitter, generator)` for jitter, supplying a
-`nupp.data.random.Random` directly. The first interval is unjittered and later
+`nupp.random.Random` directly. The first interval is unjittered and later
 intervals clamp to one percent of the base interval. Pass a named world stream
 to snapshot its random state; there is no implicit stream or automatic timer
 rewind when an entity snapshot is restored.
 ]]
+const {type DoubleArray as DoubleArray2} = require("tecs.internal.entitycolumn")
+const {type Transform3D as Transform3D2} = require("tecs.internal.meshcomponents")
+const meshcomponents = require("tecs.internal.meshcomponents")
 
 local idallocator = require("tecs.internal.idallocator")
 local archetype = require("tecs.internal.archetype")
@@ -714,7 +717,7 @@ export type Query = query.Query
 export type Archetype = archetype.Archetype
 
 --- Exposes the native, one-based packed entity ID column and its exact length.
-export type DoubleArray = tecs.internal.entitycolumn.DoubleArray
+export type DoubleArray = DoubleArray2
 
 --- Receives row and lifetime notifications from one archetype.
 export type ArchetypeEntityObserver = archetype.EntityObserver
@@ -1040,7 +1043,7 @@ export function declaredComponents(): {[string]: Component}
 end
 
 --- Places an entity in a right-handed 3D world using a quaternion and per-axis scale.
-export type Transform3D = tecs.internal.meshcomponents.Transform3D
+export type Transform3D = Transform3D2
 
 --- Constructs a 3D transform, defaulting to the identity at the origin.
-export const Transform3D = tecs.internal.meshcomponents.Transform3DComponent
+export const Transform3D = meshcomponents.Transform3DComponent

@@ -1,5 +1,8 @@
 module tecs.internal.viewpacket
 
+const {type Archetype} = require("tecs.internal.archetype")
+const io2 = require("nupp.io")
+
 local world = require("tecs.internal.world")
 local query = require("tecs.internal.query")
 local views = require("tecs.internal.views")
@@ -19,7 +22,9 @@ export record Collector
     frame: function(exclusive self: Collector, width: integer, height: integer, resident: integer?): string?
 end
 
-export function new(exclusive value: world.World): Collector
+-- The world is plain rather than `exclusive`, because the collector holds it
+-- for its own lifetime rather than for this call.
+export function new(value: world.World): Collector
     return new Collector(
         world = value,
         query = value:newQuery({
@@ -40,7 +45,7 @@ function Collector.frame(exclusive self: Collector, width: integer, height: inte
     local selected: {Selected} = {}
     local explicit = false
     for candidate, count in self.query:iter() do
-        local active = candidate as tecs.internal.archetype.Archetype
+        local active = candidate as Archetype
         local values = assert(active:get(views.Component))
         for index = 1, count as integer do
             explicit = true
@@ -64,8 +69,8 @@ function Collector.frame(exclusive self: Collector, width: integer, height: inte
     const matched = resident ~= nil and resident ~= 0 and resident == self.sent
     self.sent = self.sent + 1
     assert(self.sent < 4294967295, "view packet revision exhausted")
-    local buffer = nupp.io.newBuffer()
-    local writer = nupp.io.newScalarWriter(buffer)
+    local buffer = io2.newBuffer()
+    local writer = io2.newScalarWriter(buffer)
     writer:writeUint32(nupp.math.u32.wrap(1414944595))
     writer:writeUint32(nupp.math.u32.wrap(2))
     writer:writeUint32(nupp.math.u32.wrap(self.sent))

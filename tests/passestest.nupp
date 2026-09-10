@@ -1,3 +1,5 @@
+const io2 = require("nupp.io")
+
 local passes = require("tecs.gpu.passes")
 local test = require("nupp.test")
 
@@ -32,7 +34,7 @@ end
 --- Decodes the wire section the backend parses, so the two readers of this
 --- layout are held to the same bytes.
 local function decode(section: string): Graph
-    local reader = nupp.io.newScalarReader(section)
+    local reader = io2.newScalarReader(section)
     local nameCount = reader:readUint32() as integer
     local nameBytes = reader:readUint32() as integer
     local blob = reader:readBytes(nameBytes)

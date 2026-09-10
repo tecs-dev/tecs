@@ -1,4 +1,7 @@
 module tecs.internal.meshlights
+
+const io2 = require("nupp.io")
+
 local mesh = require("tecs.internal.meshcomponents")
 local components = require("tecs.internal.components")
 local world = require("tecs.internal.world")
@@ -58,8 +61,8 @@ function Collector.frame(exclusive self: Collector): string
     if not dirty then
         return self.payload
     end
-    local buffer = nupp.io.newBuffer()
-    local writer = nupp.io.newScalarWriter(buffer)
+    local buffer = io2.newBuffer()
+    local writer = io2.newScalarWriter(buffer)
     unsafe do
         for lane, query in ipairs({self.points, self.spots}) do
             for candidate, size in query:iter() do

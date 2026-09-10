@@ -137,7 +137,7 @@ A plugin configures one world. Games, engine features, and reusable mechanics
 use ordinary functions for composition:
 
 ```nupp
-local RATE = nupp.data.newKey<number>("game.spinRate")
+local RATE: nupp.store.Key<number> = nupp.store.newKey("game.spinRate")
 
 local function spinPlugin(exclusive world: tecs.ecs.World): nil
     world.resources:set(RATE, 1.5)
@@ -148,7 +148,7 @@ spinPlugin(world)
 ```
 
 Callers own resource values and may replace them. Key identity and typed stores
-come directly from `nupp.data`. Snapshots omit `world.resources`; register a
+come directly from `nupp.store`. Snapshots omit `world.resources`; register a
 [snapshot handler](save-games.md#snapshot-handlers) for durable resource state.
 
 ## World subsystems

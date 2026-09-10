@@ -106,7 +106,7 @@ depend on notifications.
 local audiobackend = require("tecs.platform.audiobackend")
 local ecs = require("tecs.ecs")
 local log = require("nupp.log")
-local random = require("nupp.data.random")
+local random = require("nupp.random")
 
 --- This logger name is a compatibility surface: a developer types it into a
 --- level filter, so it does not move when its module does.

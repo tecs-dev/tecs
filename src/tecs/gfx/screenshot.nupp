@@ -7,6 +7,7 @@ calling `pixels`, `encode`, or `save`. Only requested frames allocate readback
 storage or wait for the GPU. RGBA pixels run top to bottom; captures are opaque,
 matching the displayed image rather than the composite target's internal alpha.
 ]]
+const files = require("nupp.io.files")
 
 --- A requested frame. The host completes it after rendering.
 export record Capture
@@ -66,7 +67,7 @@ export function save(capture: Capture, path: string): boolean, string?
         return false, reason
     end
 
-    return nupp.io.files.write(path, bytes)
+    return files.write(path, bytes)
 end
 
 --- Consumes a queued request for the rendering host.

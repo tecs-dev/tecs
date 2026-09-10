@@ -10,7 +10,7 @@ pipelines, culling, compaction, submission, and presentation. Image pixels
 never ride in a packet. They cross once through the residency commands
 `tecs.gfx.images` queues, so a frame carries only the id a batch binds.
 
-# Packet version 7
+# Packet version 9
 
 Every field is little or big endian to match the host, every integer is
 unsigned, and every real is a 32-bit float. Offsets are in bytes from the start
@@ -22,7 +22,7 @@ of the packet.
 | ------ | ----- | ----------------- | ---------------------------------------------------- |
 | 0      | `u32` | `magic`           | `0x54454353`, and nothing else is a Tecs packet.      |
 | 4      | `u32` | `version`         | `9`. A reader rejects every other value.              |
-| 8      | `u32` | `headerSize`      | `140`. Frame-table and particle sections follow it.             |
+| 8      | `u32` | `headerSize`      | `140`. Frame-table and particle sections follow it.   |
 | 12     | `u32` | `flags`           | Bits 0/1 enable shadows/bloom; bits 2/3 retain/patch instances.           |
 | 16     | `u32` | `graphRevision`   | A reader rebuilds its graph when this changes.        |
 | 20     | `u32` | `graphBytes`      | Byte length of the graph section.                     |
@@ -188,6 +188,11 @@ does not match its declared counts, whose strides differ from the constants
 above, whose batches do not partition its instances, whose instance lane
 disagrees with its batch's, or whose material id its dispatch does not carry.
 ]]
+const components = require("tecs.internal.components")
+const sheet = require("tecs.gfx.sheet")
+const {type Component} = require("tecs.internal.components")
+const io2 = require("nupp.io")
+const particles = require("tecs.gfx.particles")
 
 local archetype = require("tecs.internal.archetype")
 local dirtyranges = require("tecs.internal.dirtyranges")
@@ -206,6 +211,12 @@ local zone = require("nupp.profile.zone")
 local array = require("nupp.mem.array")
 local ffi = require("ffi")
 local frametable = require("tecs.gfx.frametable")
+
+--- Reads `length` bytes from memory this module borrows.
+---
+--- `ffi.string` carries no Nupp declaration, so the binding states the one it
+--- uses rather than letting a borrowed pointer cross an `any` parameter.
+local readBytes: function(borrows value: uint8*, length: integer): string = ffi.string as any
 
 --- Identifies a Tecs frame packet, and is a compatibility surface.
 export const MAGIC: uint32 = 0x54454353
@@ -364,9 +375,12 @@ export record Extractor
 end
 
 --- Creates an extractor and registers its queries with one world.
+---
+--- The world is plain rather than `exclusive`, because the extractor holds it
+--- for its own lifetime rather than for this call.
 --- @param value the world whose renderable entities and cameras it reads
 --- @return the extractor, which the caller keeps for the world's lifetime
-export function new(exclusive value: world.World): Extractor
+export function new(value: world.World): Extractor
     local entities: {integer} = {}
     local depths: {number} = {}
     local before = function(left: integer, right: integer): boolean
@@ -395,7 +409,7 @@ export function new(exclusive value: world.World): Extractor
         drawCapacity = 64,
         lightCapacity = 64,
         drawables = value:newQuery({
-            exclude = {tecs.internal.components.Disabled},
+            exclude = {components.Disabled},
             include = {
                 rendercomponents.Transform2DComponent,
                 rendercomponents.TintComponent,
@@ -587,7 +601,7 @@ local function collect(exclusive self: Extractor): nil
                 const previous = authoredPrevious or emptyPrevious
                 local rowTints: rendercomponents.Tint[?] = assert(active:get(rendercomponents.TintComponent))
                 local rowClips = active:get(clips.ClipComponent)
-                const rowPivots = active:get(tecs.gfx.sheet.Pivot)
+                const rowPivots = active:get(sheet.Pivot)
                 local rowSprites = active:get(rendercomponents.SpriteComponent) as rendercomponents.Sprite[?]?
                 local rowMaterials = active:get(materials.MaterialComponent) as materials.Material[?]?
                 local rowOccluders = active:get(lighting.Occluder2DComponent) as lighting.Occluder2D[?]?
@@ -710,11 +724,7 @@ local function collect(exclusive self: Extractor): nil
                             const pivot = rowPivots[index]
                             if u0[
                                 rows
-                            ] >= 0 or not tecs.gfx.frametable.hasPivot(
-                                (-u0[rows]) as integer,
-                                pivot.sheet,
-                                pivot.slice
-                            ) then
+                            ] >= 0 or not frametable.hasPivot((-u0[rows]) as integer, pivot.sheet, pivot.slice) then
                                 const dx, dy = (0.5 - pivot.x) * transform.scaleX, (0.5 - pivot.y) * transform.scaleY
                                 const c, sine = math.cos(transform.rotation), math.sin(transform.rotation)
                                 transform.x = transform.x + dx * c - dy * sine
@@ -830,13 +840,13 @@ local function sortRows(exclusive self: Extractor): nil
 end
 
 local watched: {
-    tecs.internal.components.Component
+    Component
 } = {
     rendercomponents.Transform2DComponent,
     rendercomponents.TintComponent,
     rendercomponents.PreviousTransform2DComponent,
     rendercomponents.SpriteComponent,
-    tecs.gfx.sheet.Pivot,
+    sheet.Pivot,
     materials.MaterialComponent,
     lighting.Occluder2DComponent,
     lighting.DropShadow2DComponent,
@@ -967,8 +977,8 @@ local function rebuildBatches(exclusive self: Extractor): nil
     local runSampler: integer = -1
     local runChunk = false
     local runLane: integer = -1
-    local batchBuffer = nupp.io.newBuffer()
-    local batchWriter = nupp.io.newScalarWriter(batchBuffer)
+    local batchBuffer = io2.newBuffer()
+    local batchWriter = io2.newScalarWriter(batchBuffer)
     runImage = -1
     runSampler = -1
     runLane = -1
@@ -1038,8 +1048,8 @@ local function prefix(exclusive self: Extractor, eye: View, mode: integer, revis
     if mode ~= FRAME_RETAINED then
         for _, run in pairs(self.runs) do
             if run.length > 0 and run.tileBytes ~= "" and (mode == 0 or run.dirty) then
-                local tileBuffer = nupp.io.newBuffer()
-                local tileWriter = nupp.io.newScalarWriter(tileBuffer)
+                local tileBuffer = io2.newBuffer()
+                local tileWriter = io2.newScalarWriter(tileBuffer)
                 tileWriter:writeUint32(wrap(run.tileSlot)):writeBytes(run.tileBytes)
                 tileWriter:drop()
                 tileUpdates[#tileUpdates + 1] = tileBuffer:getString()
@@ -1053,10 +1063,10 @@ local function prefix(exclusive self: Extractor, eye: View, mode: integer, revis
         tableBytes = frametable.packed()
     end
     self.frameTableAt = tableRevision
-    const particleBytes = tecs.gfx.particles.section(self.world)
+    const particleBytes = particles.section(self.world)
     const graph = passes.section()
-    local buffer = nupp.io.newBuffer()
-    local writer = nupp.io.newScalarWriter(buffer)
+    local buffer = io2.newBuffer()
+    local writer = io2.newScalarWriter(buffer)
     writer:writeUint32(MAGIC)
         :writeUint32(VERSION)
         :writeUint32(HEADER_SIZE)
@@ -1228,8 +1238,8 @@ end
 local function payload(exclusive self: Extractor, delta: boolean, baseRevision: integer): string
     local pieces: {string} = {}
     if delta then
-        local buffer = nupp.io.newBuffer()
-        local writer = nupp.io.newScalarWriter(buffer)
+        local buffer = io2.newBuffer()
+        local writer = io2.newScalarWriter(buffer)
         writer:writeUint32(wrap(baseRevision)):writeUint32(wrap(self.ranges.count))
         for index = 0, self.ranges.count - 1 do
             const offset, size = self.ranges:at(index)
@@ -1252,7 +1262,7 @@ local function payload(exclusive self: Extractor, delta: boolean, baseRevision: 
                     pieces[#pieces + 1] = ffi.string(bytes + offset, size)
                 end
             else
-                pieces[1] = ffi.string(bytes, self.rowCount * 80)
+                pieces[1] = readBytes(bytes, self.rowCount * 80)
             end
         end
     end

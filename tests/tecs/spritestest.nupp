@@ -1,3 +1,5 @@
+const io2 = require("nupp.io")
+
 local framepacket = require("tecs.internal.framepacket")
 local gfx = require("tecs.gfx")
 local host = require("tecs.host")
@@ -34,7 +36,7 @@ function suite.drawsACameraAndTwoImagesThroughItsEntry(): nil
     test.equal(images.stateOf(images.id("example/sprites/disc")), "resident")
 
     test.equal(host.iterate(session, 0.25), "continue")
-    const reader = nupp.io.newScalarReader(host.renderPacket(session))
+    const reader = io2.newScalarReader(host.renderPacket(session))
     test.equal(reader:readUint32(), framepacket.MAGIC)
     test.equal(reader:readUint32(), framepacket.VERSION)
     reader:skip(20)

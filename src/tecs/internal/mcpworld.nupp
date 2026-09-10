@@ -23,11 +23,12 @@ Every tool name here, and every argument key of every schema below, is a
 compatibility surface an agent reaches through JSON this tree cannot see. Do
 not rename one.
 ]]
+const world2 = require("tecs.internal.world")
 
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
 local ecs = require("tecs.ecs")
-local json = require("nupp.data.json")
+local json = require("nupp.codec.json")
 local bindings = require("tecs.internal.mcpbindings")
 local registry = require("tecs.internal.mcpregistry")
 
@@ -184,7 +185,7 @@ end
 --- than conflating them.
 local function presentIn(exclusive world: ecs.World): {[integer]: boolean}
     local present: {[integer]: boolean} = {}
-    local everything = tecs.internal.world.querySnapshot(world, {})
+    local everything = world2.querySnapshot(world, {})
     for candidate, length in everything:iter() do
         local active = candidate as archetype.Archetype
         if (length as integer) > 0 then

@@ -1,19 +1,16 @@
+const {type ComponentValue} = require("tecs.ecs")
+const {type World} = require("tecs.ecs")
+const {type RelationshipPayload} = require("tecs.ecs")
+const ecs = require("tecs.ecs")
+
 local test = require("nupp.test")
 local suite = {}
 
-local function readDerived<T is tecs.ecs.ComponentValue>(
-    borrows world: tecs.ecs.World,
-    id: integer,
-    declaration: Type<T>
-): T?
+local function readDerived<T is ComponentValue>(borrows world: World, id: integer, declaration: Type<T>): T?
     return world:get(id, declaration)
 end
 
-local function readEdge<T is tecs.ecs.RelationshipPayload>(
-    borrows world: tecs.ecs.World,
-    id: integer,
-    declaration: Type<T>
-): T?
+local function readEdge<T is RelationshipPayload>(borrows world: World, id: integer, declaration: Type<T>): T?
     return world:getFirstRelationship(id, declaration)
 end
 
@@ -33,14 +30,14 @@ end
 local struct Requiring
     weight: number = 1
 end
-tecs.ecs.newComponent(Requiring, {requires = {Velocity}})
+ecs.newComponent(Requiring, {requires = {Velocity}})
 
 function suite.configuredDerivedRequirementsAndTransientPolicyApplyToRawValues(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const id = world:spawn(new Requiring())
     world:commit()
     test.assert(world:has(id, Velocity))
-    const loaded = tecs.ecs.newWorld()
+    const loaded = ecs.newWorld()
     loaded:loadSnapshot(world:saveSnapshot({format = "binary"}))
     test.assert(loaded:has(id, Velocity))
     test.equal(loaded:has(id, Requiring), false)
@@ -49,7 +46,7 @@ function suite.configuredDerivedRequirementsAndTransientPolicyApplyToRawValues()
 end
 
 function suite.stagedNativeRowsAreCapturedBeforeTheirStorageChanges(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const source = world:spawn(new Velocity(3, 4))
     world:commit()
     const copied = world:spawn(assert(world:get(source, Velocity)))
@@ -85,7 +82,7 @@ local struct Reused
 end
 
 function suite.nativeBatchDefaultsStartWithZeroedReusedStorage(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const first = assert(world:batchSpawn(32, {Reused}))
     world:commit()
     assert(world:getMut(first, Reused)).x = 99
@@ -99,9 +96,9 @@ end
 
 function suite.registrationDoesNotRunConstructorsAndBatchInitializesRows(): nil
     local before = constructions
-    tecs.ecs.definition(Counted)
+    ecs.definition(Counted)
     test.equal(constructions, before)
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const first = assert(world:batchSpawn(256, {Counted}))
     world:commit()
     test.equal(constructions - before, 256)
@@ -110,7 +107,7 @@ function suite.registrationDoesNotRunConstructorsAndBatchInitializesRows(): nil
 end
 
 function suite.derivedValuesPreserveTypedNativeAndManagedColumns(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const id = world:spawn(new Velocity(10, 20), new Description(text = "Player"))
     world:commit()
     const velocity: Velocity = assert(readDerived(world, id, Velocity))
@@ -129,7 +126,7 @@ function suite.derivedValuesPreserveTypedNativeAndManagedColumns(): nil
 end
 
 function suite.derivedRelationshipsCarryTypedNativePayloads(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const target = world:spawn()
     const id = world:spawn(new Spring(target, 0.5))
     world:commit()
@@ -139,7 +136,7 @@ function suite.derivedRelationshipsCarryTypedNativePayloads(): nil
         const wildcard: {Spring} = assert(candidate:get(Spring))
         test.equal(wildcard[1].stiffness, 0.5)
     end
-    const selected = tecs.ecs.targeting(Spring, target)
+    const selected = ecs.targeting(Spring, target)
     for candidate in world:newQuery({include = {selected}}):iter() do
         const column: Spring[?] = assert(candidate:get(selected))
         unsafe do
@@ -168,37 +165,37 @@ local record Follow
 end
 
 function suite.namesAreQualifiedAndExplicitOverridesAreStable(): nil
-    const definition = tecs.ecs.definition(Velocity)
+    const definition = ecs.definition(Velocity)
     test.equal(definition.componentName, "derivedtest.Velocity")
-    test.equal(tecs.ecs.definition(Pinned).componentName, "test.Derived.Pinned")
-    test.equal(tecs.ecs.definition(Velocity), definition)
+    test.equal(ecs.definition(Pinned).componentName, "test.Derived.Pinned")
+    test.equal(ecs.definition(Velocity), definition)
 end
 
 function suite.factoriesCreateDistinctIdentitiesWithoutChangingStorage(): nil
-    const first = tecs.ecs.newComponent(Velocity, {name = "test.Derived.First"})
-    const second = tecs.ecs.newComponent(Velocity, {name = "test.Derived.Second"})
-    const world = tecs.ecs.newWorld()
+    const first = ecs.newComponent(Velocity, {name = "test.Derived.First"})
+    const second = ecs.newComponent(Velocity, {name = "test.Derived.Second"})
+    const world = ecs.newWorld()
     const id = world:spawn(first(3, 4), second(5, 6))
     world:commit()
     test.equal(assert(world:get(id, first)).x, 3)
     test.equal(assert(world:get(id, second)).x, 5)
     test.assert(first.componentId ~= second.componentId)
     test.equal(first.storageType, "ffi")
-    test.equal(tecs.ecs.newComponent(Velocity), tecs.ecs.newComponent(Velocity))
+    test.equal(ecs.newComponent(Velocity), ecs.newComponent(Velocity))
     world:shutdown()
 end
 
 function suite.factoriesRejectMismatchedDerivesAndIncompleteCodecs(): nil
     local ok = pcall(function(): nil
-        tecs.ecs.newComponent(Spring)
+        ecs.newComponent(Spring)
     end)
     test.equal(ok, false)
     ok = pcall(function(): nil
-        tecs.ecs.newRelationship(Velocity)
+        ecs.newRelationship(Velocity)
     end)
     test.equal(ok, false)
     ok = pcall(function(): nil
-        tecs.ecs.newRelationship(Follow, {
+        ecs.newRelationship(Follow, {
             name = "test.Derived.IncompleteCodec",
             load = function(value: any): Follow
                 return new Follow(target = value.target as integer)
@@ -209,7 +206,7 @@ function suite.factoriesRejectMismatchedDerivesAndIncompleteCodecs(): nil
 end
 
 function suite.batchDefaultsAndMutationsUseDerivedDeclarations(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     world:batchSpawn(256, {Velocity})
     world:commit()
     const query = world:newQuery({include = {Velocity}})
@@ -228,7 +225,7 @@ function suite.batchDefaultsAndMutationsUseDerivedDeclarations(): nil
 end
 
 function suite.managedAndNativeEdgesRoundTripWithoutHandwrittenCodecs(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const target = world:spawn()
     const id = world:spawn(
         new Velocity(3, 4),
@@ -238,7 +235,7 @@ function suite.managedAndNativeEdgesRoundTripWithoutHandwrittenCodecs(): nil
     )
     for _, format in ipairs({"table", "binary"}) do
         const snapshot = world:saveSnapshot({format = format as "table" | "binary"})
-        const loaded = tecs.ecs.newWorld()
+        const loaded = ecs.newWorld()
         loaded:loadSnapshot(snapshot)
         test.equal(assert(loaded:get(id, Velocity)).x, 3)
         test.equal(assert(loaded:get(id, Description)).text, "saved")

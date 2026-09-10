@@ -2,6 +2,19 @@ module animated3d
 
 --[[Lights and animates the original CC0 glTF character and morph cube.
 Click to look, WASD moves, Q/E changes height, Shift sprints and Tab releases.]]
+const {type World} = require("tecs.ecs")
+const {type Instance} = require("tecs.gfx.models")
+const gfx = require("tecs.gfx")
+const {type Application} = require("tecs.application")
+const meshes = require("tecs.gfx.meshes")
+const flycamera3d = require("tecs.gfx.flycamera3d")
+const models = require("tecs.gfx.models")
+const ecs = require("tecs.ecs")
+const files = require("tecs.files")
+const {type Capture} = require("tecs.gfx.screenshot")
+const screenshot = require("tecs.gfx.screenshot")
+const {type Session} = require("tecs.host")
+const host = require("tecs.host")
 
 const FLOOR_VERTICES: {
     number
@@ -57,7 +70,7 @@ const FLOOR_VERTICES: {
 }
 const CLIPS: {string} = {"idle", "walk", "attack"}
 
-local function spawn(world: tecs.ecs.World, instance: tecs.gfx.models.Instance, margin: number): nil
+local function spawn(world: World, instance: Instance, margin: number): nil
     local entities: {integer} = {}
     for index, primitive in ipairs(instance.primitives) do
         const bound = primitive.bounds.value
@@ -66,12 +79,12 @@ local function spawn(world: tecs.ecs.World, instance: tecs.gfx.models.Instance, 
         ] = world:spawn(
             primitive.transform,
             primitive.mesh,
-            tecs.gfx.Bounds3D(bound.centerX, bound.centerY, bound.centerZ, bound.radius + margin),
+            gfx.Bounds3D(bound.centerX, bound.centerY, bound.centerZ, bound.radius + margin),
             primitive.material,
             primitive.skin,
             primitive.morph,
-            tecs.gfx.Tint(),
-            tecs.gfx.Renderable3D
+            gfx.Tint(),
+            gfx.Renderable3D
         )
     end
     world:commit()
@@ -80,9 +93,9 @@ local function spawn(world: tecs.ecs.World, instance: tecs.gfx.models.Instance, 
     end
 end
 
-local function install(exclusive app: tecs.application.Application): nil
-    const camera = tecs.gfx.newCamera3D({y = 3.25, z = 11, verticalFov = math.rad(46), near = 0.1, far = 50})
-    const lighting = tecs.gfx.meshes.newLighting()
+local function install(exclusive app: Application): nil
+    const camera = gfx.newCamera3D({y = 3.25, z = 11, verticalFov = math.rad(46), near = 0.1, far = 50})
+    const lighting = meshes.newLighting()
     lighting.ambient = 0
     lighting.probe = {
         0.1,
@@ -118,40 +131,40 @@ local function install(exclusive app: tecs.application.Application): nil
     lighting.intensity = 2.2
     lighting.shadowStrength = 0.82
     lighting.shadowSoftness = 1.25
-    app.world:spawn(tecs.gfx.View({camera3D = camera, lighting = lighting}))
-    const controller = tecs.gfx.flycamera3d.new(app.input, app.window, camera, {moveSpeed = 5, sprintMultiplier = 4})
-    const floor, bounds = tecs.gfx.models.newMesh({
+    app.world:spawn(gfx.View({camera3D = camera, lighting = lighting}))
+    const controller = flycamera3d.new(app.input, app.window, camera, {moveSpeed = 5, sprintMultiplier = 4})
+    const floor, bounds = models.newMesh({
         name = "example://animated-hero-floor",
         vertices = FLOOR_VERTICES,
         indices = {0, 2, 1, 0, 3, 2}
     })
     app.world:spawn(
-        tecs.ecs.Transform3D(),
+        ecs.Transform3D(),
         floor,
         bounds,
-        tecs.gfx.MeshMaterial(),
-        tecs.gfx.Tint(0.26, 0.29, 0.34, 1),
-        tecs.gfx.Renderable3D
+        gfx.MeshMaterial(),
+        gfx.Tint(0.26, 0.29, 0.34, 1),
+        gfx.Renderable3D
     )
-    const loaded, reason = tecs.gfx.models.load(tecs.files.assetPath("models/hero.glb"))
+    const loaded, reason = models.load(files.assetPath("models/hero.glb"))
     const model = assert(loaded, reason)
     const hero = model:newInstance()
-    hero.transform = tecs.ecs.Transform3D(-1.7, 0, 0, 0, 1, 0, 0).value
+    hero.transform = ecs.Transform3D(-1.7, 0, 0, 0, 1, 0, 0).value
     spawn(app.world, hero, 1.5)
     hero:play(CLIPS[1])
-    const loadedMorph, why = tecs.gfx.models.load(tecs.files.assetPath("models/morph-cube.gltf"))
+    const loadedMorph, why = models.load(files.assetPath("models/morph-cube.gltf"))
     const morphModel = assert(loadedMorph, why)
     const morph = morphModel:newInstance()
-    morph.transform = tecs.ecs.Transform3D(2.6, 1.45, 0, 0, 0, 0, 1, 0.72, 0.72, 0.72).value
+    morph.transform = ecs.Transform3D(2.6, 1.45, 0, 0, 0, 0, 1, 0.72, 0.72, 0.72).value
     spawn(app.world, morph, 0)
     morph:play(1)
     local clip: integer = 1
     local clipTime = 0.0
-    local capture: tecs.gfx.screenshot.Capture? = nil
+    local capture: Capture? = nil
     const input = app.input
     app.world:addSystem({
         name = "example.AnimateLitHero",
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(dt: number): nil
             controller:update(dt)
             clipTime = clipTime + dt
@@ -166,11 +179,11 @@ local function install(exclusive app: tecs.application.Application): nil
                 lighting.ssaoIntensity = lighting.ssaoIntensity > 0 and 0 or 1.15
             end
             if input:keyPressed("F12") then
-                capture = tecs.gfx.screenshot.request()
+                capture = screenshot.request()
             end
             const pending = capture
             if pending ~= nil and pending.ready then
-                tecs.gfx.screenshot.save(pending, "animated3d.png")
+                screenshot.save(pending, "animated3d.png")
                 capture = nil
             end
         end
@@ -184,14 +197,8 @@ end
 --- @param debug The caller enables guarded debugging.
 --- @param maxFrames The caller supplies a finite smoke-run frame limit.
 --- @return The session driven by the native host.
-export function create(
-    title: string?,
-    width: integer?,
-    height: integer?,
-    debug: boolean?,
-    maxFrames: integer?
-): tecs.host.Session
-    return tecs.host.createWithPlugin(
+export function create(title: string?, width: integer?, height: integer?, debug: boolean?, maxFrames: integer?): Session
+    return host.createWithPlugin(
         install,
         title or "Tecs animated and lit glTF",
         width or 960,

@@ -22,6 +22,58 @@ foreign callbacks, and returns changed boxes. Scrolling clips descendants;
 interaction supports pointer capture, dragging, focus scopes and activation.
 Screen roots follow `resize`, and `plugin(app)` connects window size and input.
 ]]
+const ecs = require("tecs.ecs")
+const {type ComponentDefinition} = require("tecs.ecs")
+const gfx = require("tecs.gfx")
+const {type Input} = require("tecs.input")
+const {type Layer} = require("tecs.input")
+const {type Query} = require("tecs.ecs")
+const {type Event as Event2} = require("tecs.platform.events")
+const {type Key} = require("nupp.store")
+const store = require("nupp.store")
+const {type World} = require("tecs.ecs")
+const text = require("tecs.gfx.text")
+const images = require("tecs.gfx.images")
+const world2 = require("tecs.internal.world")
+const json = require("nupp.codec.json")
+const cameraselection = require("tecs.internal.cameraselection")
+const uinative = require("tecs.internal.uinative")
+const layers = require("tecs.gfx.layers")
+const clips2 = require("tecs.gfx.clips")
+const {type PointerMoveEvent} = require("tecs.platform.events")
+const {type PointerButtonEvent} = require("tecs.platform.events")
+const {type TouchEvent} = require("tecs.platform.events")
+const {type WheelEvent} = require("tecs.platform.events")
+const {type KeyEvent} = require("tecs.platform.events")
+const {type GamepadButtonEvent} = require("tecs.platform.events")
+const {type FocusEvent} = require("tecs.platform.events")
+const {MouseMotion} = require("tecs.platform.events")
+const {type MouseMotion} = require("tecs.platform.events")
+const events = require("tecs.platform.events")
+const {MouseDown} = require("tecs.platform.events")
+const {type MouseDown} = require("tecs.platform.events")
+const {MouseUp} = require("tecs.platform.events")
+const {type MouseUp} = require("tecs.platform.events")
+const {MouseWheel} = require("tecs.platform.events")
+const {type MouseWheel} = require("tecs.platform.events")
+const {FingerDown} = require("tecs.platform.events")
+const {type FingerDown} = require("tecs.platform.events")
+const {FingerMotion} = require("tecs.platform.events")
+const {type FingerMotion} = require("tecs.platform.events")
+const {FingerUp} = require("tecs.platform.events")
+const {type FingerUp} = require("tecs.platform.events")
+const {FingerCanceled} = require("tecs.platform.events")
+const {type FingerCanceled} = require("tecs.platform.events")
+const {KeyDown} = require("tecs.platform.events")
+const {type KeyDown} = require("tecs.platform.events")
+const {GamepadButtonDown} = require("tecs.platform.events")
+const {type GamepadButtonDown} = require("tecs.platform.events")
+const {WindowFocusLost} = require("tecs.platform.events")
+const {type WindowFocusLost} = require("tecs.platform.events")
+const {WindowResized} = require("tecs.platform.events")
+const {type ResizeEvent} = require("tecs.platform.events")
+const {WindowScaleChanged} = require("tecs.platform.events")
+const {type Application} = require("tecs.application")
 
 --- A logical length: pixels, a percent string, or "auto".
 export type Dimension = number | string
@@ -62,7 +114,7 @@ export type StyleOptions = {
 }
 
 --- Marks a retained UI node. The persisted name is UiNode.
-export const Node = tecs.ecs.newTagComponent({name = "UiNode"})
+export const Node = ecs.newTagComponent({name = "UiNode"})
 
 @derive(nupp.derive.Debug, nupp.derive.Serde)
 local struct LayoutValue
@@ -99,7 +151,7 @@ export type LayoutOptions = {
 }
 
 --- Constructs Layout with its default values for omitted fields.
-export const Layout: tecs.ecs.ComponentDefinition<LayoutValue> = tecs.ecs.newComponent(LayoutValue, {
+export const Layout: ComponentDefinition<LayoutValue> = ecs.newComponent(LayoutValue, {
     name = "UiLayout",
     transient = true,
     construct = function(options: LayoutOptions?): LayoutValue
@@ -127,9 +179,9 @@ end
 export type Style = StyleValue
 
 --- Constructs Style with its default values for omitted fields.
-export const Style: tecs.ecs.ComponentDefinition<StyleValue> = tecs.ecs.newComponent(StyleValue, {
+export const Style: ComponentDefinition<StyleValue> = ecs.newComponent(StyleValue, {
     name = "UiStyle",
-    requires = {Node, Layout, tecs.gfx.Clip, tecs.ecs.Transform2D, tecs.ecs.RelativeTransform2D},
+    requires = {Node, Layout, gfx.Clip, ecs.Transform2D, ecs.RelativeTransform2D},
     construct = function(style: StyleOptions?): StyleValue
         return new StyleValue(style = style or {})
     end,
@@ -168,7 +220,7 @@ export type RootOptions = {
 }
 
 --- Constructs Root with its default values for omitted fields.
-export const Root: tecs.ecs.ComponentDefinition<RootValue> = tecs.ecs.newComponent(RootValue, {
+export const Root: ComponentDefinition<RootValue> = ecs.newComponent(RootValue, {
     name = "UiRoot",
     requires = {Style},
     construct = function(options: RootOptions?): RootValue
@@ -196,7 +248,7 @@ end
 export type Paint = PaintValue
 
 --- Constructs Paint with its default values for omitted fields.
-export const Paint: tecs.ecs.ComponentDefinition<PaintValue> = tecs.ecs.newComponent(PaintValue, {
+export const Paint: ComponentDefinition<PaintValue> = ecs.newComponent(PaintValue, {
     name = "UiPaint",
     construct = function(stretch: boolean?): PaintValue
         return new PaintValue(stretch == true)
@@ -240,7 +292,7 @@ export type IntrinsicOptions = {
 }
 
 --- Constructs Intrinsic with its default values for omitted fields.
-export const Intrinsic: tecs.ecs.ComponentDefinition<IntrinsicValue> = tecs.ecs.newComponent(IntrinsicValue, {
+export const Intrinsic: ComponentDefinition<IntrinsicValue> = ecs.newComponent(IntrinsicValue, {
     name = "UiIntrinsic",
     requires = {Style},
     construct = function(options: IntrinsicOptions?): IntrinsicValue
@@ -286,7 +338,7 @@ export type ScrollOptions = {
 }
 
 --- Constructs Scroll with its default values for omitted fields.
-export const Scroll: tecs.ecs.ComponentDefinition<ScrollValue> = tecs.ecs.newComponent(ScrollValue, {
+export const Scroll: ComponentDefinition<ScrollValue> = ecs.newComponent(ScrollValue, {
     name = "UiScroll",
     requires = {Style},
     construct = function(options: ScrollOptions?): ScrollValue
@@ -350,25 +402,22 @@ export type InteractionStateOptions = {
 }
 
 --- Constructs InteractionState with its default values for omitted fields.
-export const InteractionState: tecs.ecs.ComponentDefinition<InteractionStateValue> = tecs.ecs.newComponent(
-    InteractionStateValue,
-    {
-        name = "UiInteractionState",
-        transient = true,
-        construct = function(options: InteractionStateOptions?): InteractionStateValue
-            local values = options or {}
-            return new InteractionStateValue(
-                values.hovered ?? false,
-                values.pressed ?? false,
-                values.focused ?? false,
-                values.dragging ?? false
-            )
-        end,
-        default = function(): InteractionStateValue
-            return new InteractionStateValue(false, false, false, false)
-        end,
-    }
-)
+export const InteractionState: ComponentDefinition<InteractionStateValue> = ecs.newComponent(InteractionStateValue, {
+    name = "UiInteractionState",
+    transient = true,
+    construct = function(options: InteractionStateOptions?): InteractionStateValue
+        local values = options or {}
+        return new InteractionStateValue(
+            values.hovered ?? false,
+            values.pressed ?? false,
+            values.focused ?? false,
+            values.dragging ?? false
+        )
+    end,
+    default = function(): InteractionStateValue
+        return new InteractionStateValue(false, false, false, false)
+    end,
+})
 
 @derive(nupp.derive.Debug, nupp.derive.Serde)
 local struct InteractionValue
@@ -401,7 +450,7 @@ export type InteractionOptions = {
 }
 
 --- Constructs Interaction with its default values for omitted fields.
-export const Interaction: tecs.ecs.ComponentDefinition<InteractionValue> = tecs.ecs.newComponent(InteractionValue, {
+export const Interaction: ComponentDefinition<InteractionValue> = ecs.newComponent(InteractionValue, {
     name = "UiInteraction",
     requires = {Style, InteractionState},
     construct = function(options: InteractionOptions?): InteractionValue
@@ -420,7 +469,7 @@ export const Interaction: tecs.ecs.ComponentDefinition<InteractionValue> = tecs.
 })
 
 --- Constructs Scrollbar with its default values for omitted fields.
-export const Scrollbar: tecs.ecs.ComponentDefinition<ScrollbarValue> = tecs.ecs.newComponent(ScrollbarValue, {
+export const Scrollbar: ComponentDefinition<ScrollbarValue> = ecs.newComponent(ScrollbarValue, {
     name = "UiScrollbar",
     requires = {Style, Paint, Interaction},
     construct = function(options: ScrollbarOptions?): ScrollbarValue
@@ -438,7 +487,7 @@ export const Scrollbar: tecs.ecs.ComponentDefinition<ScrollbarValue> = tecs.ecs.
 })
 
 --- Marks a subtree that can own a modal focus scope.
-export const FocusScope = tecs.ecs.newTagComponent({name = "UiFocusScope"})
+export const FocusScope = ecs.newTagComponent({name = "UiFocusScope"})
 
 --- A semantic interaction delivered first to its target, then its ancestors.
 ---
@@ -493,8 +542,8 @@ export type Options = {
     layer: integer?,
     wheelStep: number?,
     dragThreshold: number?,
-    input: tecs.input.Input?,
-    inputLayer: tecs.input.Layer?
+    input: Input?,
+    inputLayer: Layer?
 }
 
 local record Hit
@@ -519,8 +568,8 @@ local record Pointer
 end
 local record State
     tree: voidptr
-    cameras: tecs.ecs.Query
-    nodes: tecs.ecs.Query
+    cameras: Query
+    nodes: Query
     width: number
     height: number
     density: number
@@ -538,21 +587,21 @@ local record State
     restore: {integer}
     hits: {Hit}
     pointers: {[string]: Pointer}
-    pending: {tecs.platform.events.Event}
+    pending: {Event2}
     wheelStep: number
     dragThreshold: number
-    input: tecs.input.Input?
-    inputLayer: tecs.input.Layer?
+    input: Input?
+    inputLayer: Layer?
     updates: integer
 end
-local stateKey: nupp.data.Key<State> = nupp.data.newKey("tecs.ui.state")
+local stateKey: Key<State> = store.newKey("tecs.ui.state")
 
-local function parentOf(borrows world: tecs.ecs.World, entity: integer): integer
-    local link = world:get(entity, tecs.ecs.ChildOf)
+local function parentOf(borrows world: World, entity: integer): integer
+    local link = world:get(entity, ecs.ChildOf)
     return link and link.target or 0
 end
 
-local function contains(borrows world: tecs.ecs.World, ancestor: integer, entity: integer): boolean
+local function contains(borrows world: World, ancestor: integer, entity: integer): boolean
     local seen: {[integer]: boolean} = {}
     while entity ~= 0 and not seen[entity] do
         if entity == ancestor then
@@ -566,7 +615,7 @@ local function contains(borrows world: tecs.ecs.World, ancestor: integer, entity
 end
 
 local function emit(
-    exclusive world: tecs.ecs.World,
+    exclusive world: World,
     kind: string,
     entity: integer,
     pointer: Pointer?,
@@ -607,7 +656,7 @@ local function emit(
     return value.consumed
 end
 
-local function inScope(borrows world: tecs.ecs.World, state: State, entity: integer): boolean
+local function inScope(borrows world: World, state: State, entity: integer): boolean
     local scope = state.scopes[#state.scopes]
     return scope == nil or contains(world, scope, entity)
 end
@@ -617,7 +666,7 @@ end
 --- @param entity the descendant to reveal
 --- @param align nearest, start, center, or end; omitted means nearest
 --- @return whether an ancestor scrolled
-export function reveal(exclusive world: tecs.ecs.World, entity: integer, align: string?): boolean
+export function reveal(exclusive world: World, entity: integer, align: string?): boolean
     local changed = false
     local box = world:get(entity, Layout)
     if box == nil then
@@ -669,7 +718,7 @@ end
 --- @param world the installed world
 --- @param entity the requested entity
 --- @return whether focus moved
-export function focus(exclusive world: tecs.ecs.World, entity: integer): boolean
+export function focus(exclusive world: World, entity: integer): boolean
     local state = world.resources:get(stateKey)
     if state == nil then
         return false
@@ -677,7 +726,7 @@ export function focus(exclusive world: tecs.ecs.World, entity: integer): boolean
     local value = world:get(entity, Interaction)
     if value == nil or not value.enabled or not value.focusable or world:has(
         entity,
-        tecs.ecs.Disabled
+        ecs.Disabled
     ) or state.hidden[entity] or not inScope(world, state, entity) then
         return false
     end
@@ -702,7 +751,7 @@ end
 --- Clears focus and reports whether an entity was focused.
 --- @param world the installed world
 --- @return whether focus changed
-export function blur(exclusive world: tecs.ecs.World): boolean
+export function blur(exclusive world: World): boolean
     local state = world.resources:get(stateKey)
     if state == nil or state.focused == 0 then
         return false
@@ -721,7 +770,7 @@ end
 --- Returns the focused entity, or zero.
 --- @param world the installed world
 --- @return the focused entity
-export function focused(borrows world: tecs.ecs.World): integer
+export function focused(borrows world: World): integer
     local state = world.resources:get(stateKey)
     return state and state.focused or 0
 end
@@ -730,7 +779,7 @@ end
 --- @param world the installed world
 --- @param entity an entity carrying FocusScope
 --- @return whether the scope was pushed
-export function pushFocusScope(exclusive world: tecs.ecs.World, entity: integer): boolean
+export function pushFocusScope(exclusive world: World, entity: integer): boolean
     local state = world.resources:get(stateKey)
     if state == nil or not world:has(entity, FocusScope) then
         return false
@@ -746,7 +795,7 @@ end
 --- @param world the installed world
 --- @param entity the expected scope, or nil
 --- @return whether a scope was popped
-export function popFocusScope(exclusive world: tecs.ecs.World, entity: integer?): boolean
+export function popFocusScope(exclusive world: World, entity: integer?): boolean
     local state = world.resources:get(stateKey)
     if state == nil or #state.scopes == 0 then
         return false
@@ -782,7 +831,8 @@ local type NodeDescription = {
     width: number,
     height: number
 }
-local function measure(borrows world: tecs.ecs.World, entity: integer): Measure?
+
+local function measure(borrows world: World, entity: integer): Measure?
     local intrinsic = world:get(entity, Intrinsic)
     if intrinsic == nil then
         return nil
@@ -794,15 +844,15 @@ local function measure(borrows world: tecs.ecs.World, entity: integer): Measure?
     local measuredWidth, measuredHeight = width, height
     local kind: integer = 1
     if intrinsic.source == "text" then
-        local item = assert(world:get(entity, tecs.gfx.Text), "ui: text intrinsic needs Text")
-        width, height, minimum = tecs.gfx.text.measureIntrinsic(item)
+        local item = assert(world:get(entity, gfx.Text), "ui: text intrinsic needs Text")
+        width, height, minimum = text.measureIntrinsic(item)
         measuredWidth = item.wrapWidth > 0 and item.wrapWidth or width
         local ignored: number
-        ignored, measuredHeight = tecs.gfx.text.measureText(item)
+        ignored, measuredHeight = text.measureText(item)
         kind = 3
     elseif intrinsic.source == "image" then
-        local sprite = assert(world:get(entity, tecs.gfx.Sprite), "ui: image intrinsic needs Sprite")
-        local imageWidth, imageHeight = tecs.gfx.images.sizeOf(sprite.image)
+        local sprite = assert(world:get(entity, gfx.Sprite), "ui: image intrinsic needs Sprite")
+        local imageWidth, imageHeight = images.sizeOf(sprite.image)
         width, height = imageWidth * math.abs(sprite.u1 - sprite.u0), imageHeight * math.abs(sprite.v1 - sprite.v0)
         measuredWidth, measuredHeight, minimum = width, height, width
         kind = 2
@@ -819,7 +869,7 @@ local function measure(borrows world: tecs.ecs.World, entity: integer): Measure?
     }
 end
 
-local function collect(borrows world: tecs.ecs.World, state: State): {integer}
+local function collect(borrows world: World, state: State): {integer}
     local ids: {integer} = {}
     for candidate, count in state.nodes:iter() do
         for row = 1, count as integer do
@@ -831,17 +881,17 @@ local function collect(borrows world: tecs.ecs.World, state: State): {integer}
     return ids
 end
 
-local function layout(exclusive world: tecs.ecs.World, state: State, ids: {integer}): nil
+local function layout(exclusive world: World, state: State, ids: {integer}): nil
     local membership = table.concat(ids, ",")
-    if state.previous ~= "" and membership == state.membership and not tecs.internal.world.anyDirty(world, {
+    if state.previous ~= "" and membership == state.membership and not world2.anyDirty(world, {
         Style,
         Root,
         Intrinsic,
-        tecs.gfx.Text,
-        tecs.gfx.Sprite,
-        tecs.ecs.ChildOf,
-        tecs.gfx.Camera2D,
-        tecs.gfx.ActiveCamera
+        gfx.Text,
+        gfx.Sprite,
+        ecs.ChildOf,
+        gfx.Camera2D,
+        gfx.ActiveCamera
     }) then
         return
     end
@@ -850,6 +900,7 @@ local function layout(exclusive world: tecs.ecs.World, state: State, ids: {integ
     for _, entity in ipairs(ids) do
         orders[entity] = assert(world:get(entity, Style)).style.order or 0
     end
+
     local function sortChildren(a: integer, b: integer): boolean
         local av, bv = orders[a], orders[b]
         return av < bv or (av == bv and a < b)
@@ -860,11 +911,11 @@ local function layout(exclusive world: tecs.ecs.World, state: State, ids: {integ
         live[entity] = true
     end
     for pass = 1, 4 do
-        local batch: {NodeDescription} = nupp.data.json.asArray({})
+        local batch: {NodeDescription} = json.asArray({})
         for _, entity in ipairs(ids) do
             local style = assert(world:get(entity, Style))
             local children: {integer} = {}
-            for _, child in ipairs(world:relationshipSources(tecs.ecs.ChildOf, entity)) do
+            for _, child in ipairs(world:relationshipSources(ecs.ChildOf, entity)) do
                 if live[child] then
                     children[#children + 1] = child
                 end
@@ -878,7 +929,7 @@ local function layout(exclusive world: tecs.ecs.World, state: State, ids: {integ
                     width, height = state.width, state.height
                 end
                 if root.sizing == "camera" then
-                    local selected = tecs.internal.cameraselection.pick(state.cameras)
+                    local selected = cameraselection.pick(state.cameras)
                     local zoom = selected and selected.zoom or 1
                     width, height = state.width * state.density / zoom, state.height * state.density / zoom
                 end
@@ -899,11 +950,11 @@ local function layout(exclusive world: tecs.ecs.World, state: State, ids: {integ
                 height = height
             }
         end
-        local source = nupp.data.json.encode(batch)
+        local source = json.encode(batch)
         if source == state.previous then
             return
         end
-        local result = nupp.data.json.decode(tecs.internal.uinative.sync(state.tree, source))
+        local result = json.decode(uinative.sync(state.tree, source))
         state.previous = source
         state.updates = state.updates + 1
         for _, box in ipairs(result) do
@@ -920,10 +971,10 @@ local function layout(exclusive world: tecs.ecs.World, state: State, ids: {integ
             local intrinsic = world:get(entity, Intrinsic)
             if intrinsic and intrinsic.source == "text" and intrinsic.wrap and intrinsic.scale > 0 then
                 local box = assert(world:get(entity, Layout))
-                local item = world:get(entity, tecs.gfx.Text)
+                local item = world:get(entity, gfx.Text)
                 local width = box.width / intrinsic.scale
                 if item then
-                    local natural = tecs.gfx.text.measureIntrinsic(item)
+                    local natural = text.measureIntrinsic(item)
                     -- Taffy rounds boxes to whole logical pixels. Do not wrap
                     -- the last word solely because that rounded its natural width down.
                     if math.abs(width - natural) < 1 then
@@ -931,7 +982,7 @@ local function layout(exclusive world: tecs.ecs.World, state: State, ids: {integ
                     end
                 end
                 if item and math.abs(item.wrapWidth - width) > 0.01 then
-                    assert(world:getMut(entity, tecs.gfx.Text)).wrapWidth = width
+                    assert(world:getMut(entity, gfx.Text)).wrapWidth = width
                     changed = true
                 end
             end
@@ -942,11 +993,11 @@ local function layout(exclusive world: tecs.ecs.World, state: State, ids: {integ
     end
 end
 
-local function apply(exclusive world: tecs.ecs.World, state: State, ids: {integer}): nil
+local function apply(exclusive world: World, state: State, ids: {integer}): nil
     local done: {[integer]: boolean} = {}
     local visiting: {[integer]: boolean} = {}
-    local applyOne: function(exclusive running: tecs.ecs.World, entity: integer): nil
-    applyOne = function(exclusive running: tecs.ecs.World, entity: integer): nil
+    local applyOne: function(exclusive running: World, entity: integer): nil
+    applyOne = function(exclusive running: World, entity: integer): nil
         if done[entity] then
             return
         end
@@ -964,7 +1015,7 @@ local function apply(exclusive world: tecs.ecs.World, state: State, ids: {intege
         end
         local root = running:get(entity, Root)
         local paint = running:get(entity, Paint)
-        local current = assert(running:get(entity, tecs.ecs.Transform2D))
+        local current = assert(running:get(entity, ecs.Transform2D))
         local x, y = box.x, box.y
         local scroll = parent ~= 0 and running:get(parent, Scroll) or nil
         if scroll and not running:has(entity, Scrollbar) then
@@ -973,19 +1024,19 @@ local function apply(exclusive world: tecs.ecs.World, state: State, ids: {intege
         if paint and paint.stretch then
             x, y = x + box.width * 0.5, y + box.height * 0.5
         end
-        local relative = assert(running:get(entity, tecs.ecs.RelativeTransform2D))
+        local relative = assert(running:get(entity, ecs.RelativeTransform2D))
         local sx, sy = relative.scaleX, relative.scaleY
         if paint and paint.stretch then
             sx, sy = box.width, box.height
         end
         if relative.x ~= x or relative.y ~= y or relative.scaleX ~= sx or relative.scaleY ~= sy then
-            relative = assert(running:getMut(entity, tecs.ecs.RelativeTransform2D))
+            relative = assert(running:getMut(entity, ecs.RelativeTransform2D))
             relative.x, relative.y, relative.scaleX, relative.scaleY = x, y, sx, sy
         end
         local layer = current.layer
         local rotation = current.rotation
         local z = current.z
-        local parentPose = parent ~= 0 and running:get(parent, tecs.ecs.Transform2D) or nil
+        local parentPose = parent ~= 0 and running:get(parent, ecs.Transform2D) or nil
         if parentPose then
             local c, s = math.cos(parentPose.rotation), math.sin(parentPose.rotation)
             x, y = parentPose.x
@@ -1014,7 +1065,7 @@ local function apply(exclusive world: tecs.ecs.World, state: State, ids: {intege
                     or root.pixelDensity
             end
             if root.sizing == "camera" then
-                local camera = tecs.internal.cameraselection.pick(state.cameras)
+                local camera = cameraselection.pick(state.cameras)
                 if camera then
                     local c, s = math.cos(camera.rotation), math.sin(camera.rotation)
                     x, y = camera.x
@@ -1042,7 +1093,7 @@ local function apply(exclusive world: tecs.ecs.World, state: State, ids: {intege
             or current.layer ~= layer
             or current.z ~= z
         then
-            local changed = assert(running:getMut(entity, tecs.ecs.Transform2D))
+            local changed = assert(running:getMut(entity, ecs.Transform2D))
             changed.x, changed.y, changed.scaleX, changed.scaleY = x, y, sx, sy
             changed.rotation, changed.layer, changed.z = rotation, layer, z
         end
@@ -1070,7 +1121,7 @@ local function apply(exclusive world: tecs.ecs.World, state: State, ids: {intege
     end
 end
 
-local function viewport(borrows world: tecs.ecs.World, entity: integer): integer
+local function viewport(borrows world: World, entity: integer): integer
     local parent = parentOf(world, entity)
     while parent ~= 0 do
         if world:has(parent, Scroll) then
@@ -1082,7 +1133,7 @@ local function viewport(borrows world: tecs.ecs.World, entity: integer): integer
     return 0
 end
 
-local function scrollbars(exclusive world: tecs.ecs.World, ids: {integer}): nil
+local function scrollbars(exclusive world: World, ids: {integer}): nil
     for _, entity in ipairs(ids) do
         local thumb = world:get(entity, Scrollbar)
         if thumb then
@@ -1118,9 +1169,9 @@ local function scrollbars(exclusive world: tecs.ecs.World, ids: {integer}): nil
     end
 end
 
-local function bounds(borrows world: tecs.ecs.World, state: State, entity: integer): Hit?
+local function bounds(borrows world: World, state: State, entity: integer): Hit?
     local box = world:get(entity, Layout)
-    local pose = world:get(entity, tecs.ecs.Transform2D)
+    local pose = world:get(entity, ecs.Transform2D)
     if box == nil or pose == nil then
         return nil
     end
@@ -1131,7 +1182,7 @@ local function bounds(borrows world: tecs.ecs.World, state: State, entity: integ
         width, height = pose.scaleX, pose.scaleY;
         x0, y0 = -width * 0.5, -height * 0.5
     end
-    local camera = tecs.internal.cameraselection.pick(state.cameras)
+    local camera = cameraselection.pick(state.cameras)
     local cx, cy, zoom, rotation = state.width * state.density * 0.5, state.height * state.density * 0.5, 1.0, 0.0
     if camera then
         cx, cy, zoom, rotation = camera.x, camera.y, camera.zoom, camera.rotation
@@ -1140,7 +1191,7 @@ local function bounds(borrows world: tecs.ecs.World, state: State, entity: integ
     local c, s = math.cos(pose.rotation), math.sin(pose.rotation)
     for _, corner in ipairs({{x0, y0}, {x0 + width, y0}, {x0, y0 + height}, {x0 + width, y0 + height}}) do
         local x, y = pose.x + corner[1] * c - corner[2] * s, pose.y + corner[1] * s + corner[2] * c
-        x, y = tecs.gfx.layers.place(
+        x, y = layers.place(
             pose.layer,
             x,
             y,
@@ -1157,7 +1208,7 @@ local function bounds(borrows world: tecs.ecs.World, state: State, entity: integ
     return new Hit(entity = entity, left = left, top = top, right = right, bottom = bottom, order = pose.z)
 end
 
-local function geometry(exclusive world: tecs.ecs.World, state: State, ids: {integer}): nil
+local function geometry(exclusive world: World, state: State, ids: {integer}): nil
     local used: {[string]: boolean} = {}
     local assigned: {[integer]: integer} = {}
     state.hits = {}
@@ -1192,11 +1243,11 @@ local function geometry(exclusive world: tecs.ecs.World, state: State, ids: {int
                 end
                 parent = parentOf(world, parent)
             end
-            if hidden and not world:has(entity, tecs.ecs.Disabled) then
-                world:set(entity, tecs.ecs.Disabled);
+            if hidden and not world:has(entity, ecs.Disabled) then
+                world:set(entity, ecs.Disabled);
                 state.hidden[entity] = true
             elseif not hidden and state.hidden[entity] then
-                world:remove(entity, tecs.ecs.Disabled);
+                world:remove(entity, ecs.Disabled);
                 state.hidden[entity] = nil
             end
             local index: integer = 0
@@ -1218,16 +1269,16 @@ local function geometry(exclusive world: tecs.ecs.World, state: State, ids: {int
                 used[clipKey] = true
                 assigned[entity] = index
                 local width, height = math.max(0, clip.right - clip.left), math.max(0, clip.bottom - clip.top)
-                local a, b, c, d = tecs.gfx.clips.regionOf(index)
+                local a, b, c, d = clips2.regionOf(index)
                 if a ~= clip.left or b ~= clip.top or c ~= clip.left + width or d ~= clip.top + height then
-                    tecs.gfx.clips.setRegion(index, {x = clip.left, y = clip.top, width = width, height = height})
+                    clips2.setRegion(index, {x = clip.left, y = clip.top, width = width, height = height})
                 end
                 hit.left, hit.top = math.max(hit.left, clip.left), math.max(hit.top, clip.top)
                 hit.right, hit.bottom = math.min(hit.right, clip.right), math.min(hit.bottom, clip.bottom)
             end
-            local component = world:get(entity, tecs.gfx.Clip)
+            local component = world:get(entity, gfx.Clip)
             if component and component.index ~= index then
-                assert(world:getMut(entity, tecs.gfx.Clip)).index = index
+                assert(world:getMut(entity, gfx.Clip)).index = index
             end
             local interaction = world:get(entity, Interaction)
             local style = world:get(entity, Style)
@@ -1244,7 +1295,7 @@ local function geometry(exclusive world: tecs.ecs.World, state: State, ids: {int
     state.clipIds = assigned
     for clipKey, index in pairs(state.clipKeys) do
         if not used[clipKey] then
-            tecs.gfx.clips.clearRegion(index);
+            clips2.clearRegion(index);
             state.clipKeys[clipKey] = nil;
             state.clips[index] = nil
         end
@@ -1254,7 +1305,7 @@ local function geometry(exclusive world: tecs.ecs.World, state: State, ids: {int
     end)
 end
 
-local function hitAt(borrows world: tecs.ecs.World, state: State, x: number, y: number): integer
+local function hitAt(borrows world: World, state: State, x: number, y: number): integer
     for _, hit in ipairs(state.hits) do
         if x >= hit.left and y >= hit.top and x < hit.right and y < hit.bottom and world:has(
             hit.entity,
@@ -1289,14 +1340,7 @@ local function pointerFor(state: State, id: string, kind: string): Pointer
     return p
 end
 
-local function pointerEvent(
-    exclusive world: tecs.ecs.World,
-    state: State,
-    p: Pointer,
-    kind: string,
-    x: number,
-    y: number
-): nil
+local function pointerEvent(exclusive world: World, state: State, p: Pointer, kind: string, x: number, y: number): nil
     local dx, dy = x - p.x, y - p.y
     p.x, p.y = x, y
     local hit = hitAt(world, state, x, y)
@@ -1378,7 +1422,7 @@ local function pointerEvent(
     end
 end
 
-local function navigate(exclusive world: tecs.ecs.World, state: State, backwards: boolean): nil
+local function navigate(exclusive world: World, state: State, backwards: boolean): nil
     local order: {[integer]: integer} = {}
     local candidates: {integer} = {}
     for _, hit in ipairs(state.hits) do
@@ -1406,7 +1450,7 @@ local function navigate(exclusive world: tecs.ecs.World, state: State, backwards
     focus(world, candidates[index])
 end
 
-local function inputs(exclusive world: tecs.ecs.World, state: State): nil
+local function inputs(exclusive world: World, state: State): nil
     local input = state.input
     if input and not input:canRead(state.inputLayer) then
         for _, p in pairs(state.pointers) do
@@ -1416,7 +1460,7 @@ local function inputs(exclusive world: tecs.ecs.World, state: State): nil
         return
     end
     for _, event in ipairs(state.pending) do
-        if event is tecs.platform.events.PointerMoveEvent then
+        if event is PointerMoveEvent then
             pointerEvent(
                 world,
                 state,
@@ -1425,7 +1469,7 @@ local function inputs(exclusive world: tecs.ecs.World, state: State): nil
                 event.x * state.density,
                 event.y * state.density
             )
-        elseif event is tecs.platform.events.PointerButtonEvent then
+        elseif event is PointerButtonEvent then
             if event.button == 1 then
                 pointerEvent(
                     world,
@@ -1436,7 +1480,7 @@ local function inputs(exclusive world: tecs.ecs.World, state: State): nil
                     event.y * state.density
                 )
             end
-        elseif event is tecs.platform.events.TouchEvent then
+        elseif event is TouchEvent then
             local kind = event.kind == "fingerDown" and "down" or (
                 event.kind == "fingerUp" and "up" or (event.kind == "fingerCanceled" and "cancel" or "move")
             )
@@ -1460,7 +1504,7 @@ local function inputs(exclusive world: tecs.ecs.World, state: State): nil
                 end
                 state.pointers[id] = nil
             end
-        elseif event is tecs.platform.events.WheelEvent then
+        elseif event is WheelEvent then
             for _, hit in ipairs(state.hits) do
                 if event.x
                     * state.density >= hit.left
@@ -1508,7 +1552,7 @@ local function inputs(exclusive world: tecs.ecs.World, state: State): nil
                     end
                 end
             end
-        elseif event is tecs.platform.events.KeyEvent then
+        elseif event is KeyEvent then
             if event.down then
                 if event.physicalKey == "Tab" then
                     navigate(
@@ -1525,7 +1569,7 @@ local function inputs(exclusive world: tecs.ecs.World, state: State): nil
                     emit(world, "activate", state.focused, nil, "keyboard")
                 end
             end
-        elseif event is tecs.platform.events.GamepadButtonEvent then
+        elseif event is GamepadButtonEvent then
             if event.down then
                 if event.button == 1 then
                     emit(world, "activate", state.focused, nil, "controller")
@@ -1535,7 +1579,7 @@ local function inputs(exclusive world: tecs.ecs.World, state: State): nil
                     navigate(world, state, true)
                 end
             end
-        elseif event is tecs.platform.events.FocusEvent and not event.focused then
+        elseif event is FocusEvent and not event.focused then
             for _, p in pairs(state.pointers) do
                 pointerEvent(world, state, p, "cancel", p.x, p.y)
             end
@@ -1549,7 +1593,7 @@ end
 --- @param width the logical viewport width
 --- @param height the logical viewport height
 --- @param density the target pixels per logical point
-export function resize(exclusive world: tecs.ecs.World, width: number, height: number, density: number?): nil
+export function resize(exclusive world: World, width: number, height: number, density: number?): nil
     local state = assert(world.resources:get(stateKey), "ui is not installed")
     assert(width > 0 and height > 0 and (density or 1) > 0, "ui viewport must be positive")
     state.width, state.height, state.density = width, height, density or 1
@@ -1564,7 +1608,7 @@ end
 
 --- Runs layout, geometry and pending interaction for the current world state.
 --- @param world the installed world
-export function update(exclusive world: tecs.ecs.World): nil
+export function update(exclusive world: World): nil
     local state = assert(world.resources:get(stateKey), "ui is not installed")
     local ids = collect(world, state)
     for entity in pairs(state.hidden) do
@@ -1583,7 +1627,7 @@ export function update(exclusive world: tecs.ecs.World): nil
         local focusValue = world:get(state.focused, Interaction)
         if focusValue == nil or not focusValue.enabled or state.hidden[
             state.focused
-        ] or world:has(state.focused, tecs.ecs.Disabled) or not inScope(world, state, state.focused) then
+        ] or world:has(state.focused, ecs.Disabled) or not inScope(world, state, state.focused) then
             blur(world)
         end
     end
@@ -1592,7 +1636,7 @@ export function update(exclusive world: tecs.ecs.World): nil
             local target = world:get(pointer.captured, Interaction)
             if target == nil or not target.enabled or state.hidden[
                 pointer.captured
-            ] or world:has(pointer.captured, tecs.ecs.Disabled) or not inScope(world, state, pointer.captured) then
+            ] or world:has(pointer.captured, ecs.Disabled) or not inScope(world, state, pointer.captured) then
                 pointerEvent(world, state, pointer, "cancel", pointer.x, pointer.y)
             end
         end
@@ -1606,14 +1650,14 @@ export function update(exclusive world: tecs.ecs.World): nil
     apply(world, state, ids)
     geometry(world, state, ids)
     world:commit()
-    tecs.gfx.text.refresh(world)
+    text.refresh(world)
     for _, entity in ipairs(ids) do
-        local clip = world:get(entity, tecs.gfx.Clip)
-        if clip and world:has(entity, tecs.gfx.Text) then
-            for _, glyph in ipairs(tecs.gfx.text.glyphsOf(world, entity)) do
-                local value = world:get(glyph, tecs.gfx.Clip)
+        local clip = world:get(entity, gfx.Clip)
+        if clip and world:has(entity, gfx.Text) then
+            for _, glyph in ipairs(text.glyphsOf(world, entity)) do
+                local value = world:get(glyph, gfx.Clip)
                 if value == nil or value.index ~= clip.index then
-                    world:set(glyph, tecs.gfx.Clip(clip.index))
+                    world:set(glyph, gfx.Clip(clip.index))
                 end
             end
         end
@@ -1624,7 +1668,7 @@ end
 --- harmless.
 --- @param world the world to install into
 --- @param options viewport, clip allocation and input settings
-export function install(exclusive world: tecs.ecs.World, options: Options?): nil
+export function install(exclusive world: World, options: Options?): nil
     if world.resources:get(stateKey) then
         return
     end
@@ -1641,13 +1685,13 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
     )
     assert((values.dragThreshold or 4) >= 0 and (values.wheelStep or 40) >= 0, "invalid UI interaction settings")
     local state = new State(
-        tree = tecs.internal.uinative.create(),
+        tree = uinative.create(),
         cameras = world:newQuery({
-            include = {tecs.gfx.Camera2D, tecs.gfx.ActiveCamera}
+            include = {gfx.Camera2D, gfx.ActiveCamera}
         }),
         -- Retained nodes must remain visible to layout so a hidden scene can be
         -- restored.
-        nodes = tecs.internal.world.newUnfilteredQuery(world, {
+        nodes = world2.newUnfilteredQuery(world, {
             include = {Node, Style, Layout}
         }),
         width = values.width or 800,
@@ -1679,30 +1723,21 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
         state.firstClip >= 1 and state.lastClip <= 255 and state.firstClip <= state.lastClip,
         "invalid UI clip range"
     )
-    tecs.gfx.layers.configure(state.layer, {sort = "z", screenSpace = true, unlit = true, overlay = true})
+    layers.configure(state.layer, {sort = "z", screenSpace = true, unlit = true, overlay = true})
+
     -- The event is the host's for the delivery and cannot be kept, so the queue
     -- holds a copy made through the event's own constructor: the same
     -- declaration and fields, owned here until the next update drains them.
-    local function queue(event: tecs.platform.events.Event): nil
+    local function queue(event: Event2): nil
         state.pending[#state.pending + 1] = event
     end
 
-    world:observe(0, tecs.platform.events.MouseMotion, function(event: tecs.platform.events.MouseMotion): nil
-        queue(
-            tecs.platform.events.pointerMoved(
-                event.x,
-                event.y,
-                event.dx,
-                event.dy,
-                event.window,
-                event.timestamp,
-                event.sequence
-            )
-        )
+    world:observe(0, MouseMotion, function(event: MouseMotion): nil
+        queue(events.pointerMoved(event.x, event.y, event.dx, event.dy, event.window, event.timestamp, event.sequence))
     end)
-    world:observe(0, tecs.platform.events.MouseDown, function(event: tecs.platform.events.MouseDown): nil
+    world:observe(0, MouseDown, function(event: MouseDown): nil
         queue(
-            tecs.platform.events.pointerButton(
+            events.pointerButton(
                 true,
                 event.button,
                 event.x,
@@ -1714,9 +1749,9 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
             )
         )
     end)
-    world:observe(0, tecs.platform.events.MouseUp, function(event: tecs.platform.events.MouseUp): nil
+    world:observe(0, MouseUp, function(event: MouseUp): nil
         queue(
-            tecs.platform.events.pointerButton(
+            events.pointerButton(
                 false,
                 event.button,
                 event.x,
@@ -1728,9 +1763,9 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
             )
         )
     end)
-    world:observe(0, tecs.platform.events.MouseWheel, function(event: tecs.platform.events.MouseWheel): nil
+    world:observe(0, MouseWheel, function(event: MouseWheel): nil
         queue(
-            tecs.platform.events.wheel(
+            events.wheel(
                 event.wheelX,
                 event.wheelY,
                 event.wheelTicksX,
@@ -1743,9 +1778,10 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
             )
         )
     end)
-    local function queueTouch(borrows event: tecs.platform.events.TouchEvent): nil
+
+    local function queueTouch(borrows event: TouchEvent): nil
         queue(
-            tecs.platform.events.touch(
+            events.touch(
                 event.kind,
                 event.touchDevice,
                 event.finger,
@@ -1763,21 +1799,21 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
         )
     end
 
-    world:observe(0, tecs.platform.events.FingerDown, function(event: tecs.platform.events.FingerDown): nil
+    world:observe(0, FingerDown, function(event: FingerDown): nil
         queueTouch(event)
     end)
-    world:observe(0, tecs.platform.events.FingerMotion, function(event: tecs.platform.events.FingerMotion): nil
+    world:observe(0, FingerMotion, function(event: FingerMotion): nil
         queueTouch(event)
     end)
-    world:observe(0, tecs.platform.events.FingerUp, function(event: tecs.platform.events.FingerUp): nil
+    world:observe(0, FingerUp, function(event: FingerUp): nil
         queueTouch(event)
     end)
-    world:observe(0, tecs.platform.events.FingerCanceled, function(event: tecs.platform.events.FingerCanceled): nil
+    world:observe(0, FingerCanceled, function(event: FingerCanceled): nil
         queueTouch(event)
     end)
-    world:observe(0, tecs.platform.events.KeyDown, function(event: tecs.platform.events.KeyDown): nil
+    world:observe(0, KeyDown, function(event: KeyDown): nil
         queue(
-            tecs.platform.events.key(
+            events.key(
                 true,
                 event.physicalKey,
                 event.logicalKey,
@@ -1790,32 +1826,30 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
             )
         )
     end)
-    world:observe(0, tecs.platform.events.GamepadButtonDown, function(
-        event: tecs.platform.events.GamepadButtonDown
-    ): nil
-        queue(tecs.platform.events.gamepadButton(true, event.which, event.button, event.timestamp, event.sequence))
+    world:observe(0, GamepadButtonDown, function(event: GamepadButtonDown): nil
+        queue(events.gamepadButton(true, event.which, event.button, event.timestamp, event.sequence))
     end)
-    world:observe(0, tecs.platform.events.WindowFocusLost, function(event: tecs.platform.events.WindowFocusLost): nil
-        queue(tecs.platform.events.focused(false, event.window, event.timestamp, event.sequence))
+    world:observe(0, WindowFocusLost, function(event: WindowFocusLost): nil
+        queue(events.focused(false, event.window, event.timestamp, event.sequence))
     end)
-    world:observe(0, tecs.platform.events.WindowResized, function(event: tecs.platform.events.ResizeEvent): nil
+    world:observe(0, WindowResized, function(event: ResizeEvent): nil
         if event.width > 0 and event.height > 0 then
             resizeState(state, event.width, event.height, event.scaleFactor)
         end
     end)
-    world:observe(0, tecs.platform.events.WindowScaleChanged, function(event: tecs.platform.events.ResizeEvent): nil
+    world:observe(0, WindowScaleChanged, function(event: ResizeEvent): nil
         if event.width > 0 and event.height > 0 then
             resizeState(state, event.width, event.height, event.scaleFactor)
         end
     end)
     world:addSnapshotHandler({
         name = "tecs.ui",
-        save = function(exclusive _world: tecs.ecs.World): any
+        save = function(exclusive _world: World): any
             return true
         end,
-        load = function(exclusive _world: tecs.ecs.World, _value: any): nil
-            tecs.internal.uinative.destroy(state.tree)
-            state.tree = tecs.internal.uinative.create()
+        load = function(exclusive _world: World, _value: any): nil
+            uinative.destroy(state.tree)
+            state.tree = uinative.create()
             state.previous = "";
             state.focused = 0;
             state.scopes = {};
@@ -1826,22 +1860,22 @@ export function install(exclusive world: tecs.ecs.World, options: Options?): nil
     })
     world:addSystem({
         name = "tecs.UiLayout",
-        phase = tecs.ecs.phases.RenderFirst,
+        phase = ecs.phases.RenderFirst,
         commitAfter = true,
-        run = function(_dt: number, exclusive running: tecs.ecs.World): nil
+        run = function(_dt: number, exclusive running: World): nil
             update(running)
         end
     })
     world:addSystem({
         name = "tecs.UiShutdown",
-        phase = tecs.ecs.phases.Shutdown,
-        run = function(_dt: number, exclusive running: tecs.ecs.World): nil
+        phase = ecs.phases.Shutdown,
+        run = function(_dt: number, exclusive running: World): nil
             if running.resources:get(stateKey) ~= state then
                 return
             end
-            tecs.internal.uinative.destroy(state.tree)
+            uinative.destroy(state.tree)
             for index in pairs(state.clips) do
-                tecs.gfx.clips.clearRegion(index)
+                clips2.clearRegion(index)
             end
             running.resources:remove(stateKey)
         end
@@ -1851,7 +1885,7 @@ end
 --- Installs UI using the application's viewport and input.
 --- @param app the application whose world hosts the UI
 --- @param options optional layout and interaction settings
-export function plugin(exclusive app: tecs.application.Application, options: Options?): nil
+export function plugin(exclusive app: Application, options: Options?): nil
     local width, height = app.window:getSize()
     local values = options or {}
     values.width, values.height, values.input = width, height, app.input
@@ -1862,7 +1896,7 @@ end
 --- Reports native synchronization calls, useful for checking idle layout work.
 --- @param world the installed world
 --- @return the synchronization count
-export function layouts(borrows world: tecs.ecs.World): integer
+export function layouts(borrows world: World): integer
     local state = world.resources:get(stateKey)
     return state and state.updates or 0
 end

@@ -24,7 +24,7 @@ coroutine unwinds. The server record holds neither, which is what keeps a
 server value ordinary rather than affine out through `tecs.mcp`.
 ]]
 
-local json = require("nupp.data.json")
+local json = require("nupp.codec.json")
 local log = require("nupp.log")
 local suspension = require("nupp.suspension")
 local net = require("nupp.io.net")
@@ -125,10 +125,13 @@ local function park(): nil
     end
 end
 
-local function newHandler(exclusive self: Server): suspension.Handler
+-- The server is plain rather than `exclusive`, because the handler resumes
+-- through it on later turns and so outlives a call-scoped borrow of it.
+local function newHandler(self: Server): suspension.Handler
     return new suspension.Handler(
         park = function(_: suspension.Handler, waiting: suspension.Waiting, _cancel: function(): nil): nil
             local task = assert(coroutine.running())
+
             -- Resumed on the pass that resolved the wait rather than queued for
             -- the next one. A readiness source stays registered until the park
             -- it belongs to finishes, and any driver in the process may run a

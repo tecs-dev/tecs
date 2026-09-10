@@ -96,10 +96,10 @@ function suite.carriesBindingsParametersAndPauseHoldersAcrossALoad(): nil
     local world = newWorld()
     local seen: {string} = {}
     sequence.registerAction(world, "test.report", function(
-        exclusive _world: ecs.World,
+        exclusive running: ecs.World,
         context: sequence.ActionContext
     ): nil
-        seen[#seen + 1] = tostring(context:entity("actor")) .. ":" .. tostring(assert(context.params).tag)
+        seen[#seen + 1] = tostring(context:entity(running, "actor")) .. ":" .. tostring(assert(context.params).tag)
     end)
     local program = sequence.define(uniqueName("test.carry."), {sequence.waitSteps(2), sequence.call("test.report"),})
     local actor = world:spawn()

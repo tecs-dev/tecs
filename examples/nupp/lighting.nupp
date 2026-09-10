@@ -22,6 +22,15 @@ the same pass they cast into.
 `create` matches the Rust host's managed entry contract, so the host selects it
 with `--entry tecs.gfx.lighting.create`.
 ]]
+const {type World} = require("tecs.ecs")
+const ecs = require("tecs.ecs")
+const gfx = require("tecs.gfx")
+const materials = require("tecs.gpu.materials")
+const {type Application} = require("tecs.application")
+const lighting2 = require("tecs.gfx.lighting")
+const {type Transform2D} = require("tecs.ecs")
+const {type Session} = require("tecs.host")
+const host = require("tecs.host")
 
 --- The world the camera looks at, in world units.
 const FIELD = 1200.0
@@ -42,38 +51,34 @@ const LIGHTS: {
 }
 
 --- Fills the floor, the pillars, the crates, and the lamp.
-local function spawnScene(exclusive world: tecs.ecs.World): nil
+local function spawnScene(exclusive world: World): nil
     const middle = FIELD * 0.5
     -- One large quad under everything, on the farthest layer, so the lights and
     -- the shadows have something to land on.
-    world:spawn(
-        tecs.ecs.Transform2D(middle, middle, 0, 4, 0, FIELD, FIELD),
-        tecs.gfx.Tint(0.62, 0.6, 0.58, 1),
-        tecs.gfx.Renderable2D
-    )
+    world:spawn(ecs.Transform2D(middle, middle, 0, 4, 0, FIELD, FIELD), gfx.Tint(0.62, 0.6, 0.58, 1), gfx.Renderable2D)
 
     for index = 1, PILLARS do
         const angle = index / PILLARS * math.pi * 2.0
         world:spawn(
-            tecs.ecs.Transform2D(middle + math.cos(angle) * 320.0, middle + math.sin(angle) * 320.0, 0, 2, 0, 56, 56),
-            tecs.gfx.Tint(0.28, 0.3, 0.36, 1),
-            tecs.gfx.Material(tecs.gpu.materials.id("rounded"), 0.25),
+            ecs.Transform2D(middle + math.cos(angle) * 320.0, middle + math.sin(angle) * 320.0, 0, 2, 0, 56, 56),
+            gfx.Tint(0.28, 0.3, 0.36, 1),
+            gfx.Material(materials.id("rounded"), 0.25),
             -- A full-height occluder blocks every light at every angle, and
             -- blocks none of the ambient: that is what the crates below are for.
-            tecs.gfx.Occluder2D(1.0),
-            tecs.gfx.Renderable2D
+            gfx.Occluder2D(1.0),
+            gfx.Renderable2D
         )
     end
 
     for index = 1, CRATES do
         const angle = (index + 0.5) / CRATES * math.pi * 2.0
         world:spawn(
-            tecs.ecs.Transform2D(middle + math.cos(angle) * 150.0, middle + math.sin(angle) * 150.0, 0, 2, 0, 44, 44),
-            tecs.gfx.Tint(0.7, 0.52, 0.34, 1),
+            ecs.Transform2D(middle + math.cos(angle) * 150.0, middle + math.sin(angle) * 150.0, 0, 2, 0, 44, 44),
+            gfx.Tint(0.7, 0.52, 0.34, 1),
             -- Half height, so the copy each light throws is short enough to read
             -- as a contact shadow rather than as a wall.
-            tecs.gfx.DropShadow2D(0.5),
-            tecs.gfx.Renderable2D
+            gfx.DropShadow2D(0.5),
+            gfx.Renderable2D
         )
     end
 
@@ -81,48 +86,48 @@ local function spawnScene(exclusive world: tecs.ecs.World): nil
     -- and glowing at once, which is what emission is for. The glow survives the
     -- darkness and the drop shadows both, and passes the bloom threshold.
     world:spawn(
-        tecs.ecs.Transform2D(middle, middle, 0, 1, 0, 90, 90),
-        tecs.gfx.Tint(1.0, 0.95, 0.8, 1),
+        ecs.Transform2D(middle, middle, 0, 1, 0, 90, 90),
+        gfx.Tint(1.0, 0.95, 0.8, 1),
         -- `emissive` is the one material that writes the emission attachment, and
         -- `param` is how much of its own color it gives off.
-        tecs.gfx.Material(tecs.gpu.materials.id("emissive"), 0.9),
-        tecs.gfx.Renderable2D
+        gfx.Material(materials.id("emissive"), 0.9),
+        gfx.Renderable2D
     )
 
     for index = 1, #LIGHTS do
         const held = LIGHTS[index]
         world:spawn(
-            tecs.ecs.Transform2D(middle, middle),
-            tecs.gfx.PointLight2D(96.0, held[1], held[3], held[4], held[5], held[2])
+            ecs.Transform2D(middle, middle),
+            gfx.PointLight2D(96.0, held[1], held[3], held[4], held[5], held[2])
         )
     end
 end
 
-local function install(exclusive app: tecs.application.Application): nil
+local function install(exclusive app: Application): nil
     -- Dim enough that a light is the thing you see, and not so dim that an
     -- unlit corner is black: the drop shadows darken this term and the occluder
     -- mask cannot reach it, which is the whole difference between them.
-    tecs.gfx.lighting.setAmbient(0.14, 0.15, 0.2)
-    tecs.gfx.lighting.setShadows({steps = 24, margin = 200, height = 96, dropOpacity = 0.55, dropLength = 420})
-    tecs.gfx.lighting.setBloom({threshold = 0.85, knee = 0.2, intensity = 0.8})
+    lighting2.setAmbient(0.14, 0.15, 0.2)
+    lighting2.setShadows({steps = 24, margin = 200, height = 96, dropOpacity = 0.55, dropLength = 420})
+    lighting2.setBloom({threshold = 0.85, knee = 0.2, intensity = 0.8})
 
-    app.world:spawn(tecs.gfx.Camera2D(FIELD * 0.5, FIELD * 0.5, 1, 0), tecs.gfx.ActiveCamera)
+    app.world:spawn(gfx.Camera2D(FIELD * 0.5, FIELD * 0.5, 1, 0), gfx.ActiveCamera)
     spawnScene(app.world)
 
-    const lights = app.world:newQuery({include = {tecs.ecs.Transform2D, tecs.gfx.PointLight2D}})
+    const lights = app.world:newQuery({include = {ecs.Transform2D, gfx.PointLight2D}})
     local elapsed = 0.0
     app.world:addSystem({
         -- This system name reaches the debug server and is a compatibility
         -- surface.
         name = "example.lighting.circle",
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(dt: number): nil
             elapsed = elapsed + dt
             const middle = FIELD * 0.5
             local slot = 0
             unsafe do
                 for candidate, count in lights:iter() do
-                    const transforms: tecs.ecs.Transform2D[?] = assert(candidate:getMut(tecs.ecs.Transform2D))
+                    const transforms: Transform2D[?] = assert(candidate:getMut(ecs.Transform2D))
                     for index = 1, count as integer do
                         slot = slot + 1
                         -- Each light circles at its own rate and its own radius, so
@@ -145,12 +150,6 @@ end
 --- @param debug whether guarded application failures may be cleared
 --- @param maxFrames an optional positive frame limit
 --- @return the session retained by the Rust host
-export function create(
-    title: string?,
-    width: integer?,
-    height: integer?,
-    debug: boolean?,
-    maxFrames: integer?
-): tecs.host.Session
-    return tecs.host.createWithPlugin(install, title or "Tecs lighting", width or 1280, height or 720, debug, maxFrames)
+export function create(title: string?, width: integer?, height: integer?, debug: boolean?, maxFrames: integer?): Session
+    return host.createWithPlugin(install, title or "Tecs lighting", width or 1280, height or 720, debug, maxFrames)
 end

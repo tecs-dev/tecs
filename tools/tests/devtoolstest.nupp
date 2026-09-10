@@ -3,7 +3,7 @@ local gates = require("tecs.dev.gates")
 local docs = require("tecs.dev.docs")
 local files = require("nupp.io.files")
 local commands = require("tecs.dev.commands")
-local json = require("nupp.data.json")
+local json = require("nupp.codec.json")
 
 local suite = {}
 
@@ -102,7 +102,7 @@ return {tasks = {probe = {argv = {"nupp", "run", "tools/run.nupp", "first argume
             files.write(
                 root .. "/tools/tecs/dev/main.nupp",
                 [[
-local json = require("nupp.data.json")
+local json = require("nupp.codec.json")
 print(json.encode({...}))
 os.exit(7)
 ]]

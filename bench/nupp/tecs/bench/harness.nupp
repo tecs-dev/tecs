@@ -31,7 +31,7 @@ print(harness.format({stage}))
 ]]
 
 local time = require("nupp.time")
-local json = require("nupp.data.json")
+local json = require("nupp.codec.json")
 
 local ceil = math.ceil
 local floor = math.floor

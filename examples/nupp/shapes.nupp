@@ -6,18 +6,24 @@ of shapes; BENCH_SHAPE selects one material or `all`. BENCH_MOTION is
 `static` or `moving`. One batch initializes the shape columns directly.
 The grid initially fits inside the render target.
 BENCH_INTERACTIVE enables wheel zoom, WASD/arrow panning and R to reset.]]
+const {type Application} = require("tecs.application")
+const ecs = require("tecs.ecs")
+const materials2 = require("tecs.gpu.materials")
+const lighting = require("tecs.gfx.lighting")
+const time = require("nupp.time")
+const gfx = require("tecs.gfx")
+const {type Archetype} = require("tecs.ecs")
+const {type Session} = require("tecs.host")
+const host = require("tecs.host")
 
-local function install(exclusive app: tecs.application.Application, interactive: boolean): nil
+local function install(exclusive app: Application, interactive: boolean): nil
     const count = tonumber(os.getenv("BENCH_COUNT") or "12")
     assert(
-        count and count >= 1 and count % 1 == 0 and count <= tecs.ecs.MAX_ENTITIES,
+        count and count >= 1 and count % 1 == 0 and count <= ecs.MAX_ENTITIES,
         "BENCH_COUNT must fit the entity limit"
     )
     const total = count as integer
-    assert(
-        not interactive or total < tecs.ecs.MAX_ENTITIES,
-        "interactive benchmark needs one entity slot for its camera"
-    )
+    assert(not interactive or total < ecs.MAX_ENTITIES, "interactive benchmark needs one entity slot for its camera")
     const kind = os.getenv("BENCH_SHAPE") or "all"
     const motion = os.getenv("BENCH_MOTION") or "static"
     assert(motion == "static" or motion == "moving", "BENCH_MOTION must be static or moving")
@@ -38,10 +44,10 @@ local function install(exclusive app: tecs.application.Application, interactive:
     const selected = kind == "rectangle" and "textured" or kind
     const ids: {integer} = {}
     for _, name in ipairs(names) do
-        ids[#ids + 1] = tecs.gpu.materials.id(name)
+        ids[#ids + 1] = materials2.id(name)
     end
-    const fixed = selected ~= "all" and tecs.gpu.materials.id(selected) or 0
-    tecs.gfx.lighting.setAmbient(1, 1, 1)
+    const fixed = selected ~= "all" and materials2.id(selected) or 0
+    lighting.setAmbient(1, 1, 1)
     const world = app.world
     const window = app.window
     const input = app.input
@@ -50,17 +56,17 @@ local function install(exclusive app: tecs.application.Application, interactive:
     local spawned = false
     world:addSystem({
         name = "example.shapes.spawn",
-        phase = tecs.ecs.phases.First,
+        phase = ecs.phases.First,
         run = function(): nil
             if spawned then
                 return
             end
             spawned = true
-            const started = nupp.time.now()
+            const started = time.now()
             const width, height = window:getPixelSize()
             centerX, centerY = width * 0.5, height * 0.5
             if interactive then
-                camera = world:spawn(tecs.gfx.Camera2D(centerX, centerY), tecs.gfx.ActiveCamera)
+                camera = world:spawn(gfx.Camera2D(centerX, centerY), gfx.ActiveCamera)
             end
             const columns = math.ceil(math.sqrt(total * width / height))
             const rows = math.ceil(total / columns)
@@ -68,11 +74,16 @@ local function install(exclusive app: tecs.application.Application, interactive:
             const size = math.min(cellWidth, cellHeight) * 0.8
             world:batchSpawn(
                 total,
-                {tecs.ecs.Transform2D, tecs.gfx.Tint, tecs.gfx.Material, tecs.gfx.Renderable2D},
-                function(candidate: tecs.ecs.Archetype, first: integer, last: integer): nil
-                    const transforms = assert(candidate:getMut(tecs.ecs.Transform2D))
-                    const tints = assert(candidate:getMut(tecs.gfx.Tint))
-                    const materials = assert(candidate:getMut(tecs.gfx.Material))
+                {
+                    ecs.Transform2D,
+                    gfx.Tint,
+                    gfx.Material,
+                    gfx.Renderable2D
+                },
+                function(candidate: Archetype, first: integer, last: integer): nil
+                    const transforms = assert(candidate:getMut(ecs.Transform2D))
+                    const tints = assert(candidate:getMut(gfx.Tint))
+                    const materials = assert(candidate:getMut(gfx.Material))
                     unsafe do
                         for row = first, last do
                             const index = row - first
@@ -89,7 +100,7 @@ local function install(exclusive app: tecs.application.Application, interactive:
                     print(
                         (
                             "shapes: %d %s, %s, target %dx%d, quad %.3fpx, batch init %.0fms"
-                        ):format(total, kind, motion, width, height, size, nupp.time.now() - started)
+                        ):format(total, kind, motion, width, height, size, time.now() - started)
                     )
                 end
             )
@@ -98,7 +109,7 @@ local function install(exclusive app: tecs.application.Application, interactive:
     if interactive then
         world:addSystem({
             name = "example.shapes.camera",
-            phase = tecs.ecs.phases.Update,
+            phase = ecs.phases.Update,
             run = function(dt: number): nil
                 const id = camera
                 if id == nil then
@@ -131,7 +142,7 @@ local function install(exclusive app: tecs.application.Application, interactive:
                 if dx == 0 and dy == 0 and wheel == 0 and not reset then
                     return
                 end
-                const eye = assert(world:getMut(id, tecs.gfx.Camera2D))
+                const eye = assert(world:getMut(id, gfx.Camera2D))
                 if reset then
                     eye.x, eye.y, eye.zoom = centerX, centerY, 1
                 else
@@ -143,13 +154,13 @@ local function install(exclusive app: tecs.application.Application, interactive:
         })
     end
     if motion == "moving" then
-        const moving = world:newQuery({include = {tecs.ecs.Transform2D, tecs.gfx.Renderable2D}})
+        const moving = world:newQuery({include = {ecs.Transform2D, gfx.Renderable2D}})
         world:addSystem({
             name = "example.shapes.rotate",
-            phase = tecs.ecs.phases.Update,
+            phase = ecs.phases.Update,
             run = function(): nil
                 for candidate, amount in moving:iter() do
-                    const transforms = assert(candidate:getMut(tecs.ecs.Transform2D))
+                    const transforms = assert(candidate:getMut(ecs.Transform2D))
                     unsafe do
                         for row = 1, amount as integer do
                             transforms[row].rotation = transforms[row].rotation + 0.01
@@ -176,12 +187,12 @@ export function create(
     debug: boolean?,
     maxFrames: integer?,
     interactive: boolean?
-): tecs.host.Session
+): Session
     const view = interactive == true or (interactive == nil and os.getenv("BENCH_INTERACTIVE") == "1")
-    return tecs.host.newSession({
-        world = {maxEntities = tecs.ecs.MAX_ENTITIES},
+    return host.newSession({
+        world = {maxEntities = ecs.MAX_ENTITIES},
         window = {title = title or "Tecs shapes", width = width, height = height},
-        plugin = function(exclusive app: tecs.application.Application): nil
+        plugin = function(exclusive app: Application): nil
             install(app, view)
         end,
         debug = debug,

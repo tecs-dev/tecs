@@ -504,7 +504,7 @@ pub fn test(root: &Path, preset: Preset) -> Result<()> {
         ("shapes", "shapes:"),
         (
             "tiled",
-            "tiled: TMX, TSX, sprites, animation and collision ready",
+            "tiled: TMX, TSX, TileChunks, animated sprites and collision ready",
         ),
         ("ui", "ui: retained Taffy layout and interaction ready"),
         (

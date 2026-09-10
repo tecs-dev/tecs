@@ -1,5 +1,11 @@
 module tecs.internal.meshpacket
 
+const {type Collector as Collector2} = require("tecs.internal.meshlights")
+const {type Lighting} = require("tecs.gfx.meshes")
+const meshlights = require("tecs.internal.meshlights")
+const io2 = require("nupp.io")
+const json = require("nupp.codec.json")
+
 local world = require("tecs.internal.world")
 local query = require("tecs.internal.query")
 local archetype = require("tecs.internal.archetype")
@@ -25,7 +31,7 @@ local record Run
     seen: integer
 end
 export record Collector
-    private lights: tecs.internal.meshlights.Collector
+    private lights: Collector2
     private query: query.Query
     private versions: {[integer]: Run} = {}
     private revision: integer = 0
@@ -37,13 +43,13 @@ export record Collector
         width: integer,
         height: integer,
         camera: camera3d.Camera3D,
-        lighting: tecs.gfx.meshes.Lighting,
+        lighting: Lighting,
         resident: integer
     ): string
 end
 export function new(exclusive value: world.World): Collector
     return new Collector(
-        lights = tecs.internal.meshlights.new(value),
+        lights = meshlights.new(value),
         query = value:newQuery({
             include = {mesh.Transform3DComponent, mesh.MeshComponent, mesh.Renderable3D},
             exclude = {components.Disabled}
@@ -86,8 +92,8 @@ local function changed(exclusive self: Collector): boolean
 end
 
 local function collect(exclusive self: Collector): string
-    local buffer, palette = nupp.io.newBuffer(), nupp.io.newBuffer()
-    local writer, paletteWriter = nupp.io.newScalarWriter(buffer), nupp.io.newScalarWriter(palette)
+    local buffer, palette = io2.newBuffer(), io2.newBuffer()
+    local writer, paletteWriter = io2.newScalarWriter(buffer), io2.newScalarWriter(palette)
     local count: integer = 0
     local paletteCount: integer = 0
     unsafe do
@@ -165,8 +171,8 @@ local function collect(exclusive self: Collector): string
     end
     writer:drop()
     paletteWriter:drop()
-    local output = nupp.io.newBuffer()
-    local prefix = nupp.io.newScalarWriter(output)
+    local output = io2.newBuffer()
+    local prefix = io2.newScalarWriter(output)
     prefix:writeUint32(nupp.math.u32.wrap(count)):writeUint32(nupp.math.u32.wrap(paletteCount))
     prefix:writeBytes(buffer:getString()):writeBytes(palette:getString())
     prefix:drop()
@@ -183,10 +189,9 @@ local record Settings
     probe: {number} = {}
     bytes: string = ""
 end
-local settingsCache: {[tecs.gfx.meshes.Lighting]: Settings} = setmetatable({}, {
-    __mode = "k"
-}) as {[tecs.gfx.meshes.Lighting]: Settings}
-local function settingsOf(lighting: tecs.gfx.meshes.Lighting): string
+local settingsCache: {[Lighting]: Settings} = setmetatable({}, {__mode = "k"}) as {[Lighting]: Settings}
+
+local function settingsOf(lighting: Lighting): string
     local saved = settingsCache[lighting]
     if saved == nil then
         saved = new Settings()
@@ -211,7 +216,7 @@ local function settingsOf(lighting: tecs.gfx.meshes.Lighting): string
         end
     end
     if changed then
-        saved.bytes = nupp.data.json.encode(lighting)
+        saved.bytes = json.encode(lighting)
         saved.probe = {}
         for index, value in ipairs(lighting.probe) do
             saved.probe[index] = value
@@ -226,7 +231,7 @@ function Collector.frame(
     width: integer,
     height: integer,
     camera: camera3d.Camera3D,
-    lighting: tecs.gfx.meshes.Lighting,
+    lighting: Lighting,
     resident: integer
 ): string
     const dirty = changed(self)
@@ -234,8 +239,8 @@ function Collector.frame(
         self.revision = self.revision + 1
         self.payload = collect(self)
     end
-    local buffer = nupp.io.newBuffer()
-    local writer = nupp.io.newScalarWriter(buffer)
+    local buffer = io2.newBuffer()
+    local writer = io2.newScalarWriter(buffer)
     const retained = resident == self.revision
     writer:writeUint32(nupp.math.u32.wrap(0x544D5348)):writeUint32(nupp.math.u32.wrap(2))
     writer:writeUint32(nupp.math.u32.wrap(self.revision)):writeUint32(nupp.math.u32.wrap(retained and 1 or 0))

@@ -1,4 +1,5 @@
 module tecs.internal.meshregistry
+
 local names: {string} = {}
 local ids: {[string]: integer} = {}
 export function register(name: string): integer

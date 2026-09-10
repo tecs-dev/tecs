@@ -1,3 +1,5 @@
+const {type Scope} = require("nupp.tasks")
+
 local ecs = require("tecs.ecs")
 local test = require("nupp.test")
 
@@ -63,7 +65,7 @@ function suite.settlesLifecycleChildTasks(): nil
     local answer = 0
     value:addSystem({
         phase = ecs.phases.Startup,
-        run = function(_dt: number, exclusive _world: ecs.World, borrows scope: nupp.tasks.Scope): nil
+        run = function(_dt: number, exclusive _world: ecs.World, borrows scope: Scope): nil
             scope:spawn(function(): nil
                 answer = 42
             end)

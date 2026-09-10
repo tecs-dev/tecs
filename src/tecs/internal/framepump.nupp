@@ -40,6 +40,7 @@ export function newPump(): Pump
     pump.handler = new suspension.Handler(
         park = function(_: suspension.Handler, waiting: suspension.Waiting, _: function(): nil): nil
             local task = assert(coroutine.running())
+
             local function wake(): nil
                 -- Other drivers, including MCP, poll the same readiness sources.
                 -- Resume now so the completed one-shot source is released before
@@ -89,11 +90,14 @@ local function state(exclusive pump: Pump): State
 end
 
 --- Starts one operation and runs it until it completes or parks.
+---
+--- The pump is plain rather than `exclusive`, because the coroutine this starts
+--- reports into it and so outlives a call-scoped borrow of it.
 --- @param pump the idle application pump
 --- @param body the lifecycle operation to run
 --- @return whether the operation parked, completed, or stopped the application
 --- @raises when another operation is still parked
-export function start(exclusive pump: Pump, body: function(): boolean): State
+export function start(pump: Pump, body: function(): boolean): State
     if pump.active ~= nil then
         error("framepump.start: an operation is already parked", 2)
     end

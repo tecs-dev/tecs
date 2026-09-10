@@ -1,9 +1,14 @@
+const ecs = require("tecs.ecs")
+const {type Archetype} = require("tecs.ecs")
+const {OnSpawn} = require("tecs.ecs")
+const {OnDespawn} = require("tecs.ecs")
+
 local test = require("nupp.test")
 
 local record Point
     x: number
 end
-const position = tecs.ecs.newComponent(Point, {
+const position = ecs.newComponent(Point, {
     name = "test.BulkPosition",
     construct = function(x: number): Point
         return new Point(x = x)
@@ -12,19 +17,19 @@ const position = tecs.ecs.newComponent(Point, {
         return new Point(x = 0)
     end
 })
-const tag = tecs.ecs.newTagComponent({name = "test.BulkTag"})
-const extra = tecs.ecs.newTagComponent({name = "test.BulkExtra"})
-const flag = tecs.ecs.newScalarComponent({name = "test.BulkFlag", kind = "boolean", default = true})
+const tag = ecs.newTagComponent({name = "test.BulkTag"})
+const extra = ecs.newTagComponent({name = "test.BulkExtra"})
+const flag = ecs.newScalarComponent({name = "test.BulkFlag", kind = "boolean", default = true})
 local suite = {}
 
 function suite.initializesBatchesBeforeMembershipAndSpawnEvents(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     local initialized = false
     local notifications = 0
     local spawned = 0
     world:newQuery({
         include = {position},
-        onEntitiesAdded = function(candidate: tecs.ecs.Archetype, first: integer, last: integer, count: integer): nil
+        onEntitiesAdded = function(candidate: Archetype, first: integer, last: integer, count: integer): nil
             test.assert(initialized)
             notifications = notifications + 1
             test.equal(count, 4)
@@ -33,7 +38,7 @@ function suite.initializesBatchesBeforeMembershipAndSpawnEvents(): nil
             end
         end
     })
-    world:observe(0, tecs.ecs.OnSpawn, function(): nil
+    world:observe(0, OnSpawn, function(): nil
         test.assert(initialized);
         spawned = spawned + 1
     end)
@@ -42,7 +47,7 @@ function suite.initializesBatchesBeforeMembershipAndSpawnEvents(): nil
         {
             position
         },
-        function(candidate: tecs.ecs.Archetype, start: integer, last: integer, count: integer): nil
+        function(candidate: Archetype, start: integer, last: integer, count: integer): nil
             test.equal(count, 4)
             const column = assert(candidate:getMut(position))
             for row = start, last do
@@ -62,9 +67,9 @@ function suite.initializesBatchesBeforeMembershipAndSpawnEvents(): nil
 end
 
 function suite.preservesLaterScalarWritesAndRemovalsOnBatchSpawns(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const first = assert(
-        world:batchSpawn(4, {position, tag}, function(candidate: tecs.ecs.Archetype, first: integer, last: integer): nil
+        world:batchSpawn(4, {position, tag}, function(candidate: Archetype, first: integer, last: integer): nil
             const column = assert(candidate:getMut(position))
             for row = first, last do
                 column[row].x = 5
@@ -84,7 +89,7 @@ function suite.preservesLaterScalarWritesAndRemovalsOnBatchSpawns(): nil
 end
 
 function suite.reservesMixedGenerationAndRecycledHandles(): nil
-    const world = tecs.ecs.newWorld({maxEntities = 6})
+    const world = ecs.newWorld({maxEntities = 6})
     const initial = assert(world:batchSpawn(3, {tag}))
     world:commit()
     world:clearEntities()
@@ -109,7 +114,7 @@ function suite.reservesMixedGenerationAndRecycledHandles(): nil
 end
 
 function suite.validatesAllExplicitIdsBeforeReservingAny(): nil
-    const world = tecs.ecs.newWorld({maxEntities = 10})
+    const world = ecs.newWorld({maxEntities = 10})
     test.raises(
         function(): nil
             world:batchSpawnAt({3, 3}, {tag})
@@ -140,7 +145,7 @@ function suite.validatesAllExplicitIdsBeforeReservingAny(): nil
 end
 
 function suite.bulkConstantsAreIndependentRecordsAndPreserveFalse(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const first = assert(world:batchSpawn(3, {position(1), tag}))
     world:commit()
     assert(world:getMut(first, position)).x = 8
@@ -159,9 +164,9 @@ function suite.bulkConstantsAreIndependentRecordsAndPreserveFalse(): nil
 end
 
 function suite.capturesMembershipAtCallTimeAndHonorsAutomaticFilters(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const active = world:spawn(tag)
-    const disabled = world:spawn(tag, tecs.ecs.Disabled)
+    const disabled = world:spawn(tag, ecs.Disabled)
     world:commit()
     const selection = world:newQuery({include = {tag}})
     world:batchSet(selection, extra)
@@ -177,12 +182,13 @@ function suite.capturesMembershipAtCallTimeAndHonorsAutomaticFilters(): nil
 end
 
 function suite.ordersMultipleWritersWithScalarWritesBetweenThem(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const id = world:spawn(tag, position(1))
     world:commit()
     const selection = world:newQuery({include = {tag}})
     local calls = 0
-    local function increment(candidate: tecs.ecs.Archetype, first: integer, last: integer): nil
+
+    local function increment(candidate: Archetype, first: integer, last: integer): nil
         const column = assert(candidate:getMut(position))
         for row = first, last do
             column[row].x = column[row].x + 1
@@ -203,13 +209,13 @@ function suite.ordersMultipleWritersWithScalarWritesBetweenThem(): nil
 end
 
 function suite.writersInitializeNewColumnsBeforeEntryNotifications(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     world:batchSpawn(3, {tag})
     world:commit()
     local calls = 0
     world:newQuery({
         include = {position},
-        onEntitiesAdded = function(candidate: tecs.ecs.Archetype, first: integer, last: integer): nil
+        onEntitiesAdded = function(candidate: Archetype, first: integer, last: integer): nil
             for row = first, last do
                 test.equal(assert(candidate:get(position))[row].x, 33)
             end
@@ -220,7 +226,7 @@ function suite.writersInitializeNewColumnsBeforeEntryNotifications(): nil
             include = {tag}
         }),
         position,
-        function(candidate: tecs.ecs.Archetype, first: integer, last: integer, count: integer): nil
+        function(candidate: Archetype, first: integer, last: integer, count: integer): nil
             calls = calls + 1
             test.equal(count, 3)
             const column = assert(candidate:getMut(position))
@@ -235,7 +241,7 @@ function suite.writersInitializeNewColumnsBeforeEntryNotifications(): nil
 end
 
 function suite.drainsCallbackStagedBatchesWithoutDroppingLaterWork(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const id = world:spawn(tag)
     world:commit()
     const selection = world:newQuery({include = {tag}})
@@ -249,8 +255,8 @@ function suite.drainsCallbackStagedBatchesWithoutDroppingLaterWork(): nil
 end
 
 function suite.preservesRelationshipEdgesAcrossWriterSegmentsAndCascades(): nil
-    const world = tecs.ecs.newWorld()
-    const follows = tecs.ecs.newRelationship({name = "test.BulkFollows", reverseIndex = true})
+    const world = ecs.newWorld()
+    const follows = ecs.newRelationship({name = "test.BulkFollows", reverseIndex = true})
     const parent = world:spawn()
     const other = world:spawn()
     const child = world:spawn(tag)
@@ -269,15 +275,15 @@ function suite.preservesRelationshipEdgesAcrossWriterSegmentsAndCascades(): nil
     test.equal(#world:relationshipSources(follows, parent), 0)
     test.equal(#world:relationshipSources(follows, other), 1)
     const ancestor = assert(world:batchSpawn(1, {tag}))
-    const descendant = assert(world:batchSpawn(1, {tecs.ecs.ChildOf(ancestor)}))
+    const descendant = assert(world:batchSpawn(1, {ecs.ChildOf(ancestor)}))
     world:despawn(ancestor)
     world:commit()
     test.assert(not world:isAlive(ancestor) and not world:isAlive(descendant))
 end
 
 function suite.rejectsForeignQueriesAndUnsafeCallbackShapes(): nil
-    const world = tecs.ecs.newWorld({maxEntities = 2})
-    const other = tecs.ecs.newWorld()
+    const world = ecs.newWorld({maxEntities = 2})
+    const other = ecs.newWorld()
     const selection = world:newQuery({})
     test.raises(
         function(): nil
@@ -294,7 +300,7 @@ function suite.rejectsForeignQueriesAndUnsafeCallbackShapes(): nil
     )
     test.raises(
         function(): nil
-            world:batchSet(selection, tecs.ecs.ChildOf, function(): nil
+            world:batchSet(selection, ecs.ChildOf, function(): nil
             end)
         end,
         "plain component definition"
@@ -313,13 +319,13 @@ function suite.rejectsForeignQueriesAndUnsafeCallbackShapes(): nil
     )
     test.raises(
         function(): nil
-            world:batchSpawn(1, {tecs.ecs.EntityKey("key")})
+            world:batchSpawn(1, {ecs.EntityKey("key")})
         end,
         "EntityKey"
     )
     test.raises(
         function(): nil
-            world:batchSpawn(1, {tecs.ecs.ChildOf})
+            world:batchSpawn(1, {ecs.ChildOf})
         end,
         "requires a target"
     )
@@ -329,27 +335,27 @@ function suite.rejectsForeignQueriesAndUnsafeCallbackShapes(): nil
 end
 
 function suite.retainsAStagedChildRetargetedBeforeOldParentCancellation(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const oldParent = assert(world:batchSpawn(1, {}))
     const nextParent = assert(world:batchSpawn(1, {}))
-    const child = assert(world:batchSpawn(1, {tecs.ecs.ChildOf(oldParent)}))
-    world:set(child, tecs.ecs.ChildOf(nextParent))
+    const child = assert(world:batchSpawn(1, {ecs.ChildOf(oldParent)}))
+    world:set(child, ecs.ChildOf(nextParent))
     world:despawn(oldParent)
     world:commit()
     test.assert(world:isAlive(child))
-    test.equal(assert(world:get(child, tecs.ecs.ChildOf)).target, nextParent)
-    test.equal(#world:relationshipSources(tecs.ecs.ChildOf, nextParent), 1)
+    test.equal(assert(world:get(child, ecs.ChildOf)).target, nextParent)
+    test.equal(#world:relationshipSources(ecs.ChildOf, nextParent), 1)
 end
 
 function suite.notifiesCorrectRowsWhenAnotherMoveSwapRemovesTheDestination(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const source = world:spawn(tag)
     const destination = world:spawn(tag, position(7))
     world:commit()
     local observed: integer? = nil
     world:newQuery({
         include = {position},
-        onEntitiesAdded = function(candidate: tecs.ecs.Archetype, first: integer): nil
+        onEntitiesAdded = function(candidate: Archetype, first: integer): nil
             observed = candidate.entities[first]
         end
     })
@@ -363,7 +369,7 @@ function suite.notifiesCorrectRowsWhenAnotherMoveSwapRemovesTheDestination(): ni
 end
 
 function suite.releasesUnpublishedReservationsAfterInitializerFailure(): nil
-    const world = tecs.ecs.newWorld({maxEntities = 2})
+    const world = ecs.newWorld({maxEntities = 2})
     world:batchSpawn(1, {tag}, function(): nil
         error("batch initializer failed")
     end)
@@ -382,29 +388,29 @@ function suite.releasesUnpublishedReservationsAfterInitializerFailure(): nil
 end
 
 function suite.bulkTeardownFiresEventsAndUnlinksSparseEdges(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const parent = world:spawn()
-    const first = assert(world:batchSpawn(3, {tag, tecs.ecs.ChildOf(parent)}))
+    const first = assert(world:batchSpawn(3, {tag, ecs.ChildOf(parent)}))
     world:commit()
     local global = 0
     local addressed = 0
-    world:observe(0, tecs.ecs.OnDespawn, function(): nil
+    world:observe(0, OnDespawn, function(): nil
         global = global + 1
     end)
-    world:observe(first, tecs.ecs.OnDespawn, function(): nil
+    world:observe(first, OnDespawn, function(): nil
         addressed = addressed + 1
     end)
     world:batchDespawn(world:newQuery({include = {tag}}))
     world:commit()
     test.equal(global, 3)
     test.equal(addressed, 1)
-    test.assert(not world:hasObservers(first, tecs.ecs.OnDespawn))
-    test.equal(#world:relationshipSources(tecs.ecs.ChildOf, parent), 0)
+    test.assert(not world:hasObservers(first, OnDespawn))
+    test.equal(#world:relationshipSources(ecs.ChildOf, parent), 0)
     test.assert(world:isAlive(parent))
 end
 
 function suite.recyclesSlotsWithinOneCommitWithoutCancellingNewGenerations(): nil
-    const world = tecs.ecs.newWorld({maxEntities = 2})
+    const world = ecs.newWorld({maxEntities = 2})
     const old = world:spawn(tag)
     const survivor = world:spawn(position(1))
     world:commit()
@@ -424,17 +430,12 @@ function suite.recyclesSlotsWithinOneCommitWithoutCancellingNewGenerations(): ni
 end
 
 function suite.initializerQueryRegistrationDoesNotDoubleReportBatchRows(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     local entries = 0
     world:batchSpawn(4, {tag}, function(): nil
         world:newQuery({
             include = {tag},
-            onEntitiesAdded = function(
-                _candidate: tecs.ecs.Archetype,
-                _first: integer,
-                _last: integer,
-                count: integer
-            ): nil
+            onEntitiesAdded = function(_candidate: Archetype, _first: integer, _last: integer, count: integer): nil
                 entries = entries + count
             end
         })
@@ -444,7 +445,7 @@ function suite.initializerQueryRegistrationDoesNotDoubleReportBatchRows(): nil
 end
 
 function suite.deferredEntryNotificationsDoNotRepeatInitialQueryMembers(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     world:batchSpawn(4, {tag})
     world:commit()
     local entries = 0
@@ -457,7 +458,7 @@ function suite.deferredEntryNotificationsDoNotRepeatInitialQueryMembers(): nil
                 world:newQuery({
                     include = {position},
                     onEntitiesAdded = function(
-                        _candidate: tecs.ecs.Archetype,
+                        _candidate: Archetype,
                         _first: integer,
                         _last: integer,
                         count: integer
@@ -475,7 +476,7 @@ function suite.deferredEntryNotificationsDoNotRepeatInitialQueryMembers(): nil
 end
 
 function suite.recyclesExplicitIdGapsWithoutReissuingPendingReservations(): nil
-    const world = tecs.ecs.newWorld({maxEntities = 8})
+    const world = ecs.newWorld({maxEntities = 8})
     const reserved = world:spawn(tag)
     world:batchSpawnAt({8, 5, 3}, {tag})
     world:batchSpawn(4, {tag})
@@ -492,7 +493,7 @@ function suite.recyclesExplicitIdGapsWithoutReissuingPendingReservations(): nil
 end
 
 function suite.ordersQueuedWholeArchetypeChangesAndLaterScalarExceptions(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const first = assert(world:batchSpawn(8, {tag, position(3)}))
     world:commit()
     const selection = world:newQuery({include = {tag}})
@@ -514,7 +515,7 @@ function suite.ordersQueuedWholeArchetypeChangesAndLaterScalarExceptions(): nil
 end
 
 function suite.capturedBulkRowsExcludeEarlierQueuedSpawns(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const first = assert(world:batchSpawn(4, {tag}))
     world:commit()
     const later = assert(world:batchSpawn(3, {tag}))
@@ -524,7 +525,7 @@ function suite.capturedBulkRowsExcludeEarlierQueuedSpawns(): nil
             include = {tag}
         }),
         position,
-        function(candidate: tecs.ecs.Archetype, firstRow: integer, lastRow: integer): nil
+        function(candidate: Archetype, firstRow: integer, lastRow: integer): nil
             for row = firstRow, lastRow do
                 assert(candidate:getMut(position))[row].x = 42
                 written += 1
@@ -542,18 +543,13 @@ function suite.capturedBulkRowsExcludeEarlierQueuedSpawns(): nil
 end
 
 function suite.bulkRemovalObserversStageAgainstTheDestinationSignature(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const first = assert(world:batchSpawn(4, {tag, position(7)}))
     world:commit()
     local removed = 0
     world:newQuery({
         include = {position},
-        onEntitiesRemoved = function(
-            candidate: tecs.ecs.Archetype,
-            firstRow: integer,
-            lastRow: integer,
-            count: integer
-        ): nil
+        onEntitiesRemoved = function(candidate: Archetype, firstRow: integer, lastRow: integer, count: integer): nil
             removed += count
             for row = firstRow, lastRow do
                 world:set(candidate.entities[row], extra)
@@ -570,9 +566,9 @@ function suite.bulkRemovalObserversStageAgainstTheDestinationSignature(): nil
 end
 
 function suite.bulkDeletionOfTargetsStillCascadesAcrossArchetypes(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const parent = assert(world:batchSpawn(3, {tag}))
-    const child = assert(world:batchSpawn(3, {tecs.ecs.ChildOf(parent)}))
+    const child = assert(world:batchSpawn(3, {ecs.ChildOf(parent)}))
     world:commit()
     world:batchDespawn(world:newQuery({include = {tag}}))
     world:commit()
@@ -582,7 +578,7 @@ end
 
 function suite.batchDefaultsStillRunForEveryEntityAndEachReset(): nil
     local sequence = 0
-    const unique = tecs.ecs.newComponent(Point, {
+    const unique = ecs.newComponent(Point, {
         name = "test.BulkUniqueDefault",
         default = function(): Point
             sequence += 1
@@ -592,7 +588,7 @@ function suite.batchDefaultsStillRunForEveryEntityAndEachReset(): nil
             return new Point(x = 0)
         end
     })
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const first = assert(world:batchSpawn(5, {unique, tag}))
     world:commit()
     const before = sequence
@@ -604,7 +600,7 @@ end
 
 function suite.failingBulkDefaultsDoNotExchangeLiveSourceColumns(): nil
     local fail = false
-    const fragile = tecs.ecs.newComponent(Point, {
+    const fragile = ecs.newComponent(Point, {
         name = "test.BulkFailingDefault",
         construct = function(): Point
             return new Point(x = 0)
@@ -616,7 +612,7 @@ function suite.failingBulkDefaultsDoNotExchangeLiveSourceColumns(): nil
             return new Point(x = 0)
         end
     })
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const first = assert(world:batchSpawn(5, {tag, position(61)}))
     world:commit()
     fail = true

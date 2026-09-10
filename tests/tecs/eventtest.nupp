@@ -84,6 +84,7 @@ end
 function suite.removesEveryRegistrationOfACallback(): nil
     local value = world.new(2)
     local calls: integer = 0
+
     local function count(borrows _event: Message): nil
         calls = calls + 1
     end

@@ -82,15 +82,12 @@ local function secondsToSteps(borrows world: entityworld.World, clock: sequencet
     return steps
 end
 
-local function contextFor(
-    exclusive world: entityworld.World,
-    state: sequencetypes.WorldState
-): sequencetypes.ActionContext
+local function contextFor(state: sequencetypes.WorldState): sequencetypes.ActionContext
     local existing = state.context
     if existing ~= nil then
         return existing
     end
-    local created = new sequencetypes.ActionContext(world = world, handle = 0, owner = 0, args = {})
+    local created = new sequencetypes.ActionContext(handle = 0, owner = 0, args = {})
     state.context = created
 
     return created
@@ -317,7 +314,7 @@ export function run(
                 )
                 return remaining
             end
-            local context = contextFor(world, state)
+            local context = contextFor(state)
             context.handle = sequencecursors.packHandle(cursor.slot, cursor.generation)
             context.owner = cursor.owner
             context.args = resolveArgs(world, state, cursor, b)
@@ -553,6 +550,7 @@ local function stepActive(
         return
     end
     local active = clock.active
+
     local function walk(): nil
         while walkAt >= 1 do
             local cursor = active[walkAt]

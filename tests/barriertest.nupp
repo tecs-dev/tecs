@@ -1,10 +1,14 @@
+const ecs = require("tecs.ecs")
+const {type World} = require("tecs.ecs")
+const {type Scope} = require("nupp.tasks")
+
 local test = require("nupp.test")
 
-const tag = tecs.ecs.newTagComponent({name = "test.ConditionalBarrier"})
+const tag = ecs.newTagComponent({name = "test.ConditionalBarrier"})
 local suite = {}
 
 function suite.publishesSynchronouslyOutsideSystems(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const id = world:spawn(tag)
     test.assert(not world:isAlive(id))
     world:enqueueCommit()
@@ -16,7 +20,7 @@ function suite.publishesSynchronouslyOutsideSystems(): nil
 end
 
 function suite.coalescesRequestsUntilTheSystemReturns(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const query = world:newQuery({include = {tag}})
     local returned = false
     local notifications = 0
@@ -28,7 +32,7 @@ function suite.coalescesRequestsUntilTheSystemReturns(): nil
         end
     })
     world:addSystem({
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         commitAfter = true,
         run = function(): nil
             world:spawn(tag)
@@ -39,7 +43,7 @@ function suite.coalescesRequestsUntilTheSystemReturns(): nil
         end
     })
     world:addSystem({
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(): nil
             test.equal(query:count(), 1)
             test.equal(notifications, 1)
@@ -49,11 +53,11 @@ function suite.coalescesRequestsUntilTheSystemReturns(): nil
 end
 
 function suite.onlyIntroducesRequestedBoundaries(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const query = world:newQuery({include = {tag}})
     local request = false
     world:addSystem({
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(): nil
             world:spawn(tag)
             if request then
@@ -62,7 +66,7 @@ function suite.onlyIntroducesRequestedBoundaries(): nil
         end
     })
     world:addSystem({
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(): nil
             test.equal(query:count(), request and 2 or 0)
         end
@@ -75,11 +79,11 @@ end
 
 function suite.defersTrueAndFalsePredicateRequests(): nil
     for _, allowed in ipairs({true, false}) do
-        const world = tecs.ecs.newWorld()
+        const world = ecs.newWorld()
         const query = world:newQuery({include = {tag}})
         local bodyRan = false
         world:addSystem({
-            phase = tecs.ecs.phases.Update,
+            phase = ecs.phases.Update,
             runIf = function(): boolean
                 world:spawn(tag)
                 world:enqueueCommit()
@@ -93,7 +97,7 @@ function suite.defersTrueAndFalsePredicateRequests(): nil
             end
         })
         world:addSystem({
-            phase = tecs.ecs.phases.Update,
+            phase = ecs.phases.Update,
             run = function(): nil
                 test.equal(bodyRan, allowed)
                 test.equal(query:count(), 1)
@@ -104,13 +108,13 @@ function suite.defersTrueAndFalsePredicateRequests(): nil
 end
 
 function suite.keepsTheViewStableAcrossIterationAndSuspension(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const query = world:newQuery({include = {tag}})
     world:batchSpawn(3, {tag})
     world:commit()
     world:addSystem({
-        phase = tecs.ecs.phases.Update,
-        run = function(_dt: number, exclusive _world: tecs.ecs.World, borrows scope: nupp.tasks.Scope): nil
+        phase = ecs.phases.Update,
+        run = function(_dt: number, exclusive _world: World, borrows scope: Scope): nil
             local visited = 0
             for candidate in query:iter() do
                 for row = 1, #assert(candidate).entities do
@@ -131,7 +135,7 @@ function suite.keepsTheViewStableAcrossIterationAndSuspension(): nil
         end
     })
     world:addSystem({
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(): nil
             test.equal(query:count(), 0)
         end
@@ -140,9 +144,9 @@ function suite.keepsTheViewStableAcrossIterationAndSuspension(): nil
 end
 
 function suite.explicitCommitRemainsSynchronousInsideSystems(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     world:addSystem({
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(): nil
             const id = world:spawn(tag)
             world:enqueueCommit()
@@ -154,11 +158,11 @@ function suite.explicitCommitRemainsSynchronousInsideSystems(): nil
 end
 
 function suite.publishesChildWorkSettlingAfterDispatch(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     local finished = false
     world:addSystem({
-        phase = tecs.ecs.phases.Last,
-        run = function(_dt: number, exclusive _world: tecs.ecs.World, borrows scope: nupp.tasks.Scope): nil
+        phase = ecs.phases.Last,
+        run = function(_dt: number, exclusive _world: World, borrows scope: Scope): nil
             scope:spawn(function(): nil
                 const id = world:spawn(tag)
                 world:enqueueCommit()
@@ -172,11 +176,11 @@ function suite.publishesChildWorkSettlingAfterDispatch(): nil
 end
 
 function suite.clearsRequestsAfterAnAwaitedChildFailure(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const query = world:newQuery({include = {tag}})
     world:addSystem({
-        phase = tecs.ecs.phases.Update,
-        run = function(_dt: number, exclusive _world: tecs.ecs.World, borrows scope: nupp.tasks.Scope): nil
+        phase = ecs.phases.Update,
+        run = function(_dt: number, exclusive _world: World, borrows scope: Scope): nil
             world:spawn(tag)
             world:enqueueCommit()
             const child = scope:spawn(function(): nil
@@ -197,7 +201,7 @@ function suite.clearsRequestsAfterAnAwaitedChildFailure(): nil
 end
 
 function suite.drainsObserverRequestsWithoutRecursing(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     local inside = false
     local notifications = 0
     world:newQuery({
@@ -220,13 +224,13 @@ function suite.drainsObserverRequestsWithoutRecursing(): nil
     test.equal(notifications, 2)
 end
 
-local function dispatch(exclusive world: tecs.ecs.World, entry: string): nil
+local function dispatch(exclusive world: World, entry: string): nil
     if entry == "startup" then
         world:startup()
     elseif entry == "shutdown" then
         world:shutdown()
     elseif entry == "phase" then
-        world:runPhase(tecs.ecs.phases.Update)
+        world:runPhase(ecs.phases.Update)
     else
         world:update(0)
     end
@@ -235,16 +239,17 @@ end
 function suite.recoversEveryDispatchAfterBodyAndPredicateFailures(): nil
     for _, entry in ipairs({"startup", "shutdown", "phase", "update"}) do
         for _, predicateFailure in ipairs({false, true}) do
-            const world = tecs.ecs.newWorld()
+            const world = ecs.newWorld()
             const query = world:newQuery({include = {tag}})
-            local phase = tecs.ecs.phases.Update
+            local phase = ecs.phases.Update
             if entry == "startup" then
-                phase = tecs.ecs.phases.Startup
+                phase = ecs.phases.Startup
             elseif entry == "shutdown" then
-                phase = tecs.ecs.phases.Shutdown
+                phase = ecs.phases.Shutdown
             end
             local failed = false
             local consumed = false
+
             local function failOnce(): nil
                 if not failed then
                     failed = true
@@ -295,7 +300,7 @@ function suite.recoversEveryDispatchAfterBodyAndPredicateFailures(): nil
 end
 
 function suite.recoversAfterPublicationFailure(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     local failed = false
     world:newQuery({
         include = {tag},
@@ -309,7 +314,7 @@ function suite.recoversAfterPublicationFailure(): nil
         end
     })
     world:addSystem({
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(): nil
             world:spawn(tag)
             world:enqueueCommit()

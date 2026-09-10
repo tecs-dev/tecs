@@ -1,5 +1,9 @@
 module tecs.internal.views
 
+const {type Camera3D} = require("tecs.gfx.camera3d")
+const {type Options as Options2} = require("tecs.gfx.camera3d")
+const camera3d = require("tecs.gfx.camera3d")
+
 local meshes = require("tecs.gfx.meshes")
 local components = require("tecs.internal.components")
 local rendercomponents = require("tecs.internal.rendercomponents")
@@ -10,7 +14,7 @@ export record View
     camera2D: rendercomponents.Camera2D?
 
     --- Caller-writable. Selects a 3D camera, or nil to omit meshes.
-    camera3D: tecs.gfx.camera3d.Camera3D? = nil
+    camera3D: Camera3D? = nil
 
     --- Caller-writable. Controls mesh lighting in this viewport.
     lighting: meshes.Lighting
@@ -36,7 +40,7 @@ end
 
 export type Options = {
     camera2D: rendercomponents.Camera2D?,
-    camera3D: tecs.gfx.camera3d.Camera3D?,
+    camera3D: Camera3D?,
     lighting: meshes.Lighting?,
     x: number?,
     y: number?,
@@ -114,7 +118,7 @@ export const Component: components.TableComponent<View> = components.newComponen
             zoom: number,
             rotation: number
         }?
-        const c3 = saved.camera3D as tecs.gfx.camera3d.Options?
+        const c3 = saved.camera3D as Options2?
 
         return make({
             lighting = saved.lighting as meshes.Lighting?,
@@ -125,7 +129,7 @@ export const Component: components.TableComponent<View> = components.newComponen
             order = saved.order as integer,
             enabled = saved.enabled as boolean,
             camera2D = c2 ~= nil and new rendercomponents.Camera2D(c2.x, c2.y, c2.zoom, c2.rotation) or nil,
-            camera3D = c3 ~= nil and tecs.gfx.camera3d.newCamera3D(c3) or nil
+            camera3D = c3 ~= nil and camera3d.newCamera3D(c3) or nil
         })
     end,
     default = function(): View

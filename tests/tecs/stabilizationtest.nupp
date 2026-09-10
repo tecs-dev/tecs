@@ -1,3 +1,5 @@
+const io2 = require("nupp.io")
+
 local application = require("tecs.application")
 local assets = require("tecs.assets")
 local ecs = require("tecs.ecs")
@@ -5,7 +7,7 @@ local framepacket = require("tecs.internal.framepacket")
 local framepump = require("tecs.internal.framepump")
 local gfx = require("tecs.gfx")
 local host = require("tecs.host")
-local json = require("nupp.data.json")
+local json = require("nupp.codec.json")
 local mcp = require("tecs.mcp")
 local net = require("nupp.io.net")
 local physics = require("tecs.physics")
@@ -21,20 +23,30 @@ local function near(actual: number, expected: number): nil
     test.assert(math.abs(actual - expected) < 0.0001, actual, expected)
 end
 
+-- Walks a packet to the first instance, reading the counts that size every
+-- section between it and the header. Each tile-grid update is its slot word and
+-- 1,072 bytes of grid; every other stride is a packet constant.
 local function firstPose(packet: string): (number, number, number)
-    local reader = nupp.io.newScalarReader(packet)
+    local reader = io2.newScalarReader(packet)
     reader:skip(20)
     const graphBytes = reader:readUint32()
     reader:skip(4)
     const batches = reader:readUint32()
-    reader:skip(40)
+    reader:skip(36)
     const lights = reader:readUint32()
+    reader:skip(52)
+    const tiles = reader:readUint32()
+    reader:skip(4)
+    const frameTableBytes = reader:readUint32()
+    const particleBytes = reader:readUint32()
     reader:skip(
-        framepacket.HEADER_SIZE
-        - 76
+        frameTableBytes
+        + particleBytes
         + graphBytes
         + lights
         * framepacket.LIGHT_STRIDE
+        + tiles
+        * 1076
         + batches
         * framepacket.BATCH_STRIDE
     )
@@ -490,10 +502,15 @@ function suite.interpolatesLightPositionsWithoutChangingTheirSimulationPose(): n
     world:commit()
     world:update(0.5)
     const extractor = framepacket.new(world)
-    local reader = nupp.io.newScalarReader(extractor:packet(640, 480))
+    local reader = io2.newScalarReader(extractor:packet(640, 480))
     reader:skip(20)
     const graphBytes = reader:readUint32()
-    reader:skip(framepacket.HEADER_SIZE - 24 + graphBytes)
+    -- The frame table and the particle section stand between the header and the
+    -- graph, and the light table follows the graph.
+    reader:skip(108)
+    const frameTableBytes = reader:readUint32()
+    const particleBytes = reader:readUint32()
+    reader:skip(frameTableBytes + particleBytes + graphBytes)
     near(reader:readFloat32(), 10)
     near(reader:readFloat32(), 20)
     near(assert(world:get(light, ecs.Transform2D)).x, 20)

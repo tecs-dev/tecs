@@ -22,7 +22,7 @@ one.
 
 local ecs = require("tecs.ecs")
 local files = require("nupp.io.files")
-local json = require("nupp.data.json")
+local json = require("nupp.codec.json")
 local platformevents = require("tecs.platform.events")
 local platformwindow = require("tecs.platform.window")
 local time = require("nupp.time")
@@ -173,8 +173,10 @@ registry.register({
         end
         handle:seek(after, "set")
         -- The reader borrows the open file rather than owning it, so closing
-        -- the file is the one release this needs.
-        local window = handle:newReader():read(WINDOW) or ""
+        -- the file is the one release this needs. It is bound rather than
+        -- chained, because a temporary has no scope to be released at.
+        local reader = handle:newReader()
+        local window = reader:read(WINDOW) or ""
         handle:close()
 
         -- Only whole lines, so a cursor never lands mid-record and the next

@@ -101,6 +101,10 @@ bursts, R restarts and C clears. A pool can reserve up to four million slots
 its frame packet contains emitter records rather than individual particles.
 
 ]]
+const clips = require("tecs.gfx.clips")
+const io2 = require("nupp.io")
+const {type Archetype} = require("tecs.internal.archetype")
+const archetype = require("tecs.internal.archetype")
 
 local ecs = require("tecs.ecs")
 local sheet = require("tecs.gfx.sheet")
@@ -1380,7 +1384,7 @@ local clipAt: integer = -1
 local layerAt: integer = -1
 
 local function packedEffects(): string
-    const sheetVersion, clipVersion, layerVersion = sheet.revision(), tecs.gfx.clips.revision(), layers.revision()
+    const sheetVersion, clipVersion, layerVersion = sheet.revision(), clips.revision(), layers.revision()
     if sheetAt ~= sheetVersion or clipAt ~= clipVersion or layerAt ~= layerVersion then
         sheetAt, clipAt, layerAt = sheetVersion, clipVersion, layerVersion
         revision = revision + 1
@@ -1404,7 +1408,7 @@ local function packedEffects(): string
         effect._record[EFFECT.UNBOUNDED] = layers.isScreenSpace(layer) and 1 or 0
         local left, top, right, bottom = 0, 0, 65535, 65535
         if render.clip ~= nil and render.clip ~= 0 then
-            left, top, right, bottom = tecs.gfx.clips.regionOf(render.clip)
+            left, top, right, bottom = clips.regionOf(render.clip)
         end
         for lane, value in ipairs({left, top, right, bottom}) do
             effect._record[64 + lane] = math.max(0, math.min(65535, math.ceil(value - 0.5)))
@@ -1423,8 +1427,8 @@ local function packedEffects(): string
         end
     end
     assert(tail <= EFFECT_TABLE_FLOATS, "particle effect table is full")
-    local buffer = nupp.io.newBuffer()
-    local writer = nupp.io.newScalarWriter(buffer)
+    local buffer = io2.newBuffer()
+    local writer = io2.newScalarWriter(buffer)
     for _, value in ipairs(data) do
         writer:writeFloat32(nupp.math.f32.narrow(value))
     end
@@ -1499,13 +1503,10 @@ local function sync(exclusive pool: Pool, borrows world: ecs.World): nil
         holding.advancing = false
     end
     for candidate, count in pool.query:iter() do
-        const active = candidate as tecs.internal.archetype.Archetype
+        const active = candidate as Archetype
         const values = assert(active:get(ParticleEmitter))
         const transforms = assert(active:get(rendercomponents.Transform2DComponent))
-        const held = tecs.internal.archetype.has(
-            active,
-            ecs.Paused
-        ) or tecs.internal.archetype.has(active, ecs.Disabled)
+        const held = archetype.has(active, ecs.Paused) or archetype.has(active, ecs.Disabled)
         for row = 1, count as integer do
             const item = values[row]
             local holding = pool.holdings[item]
@@ -1622,8 +1623,8 @@ export function section(borrows world: ecs.World): string
     if pool.packedSerial == pool.serial and pool.packedRevision == revision then
         return pool.bytes
     end
-    local buffer = nupp.io.newBuffer()
-    local writer = nupp.io.newScalarWriter(buffer)
+    local buffer = io2.newBuffer()
+    local writer = io2.newScalarWriter(buffer)
     local count: integer = 0
     for _ in pairs(pool.holdings) do
         count = count + 1

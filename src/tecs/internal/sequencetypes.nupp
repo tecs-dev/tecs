@@ -153,9 +153,6 @@ end
 --- The context and its `args` belong to the sequencer, which reuses them for
 --- the next call. Read them rather than keeping or modifying them.
 export record ActionContext
-    --- Read-only. Names the world this playback belongs to.
-    world: entityworld.World
-
     --- Read-only. Identifies the playback, for `status` or `cancel` from
     --- inside an action.
     handle: Handle
@@ -174,7 +171,27 @@ export record ActionContext
     --- and `bind` instead of reading this.
     cursor: Cursor?
 
-    entity: function(borrows self: ActionContext, name: string): integer?
+    --- Resolves a named binding to a live entity.
+    ---
+    --- The world is a parameter rather than a field of this record, because the
+    --- sequencer reuses one context across calls and may not keep a view of the
+    --- world the running tick borrows. An action already has the world it ran
+    --- under.
+    --- @param self the context the running action received
+    --- @param world the world the running action received
+    --- @param name the binding name supplied through `PlayOptions.bindings`
+    --- @return the entity id, or nil when the binding is missing or its entity
+    ---     is no longer alive
+    entity: function(borrows self: ActionContext, borrows world: entityworld.World, name: string): integer?
+
+    --- Names an entity for the steps that follow, so an action that creates one
+    --- can hand it on.
+    ---
+    --- Bindings travel with the playback and survive a snapshot. Passing nil
+    --- forgets the name.
+    --- @param self the context the running action received
+    --- @param name the binding name later steps resolve
+    --- @param entity the entity id to bind, or nil to forget the name
     bind: function(exclusive self: ActionContext, name: string, entity: integer?): nil
 end
 
@@ -521,12 +538,7 @@ export function clockById(clocks: Clocks, id: ClockId): Clock
     end
 end
 
---- Resolves a named binding to a live entity.
---- @param self the context the running action received
---- @param name the binding name supplied through `PlayOptions.bindings`
---- @return the entity id, or nil when the binding is missing or its entity is
----     no longer alive
-function ActionContext.entity(borrows self: ActionContext, name: string): integer?
+function ActionContext.entity(borrows self: ActionContext, borrows world: entityworld.World, name: string): integer?
     local cursor = self.cursor
     if cursor == nil then
         return nil
@@ -536,21 +548,13 @@ function ActionContext.entity(borrows self: ActionContext, name: string): intege
         return nil
     end
     local id = bindings[name]
-    if id == nil or not self.world:isAlive(id) then
+    if id == nil or not world:isAlive(id) then
         return nil
     end
 
     return id
 end
 
---- Names an entity for the steps that follow, so an action that creates one
---- can hand it on.
----
---- Bindings travel with the playback and survive a snapshot. Passing nil
---- forgets the name.
---- @param self the context the running action received
---- @param name the binding name later steps resolve
---- @param entity the entity id to bind, or nil to forget the name
 function ActionContext.bind(exclusive self: ActionContext, name: string, entity: integer?): nil
     local cursor = self.cursor
     if cursor == nil then

@@ -79,7 +79,7 @@ assembler and loads a prebuilt pack, so a changed material body is a rebuild.
 ]]
 
 local components = require("tecs.internal.components")
-local files = nupp.io.files
+local files = require("nupp.io.files")
 
 --- Takes id zero, because an instance with no `Material` writes a zero.
 ---

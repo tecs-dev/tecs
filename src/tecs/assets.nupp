@@ -237,8 +237,8 @@ export record Assets
     --- Engine-owned. Reports whether this loader still accepts requests.
     private open: boolean
 
-    request: function(exclusive self: Assets, kind: Kind, path: string): (Handle?, string?)
-    reload: function(exclusive self: Assets, kind: Kind, handle: Handle): (boolean, string?)
+    request: function(self: Assets, kind: Kind, path: string): (Handle?, string?)
+    reload: function(self: Assets, kind: Kind, handle: Handle): (boolean, string?)
     drain: function(exclusive self: Assets): (boolean, string?)
     pending: function(borrows self: Assets): integer
     resident: function(borrows self: Assets): integer
@@ -527,6 +527,8 @@ end
 --- requests for one kind and path share the acquisition and receive holds on one
 --- handle; a request made after the first settles acquires again.
 ---
+--- The receiver is plain rather than `exclusive`, because the entry this
+--- registers names the loader it belongs to and outlives the call.
 --- @param self the running loader
 --- @param kind how this class of asset is acquired and freed
 --- @param path the asset path, passed to the kind unchanged
@@ -534,7 +536,7 @@ end
 ---   ownership
 --- @return a failure reason, when the asset could not be acquired
 --- @raises when the path is empty or the loader has shut down
-function Assets.request(exclusive self: Assets, kind: Kind, path: string): (Handle?, string?)
+function Assets.request(self: Assets, kind: Kind, path: string): (Handle?, string?)
     if not self.open then
         error("assets.request: the loader has shut down", 2)
     end
@@ -581,6 +583,8 @@ end
 --- is stale. The displaced payload is freed through the kind once the swap has
 --- happened. A failed acquisition changes nothing and reports why.
 ---
+--- The receiver is plain rather than `exclusive`, because the replacement entry
+--- names the loader it belongs to and outlives the call.
 --- @param self the running loader
 --- @param kind how this class of asset is acquired and freed
 --- @param handle the resident handle to replace in place
@@ -588,7 +592,7 @@ end
 --- @return a failure reason, when the acquisition failed
 --- @raises when the loader has shut down, the handle is released, or the handle
 ---   belongs to another loader or another kind
-function Assets.reload(exclusive self: Assets, kind: Kind, handle: Handle): (boolean, string?)
+function Assets.reload(self: Assets, kind: Kind, handle: Handle): (boolean, string?)
     if not self.open then
         error("assets.reload: the loader has shut down", 2)
     end

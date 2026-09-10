@@ -1,3 +1,7 @@
+const {type SampleSession} = require("nupp.profile")
+const profile = require("nupp.profile")
+const io2 = require("nupp.io")
+
 --- Steady-state shape field, simulated and extracted.
 ---
 --- The scene is copied from `bench/shapes.tl` so the two are talking about the
@@ -127,11 +131,11 @@ const extract = harness.newStage("extract")
 const frame = harness.newStage("frame")
 
 local packet = ""
-local profiling: nupp.profile.SampleSession? = nil
+local profiling: SampleSession? = nil
 const profilePath = harness.text("BENCH_PROFILE", "")
 for index = 1, WARMUP + FRAMES do
     if index == WARMUP + 1 and profilePath ~= "" then
-        profiling = nupp.profile.sample({intervalMs = 1})
+        profiling = profile.sample({intervalMs = 1})
     end
     const started = time.now()
     world:update(STEP)
@@ -149,7 +153,7 @@ if profiling ~= nil then
     profiling:stop(profilePath)
 end
 const bytes = #packet
-local reader = nupp.io.newScalarReader(packet:sub(37, 40))
+local reader = io2.newScalarReader(packet:sub(37, 40))
 const instances = reader:readUint32() as integer
 reader:drop()
 assert(instances == COUNT, "benchmark packet lost instances")

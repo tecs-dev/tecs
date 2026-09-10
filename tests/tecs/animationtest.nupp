@@ -1,3 +1,6 @@
+const framepacket = require("tecs.internal.framepacket")
+const {type Archetype} = require("tecs.internal.archetype")
+
 local frametable = require("tecs.gfx.frametable")
 local animation = require("tecs.gfx.animation")
 local archetype = require("tecs.internal.archetype")
@@ -458,11 +461,11 @@ function suite.retainsAnUnchangedAnimatedCrowdAcrossFrames(): nil
     world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), source:sprite(), animation.of(source), gfx.Renderable2D)
     world:commit()
     advance(world, 0.05)
-    const extractor = tecs.internal.framepacket.new(world)
+    const extractor = framepacket.new(world)
     const first = extractor:frame(320, 240, 0)
     const revision = extractor:revision()
     const query = world:newQuery({include = {animation.AnimationComponent}})
-    local firstArchetype: tecs.internal.archetype.Archetype? = nil
+    local firstArchetype: Archetype? = nil
     for candidate in query:iter() do
         firstArchetype = candidate
         break

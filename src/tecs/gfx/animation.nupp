@@ -368,6 +368,7 @@ local record EncodedRun
     sheets: integer = -1
     timestep: number = -1
 end
+
 local function ticksOf(borrows sprite: rendercomponents.Sprite, clock: number): number
     if sprite.u1 == 0 then
         return sprite.v0

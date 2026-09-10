@@ -1,12 +1,21 @@
 module particles
 
-local function install(exclusive app: tecs.application.Application): nil
+const {type Application} = require("tecs.application")
+const gfx = require("tecs.gfx")
+const layers = require("tecs.gfx.layers")
+const lighting = require("tecs.gfx.lighting")
+const particles2 = require("tecs.gfx.particles")
+const ecs = require("tecs.ecs")
+const {type Session} = require("tecs.host")
+const host = require("tecs.host")
+
+local function install(exclusive app: Application): nil
     const world, input = app.world, app.input
-    world:spawn(tecs.gfx.View({camera2D = tecs.gfx.newCamera2D()}))
-    tecs.gfx.layers.configure(1, {sort = "z", unlit = true})
-    tecs.gfx.lighting.setBloom({threshold = 0.5, knee = 0.15, intensity = 0.7})
-    tecs.gfx.particles.plugin(world, {capacity = 32768})
-    const effect = tecs.gfx.particles.newEffect({
+    world:spawn(gfx.View({camera2D = gfx.newCamera2D()}))
+    layers.configure(1, {sort = "z", unlit = true})
+    lighting.setBloom({threshold = 0.5, knee = 0.15, intensity = 0.7})
+    particles2.plugin(world, {capacity = 32768})
+    const effect = particles2.newEffect({
         name = "example://embers",
         capacity = 16384,
         schedule = {rate = 2400},
@@ -19,30 +28,24 @@ local function install(exclusive app: tecs.application.Application): nil
         },
         update = {
             drag = 0.35,
-            size = tecs.gfx.particles.newCurve({
+            size = particles2.newCurve({
                 {0, 0.2},
                 {0.1, 1},
                 {1, 0}
             }),
-            color = tecs.gfx.particles.newGradient({{0, "#ffffbfff"}, {0.4, "#ff792aff"}, {1, "#e62a0800"}})
+            color = particles2.newGradient({{0, "#ffffbfff"}, {0.4, "#ff792aff"}, {1, "#e62a0800"}})
         },
         render = {blend = "additive", layer = 1},
     })
-    const emitter = world:spawn(
-        tecs.ecs.Transform2D(0, 120),
-        tecs.gfx.particles.ParticleEmitter({
-            effect = effect,
-            seed = 17
-        })
-    )
+    const emitter = world:spawn(ecs.Transform2D(0, 120), particles2.ParticleEmitter({effect = effect, seed = 17}))
     local elapsed = 0.0
     world:addSystem({
         name = "example.ParticleControls",
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(dt: number): nil
             elapsed = elapsed + dt
-            assert(world:getMut(emitter, tecs.ecs.Transform2D)).x = math.sin(elapsed * 0.8) * 160
-            const field = assert(world:get(emitter, tecs.gfx.particles.ParticleEmitter))
+            assert(world:getMut(emitter, ecs.Transform2D)).x = math.sin(elapsed * 0.8) * 160
+            const field = assert(world:get(emitter, particles2.ParticleEmitter))
             if input:keyPressed("Space") then
                 if field.state == "paused" then
                     field:play()
@@ -71,19 +74,6 @@ end
 --- @param debug enable guarded failures
 --- @param maxFrames optional bounded run
 --- @return native host session
-export function create(
-    title: string?,
-    width: integer?,
-    height: integer?,
-    debug: boolean?,
-    maxFrames: integer?
-): tecs.host.Session
-    return tecs.host.createWithPlugin(
-        install,
-        title or "Tecs GPU particles",
-        width or 960,
-        height or 640,
-        debug,
-        maxFrames
-    )
+export function create(title: string?, width: integer?, height: integer?, debug: boolean?, maxFrames: integer?): Session
+    return host.createWithPlugin(install, title or "Tecs GPU particles", width or 960, height or 640, debug, maxFrames)
 end

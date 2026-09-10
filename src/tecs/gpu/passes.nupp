@@ -62,6 +62,7 @@ Each explicit `tecs.gfx.View` runs this graph at its viewport resolution.
 The renderer composites those results in view order. With no explicit views,
 the active camera draws one full-frame view.
 ]]
+const io2 = require("nupp.io")
 
 --- Names the shared depth attachment, which is not a declarable target.
 ---
@@ -526,6 +527,7 @@ export function section(): string
 
     local names: {string} = {}
     local nameIndex: {[string]: integer} = {}
+
     local function intern(value: string): integer
         const existing = nameIndex[value]
         if existing ~= nil then
@@ -565,8 +567,8 @@ export function section(): string
         blobLength = blobLength + padding
     end
 
-    local buffer = nupp.io.newBuffer()
-    local writer = nupp.io.newScalarWriter(buffer)
+    local buffer = io2.newBuffer()
+    local writer = io2.newScalarWriter(buffer)
     writer:writeUint32(wrap(#names)):writeUint32(wrap(blobLength))
     writer:writeBytes(table.concat(blobParts))
 

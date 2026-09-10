@@ -1,5 +1,19 @@
 module shadows3d
 
+const {type MeshInput} = require("tecs.gfx.models")
+const {type BoundsInput} = require("tecs.gfx.models")
+const models = require("tecs.gfx.models")
+const {type MeshOptions} = require("tecs.gfx.models")
+const {type Application} = require("tecs.application")
+const gfx = require("tecs.gfx")
+const meshes = require("tecs.gfx.meshes")
+const flycamera3d = require("tecs.gfx.flycamera3d")
+const ecs = require("tecs.ecs")
+const files = require("tecs.files")
+const lighting2 = require("tecs.gfx.lighting")
+const {type Session} = require("tecs.host")
+const host = require("tecs.host")
+
 local CUBE_POSITIONS: {
     {number}
 } = {{-1, -1, -1}, {1, -1, -1}, {1, 1, -1}, {-1, 1, -1}, {-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1},}
@@ -7,7 +21,7 @@ local CUBE_INDICES: {
     integer
 } = {0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5,}
 
-local function cube(): tecs.gfx.models.MeshInput, tecs.gfx.models.BoundsInput
+local function cube(): MeshInput, BoundsInput
     local vertices: {number} = {}
     for _, position in ipairs(CUBE_POSITIONS) do
         local x, y, z = position[1], position[2], position[3]
@@ -21,10 +35,10 @@ local function cube(): tecs.gfx.models.MeshInput, tecs.gfx.models.BoundsInput
         vertices[base + 11], vertices[base + 12] = x * 0.5 + 0.5, z * 0.5 + 0.5
     end
 
-    return tecs.gfx.models.newMesh({name = "example://shadow-cube", vertices = vertices, indices = CUBE_INDICES})
+    return models.newMesh({name = "example://shadow-cube", vertices = vertices, indices = CUBE_INDICES})
 end
 
-local function ground(): tecs.gfx.models.MeshOptions
+local function ground(): MeshOptions
     return {
         name = "example://shadow-ground",
         vertices = {
@@ -81,36 +95,36 @@ local function ground(): tecs.gfx.models.MeshOptions
     }
 end
 
-local function install(exclusive app: tecs.application.Application): nil
+local function install(exclusive app: Application): nil
     const world, input = app.world, app.input
-    const camera = tecs.gfx.newCamera3D()
-    const lighting = tecs.gfx.meshes.newLighting()
-    world:spawn(tecs.gfx.View({camera3D = camera, lighting = lighting}))
+    const camera = gfx.newCamera3D()
+    const lighting = meshes.newLighting()
+    world:spawn(gfx.View({camera3D = camera, lighting = lighting}))
     camera.y, camera.z = 3.2, 8
     camera.rotationX = math.sin(math.rad(-13) * 0.5)
     camera.rotationW = math.cos(math.rad(-13) * 0.5)
     camera.verticalFov = math.rad(58)
     camera.near, camera.far = 0.1, 140
 
-    local controller = tecs.gfx.flycamera3d.new(input, app.window, camera, {moveSpeed = 9, sprintMultiplier = 4})
+    local controller = flycamera3d.new(input, app.window, camera, {moveSpeed = 9, sprintMultiplier = 4})
     world:addSystem({
         name = "example.ShadowFlyCamera",
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(dt: number): nil
             controller:update(dt)
         end,
     })
 
-    local floorMesh, floorBounds = tecs.gfx.models.newMesh(ground())
+    local floorMesh, floorBounds = models.newMesh(ground())
     local cubeMesh, cubeBounds = cube()
-    local floorMaterial = tecs.gfx.models.newMaterial({
+    local floorMaterial = models.newMaterial({
         name = "example://shadow-floor",
         baseR = 0.34,
         baseG = 0.38,
         baseB = 0.42,
         roughness = 0.72,
     })
-    local pillarMaterial = tecs.gfx.models.newMaterial({
+    local pillarMaterial = models.newMaterial({
         name = "example://shadow-pillars",
         baseR = 0.76,
         baseG = 0.42,
@@ -118,19 +132,12 @@ local function install(exclusive app: tecs.application.Application): nil
         metallic = 0.08,
         roughness = 0.4,
     })
-    world:spawn(
-        tecs.ecs.Transform3D(),
-        floorMesh,
-        floorBounds,
-        floorMaterial,
-        tecs.gfx.Tint(1, 1, 1, 1),
-        tecs.gfx.Renderable3D
-    )
+    world:spawn(ecs.Transform3D(), floorMesh, floorBounds, floorMaterial, gfx.Tint(1, 1, 1, 1), gfx.Renderable3D)
 
     local depths: {number} = {-3, -10, -22, -40, -64, -86}
     for index, z in ipairs(depths) do
         world:spawn(
-            tecs.ecs.Transform3D(
+            ecs.Transform3D(
                 index % 2 == 0 and 2.8 or -2.8,
                 1.5 + index * 0.08,
                 z,
@@ -145,29 +152,18 @@ local function install(exclusive app: tecs.application.Application): nil
             cubeMesh,
             cubeBounds,
             pillarMaterial,
-            tecs.gfx.Tint(1, 1, 1, 1),
-            tecs.gfx.Renderable3D
+            gfx.Tint(1, 1, 1, 1),
+            gfx.Renderable3D
         )
     end
 
     world:spawn(
-        tecs.ecs.Transform3D(-3.2, 3.4, -8, 0, 0, 0, 1, 1, 1, 1),
-        tecs.gfx.PointLight3D(11, 1.0, 0.28, 0.12, 45, tecs.gfx.LIGHT_CASTS_SHADOWS)
+        ecs.Transform3D(-3.2, 3.4, -8, 0, 0, 0, 1, 1, 1, 1),
+        gfx.PointLight3D(11, 1.0, 0.28, 0.12, 45, gfx.LIGHT_CASTS_SHADOWS)
     )
     world:spawn(
-        tecs.ecs.Transform3D(
-            3.2,
-            6.5,
-            -23,
-            math.sin(math.rad(-55) * 0.5),
-            0,
-            0,
-            math.cos(math.rad(-55) * 0.5),
-            1,
-            1,
-            1
-        ),
-        tecs.gfx.SpotLight3D(18, math.rad(18), math.rad(30), 0.18, 0.5, 1.0, 70, tecs.gfx.LIGHT_CASTS_SHADOWS)
+        ecs.Transform3D(3.2, 6.5, -23, math.sin(math.rad(-55) * 0.5), 0, 0, math.cos(math.rad(-55) * 0.5), 1, 1, 1),
+        gfx.SpotLight3D(18, math.rad(18), math.rad(30), 0.18, 0.5, 1.0, 70, gfx.LIGHT_CASTS_SHADOWS)
     )
 
     local faceNames: {
@@ -175,9 +171,9 @@ local function install(exclusive app: tecs.application.Application): nil
     } = {"positive-x.svg", "negative-x.svg", "positive-y.svg", "negative-y.svg", "positive-z.svg", "negative-z.svg",}
     local faces: {string} = {}
     for index, face in ipairs(faceNames) do
-        faces[index] = tecs.files.assetPath("environment/ibl-demo/" .. face)
+        faces[index] = files.assetPath("environment/ibl-demo/" .. face)
     end
-    lighting.environment = assert(tecs.gfx.models.loadEnvironment("example://shadow-environment", faces))
+    lighting.environment = assert(models.loadEnvironment("example://shadow-environment", faces))
     lighting.ambient = 0
     lighting.probe = {
         0.12,
@@ -206,7 +202,7 @@ local function install(exclusive app: tecs.application.Application): nil
     lighting.shadowDistance, lighting.shadowSplitLambda, lighting.shadowSplitBlend = 100, 0.72, 0.12
     lighting.shadowDepthPadding, lighting.shadowStrength = 24, 0.92
     lighting.directionX, lighting.directionY, lighting.directionZ, lighting.intensity = -0.55, -1, -0.35, 4
-    tecs.gfx.lighting.setBloom({threshold = 0.8, knee = 0.2, intensity = 0.38})
+    lighting2.setBloom({threshold = 0.8, knee = 0.2, intensity = 0.38})
 
     print("shadows3d: warm point and cool spot shadows join three directional cascades")
     print("shadows3d: click to look; WASD moves, Q/E changes height, Shift sprints, Tab releases")
@@ -219,14 +215,8 @@ end
 --- @param debug guarded failures
 --- @param maxFrames optional frame limit
 --- @return native host session
-export function create(
-    title: string?,
-    width: integer?,
-    height: integer?,
-    debug: boolean?,
-    maxFrames: integer?
-): tecs.host.Session
-    return tecs.host.createWithPlugin(
+export function create(title: string?, width: integer?, height: integer?, debug: boolean?, maxFrames: integer?): Session
+    return host.createWithPlugin(
         install,
         title or "Tecs directional and local shadows",
         width or 1280,

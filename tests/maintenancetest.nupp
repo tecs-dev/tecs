@@ -1,12 +1,16 @@
+const ecs = require("tecs.ecs")
+const {type World} = require("tecs.ecs")
+const {type Archetype} = require("tecs.ecs")
+
 local test = require("nupp.test")
-const tag = tecs.ecs.newTagComponent({name = "test.MaintenanceTag"})
-const score = tecs.ecs.newScalarComponent({name = "test.MaintenanceScore", kind = "number"})
-const follows = tecs.ecs.newRelationship({name = "test.MaintenanceFollows", reverseIndex = true})
+const tag = ecs.newTagComponent({name = "test.MaintenanceTag"})
+const score = ecs.newScalarComponent({name = "test.MaintenanceScore", kind = "number"})
+const follows = ecs.newRelationship({name = "test.MaintenanceFollows", reverseIndex = true})
 local suite = {}
 
-local function containing(borrows world: tecs.ecs.World, id: integer): tecs.ecs.Archetype
-    local found: tecs.ecs.Archetype? = nil
-    world:forEachArchetype(function(candidate: tecs.ecs.Archetype): nil
+local function containing(borrows world: World, id: integer): Archetype
+    local found: Archetype? = nil
+    world:forEachArchetype(function(candidate: Archetype): nil
         for row = 1, #candidate.entities do
             if candidate.entities[row] == id then
                 found = candidate
@@ -18,7 +22,7 @@ local function containing(borrows world: tecs.ecs.World, id: integer): tecs.ecs.
 end
 
 function suite.prunesDeadTargetsWithoutRenumberingSurvivors(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const parent = world:spawn()
     const child = world:spawn(follows(parent))
     const survivor = world:spawn(tag, score(42))
@@ -38,7 +42,7 @@ function suite.prunesDeadTargetsWithoutRenumberingSurvivors(): nil
     test.assert(containing(world, survivor) == stable)
     test.equal(world:get(survivor, score), 42)
     local sentinel = false
-    world:forEachArchetype(function(candidate: tecs.ecs.Archetype): nil
+    world:forEachArchetype(function(candidate: Archetype): nil
         if candidate.id == 1 then
             sentinel = true
         end
@@ -47,10 +51,10 @@ function suite.prunesDeadTargetsWithoutRenumberingSurvivors(): nil
 end
 
 function suite.releasesPrunedQueryGroupsAndReusesFreedIds(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const selection = world:newQuery({
         include = {follows},
-        groupBy = function(candidate: tecs.ecs.Archetype): integer
+        groupBy = function(candidate: Archetype): integer
             return candidate.id
         end
     })
@@ -76,7 +80,7 @@ function suite.releasesPrunedQueryGroupsAndReusesFreedIds(): nil
 end
 
 function suite.rebuildsShrunkenColumnsWithoutChangingValuesOrDirtyFlags(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const first = assert(world:batchSpawn(100, {tag, score(7)}))
     world:commit()
     const candidate = containing(world, first)
@@ -102,7 +106,7 @@ function suite.rebuildsShrunkenColumnsWithoutChangingValuesOrDirtyFlags(): nil
 end
 
 function suite.retainsOrdinaryEmptyArchetypesAndWorldControls(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const id = world:spawn(tag)
     world:commit()
     const candidate = containing(world, id)
@@ -110,7 +114,7 @@ function suite.retainsOrdinaryEmptyArchetypesAndWorldControls(): nil
     local runs = 0
     world:addSystem({
         name = "maintenance.control",
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(): nil
             runs = runs + 1
         end
@@ -127,9 +131,9 @@ function suite.retainsOrdinaryEmptyArchetypesAndWorldControls(): nil
 end
 
 function suite.iteratesDirtyAndDisabledArchetypesIndependently(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const first = world:spawn(tag)
-    const second = world:spawn(score(3), tecs.ecs.Disabled)
+    const second = world:spawn(score(3), ecs.Disabled)
     world:commit()
     const one = world:dirtyArchetypes()
     const two = world:dirtyArchetypes()
@@ -137,7 +141,7 @@ function suite.iteratesDirtyAndDisabledArchetypesIndependently(): nil
     test.assert(one() == two())
     test.assert(one() == nil and two() == nil)
     local entities = 0
-    world:forEachArchetype(function(candidate: tecs.ecs.Archetype): nil
+    world:forEachArchetype(function(candidate: Archetype): nil
         entities = entities + #candidate.entities
     end)
     test.equal(entities, 2)
@@ -157,7 +161,7 @@ function suite.iteratesDirtyAndDisabledArchetypesIndependently(): nil
 end
 
 function suite.rejectsNonQuietMaintenanceAndCancelsQueuedInitializersOnClear(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     local callbacks = 0
     world:batchSpawn(3, {tag}, function(): nil
         callbacks = callbacks + 1
@@ -173,7 +177,7 @@ function suite.rejectsNonQuietMaintenanceAndCancelsQueuedInitializersOnClear(): 
     test.equal(callbacks, 0)
     world:addSystem({
         name = "badMaintenance",
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(): nil
             world:compact()
         end
@@ -190,7 +194,7 @@ function suite.rejectsNonQuietMaintenanceAndCancelsQueuedInitializersOnClear(): 
 end
 
 function suite.restoresSnapshotsAfterDenseArchetypePruning(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const target = world:spawn()
     const child = world:spawn(follows(target), score(19))
     world:commit()

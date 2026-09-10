@@ -1,5 +1,5 @@
 local ecs = require("tecs.ecs")
-local json = require("nupp.data.json")
+local json = require("nupp.codec.json")
 local mcp = require("tecs.mcp")
 local test = require("nupp.test")
 

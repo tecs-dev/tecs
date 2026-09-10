@@ -1,8 +1,12 @@
+const io2 = require("nupp.io")
+const clips = require("tecs.gfx.clips")
+
 local test = require("nupp.test")
 local particles = require("tecs.gfx.particles")
 local ecs = require("tecs.ecs")
 local suite = {}
 local sequence: integer = 0
+
 local function effect(capacity: integer?): particles.Effect
     sequence = sequence + 1
     return particles.newEffect({
@@ -24,7 +28,7 @@ local function effect(capacity: integer?): particles.Effect
 end
 
 local function number(bytes: string, offset: integer): number
-    local reader = nupp.io.newScalarReader(bytes)
+    local reader = io2.newScalarReader(bytes)
     reader:skip(offset)
     const value = reader:readFloat32()
     reader:drop()
@@ -33,7 +37,7 @@ local function number(bytes: string, offset: integer): number
 end
 
 local function word(bytes: string, offset: integer): integer
-    local reader = nupp.io.newScalarReader(bytes)
+    local reader = io2.newScalarReader(bytes)
     reader:skip(offset)
     const value = reader:readUint32() as integer
     reader:drop()
@@ -174,21 +178,21 @@ function suite.burstOnlyEffectsFinishAndClipsRefreshWithoutAnEmitterWrite(): nil
     particles.plugin(world)
     const id = world:spawn(ecs.Transform2D(123, 45), particles.ParticleEmitter({effect = built}))
     world:commit()
-    tecs.gfx.clips.setRegion(7, {x = 10, y = 20, width = 90, height = 70})
+    clips.setRegion(7, {x = 10, y = 20, width = 90, height = 70})
     world:update(1 / 60)
     const first = particles.section(world)
     const offset = emitterOffset(first)
     test.equal(number(first, offset + 8 * 4), 123)
     test.equal(number(first, offset + 9 * 4), 45)
     test.equal(number(first, 40 + ((built.index - 1) * 69 + 65) * 4), 10)
-    tecs.gfx.clips.setRegion(7, {x = 30, y = 20, width = 70, height = 70})
+    clips.setRegion(7, {x = 30, y = 20, width = 70, height = 70})
     const second = particles.section(world)
     test.equal(number(second, 40 + ((built.index - 1) * 69 + 65) * 4), 30)
     for _ = 1, 20 do
         world:update(1 / 60)
     end
     test.assert(assert(world:get(id, particles.ParticleEmitter)):finished())
-    tecs.gfx.clips.clearRegion(7)
+    clips.clearRegion(7)
 end
 
 return suite

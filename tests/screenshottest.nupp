@@ -1,3 +1,5 @@
+const files = require("nupp.io.files")
+
 local test = require("nupp.test")
 local screenshot = require("tecs.gfx.screenshot")
 local suite = {}
@@ -26,10 +28,10 @@ function suite.completedCapturesReturnPixelsAndPngAndSaveThem(): nil
     test.equal(height, 1)
     test.equal(reason, nil)
     test.equal(screenshot.encode(capture), "png bytes")
-    local file = assert(nupp.io.files.createTemporaryFile())
+    local file = assert(files.createTemporaryFile())
     const path = file:toString()
     test.equal(screenshot.save(capture, path), true)
-    test.equal(nupp.io.files.read(path), "png bytes")
+    test.equal(files.read(path), "png bytes")
 end
 
 function suite.shutdownCompletesPendingRequestsWithCancellation(): nil

@@ -76,7 +76,7 @@ field. `nupp task ex-uistandalone --width 960 --height 640` runs the centered pa
 | Audio, gamepads, physics                               | Rust services behind Tecs contracts |
 | Tasks, suspension, files, bytes, JSON, networking, log | The Nupp standard runtime           |
 
-Two rules follow from that table and are worth stating separately.
+Three rules follow from that table and are worth stating separately.
 
 **Where Nupp provides a facility, Tecs uses it directly and wraps nothing.** A
 wrapper costs a file, a name and a second place to look, and it earns that back
@@ -84,6 +84,19 @@ only by adding behavior Nupp does not have. The logging module is the worked
 example: it existed to add a per-name threshold, seven modules then reached past
 it to `nupp.log` anyway, and the threshold it existed for stopped reaching them.
 It is gone, and every module names its logger to `nupp.log.named`.
+
+**`exclusive` is a call-scoped borrow, so a function that keeps its receiver
+does not take one.** Almost every engine function declares `exclusive world:
+World` or `exclusive self`, which is what stops a caller holding a second view
+across a mutation. A few build a record that outlives the call and holds the
+receiver inside it: the world's bundles, `Input`'s gamepads, the asset loader's
+entries, a model's instances, the frame extractors, the frame pump's parked
+task and the debug server's suspension handler. A borrow may not be stored, so
+those receivers are plain, and the record and the receiver are aliased and
+collected together the way any two Lua tables are. The sequencer's action
+context is the case where no mode worked: an action needs the world exclusively
+while its context is live, so the context holds no world at all and
+`ActionContext.entity` takes the one its action already received.
 
 **Maintained Rust crates own published formats and coarse CPU algorithms, and
 no crate is called per entity or per draw during a frame.** `symphonia`
@@ -356,13 +369,14 @@ the reasoning is here because the absence is what a reader will notice.
 `tecs.io.filters` is dropped rather than ported. Its deflate, inflate, hex and
 iconv transforms had one named consumer, HTTP response compression, and
 `nupp.io.http` decompresses natively; every format Tecs owns is uncompressed,
-and what those formats do need is already `nupp.data`: base64, CRC-32, SHA-256,
-FNV-1a and UTF-8 validation. The two alternatives lose on cost. A Rust service
-would be a native library with an ABI, a packaging entry and a per-platform
-build for a facility nothing calls. A Nupp implementation would put a DEFLATE
-codec in a game engine's repository, maintained here, competing with the one
-every language runtime already ships. A general facility Nupp supplies does not
-get a Tecs copy, and a general facility Nupp lacks is a request to Nupp.
+and what those formats do need the Nupp standard library already has: base64,
+CRC-32, SHA-256, FNV-1a and UTF-8 validation. The two alternatives lose on
+cost. A Rust service would be a native library with an ABI, a packaging entry
+and a per-platform build for a facility nothing calls. A Nupp implementation
+would put a DEFLATE codec in a game engine's repository, maintained here,
+competing with the one every language runtime already ships. A general facility
+Nupp supplies does not get a Tecs copy, and a general facility Nupp lacks is a
+request to Nupp.
 
 `tecs.watch` polls `nupp.io.files.info` rather than binding a platform
 change-notification service such as `notify`. A notification says a write

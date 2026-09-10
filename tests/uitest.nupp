@@ -1,160 +1,140 @@
+const ecs = require("tecs.ecs")
+const ui = require("tecs.ui")
+const test = require("nupp.test")
+const gfx = require("tecs.gfx")
+const clips = require("tecs.gfx.clips")
+const {Event} = require("tecs.ui")
+const {type Event} = require("tecs.ui")
+const events = require("tecs.platform.events")
+const text2 = require("tecs.gfx.text")
+const files = require("nupp.io.files")
+const fonts = require("tecs.gfx.fonts")
+
 local suite = {}
 function suite.laysOutFlexAndSkipsUnchangedNativeWork(): nil
-    local world = tecs.ecs.newWorld()
-    tecs.ui.install(world, {width = 300, height = 100})
-    local root = world:spawn(tecs.ui.Root(), tecs.ui.Style({width = "100%", height = "100%", gap = 10}))
-    local a = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 50, height = 20}), tecs.ui.Paint(true))
-    local b = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({flexGrow = 1, height = 30}))
+    local world = ecs.newWorld()
+    ui.install(world, {width = 300, height = 100})
+    local root = world:spawn(ui.Root(), ui.Style({width = "100%", height = "100%", gap = 10}))
+    local a = world:spawn(ecs.ChildOf(root), ui.Style({width = 50, height = 20}), ui.Paint(true))
+    local b = world:spawn(ecs.ChildOf(root), ui.Style({flexGrow = 1, height = 30}))
     world:update(0)
-    local box = assert(world:get(b, tecs.ui.Layout))
-    nupp.test.equal(box.x, 60)
-    nupp.test.equal(box.width, 240)
-    local pose = assert(world:get(a, tecs.ecs.Transform2D))
-    nupp.test.equal(pose.x, 25)
-    nupp.test.equal(pose.scaleX, 50)
-    local calls = tecs.ui.layouts(world)
+    local box = assert(world:get(b, ui.Layout))
+    test.equal(box.x, 60)
+    test.equal(box.width, 240)
+    local pose = assert(world:get(a, ecs.Transform2D))
+    test.equal(pose.x, 25)
+    test.equal(pose.scaleX, 50)
+    local calls = ui.layouts(world)
     world:update(0)
-    nupp.test.equal(tecs.ui.layouts(world), calls)
-    tecs.ui.resize(world, 400, 100)
+    test.equal(ui.layouts(world), calls)
+    ui.resize(world, 400, 100)
     world:update(0)
-    nupp.test.equal(assert(world:get(b, tecs.ui.Layout)).width, 340)
+    test.equal(assert(world:get(b, ui.Layout)).width, 340)
     world:shutdown()
 end
 
 function suite.clipsScrollAndRevealsChildren(): nil
-    local world = tecs.ecs.newWorld()
-    tecs.ui.install(world, {width = 200, height = 100})
-    local root = world:spawn(
-        tecs.ui.Root(),
-        tecs.ui.Style({
-            width = 100,
-            height = 50,
-            flexDirection = "column"
-        }),
-        tecs.ui.Scroll()
-    )
-    local child = world:spawn(
-        tecs.ecs.ChildOf(root),
-        tecs.ui.Style({
-            width = 80,
-            height = 100,
-            flexShrink = 0
-        }),
-        tecs.ui.Interaction()
-    )
+    local world = ecs.newWorld()
+    ui.install(world, {width = 200, height = 100})
+    local root = world:spawn(ui.Root(), ui.Style({width = 100, height = 50, flexDirection = "column"}), ui.Scroll())
+    local child = world:spawn(ecs.ChildOf(root), ui.Style({width = 80, height = 100, flexShrink = 0}), ui.Interaction())
     world:update(0)
-    nupp.test.equal(assert(world:get(root, tecs.ui.Scroll)).contentHeight, 100)
-    nupp.test.assert(tecs.ui.reveal(world, child, "end"))
+    test.equal(assert(world:get(root, ui.Scroll)).contentHeight, 100)
+    test.assert(ui.reveal(world, child, "end"))
     world:update(0)
-    nupp.test.equal(assert(world:get(root, tecs.ui.Scroll)).y, 50)
-    local clip = assert(world:get(child, tecs.gfx.Clip)).index
-    nupp.test.assert(clip > 0)
-    nupp.test.assert(tecs.gfx.clips.contains(clip, 10, 25))
-    nupp.test.assert(not tecs.gfx.clips.contains(clip, 10, 75))
+    test.equal(assert(world:get(root, ui.Scroll)).y, 50)
+    local clip = assert(world:get(child, gfx.Clip)).index
+    test.assert(clip > 0)
+    test.assert(clips.contains(clip, 10, 25))
+    test.assert(not clips.contains(clip, 10, 75))
     world:shutdown()
 end
 
 function suite.routesPointerActivationAndFocus(): nil
-    local world = tecs.ecs.newWorld()
-    tecs.ui.install(world, {width = 200, height = 100})
-    local root = world:spawn(tecs.ui.Root(), tecs.ui.Style({width = 200, height = 100}))
-    local button = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 80, height = 30}), tecs.ui.Interaction())
+    local world = ecs.newWorld()
+    ui.install(world, {width = 200, height = 100})
+    local root = world:spawn(ui.Root(), ui.Style({width = 200, height = 100}))
+    local button = world:spawn(ecs.ChildOf(root), ui.Style({width = 80, height = 30}), ui.Interaction())
     local activated = 0
-    world:observe(button, tecs.ui.Event, function(event: tecs.ui.Event): nil
+    world:observe(button, Event, function(event: Event): nil
         if event.kind == "activate" then
             activated = activated + 1
         end
     end)
     world:update(0)
-    tecs.platform.events.dispatch(world, tecs.platform.events.pointerButton(true, 1, 10, 10))
-    tecs.platform.events.dispatch(world, tecs.platform.events.pointerButton(false, 1, 10, 10))
+    events.dispatch(world, events.pointerButton(true, 1, 10, 10))
+    events.dispatch(world, events.pointerButton(false, 1, 10, 10))
     world:update(0)
-    nupp.test.equal(activated, 1)
-    nupp.test.equal(tecs.ui.focused(world), button)
+    test.equal(activated, 1)
+    test.equal(ui.focused(world), button)
     world:shutdown()
 end
 
 function suite.sharesClipsAndReleasesTheLastRoot(): nil
-    local world = tecs.ecs.newWorld()
-    tecs.ui.install(world, {width = 300, height = 100, firstClip = 1, lastClip = 1})
-    local root = world:spawn(tecs.ui.Root(), tecs.ui.Style({width = 100, height = 50}), tecs.ui.Scroll())
-    local a = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 20, height = 20}))
-    local b = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 20, height = 20}))
+    local world = ecs.newWorld()
+    ui.install(world, {width = 300, height = 100, firstClip = 1, lastClip = 1})
+    local root = world:spawn(ui.Root(), ui.Style({width = 100, height = 50}), ui.Scroll())
+    local a = world:spawn(ecs.ChildOf(root), ui.Style({width = 20, height = 20}))
+    local b = world:spawn(ecs.ChildOf(root), ui.Style({width = 20, height = 20}))
     world:update(0)
-    nupp.test.equal(assert(world:get(a, tecs.gfx.Clip)).index, assert(world:get(b, tecs.gfx.Clip)).index)
+    test.equal(assert(world:get(a, gfx.Clip)).index, assert(world:get(b, gfx.Clip)).index)
     world:despawn(root);
     world:commit();
     world:update(0)
-    nupp.test.equal(world.liveCount, 0)
+    test.equal(world.liveCount, 0)
     world:shutdown()
 end
 
 function suite.sizesAndDragsScrollbarThumbs(): nil
-    local world = tecs.ecs.newWorld()
-    tecs.ui.install(world, {width = 200, height = 100, dragThreshold = 0})
-    local root = world:spawn(
-        tecs.ui.Root(),
-        tecs.ui.Style({
-            width = 100,
-            height = 100,
-            flexDirection = "column"
-        }),
-        tecs.ui.Scroll()
-    )
-    world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 80, height = 300, flexShrink = 0}))
+    local world = ecs.newWorld()
+    ui.install(world, {width = 200, height = 100, dragThreshold = 0})
+    local root = world:spawn(ui.Root(), ui.Style({width = 100, height = 100, flexDirection = "column"}), ui.Scroll())
+    world:spawn(ecs.ChildOf(root), ui.Style({width = 80, height = 300, flexShrink = 0}))
     local thumb = world:spawn(
-        tecs.ecs.ChildOf(root),
-        tecs.ui.Scrollbar({
+        ecs.ChildOf(root),
+        ui.Scrollbar({
             thickness = 10,
             inset = 0,
             minLength = 10
         }),
-        tecs.gfx.Renderable2D
+        gfx.Renderable2D
     )
     world:update(0)
-    local box = assert(world:get(thumb, tecs.ui.Layout))
-    nupp.test.assert(math.abs(box.height - 100 / 3) < 0.01)
-    tecs.platform.events.dispatch(world, tecs.platform.events.pointerButton(true, 1, 95, 10))
-    tecs.platform.events.dispatch(world, tecs.platform.events.pointerMoved(95, 40))
+    local box = assert(world:get(thumb, ui.Layout))
+    test.assert(math.abs(box.height - 100 / 3) < 0.01)
+    events.dispatch(world, events.pointerButton(true, 1, 95, 10))
+    events.dispatch(world, events.pointerMoved(95, 40))
     world:update(0)
-    nupp.test.assert(assert(world:get(root, tecs.ui.Scroll)).y > 80)
-    assert(world:getMut(root, tecs.ui.Style)).style.height = 400
+    test.assert(assert(world:get(root, ui.Scroll)).y > 80)
+    assert(world:getMut(root, ui.Style)).style.height = 400
     world:update(0)
-    nupp.test.equal(assert(world:get(thumb, tecs.ui.Layout)).height, 0)
+    test.equal(assert(world:get(thumb, ui.Layout)).height, 0)
     world:shutdown()
 end
 
 function suite.paintsAtDisplayDensityAndRestoresFocusScopes(): nil
-    local world = tecs.ecs.newWorld()
-    tecs.ui.install(world, {width = 200, height = 100, pixelDensity = 2})
-    local root = world:spawn(tecs.ui.Root(), tecs.ui.Style({width = 200, height = 100}))
-    local button = world:spawn(
-        tecs.ecs.ChildOf(root),
-        tecs.ui.Style({
-            width = 40,
-            height = 20
-        }),
-        tecs.ui.Paint(true),
-        tecs.ui.Interaction()
-    )
-    local modal = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.FocusScope, tecs.ui.Style({width = 80, height = 50}))
+    local world = ecs.newWorld()
+    ui.install(world, {width = 200, height = 100, pixelDensity = 2})
+    local root = world:spawn(ui.Root(), ui.Style({width = 200, height = 100}))
+    local button = world:spawn(ecs.ChildOf(root), ui.Style({width = 40, height = 20}), ui.Paint(true), ui.Interaction())
+    local modal = world:spawn(ecs.ChildOf(root), ui.FocusScope, ui.Style({width = 80, height = 50}))
     world:update(0)
-    nupp.test.equal(assert(world:get(button, tecs.ecs.Transform2D)).scaleX, 80)
-    nupp.test.assert(tecs.ui.focus(world, button))
-    nupp.test.assert(tecs.ui.pushFocusScope(world, modal))
-    nupp.test.assert(not tecs.ui.focus(world, button))
-    nupp.test.assert(tecs.ui.popFocusScope(world, modal))
-    nupp.test.equal(tecs.ui.focused(world), button)
+    test.equal(assert(world:get(button, ecs.Transform2D)).scaleX, 80)
+    test.assert(ui.focus(world, button))
+    test.assert(ui.pushFocusScope(world, modal))
+    test.assert(not ui.focus(world, button))
+    test.assert(ui.popFocusScope(world, modal))
+    test.equal(ui.focused(world), button)
     world:shutdown()
 end
 
 function suite.restoresLayoutsAndCancelsHiddenInteractions(): nil
-    local world = tecs.ecs.newWorld()
-    tecs.ui.install(world, {width = 300, height = 100})
-    local root = world:spawn(tecs.ui.Root(), tecs.ui.Style({width = "100%", height = "100%"}))
-    local button = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 80, height = 30}), tecs.ui.Interaction())
+    local world = ecs.newWorld()
+    ui.install(world, {width = 300, height = 100})
+    local root = world:spawn(ui.Root(), ui.Style({width = "100%", height = "100%"}))
+    local button = world:spawn(ecs.ChildOf(root), ui.Style({width = 80, height = 30}), ui.Interaction())
     local activated = 0
-    world:observe(button, tecs.ui.Event, function(event: tecs.ui.Event): nil
+    world:observe(button, Event, function(event: Event): nil
         if event.kind == "activate" then
             activated = activated + 1
         end
@@ -163,87 +143,79 @@ function suite.restoresLayoutsAndCancelsHiddenInteractions(): nil
     local snapshot = world:saveSnapshot();
     world:loadSnapshot(snapshot);
     world:update(0)
-    nupp.test.equal(assert(world:get(button, tecs.ui.Layout)).width, 80)
-    tecs.platform.events.dispatch(world, tecs.platform.events.pointerButton(true, 1, 10, 10));
+    test.equal(assert(world:get(button, ui.Layout)).width, 80)
+    events.dispatch(world, events.pointerButton(true, 1, 10, 10));
     world:update(0)
-    assert(world:getMut(button, tecs.ui.Style)).style.display = "none"
-    tecs.platform.events.dispatch(world, tecs.platform.events.pointerButton(false, 1, 10, 10));
+    assert(world:getMut(button, ui.Style)).style.display = "none"
+    events.dispatch(world, events.pointerButton(false, 1, 10, 10));
     world:update(0)
-    nupp.test.equal(activated, 0)
-    nupp.test.equal(tecs.ui.focused(world), 0)
+    test.equal(activated, 0)
+    test.equal(ui.focused(world), 0)
     world:shutdown()
 end
 
 function suite.wrapsTextAndClipsEveryGlyph(): nil
-    local world = tecs.ecs.newWorld()
-    tecs.ui.install(world, {width = 300, height = 100})
-    tecs.gfx.text.install(world)
-    local bytes = assert(nupp.io.files.read("assets/fonts/JetBrainsMono-ExtraBold.ttf"))
-    local font = assert(tecs.gfx.fonts.newTTF({bytes = bytes, name = "uitest/font", size = 24}))
-    local root = world:spawn(
-        tecs.ui.Root(),
-        tecs.ui.Style({
-            width = 100,
-            height = 30,
-            flexDirection = "column"
-        }),
-        tecs.ui.Scroll()
-    )
+    local world = ecs.newWorld()
+    ui.install(world, {width = 300, height = 100})
+    text2.install(world)
+    local bytes = assert(files.read("assets/fonts/JetBrainsMono-ExtraBold.ttf"))
+    local font = assert(fonts.newTTF({bytes = bytes, name = "uitest/font", size = 24}))
+    local root = world:spawn(ui.Root(), ui.Style({width = 100, height = 30, flexDirection = "column"}), ui.Scroll())
     local label = world:spawn(
-        tecs.ecs.ChildOf(root),
-        tecs.ui.Style({
+        ecs.ChildOf(root),
+        ui.Style({
             width = 90,
             flexShrink = 0
         }),
-        tecs.ui.Intrinsic({
+        ui.Intrinsic({
             source = "text",
             wrap = true
         }),
-        tecs.gfx.Text("alpha beta gamma delta", font, 16)
+        gfx.Text("alpha beta gamma delta", font, 16)
     )
     world:update(0)
-    local box = assert(world:get(label, tecs.ui.Layout))
-    nupp.test.assert(box.height > 30)
-    nupp.test.equal(assert(world:get(label, tecs.gfx.Text)).wrapWidth, 90)
-    local glyphs = tecs.gfx.text.glyphsOf(world, label)
-    nupp.test.assert(#glyphs > 0)
+    local box = assert(world:get(label, ui.Layout))
+    test.assert(box.height > 30)
+    test.equal(assert(world:get(label, gfx.Text)).wrapWidth, 90)
+    local glyphs = text2.glyphsOf(world, label)
+    test.assert(#glyphs > 0)
     for _, glyph in ipairs(glyphs) do
-        nupp.test.equal(assert(world:get(glyph, tecs.gfx.Clip)).index, assert(world:get(label, tecs.gfx.Clip)).index)
+        test.equal(assert(world:get(glyph, gfx.Clip)).index, assert(world:get(label, gfx.Clip)).index)
     end
     world:shutdown()
 end
 
 function suite.keepsNaturallySizedTextOnOneLine(): nil
-    local world = tecs.ecs.newWorld()
-    tecs.ui.install(world, {width = 400, height = 100})
-    local bytes = assert(nupp.io.files.read("assets/fonts/JetBrainsMono-ExtraBold.ttf"))
-    local font = assert(tecs.gfx.fonts.newTTF({bytes = bytes, name = "uitest/rounding", size = 32}))
-    local root = world:spawn(tecs.ui.Root(), tecs.ui.Style({width = 400, height = 48, padding = 12}))
+    local world = ecs.newWorld()
+    ui.install(world, {width = 400, height = 100})
+    local bytes = assert(files.read("assets/fonts/JetBrainsMono-ExtraBold.ttf"))
+    local font = assert(fonts.newTTF({bytes = bytes, name = "uitest/rounding", size = 32}))
+    local root = world:spawn(ui.Root(), ui.Style({width = 400, height = 48, padding = 12}))
     local label = world:spawn(
-        tecs.ecs.ChildOf(root),
-        tecs.ui.Style({
+        ecs.ChildOf(root),
+        ui.Style({
             flexShrink = 0
         }),
-        tecs.ui.Intrinsic({
+        ui.Intrinsic({
             source = "text",
             wrap = true
         }),
-        tecs.gfx.Text("01  Explore this world", font, 16)
+        gfx.Text("01  Explore this world", font, 16)
     )
     world:update(0)
-    local text = assert(world:get(label, tecs.gfx.Text))
-    local _, naturalHeight = tecs.gfx.text.measureIntrinsic(text)
-    local _, actualHeight = tecs.gfx.text.measureText(text)
-    nupp.test.equal(actualHeight, naturalHeight)
+    local text = assert(world:get(label, gfx.Text))
+    local _, naturalHeight = text2.measureIntrinsic(text)
+    local _, actualHeight = text2.measureText(text)
+    test.equal(actualHeight, naturalHeight)
     world:shutdown()
 end
 
 function suite.alignsWrappedRowsToStart(): nil
-    local world = tecs.ecs.newWorld()
-    tecs.ui.install(world, {width = 100, height = 200})
+    local world = ecs.newWorld()
+    ui.install(world, {width = 100, height = 200})
     local root = world:spawn(
-        tecs.ui.Root(),
-        tecs.ui.Style({
+        ui.Root(),
+        ui.Style({
             width = 100,
             height = 200,
             flexWrap = "wrap",
@@ -252,66 +224,60 @@ function suite.alignsWrappedRowsToStart(): nil
             gap = 10
         })
     )
-    local first = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 60, height = 20}))
-    local second = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 60, height = 20}))
+    local first = world:spawn(ecs.ChildOf(root), ui.Style({width = 60, height = 20}))
+    local second = world:spawn(ecs.ChildOf(root), ui.Style({width = 60, height = 20}))
     world:update(0)
-    nupp.test.equal(assert(world:get(first, tecs.ui.Layout)).y, 0)
-    nupp.test.equal(assert(world:get(second, tecs.ui.Layout)).y, 30)
+    test.equal(assert(world:get(first, ui.Layout)).y, 0)
+    test.equal(assert(world:get(second, ui.Layout)).y, 30)
     world:shutdown()
 end
 
 function suite.handsUnusedWheelToParentAndHonorsConsumption(): nil
-    local world = tecs.ecs.newWorld()
-    tecs.ui.install(world, {width = 100, height = 100, wheelStep = 40})
-    local root = world:spawn(tecs.ui.Root(), tecs.ui.Style({width = 100, height = 100}), tecs.ui.Scroll())
-    local content = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 100, height = 300, flexShrink = 0}))
-    local inner = world:spawn(tecs.ecs.ChildOf(content), tecs.ui.Style({width = 80, height = 80}), tecs.ui.Scroll())
-    world:spawn(tecs.ecs.ChildOf(inner), tecs.ui.Style({width = 80, height = 100, flexShrink = 0}))
+    local world = ecs.newWorld()
+    ui.install(world, {width = 100, height = 100, wheelStep = 40})
+    local root = world:spawn(ui.Root(), ui.Style({width = 100, height = 100}), ui.Scroll())
+    local content = world:spawn(ecs.ChildOf(root), ui.Style({width = 100, height = 300, flexShrink = 0}))
+    local inner = world:spawn(ecs.ChildOf(content), ui.Style({width = 80, height = 80}), ui.Scroll())
+    world:spawn(ecs.ChildOf(inner), ui.Style({width = 80, height = 100, flexShrink = 0}))
     world:update(0)
-    tecs.platform.events.dispatch(world, tecs.platform.events.wheel(0, -1, nil, nil, 10, 10))
+    events.dispatch(world, events.wheel(0, -1, nil, nil, 10, 10))
     world:update(0)
-    nupp.test.equal(assert(world:get(inner, tecs.ui.Scroll)).y, 20)
-    nupp.test.equal(assert(world:get(root, tecs.ui.Scroll)).y, 20)
-    world:observe(root, tecs.ui.Event, function(event: tecs.ui.Event): nil
+    test.equal(assert(world:get(inner, ui.Scroll)).y, 20)
+    test.equal(assert(world:get(root, ui.Scroll)).y, 20)
+    world:observe(root, Event, function(event: Event): nil
         if event.kind == "wheel" then
             event.consumed = true
         end
     end)
-    tecs.platform.events.dispatch(world, tecs.platform.events.wheel(0, -1, nil, nil, 10, 10))
+    events.dispatch(world, events.wheel(0, -1, nil, nil, 10, 10))
     world:update(0)
-    nupp.test.equal(assert(world:get(root, tecs.ui.Scroll)).y, 20)
+    test.equal(assert(world:get(root, ui.Scroll)).y, 20)
     world:shutdown()
 end
 
 function suite.hidesAndRestoresSceneGlyphs(): nil
-    local world = tecs.ecs.newWorld()
-    tecs.ui.install(world, {width = 200, height = 100})
-    tecs.gfx.text.install(world)
+    local world = ecs.newWorld()
+    ui.install(world, {width = 200, height = 100})
+    text2.install(world)
     local font = assert(
-        tecs.gfx.fonts.newTTF({
+        fonts.newTTF({
             source = "assets/fonts/JetBrainsMono-ExtraBold.ttf",
             name = "uitest/scenes",
             size = 16
         })
     )
-    local root = world:spawn(tecs.ui.Root(), tecs.ui.Style({width = 200, height = 100}))
-    local scene = world:spawn(tecs.ecs.ChildOf(root), tecs.ui.Style({width = 100, height = 80}))
-    local label = world:spawn(
-        tecs.ecs.ChildOf(scene),
-        tecs.ui.Intrinsic({
-            source = "text"
-        }),
-        tecs.gfx.Text("Scene", font, 16)
-    )
+    local root = world:spawn(ui.Root(), ui.Style({width = 200, height = 100}))
+    local scene = world:spawn(ecs.ChildOf(root), ui.Style({width = 100, height = 80}))
+    local label = world:spawn(ecs.ChildOf(scene), ui.Intrinsic({source = "text"}), gfx.Text("Scene", font, 16))
     world:update(0)
-    nupp.test.equal(#tecs.gfx.text.glyphsOf(world, label), 5)
+    test.equal(#text2.glyphsOf(world, label), 5)
     for cycle = 1, 3 do
-        assert(world:getMut(scene, tecs.ui.Style)).style.display = "none"
+        assert(world:getMut(scene, ui.Style)).style.display = "none"
         world:update(0)
-        nupp.test.equal(#tecs.gfx.text.glyphsOf(world, label), 0)
-        assert(world:getMut(scene, tecs.ui.Style)).style.display = "flex"
+        test.equal(#text2.glyphsOf(world, label), 0)
+        assert(world:getMut(scene, ui.Style)).style.display = "flex"
         world:update(0)
-        nupp.test.equal(#tecs.gfx.text.glyphsOf(world, label), 5)
+        test.equal(#text2.glyphsOf(world, label), 5)
     end
     world:shutdown()
 end

@@ -257,8 +257,20 @@ local function modeCode(mode: audiobackend.LoadMode): integer
     end
 end
 
---- Wraps an open library device in the backend contract.
-local function wrap(device: voidptr?): audiobackend.Backend
+--- Opens a device with the thunk and wraps it in the backend contract.
+---
+--- The thunk opens the device here rather than a caller handing the pointer in,
+--- because the returned record is closures over that pointer: a closure over a
+--- parameter would be a view of the caller's frame, and the backend outlives it.
+local function wrap(openDevice: function(): voidptr?, absent: string): (audiobackend.Backend?, string?)
+    local mismatch = layoutMismatch()
+    if mismatch ~= nil then
+        return nil, mismatch
+    end
+    local device = openDevice()
+    if device == nil then
+        return nil, absent
+    end
     local closed = {false}
     local commands = carray(tecsAudioCommand, CAPACITY)
     local events = carray(tecsAudioEvent, CAPACITY)
@@ -409,16 +421,12 @@ end
 --- @return the backend, or nil when the library opened nothing
 --- @return the reason, when the first return is nil
 export function open(frequency: integer, channels: integer, maxVoices: integer): (audiobackend.Backend?, string?)
-    local mismatch = layoutMismatch()
-    if mismatch ~= nil then
-        return nil, mismatch
-    end
-    local device = tecs_audio_open(frequency as uint32, channels as uint32, maxVoices as uint32)
-    if device == nil then
-        return nil, "tecsaudio opened no output"
-    end
-
-    return wrap(device)
+    return wrap(
+        function(): voidptr?
+            return tecs_audio_open(frequency as uint32, channels as uint32, maxVoices as uint32)
+        end,
+        "tecsaudio opened no output"
+    )
 end
 
 --- Opens a backend that touches no output device.
@@ -436,16 +444,12 @@ end
 --- @return the backend, or nil when the library refused
 --- @return the reason, when the first return is nil
 export function openOffline(frequency: integer, channels: integer, maxVoices: integer): (audiobackend.Backend?, string?)
-    local mismatch = layoutMismatch()
-    if mismatch ~= nil then
-        return nil, mismatch
-    end
-    local device = tecs_audio_open_offline(frequency as uint32, channels as uint32, maxVoices as uint32)
-    if device == nil then
-        return nil, "tecsaudio opened no offline mixer"
-    end
-
-    return wrap(device)
+    return wrap(
+        function(): voidptr?
+            return tecs_audio_open_offline(frequency as uint32, channels as uint32, maxVoices as uint32)
+        end,
+        "tecsaudio opened no offline mixer"
+    )
 end
 
 --- Returns the reason the library left after a failing enumeration or open.
@@ -502,18 +506,27 @@ local function listDevices(recording: boolean): ({audiobackend.Device}, string?)
     return out
 end
 
---- Wraps an open library capture in the backend contract.
+--- Opens a capture with the thunk and wraps it in the backend contract.
+---
+--- The thunk opens the microphone here rather than a caller handing the pointer
+--- in, because the returned record is closures over that pointer: a closure over
+--- a parameter would be a view of the caller's frame, and the capture outlives
+--- it.
 ---
 --- The sample block is allocated once, sized to the whole ring, because no read
 --- can produce more frames than the ring holds and a capture drained every
 --- frame must not allocate to do it.
 local function wrapCapture(
-    microphone: voidptr?,
-    frequency: integer,
-    channels: integer,
+    openMicrophone: function(): voidptr?,
+    absent: string,
     bufferFrames: integer
-): audiobackend.Capture
-    local width = channels
+): (audiobackend.Capture?, string?)
+    local microphone = openMicrophone()
+    if microphone == nil then
+        return nil, openReason(absent)
+    end
+    local frequency = tecs_audio_microphone_frequency(microphone) as integer
+    local width = tecs_audio_microphone_channels(microphone) as integer
     if width < 1 then
         width = 1
     end
@@ -703,21 +716,17 @@ export function devices(): audiobackend.Devices
             channels: integer,
             bufferFrames: integer
         ): (audiobackend.Capture?, string?)
-            local microphone = tecs_audio_open_microphone(
-                device as uint32,
-                deviceName,
-                frequency as uint32,
-                channels as uint32,
-                bufferFrames as uint32
-            )
-            if microphone == nil then
-                return nil, openReason("tecsaudio opened no microphone")
-            end
-
             return wrapCapture(
-                microphone,
-                tecs_audio_microphone_frequency(microphone) as integer,
-                tecs_audio_microphone_channels(microphone) as integer,
+                function(): voidptr?
+                    return tecs_audio_open_microphone(
+                        device as uint32,
+                        deviceName,
+                        frequency as uint32,
+                        channels as uint32,
+                        bufferFrames as uint32
+                    )
+                end,
+                "tecsaudio opened no microphone",
                 bufferFrames
             )
         end
@@ -748,19 +757,15 @@ export function offlineDevices(): audiobackend.Devices
             channels: integer,
             bufferFrames: integer
         ): (audiobackend.Capture?, string?)
-            local microphone = tecs_audio_open_microphone_offline(
-                frequency as uint32,
-                channels as uint32,
-                bufferFrames as uint32
-            )
-            if microphone == nil then
-                return nil, openReason("tecsaudio opened no offline capture")
-            end
-
             return wrapCapture(
-                microphone,
-                tecs_audio_microphone_frequency(microphone) as integer,
-                tecs_audio_microphone_channels(microphone) as integer,
+                function(): voidptr?
+                    return tecs_audio_open_microphone_offline(
+                        frequency as uint32,
+                        channels as uint32,
+                        bufferFrames as uint32
+                    )
+                end,
+                "tecsaudio opened no offline capture",
                 bufferFrames
             )
         end

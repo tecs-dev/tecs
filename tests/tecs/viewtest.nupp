@@ -1,10 +1,15 @@
+const io2 = require("nupp.io")
+const framepacket = require("tecs.internal.framepacket")
+const meshes = require("tecs.gfx.meshes")
+
 local test = require("nupp.test")
 local views = require("tecs.internal.viewpacket")
 local ecs = require("tecs.ecs")
 local gfx = require("tecs.gfx")
 local suite = {}
+
 local function packets(bytes: string): {string}, {integer}, integer
-    local reader = nupp.io.newScalarReader(bytes)
+    local reader = io2.newScalarReader(bytes)
     reader:skip(8)
     const revision = reader:readUint32() as integer
     reader:skip(8)
@@ -24,7 +29,7 @@ local function packets(bytes: string): {string}, {integer}, integer
 end
 
 local function word(bytes: string, offset: integer): integer
-    local reader = nupp.io.newScalarReader(bytes)
+    local reader = io2.newScalarReader(bytes)
     reader:skip(offset)
     const value = reader:readUint32() as integer
     reader:drop()
@@ -56,8 +61,8 @@ function suite.ordersViewsAndRetainsEachCameraScene(): nil
     test.equal(word(original[1], 36), 1)
     world:update(0)
     const retained = packets(assert(collector:frame(640, 360, revision)))
-    test.equal(word(retained[1], 12), tecs.internal.framepacket.FRAME_RETAINED)
-    test.equal(word(retained[2], 12), tecs.internal.framepacket.FRAME_RETAINED)
+    test.equal(word(retained[1], 12), framepacket.FRAME_RETAINED)
+    test.equal(word(retained[2], 12), framepacket.FRAME_RETAINED)
     test.assert(#retained[1] < #original[1])
     assert(world:getMut(first, gfx.View)).enabled = false
     assert(world:getMut(second, gfx.View)).enabled = false
@@ -67,7 +72,7 @@ end
 
 function suite.restoresCameraAndLightingAndRecreatesRemovedViewQueries(): nil
     const world = ecs.newWorld()
-    const lighting = tecs.gfx.meshes.newLighting()
+    const lighting = meshes.newLighting()
     lighting.ssao, lighting.shadows = true, true
     lighting.probe = {1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1}
     const id = world:spawn(gfx.View({camera3D = gfx.newCamera3D({x = 3, z = 6}), lighting = lighting}))

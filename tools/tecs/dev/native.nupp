@@ -1,7 +1,7 @@
 module tecs.dev.native
 
 local commands = require("tecs.dev.commands")
-local json = require("nupp.data.json")
+local json = require("nupp.codec.json")
 local path = require("nupp.io.path")
 
 --- Builds native services and selects exactly the artifacts Cargo produced.

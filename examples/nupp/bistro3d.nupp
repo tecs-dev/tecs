@@ -1,5 +1,19 @@
 module bistro3d
 
+const {type MaterialInfo} = require("tecs.gfx.models")
+const {type Primitive} = require("tecs.gfx.models")
+const {type Instance} = require("tecs.gfx.models")
+const {type Application} = require("tecs.application")
+const gfx = require("tecs.gfx")
+const meshes = require("tecs.gfx.meshes")
+const flycamera3d = require("tecs.gfx.flycamera3d")
+const ecs = require("tecs.ecs")
+const lighting2 = require("tecs.gfx.lighting")
+const models = require("tecs.gfx.models")
+const files = require("tecs.files")
+const {type Session} = require("tecs.host")
+const host = require("tecs.host")
+
 local INITIAL_DAYLIGHT = 0.55
 local DAYLIGHT_PER_WHEEL = 0.08
 local INITIAL_CAMERA_X = 9.1325
@@ -43,7 +57,7 @@ local function mixColor(
     color[3] = mix(nightB, dayB, daylight)
 end
 
-local function tuneLegacyMaterial(exclusive material: tecs.gfx.models.MaterialInfo, lambert: integer): nil
+local function tuneLegacyMaterial(exclusive material: MaterialInfo, lambert: integer): nil
     -- The source marks every material as a non-PBR Phong conversion and gives
     -- concrete, foliage, glass, and metal the same metallic and roughness
     -- factors. Classify its authored names so view-dependent highlights stay
@@ -97,7 +111,7 @@ local function fixtureProfile(name: string): FixtureProfile?
     return {spot = false, r = 1.0, g = 0.78, b = 0.48}
 end
 
-local function fixturePosition(primitive: tecs.gfx.models.Primitive): number, number, number
+local function fixturePosition(primitive: Primitive): number, number, number
     const draw, bounds = primitive.transform.value, primitive.bounds.value
     const x, y, z = bounds.centerX * draw.scaleX, bounds.centerY * draw.scaleY, bounds.centerZ * draw.scaleZ
     const qx, qy, qz, qw = draw.rotationX, draw.rotationY, draw.rotationZ, draw.rotationW
@@ -127,7 +141,7 @@ local function fixturePosition(primitive: tecs.gfx.models.Primitive): number, nu
         * tx
 end
 
-local function findFixtureLights(instance: tecs.gfx.models.Instance): {FixtureLight}
+local function findFixtureLights(instance: Instance): {FixtureLight}
     local fixtures: {FixtureLight} = {}
     for _, primitive in ipairs(instance.primitives) do
         const draw = primitive.transform.value
@@ -162,11 +176,11 @@ local function findFixtureLights(instance: tecs.gfx.models.Instance): {FixtureLi
     return fixtures
 end
 
-local function install(exclusive app: tecs.application.Application): nil
+local function install(exclusive app: Application): nil
     const world, input = app.world, app.input
-    const camera = tecs.gfx.newCamera3D()
-    const lighting = tecs.gfx.meshes.newLighting()
-    world:spawn(tecs.gfx.View({camera3D = camera, lighting = lighting}))
+    const camera = gfx.newCamera3D()
+    const lighting = meshes.newLighting()
+    world:spawn(gfx.View({camera3D = camera, lighting = lighting}))
 
     -- Use the authored exterior camera. Its quaternion turns Tecs' negative-Z
     -- camera forward toward the street's positive-Z extent.
@@ -181,10 +195,10 @@ local function install(exclusive app: tecs.application.Application): nil
     camera.near = 0.1
     camera.far = 250
 
-    local controller = tecs.gfx.flycamera3d.new(input, app.window, camera, {moveSpeed = 7, sprintMultiplier = 4})
+    local controller = flycamera3d.new(input, app.window, camera, {moveSpeed = 7, sprintMultiplier = 4})
     world:addSystem({
         name = "example.BistroFlyCamera",
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(dt: number): nil
             controller:update(dt)
         end,
@@ -195,6 +209,7 @@ local function install(exclusive app: tecs.application.Application): nil
 
     local daylight = INITIAL_DAYLIGHT
     local appliedDaylight = -1.0
+
     local function applyDaylight()
         local ambient: {number} = {}
         mixColor(ambient, 0.015, 0.02, 0.035, 0.085, 0.10, 0.13, daylight)
@@ -238,12 +253,12 @@ local function install(exclusive app: tecs.application.Application): nil
         fog.fogB = mix(0.08, 0.55, daylight)
 
         for _, entity in ipairs(pointLampEntities) do
-            local light = assert(world:getMut(entity, tecs.gfx.PointLight3D))
+            local light = assert(world:getMut(entity, gfx.PointLight3D))
             light.radius = mix(8, 5, daylight)
             light.intensity = mix(5, 0.2, daylight)
         end
         for _, entity in ipairs(spotLampEntities) do
-            local light = assert(world:getMut(entity, tecs.gfx.SpotLight3D))
+            local light = assert(world:getMut(entity, gfx.SpotLight3D))
             light.radius = mix(16, 10, daylight)
             light.intensity = mix(20, 1.0, daylight)
         end
@@ -252,7 +267,7 @@ local function install(exclusive app: tecs.application.Application): nil
 
     world:addSystem({
         name = "example.BistroDayNight",
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(): nil
             local wheel = input.wheelY
             if wheel ~= 0.0 then
@@ -269,11 +284,11 @@ local function install(exclusive app: tecs.application.Application): nil
 
     lighting.ambient, lighting.fog, lighting.shadows = 0, true, true
     lighting.shadowScale, lighting.shadowDistance, lighting.shadowStrength = 0.5, 60, 0.68
-    tecs.gfx.lighting.setBloom({threshold = 0.4, knee = 0.25, intensity = 1.3})
+    lighting2.setBloom({threshold = 0.4, knee = 0.25, intensity = 1.3})
     const loaded = assert(
-        tecs.gfx.models.load(tecs.files.assetPath("external/bistro/Bistro.tecs.gltf"), {
-            material = function(exclusive value: tecs.gfx.models.MaterialInfo): nil
-                tuneLegacyMaterial(value, tecs.gfx.models.MATERIAL_LAMBERT)
+        models.load(files.assetPath("external/bistro/Bistro.tecs.gltf"), {
+            material = function(exclusive value: MaterialInfo): nil
+                tuneLegacyMaterial(value, models.MATERIAL_LAMBERT)
             end,
         })
     )
@@ -289,7 +304,7 @@ local function install(exclusive app: tecs.application.Application): nil
             spotLampEntities[
                 #spotLampEntities + 1
             ] = world:spawn(
-                tecs.ecs.Transform3D(
+                ecs.Transform3D(
                     fixture.x + directionX * 0.2,
                     fixture.y + directionY * 0.2,
                     fixture.z + directionZ * 0.2,
@@ -301,14 +316,14 @@ local function install(exclusive app: tecs.application.Application): nil
                     1,
                     1
                 ),
-                tecs.gfx.SpotLight3D(16, math.rad(48), math.rad(72), profile.r, profile.g, profile.b, 20, 0)
+                gfx.SpotLight3D(16, math.rad(48), math.rad(72), profile.r, profile.g, profile.b, 20, 0)
             )
         else
             pointLampEntities[
                 #pointLampEntities + 1
             ] = world:spawn(
-                tecs.ecs.Transform3D(fixture.x, fixture.y, fixture.z, 0, 0, 0, 1, 1, 1, 1),
-                tecs.gfx.PointLight3D(8, profile.r, profile.g, profile.b, 5)
+                ecs.Transform3D(fixture.x, fixture.y, fixture.z, 0, 0, 0, 1, 1, 1, 1),
+                gfx.PointLight3D(8, profile.r, profile.g, profile.b, 5)
             )
         end
     end
@@ -318,8 +333,8 @@ local function install(exclusive app: tecs.application.Application): nil
             primitive.mesh,
             primitive.bounds,
             primitive.material,
-            tecs.gfx.Tint(1, 1, 1, 1),
-            tecs.gfx.Renderable3D
+            gfx.Tint(1, 1, 1, 1),
+            gfx.Renderable3D
         )
     end
     print(("bistro3d: loaded %d GPU-cullable chunks"):format(#instance.primitives))
@@ -335,14 +350,8 @@ end
 --- @param debug guarded failures
 --- @param maxFrames optional frame limit
 --- @return native host session
-export function create(
-    title: string?,
-    width: integer?,
-    height: integer?,
-    debug: boolean?,
-    maxFrames: integer?
-): tecs.host.Session
-    return tecs.host.createWithPlugin(
+export function create(title: string?, width: integer?, height: integer?, debug: boolean?, maxFrames: integer?): Session
+    return host.createWithPlugin(
         install,
         title or "Tecs Bistro stress scene",
         width or 1280,

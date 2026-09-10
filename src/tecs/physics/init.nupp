@@ -47,6 +47,9 @@ A body declared during a frame becomes live during that frame's next fixed
 step, and its `RigidBody` row appears at the end of that step's `FixedUpdate`,
 which is where the solver hands back the slot it assigned.
 ]]
+const {type Key} = require("nupp.store")
+const store = require("nupp.store")
+const world2 = require("tecs.internal.world")
 
 local ecs = require("tecs.ecs")
 local events = require("nupp.events")
@@ -674,7 +677,7 @@ end
 --- Names the world resource holding physics state.
 ---
 --- The key name is the compatibility surface `SNAPSHOT_KEY` declares.
-const stateKey: nupp.data.Key<State> = nupp.data.newKey(SNAPSHOT_KEY)
+const stateKey: Key<State> = store.newKey(SNAPSHOT_KEY)
 
 local function toMeters(pixels: number): number
     return pixels / pixelsPerMeter
@@ -1882,61 +1885,53 @@ export function install(exclusive world: ecs.World, options: Options?): contract
 
     local state = new State(
         simulation = simulation,
-        poselessBodies = tecs.internal.world.newUnfilteredQuery(world, {
+        poselessBodies = world2.newUnfilteredQuery(world, {
             include = {Body},
             exclude = {ecs.Transform2D}
         }),
-        motionlessBodies = tecs.internal.world.newUnfilteredQuery(world, {
+        motionlessBodies = world2.newUnfilteredQuery(world, {
             include = {Body},
             exclude = {Motion}
         }),
-        pendingBodies = tecs.internal.world.newUnfilteredQuery(world, {
+        pendingBodies = world2.newUnfilteredQuery(world, {
             include = {ecs.Transform2D, Body, Collider},
             exclude = {RigidBody}
         }),
-        detachedBodies = tecs.internal.world.newUnfilteredQuery(world, {include = {RigidBody}, exclude = {Body}}),
-        detachedShapes = tecs.internal.world.newUnfilteredQuery(world, {
-            include = {ColliderShape},
-            exclude = {Collider}
-        }),
-        detachedJoints = tecs.internal.world.newUnfilteredQuery(world, {include = {JointLink}, exclude = {Joint}}),
-        pausedBodies = tecs.internal.world.newUnfilteredQuery(world, {
+        detachedBodies = world2.newUnfilteredQuery(world, {include = {RigidBody}, exclude = {Body}}),
+        detachedShapes = world2.newUnfilteredQuery(world, {include = {ColliderShape}, exclude = {Collider}}),
+        detachedJoints = world2.newUnfilteredQuery(world, {include = {JointLink}, exclude = {Joint}}),
+        pausedBodies = world2.newUnfilteredQuery(world, {
             include = {Body, Motion, RigidBody, ecs.Paused},
             exclude = {PhysicsHeld},
         }),
-        resumedBodies = tecs.internal.world.newUnfilteredQuery(world, {
+        resumedBodies = world2.newUnfilteredQuery(world, {
             include = {Body, Motion, RigidBody, PhysicsHeld},
             exclude = {ecs.Paused},
         }),
-        disabledBodies = tecs.internal.world.newUnfilteredQuery(world, {
+        disabledBodies = world2.newUnfilteredQuery(world, {
             include = {RigidBody, ecs.Disabled},
             exclude = {PhysicsDisabled}
         }),
-        enabledBodies = tecs.internal.world.newUnfilteredQuery(world, {
+        enabledBodies = world2.newUnfilteredQuery(world, {
             include = {RigidBody, PhysicsDisabled},
             exclude = {ecs.Disabled}
         }),
-        declaredBodies = tecs.internal.world.newUnfilteredQuery(world, {
+        declaredBodies = world2.newUnfilteredQuery(world, {
             include = {Body, RigidBody},
             exclude = {PhysicsHeld, PhysicsDisabled},
         }),
-        primaryColliders = tecs.internal.world.newUnfilteredQuery(world, {include = {Collider, RigidBody}}),
-        pendingSecondary = tecs.internal.world.newUnfilteredQuery(world, {
+        primaryColliders = world2.newUnfilteredQuery(world, {include = {Collider, RigidBody}}),
+        pendingSecondary = world2.newUnfilteredQuery(world, {
             include = {Collider, ColliderOf},
             exclude = {ColliderShape}
         }),
-        secondaryColliders = tecs.internal.world.newUnfilteredQuery(world, {
-            include = {Collider, ColliderOf, ColliderShape}
-        }),
-        pendingJoints = tecs.internal.world.newUnfilteredQuery(world, {
+        secondaryColliders = world2.newUnfilteredQuery(world, {include = {Collider, ColliderOf, ColliderShape}}),
+        pendingJoints = world2.newUnfilteredQuery(world, {
             include = {Joint, JointBodyA, JointBodyB},
             exclude = {JointLink}
         }),
-        simulatedBodies = tecs.internal.world.newUnfilteredQuery(world, {include = {ecs.Transform2D, RigidBody}}),
-        snapshotBodies = tecs.internal.world.newUnfilteredQuery(world, {
-            include = {Motion, RigidBody},
-            exclude = {PhysicsHeld}
-        }),
+        simulatedBodies = world2.newUnfilteredQuery(world, {include = {ecs.Transform2D, RigidBody}}),
+        snapshotBodies = world2.newUnfilteredQuery(world, {include = {Motion, RigidBody}, exclude = {PhysicsHeld}}),
         gathered = {},
         createOrder = {},
         createX = {},

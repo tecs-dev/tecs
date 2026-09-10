@@ -44,6 +44,9 @@ components, and stages each instance-owned skin palette and morph vector. No
 table or cdata is allocated per sample. Bounds remain caller-owned and must
 enclose every pose.
 ]]
+const io2 = require("nupp.io")
+const json2 = require("nupp.codec.json")
+const meshregistry = require("tecs.internal.meshregistry")
 
 local ecs = require("tecs.ecs")
 local mesh = require("tecs.internal.meshcomponents")
@@ -195,7 +198,7 @@ export record Model
     --- Creates an independently animated instance.
     --- @return Returns reusable primitive templates plus private joint
     ---     palettes and morph-weight vectors.
-    newInstance: function(exclusive self: Model): Instance
+    newInstance: function(self: Model): Instance
 
     --- Returns a clip's one-based index.
     --- @param name The caller supplies an authored or generated clip name.
@@ -618,7 +621,9 @@ function Model.animationIndex(borrows self: Model, name: string): integer?
     return index
 end
 
-function Model.newInstance(exclusive self: Model): Instance
+-- The receiver is plain rather than `exclusive`, because the instance names the
+-- model it was cut from and outlives a call-scoped borrow of it.
+function Model.newInstance(self: Model): Instance
     self._nextInstance = self._nextInstance + 1
     local skins: {SkinInput} = {}
     local palettes: {{number}} = {}
@@ -761,6 +766,7 @@ end
 local function orderOf(nodes: {Node}): {integer}
     local order: {integer} = {}
     local state: {[integer]: integer} = {}
+
     local function visit(index: integer)
         if state[index] == 2 then
             return
@@ -815,17 +821,17 @@ export type LoadOptions = {
 }
 
 local function register(bytes: string, path: string, options: LoadOptions?): Model
-    local reader = nupp.io.newScalarReader(bytes)
+    local reader = io2.newScalarReader(bytes)
     const metadataBytes = reader:readBytes(reader:readUint32() as integer)
     reader:drop()
-    const source = nupp.data.json.decode(metadataBytes) as Metadata
+    const source = json2.decode(metadataBytes) as Metadata
     if options ~= nil then
         for _, material in ipairs(source.materials) do
             options.material(material as MaterialInfo)
         end
-        const metadata = nupp.data.json.encode(source)
-        local buffer = nupp.io.newBuffer()
-        local writer = nupp.io.newScalarWriter(buffer)
+        const metadata = json2.encode(source)
+        local buffer = io2.newBuffer()
+        local writer = io2.newScalarWriter(buffer)
         writer:writeUint32(nupp.math.u32.wrap(#metadata))
             :writeBytes(metadata)
             :writeBytes(string.rep("\0", (4 - #metadata % 4) % 4))
@@ -834,7 +840,7 @@ local function register(bytes: string, path: string, options: LoadOptions?): Mod
         bytes = buffer:getString()
         buffer:drop()
     end
-    const nextId = tecs.internal.meshregistry.register(path)
+    const nextId = meshregistry.register(path)
     local animations: {Animation} = {}
     local byName: {[string]: integer} = {}
     for index, animation in ipairs(source.animations) do
@@ -936,8 +942,8 @@ export function newMesh(options: MeshOptions): MeshInput, BoundsInput
     )
     assert(#options.indices > 0 and #options.indices % 3 == 0, "mesh indices must describe triangles")
     const vertexCount = #options.vertices // 12
-    local data = nupp.io.newBuffer()
-    local writer = nupp.io.newScalarWriter(data)
+    local data = io2.newBuffer()
+    local writer = io2.newScalarWriter(data)
     local minX, minY, minZ = math.huge, math.huge, math.huge
     local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
     for offset = 1, #options.vertices, 12 do
@@ -1015,11 +1021,11 @@ export function newMesh(options: MeshOptions): MeshInput, BoundsInput
         version = 1,
         path = options.name,
         mipmaps = false,
-        images = nupp.data.json.asArray({}),
-        materials = nupp.data.json.asArray({}),
-        skins = nupp.data.json.asArray({}),
-        channels = nupp.data.json.asArray({}),
-        animations = nupp.data.json.asArray({}),
+        images = json2.asArray({}),
+        materials = json2.asArray({}),
+        skins = json2.asArray({}),
+        channels = json2.asArray({}),
+        animations = json2.asArray({}),
         meshes = {
             {
                 name = options.name,
@@ -1040,9 +1046,9 @@ export function newMesh(options: MeshOptions): MeshInput, BoundsInput
         nodes = {{parent = 0, translation = {0, 0, 0}, rotation = {0, 0, 0, 1}, scale = {1, 1, 1}}},
         draws = {{mesh = 1, material = 0, skin = 0, node = 1, weights = {}}}
     }
-    const json = nupp.data.json.encode(metadata)
-    local output = nupp.io.newBuffer()
-    local prefix = nupp.io.newScalarWriter(output)
+    const json = json2.encode(metadata)
+    local output = io2.newBuffer()
+    local prefix = io2.newScalarWriter(output)
     prefix:writeUint32(nupp.math.u32.wrap(#json))
         :writeBytes(json)
         :writeBytes(string.rep("\0", (4 - #json % 4) % 4))
@@ -1091,9 +1097,9 @@ export function loadEnvironment(name: string, faces: {string}): string?, string?
             images[index] = {width = width, height = height, pixels = {offset, #bytes}}
             offset = offset + #bytes
         end
-        const metadata = nupp.data.json.encode({version = 1, environment = name, images = images})
-        local buffer = nupp.io.newBuffer()
-        local writer = nupp.io.newScalarWriter(buffer)
+        const metadata = json2.encode({version = 1, environment = name, images = images})
+        local buffer = io2.newBuffer()
+        local writer = io2.newScalarWriter(buffer)
         writer:writeUint32(nupp.math.u32.wrap(#metadata))
             :writeBytes(metadata)
             :writeBytes(string.rep("\0", (4 - #metadata % 4) % 4))
@@ -1109,7 +1115,7 @@ export function loadEnvironment(name: string, faces: {string}): string?, string?
     if not ok then
         return nil, tostring(result)
     end
-    const id = tecs.internal.meshregistry.register("environment://" .. name)
+    const id = meshregistry.register("environment://" .. name)
     commands[#commands + 1] = result as string
     commandIds[#commandIds + 1] = id
 
@@ -1250,7 +1256,7 @@ export function newMaterial(options: MaterialOptions): MaterialInput
             size = size + #bytes
         end
     end
-    const empty = nupp.data.json.asArray({})
+    const empty = json2.asArray({})
     const material: any = {
         name = options.name,
         model = model,
@@ -1265,11 +1271,11 @@ export function newMaterial(options: MaterialOptions): MaterialInput
         doubleSided = options.doubleSided ?? false,
         images = offsets
     }
-    const metadata = nupp.data.json.encode({
+    const metadata = json2.encode({
         version = 1,
         path = options.name,
         mipmaps = true,
-        images = nupp.data.json.asArray(images),
+        images = json2.asArray(images),
         materials = {material},
         meshes = empty,
         draws = empty,
@@ -1278,8 +1284,8 @@ export function newMaterial(options: MaterialOptions): MaterialInput
         channels = empty,
         animations = empty
     })
-    local buffer = nupp.io.newBuffer()
-    local writer = nupp.io.newScalarWriter(buffer)
+    local buffer = io2.newBuffer()
+    local writer = io2.newScalarWriter(buffer)
     writer:writeUint32(nupp.math.u32.wrap(#metadata))
         :writeBytes(metadata)
         :writeBytes(string.rep("\0", (4 - #metadata % 4) % 4))

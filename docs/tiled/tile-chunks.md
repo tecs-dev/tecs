@@ -39,16 +39,16 @@ and are supplied automatically when omitted.
 
 ## TileChunk properties
 
-| Property | Default | Meaning |
-| --- | --- | --- |
-| `tileset` | Required | Atlas image ID |
-| `tileWidth`, `tileHeight` | 32 | Tile image dimensions in pixels |
-| `columns` | 16 | Atlas columns for UV calculation |
-| `spacing` | 0 | Pixel gap between atlas tiles |
-| `margin` | 0 | Pixel inset around the atlas edge |
-| `tiles` | Empty grid | Cells 1 through 256, in row order; 0 means empty |
-| `cellWidth`, `cellHeight` | Tile dimensions | Grid spacing, independent of tile image size |
-| `offsetX`, `offsetY` | 0 | Tile image offsets inside each cell |
+| Property                  | Default         | Meaning                                          |
+| ------------------------- | --------------- | ------------------------------------------------ |
+| `tileset`                 | Required        | Atlas image ID                                   |
+| `tileWidth`, `tileHeight` | 32              | Tile image dimensions in pixels                  |
+| `columns`                 | 16              | Atlas columns for UV calculation                 |
+| `spacing`                 | 0               | Pixel gap between atlas tiles                    |
+| `margin`                  | 0               | Pixel inset around the atlas edge                |
+| `tiles`                   | Empty grid      | Cells 1 through 256, in row order; 0 means empty |
+| `cellWidth`, `cellHeight` | Tile dimensions | Grid spacing, independent of tile image size     |
+| `offsetX`, `offsetY`      | 0               | Tile image offsets inside each cell              |
 
 Tile IDs are **one-based local atlas indices**. Tiled's zero-based tile ID 0 is
 stored as 1. The high H, V and diagonal flip bits retain Tiled's encoding.

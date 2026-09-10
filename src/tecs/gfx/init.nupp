@@ -45,6 +45,21 @@ through the same textured path a sprite does, `tecs.gpu.materials` numbers the
 materials a `Material` selects, and `tecs.gpu.passes` declares the render passes
 and render targets a frame is drawn through.
 ]]
+const {type TileChunk as TileChunk2} = require("tecs.internal.tilechunk")
+const tilechunk = require("tecs.internal.tilechunk")
+const {type View as View2} = require("tecs.internal.views")
+const views = require("tecs.internal.views")
+const {type Bounds3D as Bounds3D2} = require("tecs.internal.meshcomponents")
+const meshcomponents = require("tecs.internal.meshcomponents")
+const {type Mesh as Mesh2} = require("tecs.internal.meshcomponents")
+const {type MeshMaterial as MeshMaterial2} = require("tecs.internal.meshcomponents")
+const {type MeshSkin as MeshSkin2} = require("tecs.internal.meshcomponents")
+const {type MeshMorph as MeshMorph2} = require("tecs.internal.meshcomponents")
+const {type Camera3D as Camera3D2} = require("tecs.gfx.camera3d")
+const camera3d = require("tecs.gfx.camera3d")
+const {type PointLight3D as PointLight3D2} = require("tecs.internal.meshcomponents")
+const {type SpotLight3D as SpotLight3D2} = require("tecs.internal.meshcomponents")
+const sheet = require("tecs.gfx.sheet")
 
 local animation = require("tecs.gfx.animation")
 local clips = require("tecs.gfx.clips")
@@ -146,24 +161,24 @@ export type Material = materials.Material
 export const Material = materials.MaterialComponent
 
 --- A native 16 by 16 grid of static atlas tiles.
-export type TileChunk = tecs.internal.tilechunk.TileChunk
+export type TileChunk = TileChunk2
 
 --- Constructs a tile chunk positioned by its top-left Transform2D.
-export const TileChunk = tecs.internal.tilechunk.TileChunkComponent
+export const TileChunk = tilechunk.TileChunkComponent
 
 --- Requests synchronization after a nested tile-array edit.
-export const DirtyTileChunk = tecs.internal.tilechunk.DirtyTileChunk
+export const DirtyTileChunk = tilechunk.DirtyTileChunk
 
 --- The number of cells along a tile chunk edge.
-export const TILE_CHUNK_SIZE = tecs.internal.tilechunk.SIZE
+export const TILE_CHUNK_SIZE = tilechunk.SIZE
 
 --- Describes an ordered viewport with its own camera. Explicit views replace
 --- the synthesized full-frame camera; coordinates are fractions of the frame.
-export type View = tecs.internal.views.View
+export type View = View2
 
 --- Constructs a viewport from a camera and optional rectangle, order and enabled
 --- fields.
-export const View = tecs.internal.views.Component
+export const View = views.Component
 
 --- Creates a camera value for a View or coordinate conversion outside an entity.
 --- @param options The caller supplies world position, positive zoom and radians of
@@ -187,60 +202,60 @@ export function newCamera2D(options: {
 end
 
 --- Stores the Bounds3D data for one 3D primitive.
-export type Bounds3D = tecs.internal.meshcomponents.Bounds3D
+export type Bounds3D = Bounds3D2
 
 --- Constructs the Bounds3D component for a 3D primitive.
-export const Bounds3D = tecs.internal.meshcomponents.Bounds3DComponent
+export const Bounds3D = meshcomponents.Bounds3DComponent
 
 --- Stores the Mesh data for one 3D primitive.
-export type Mesh = tecs.internal.meshcomponents.Mesh
+export type Mesh = Mesh2
 
 --- Constructs the Mesh component for a 3D primitive.
-export const Mesh = tecs.internal.meshcomponents.MeshComponent
+export const Mesh = meshcomponents.MeshComponent
 
 --- Stores the MeshMaterial data for one 3D primitive.
-export type MeshMaterial = tecs.internal.meshcomponents.MeshMaterial
+export type MeshMaterial = MeshMaterial2
 
 --- Constructs the MeshMaterial component for a 3D primitive.
-export const MeshMaterial = tecs.internal.meshcomponents.MeshMaterialComponent
+export const MeshMaterial = meshcomponents.MeshMaterialComponent
 
 --- Stores the MeshSkin data for one 3D primitive.
-export type MeshSkin = tecs.internal.meshcomponents.MeshSkin
+export type MeshSkin = MeshSkin2
 
 --- Constructs the MeshSkin component for a 3D primitive.
-export const MeshSkin = tecs.internal.meshcomponents.MeshSkinComponent
+export const MeshSkin = meshcomponents.MeshSkinComponent
 
 --- Stores the MeshMorph data for one 3D primitive.
-export type MeshMorph = tecs.internal.meshcomponents.MeshMorph
+export type MeshMorph = MeshMorph2
 
 --- Constructs the MeshMorph component for a 3D primitive.
-export const MeshMorph = tecs.internal.meshcomponents.MeshMorphComponent
+export const MeshMorph = meshcomponents.MeshMorphComponent
 
 --- Marks geometry for the 3D renderer.
-export const Renderable3D = tecs.internal.meshcomponents.Renderable3D
+export const Renderable3D = meshcomponents.Renderable3D
 
 --- A perspective camera with quaternion orientation.
-export type Camera3D = tecs.gfx.camera3d.Camera3D
+export type Camera3D = Camera3D2
 
 --- Creates a right-handed perspective camera looking along negative Z.
-export const newCamera3D = tecs.gfx.camera3d.newCamera3D
+export const newCamera3D = camera3d.newCamera3D
 
 --- Omnidirectional mesh light positioned by Transform3D.
-export type PointLight3D = tecs.internal.meshcomponents.PointLight3D
+export type PointLight3D = PointLight3D2
 
 --- Constructs a point light with radius, linear RGB, intensity and LIGHT_* flags.
-export const PointLight3D = tecs.internal.meshcomponents.PointLight3DComponent
+export const PointLight3D = meshcomponents.PointLight3DComponent
 
 --- Conical mesh light aimed along Transform3D local negative Z.
-export type SpotLight3D = tecs.internal.meshcomponents.SpotLight3D
+export type SpotLight3D = SpotLight3D2
 
 --- Constructs a spot light with radius, inner and outer half-angles in radians,
 --- linear RGB, intensity and LIGHT_* flags.
-export const SpotLight3D = tecs.internal.meshcomponents.SpotLight3DComponent
+export const SpotLight3D = meshcomponents.SpotLight3DComponent
 
 --- Requests a slot in the local-light shadow atlas.
 export const LIGHT_CASTS_SHADOWS: integer = 1
 
 --- Anchors a sprite at normalized X/Y coordinates or an authored sheet slice.
 --- Use Sheet:pivot to keep animated slice anchors synchronized with the GPU frames.
-export const Pivot = tecs.gfx.sheet.Pivot
+export const Pivot = sheet.Pivot

@@ -87,7 +87,7 @@ from durable state after loading.
 Register a handler for durable resource state outside component columns:
 
 ```nupp
-local SCORE = nupp.data.newKey<number>("game.score")
+local SCORE: nupp.store.Key<number> = nupp.store.newKey("game.score")
 world.resources:set(SCORE, 0)
 world:addSnapshotHandler({
     name = "game.score",

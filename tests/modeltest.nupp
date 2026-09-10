@@ -1,3 +1,6 @@
+const ecs = require("tecs.ecs")
+const gfx = require("tecs.gfx")
+
 local test = require("nupp.test")
 local models = require("tecs.gfx.models")
 local suite = {}
@@ -14,21 +17,21 @@ function suite.samplesIndependentPosesWithSkinAndMorphWeights(): nil
     test.assert(math.abs(second.primitives[1].skin.value.matrices[13] - 0.75) < 1e-6)
     test.equal(first.primitives[1].morph.value.weights[1], 0.25)
     test.equal(second.primitives[1].morph.value.weights[1], 0.75)
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const p = first.primitives[1]
-    const entity = world:spawn(p.transform, p.mesh, p.bounds, p.material, p.skin, p.morph, tecs.gfx.Renderable3D)
+    const entity = world:spawn(p.transform, p.mesh, p.bounds, p.material, p.skin, p.morph, gfx.Renderable3D)
     world:commit()
     first:bind(world, 1, entity)
     first:play("Move", {loop = false})
     first:update(1)
-    test.equal(assert(world:get(entity, tecs.ecs.Transform3D)).y, 1)
+    test.equal(assert(world:get(entity, ecs.Transform3D)).y, 1)
     test.equal(first.playing, false)
     first:sample("Rotate", 0.5)
     test.assert(math.abs(math.abs(first.primitives[1].transform.value.rotationZ) - math.sqrt(0.5)) < 1e-6)
 end
 
 function suite.cameraProjectionAndInverseRoundTrip(): nil
-    const camera = tecs.gfx.newCamera3D({x = 2, y = 3, z = 8})
+    const camera = gfx.newCamera3D({x = 2, y = 3, z = 8})
     const matrix, inverse = camera:matrices(1280, 720)
     for column = 0, 3 do
         for row = 0, 3 do

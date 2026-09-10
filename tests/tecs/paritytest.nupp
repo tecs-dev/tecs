@@ -1,3 +1,21 @@
+const ecs = require("tecs.ecs")
+const {ArchetypeCreated} = require("tecs.ecs")
+const {type ArchetypeCreated} = require("tecs.ecs")
+const {OnSnapshotSave} = require("tecs.ecs")
+const {type OnSnapshotSave} = require("tecs.ecs")
+const {StartSnapshotLoad} = require("tecs.ecs")
+const {type StartSnapshotLoad} = require("tecs.ecs")
+const {FinishSnapshotLoad} = require("tecs.ecs")
+const {type FinishSnapshotLoad} = require("tecs.ecs")
+const {type World} = require("tecs.ecs")
+const {type PhaseDefinition} = require("tecs.ecs")
+const {OnSpawn} = require("tecs.ecs")
+const {type OnSpawn} = require("tecs.ecs")
+const {type SystemConfig} = require("tecs.ecs")
+const {type Pipeline} = require("tecs.ecs")
+const {type SystemInfo} = require("tecs.ecs")
+const files = require("nupp.io.files")
+
 local test = require("nupp.test")
 local archetype = require("tecs.internal.archetype")
 local events = require("nupp.events")
@@ -9,16 +27,16 @@ local tasks = require("nupp.tasks")
 local suite = {}
 
 function suite.observesArchetypeRowsAndTracksResidue(): nil
-    const world = tecs.ecs.newWorld()
-    const value = tecs.ecs.newScalarComponent({name = "test.Parity.Value", kind = "number"})
-    const marker = tecs.ecs.newTagComponent({name = "test.Parity.Marker"})
+    const world = ecs.newWorld()
+    const value = ecs.newScalarComponent({name = "test.Parity.Value", kind = "number"})
+    const marker = ecs.newTagComponent({name = "test.Parity.Marker"})
     local created: integer = 0
     local added: integer = 0
     local removed: integer = 0
     local activated: integer = 0
     local deactivated: integer = 0
     local moved: integer = 0
-    world:observe(0, tecs.ecs.ArchetypeCreated, function(borrows event: tecs.ecs.ArchetypeCreated): nil
+    world:observe(0, ArchetypeCreated, function(borrows event: ArchetypeCreated): nil
         created = created + 1
         event.archetype:addEntityObserver({
             onEntitiesAdded = function(
@@ -98,9 +116,9 @@ function suite.observesArchetypeRowsAndTracksResidue(): nil
 end
 
 function suite.dirtyArchetypesFollowFirstWriteOrder(): nil
-    const world = tecs.ecs.newWorld()
-    const left = tecs.ecs.newTagComponent({name = "test.Parity.Left"})
-    const right = tecs.ecs.newTagComponent({name = "test.Parity.Right"})
+    const world = ecs.newWorld()
+    const left = ecs.newTagComponent({name = "test.Parity.Left"})
+    const right = ecs.newTagComponent({name = "test.Parity.Right"})
     world:spawn(left)
     world:spawn(right)
     world:commit()
@@ -117,18 +135,18 @@ function suite.dirtyArchetypesFollowFirstWriteOrder(): nil
 end
 
 function suite.snapshotEventsFilterAndFanOut(): nil
-    const world = tecs.ecs.newWorld()
-    const derived = tecs.ecs.newTagComponent({name = "test.Parity.Derived"})
-    const retained = world:spawn(tecs.ecs.Transform3D(1, 2, 3))
+    const world = ecs.newWorld()
+    const derived = ecs.newTagComponent({name = "test.Parity.Derived"})
+    const retained = world:spawn(ecs.Transform3D(1, 2, 3))
     world:spawn(derived)
     world:commit()
     local loaded: integer = 0
     local finished = false
-    world:observe(0, tecs.ecs.OnSnapshotSave, function(borrows event: tecs.ecs.OnSnapshotSave): nil
+    world:observe(0, OnSnapshotSave, function(borrows event: OnSnapshotSave): nil
         event:addData("test.parity", 7)
         event:exclude(derived)
     end)
-    world:observe(0, tecs.ecs.StartSnapshotLoad, function(borrows event: tecs.ecs.StartSnapshotLoad): nil
+    world:observe(0, StartSnapshotLoad, function(borrows event: StartSnapshotLoad): nil
         test.equal(event.prelude.entityCount, 1)
         event:onData("test.parity", function(value: any): nil
             loaded = loaded + (value as integer)
@@ -137,7 +155,7 @@ function suite.snapshotEventsFilterAndFanOut(): nil
             loaded = loaded + (value as integer)
         end)
     end)
-    world:observe(0, tecs.ecs.FinishSnapshotLoad, function(borrows event: tecs.ecs.FinishSnapshotLoad): nil
+    world:observe(0, FinishSnapshotLoad, function(borrows event: FinishSnapshotLoad): nil
         test.equal(event.prelude.entityCount, 1)
         test.equal(loaded, 14)
         finished = true
@@ -148,19 +166,19 @@ function suite.snapshotEventsFilterAndFanOut(): nil
     world:loadSnapshot(saved)
     test.assert(finished)
     test.assert(not world:isPhaseEnabled("Update"))
-    const pose = assert(world:get(retained, tecs.ecs.Transform3D))
+    const pose = assert(world:get(retained, ecs.Transform3D))
     test.equal(pose.z, 3)
     test.equal(pose.rotationW, 1)
     test.equal(pose.scaleZ, 1)
     test.equal(world:newQuery({include = {derived}}):count(), 0)
-    test.equal(events.name(tecs.ecs.OnSnapshotSave), "OnSnapshotSave")
+    test.equal(events.name(OnSnapshotSave), "OnSnapshotSave")
 end
 
 function suite.snapshotNilSerializerOmitsTheComponent(): nil
     local record Value
         x: number
     end
-    const value = tecs.ecs.newComponent(Value, {
+    const value = ecs.newComponent(Value, {
         name = "test.Parity.NilCodec",
         construct = function(): Value
             return new Value(x = 1)
@@ -175,7 +193,7 @@ function suite.snapshotNilSerializerOmitsTheComponent(): nil
             error("nil must not reach deserialize")
         end
     })
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const id = world:spawn(value())
     world:commit()
     world:loadSnapshot(world:saveSnapshot())
@@ -184,9 +202,9 @@ function suite.snapshotNilSerializerOmitsTheComponent(): nil
 end
 
 function suite.binarySnapshotsRestoreNativeColumnsAndRetainTheInputBuffer(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const count = 1000
-    world:batchSpawn(count, {tecs.ecs.Transform3D(1, 2, 3)})
+    world:batchSpawn(count, {ecs.Transform3D(1, 2, 3)})
     world:commit()
     const output = buffer.new()
     const saved = world:saveSnapshot({format = "binary", buffer = output})
@@ -195,9 +213,9 @@ function suite.binarySnapshotsRestoreNativeColumnsAndRetainTheInputBuffer(): nil
     test.assert(length > count * 80)
     world:loadSnapshot(saved)
     test.equal(#output, length)
-    test.equal(world:newQuery({include = {tecs.ecs.Transform3D}}):count(), count)
-    for candidate, rows in world:newQuery({include = {tecs.ecs.Transform3D}}):iter() do
-        const values = assert(candidate:get(tecs.ecs.Transform3D))
+    test.equal(world:newQuery({include = {ecs.Transform3D}}):count(), count)
+    for candidate, rows in world:newQuery({include = {ecs.Transform3D}}):iter() do
+        const values = assert(candidate:get(ecs.Transform3D))
         unsafe do
             for row = 1, assert(rows) do
                 test.equal(values[row].z, 3);
@@ -215,8 +233,8 @@ function suite.binarySnapshotsRestoreNativeColumnsAndRetainTheInputBuffer(): nil
 end
 
 function suite.readsColumnIndexedTablesAndMigratesBinarySchemas(): nil
-    const world = tecs.ecs.newWorld()
-    const native = tecs.ecs.Transform3D
+    const world = ecs.newWorld()
+    const native = ecs.Transform3D
     world:loadSnapshot({
         version = 1,
         nextEntityId = 2,
@@ -252,7 +270,7 @@ local struct Nested
 end
 
 function suite.nativeNestedAndPointerLayoutsUseCustomCodecs(): nil
-    const component = tecs.ecs.newComponent(Nested, {
+    const component = ecs.newComponent(Nested, {
         name = "test.Parity.Nested",
         construct = function(x: number): Nested
             return new Nested(new NestedPose(x), nil)
@@ -267,7 +285,7 @@ function suite.nativeNestedAndPointerLayoutsUseCustomCodecs(): nil
             return new Nested(new NestedPose(value.x as number), nil)
         end
     })
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     const id = world:spawn(component(17))
     world:commit()
     world:loadSnapshot(world:saveSnapshot({format = "binary"}))
@@ -277,12 +295,12 @@ function suite.nativeNestedAndPointerLayoutsUseCustomCodecs(): nil
 end
 
 function suite.savesAndLoadsInsideAnActiveSystem(): nil
-    const world = tecs.ecs.newWorld()
-    const marker = tecs.ecs.newTagComponent({name = "test.Parity.InSystem"})
+    const world = ecs.newWorld()
+    const marker = ecs.newTagComponent({name = "test.Parity.InSystem"})
     world:addSystem({
         name = "test.parity.snapshot",
         phase = "Update",
-        run = function(_dt: number, exclusive running: tecs.ecs.World): nil
+        run = function(_dt: number, exclusive running: World): nil
             running:spawn(marker)
             running:loadSnapshot(running:saveSnapshot({format = "binary"}))
         end
@@ -292,8 +310,8 @@ function suite.savesAndLoadsInsideAnActiveSystem(): nil
 end
 
 function suite.customPhaseTreesDispatchAndEnableRecursively(): nil
-    const world = tecs.ecs.newWorld()
-    const first: tecs.ecs.PhaseDefinition = {name = "test.CustomFirst"}
+    const world = ecs.newWorld()
+    const first: PhaseDefinition = {name = "test.CustomFirst"}
     world:registerPhase(first)
     world:registerPhase({name = "test.CustomLast"})
     world:registerPhase({name = "test.CustomGroup", children = {first.name, "test.CustomLast"}})
@@ -335,9 +353,9 @@ function suite.worldAwareDeserializersReceiveTheDestination(): nil
     local record Value
         count: integer
     end
-    const destination = tecs.ecs.newWorld()
+    const destination = ecs.newWorld()
     local seen = false
-    const value = tecs.ecs.newComponent(Value, {
+    const value = ecs.newComponent(Value, {
         name = "test.Parity.WorldAware",
         construct = function(): Value
             return new Value(count = 17)
@@ -348,7 +366,7 @@ function suite.worldAwareDeserializersReceiveTheDestination(): nil
         save = function(input: Value): any
             return input.count
         end,
-        deserialize = function(exclusive world: tecs.ecs.World, input: any): Value
+        deserialize = function(exclusive world: World, input: any): Value
             seen = world == destination
             return new Value(count = input as integer)
         end
@@ -361,8 +379,8 @@ function suite.worldAwareDeserializersReceiveTheDestination(): nil
 end
 
 function suite.fixedTrackingDistinguishesVariableRateOverwrites(): nil
-    const world = tecs.ecs.newWorld({timestep = 0.1})
-    const value = tecs.ecs.newScalarComponent({name = "test.Parity.Fixed", kind = "number"})
+    const world = ecs.newWorld({timestep = 0.1})
+    const value = ecs.newScalarComponent({name = "test.Parity.Fixed", kind = "number"})
     const id = world:spawn(value(1))
     world:commit()
     const candidate = assert((world:findArchetypes(value)()))
@@ -372,14 +390,14 @@ function suite.fixedTrackingDistinguishesVariableRateOverwrites(): nil
     fixedtracking.beforeStep(world, function(): nil
         before = before + 1
     end)
-    fixedtracking.afterStep(world, function(exclusive current: tecs.ecs.World): nil
+    fixedtracking.afterStep(world, function(exclusive current: World): nil
         after = after + 1
         test.assert(fixedtracking.wroteThisStep(current, candidate, value))
     end)
     world:addSystem({
         name = "test.parity.fixed",
         phase = "FixedUpdate",
-        run = function(_dt: number, exclusive current: tecs.ecs.World): nil
+        run = function(_dt: number, exclusive current: World): nil
             current:getMut(id, value)
         end
     })
@@ -393,10 +411,10 @@ function suite.fixedTrackingDistinguishesVariableRateOverwrites(): nil
 end
 
 function suite.flatQueuesPreserveCoalescingAndMixedPublicationOrder(): nil
-    const world = tecs.ecs.newWorld()
-    const a = tecs.ecs.newScalarComponent({name = "test.Parity.FlatA", kind = "number"})
-    const b = tecs.ecs.newScalarComponent({name = "test.Parity.FlatB", kind = "number"})
-    const relation = tecs.ecs.newRelationship({name = "test.Parity.FlatEdge", exclusive = true, reverseIndex = true})
+    const world = ecs.newWorld()
+    const a = ecs.newScalarComponent({name = "test.Parity.FlatA", kind = "number"})
+    const b = ecs.newScalarComponent({name = "test.Parity.FlatB", kind = "number"})
+    const relation = ecs.newRelationship({name = "test.Parity.FlatEdge", exclusive = true, reverseIndex = true})
     const bundle = world:newBundle("test.parity.flat", {required = {a}})
     const parent = world:spawn()
     const first = bundle:spawn(a(1))
@@ -405,7 +423,7 @@ function suite.flatQueuesPreserveCoalescingAndMixedPublicationOrder(): nil
     const related = world:spawn(relation(parent))
     const last = bundle:spawn(a(4))
     const order: {integer} = {}
-    world:observe(0, tecs.ecs.OnSpawn, function(borrows event: tecs.ecs.OnSpawn): nil
+    world:observe(0, OnSpawn, function(borrows event: OnSpawn): nil
         order[#order + 1] = event.entity
     end)
     world:commit()
@@ -432,9 +450,9 @@ function suite.flatQueuesPreserveCoalescingAndMixedPublicationOrder(): nil
 end
 
 function suite.sparseFramesKeepAbsentTagsAndFalseScalarsDistinct(): nil
-    const world = tecs.ecs.newWorld()
-    const tag = tecs.ecs.newTagComponent({name = "test.Parity.SparseTag"})
-    const flag = tecs.ecs.newScalarComponent({name = "test.Parity.SparseBool", kind = "boolean"})
+    const world = ecs.newWorld()
+    const tag = ecs.newTagComponent({name = "test.Parity.SparseTag"})
+    const flag = ecs.newScalarComponent({name = "test.Parity.SparseBool", kind = "boolean"})
     const encoded = buffer.new()
     encoded:encode(1):encode(3):encode(2):encode(1):encode(2)
     encoded:encode(tag.componentName):encode(nil):encode(flag.componentName):encode(nil)
@@ -456,15 +474,15 @@ local struct NativeEdge
 end
 
 function suite.binaryRelationshipsRestoreDenseNativeAndSparseEdgeSets(): nil
-    const world = tecs.ecs.newWorld()
-    const dense = tecs.ecs.newRelationship(NativeEdge, {
+    const world = ecs.newWorld()
+    const dense = ecs.newRelationship(NativeEdge, {
         name = "test.Parity.NativeEdge",
         reverseIndex = true,
         construct = function(target: integer, weight: number): NativeEdge
             return new NativeEdge(target, weight)
         end
     })
-    const sparse = tecs.ecs.newRelationship({name = "test.Parity.SparseEdge", sparse = true, reverseIndex = true})
+    const sparse = ecs.newRelationship({name = "test.Parity.SparseEdge", sparse = true, reverseIndex = true})
     const left = world:spawn()
     const right = world:spawn()
     const source = world:spawn(dense(left, 3), dense(right, 7))
@@ -479,8 +497,8 @@ function suite.binaryRelationshipsRestoreDenseNativeAndSparseEdgeSets(): nil
 end
 
 function suite.coldTransitionHooksObserveEntityAndStateChanges(): nil
-    const world = tecs.ecs.newWorld()
-    const tag = tecs.ecs.newTagComponent({name = "test.Parity.Transitions"})
+    const world = ecs.newWorld()
+    const tag = ecs.newTagComponent({name = "test.Parity.Transitions"})
     local transitions: integer = 0
     local states: integer = 0
     entityworld.setTransitionObserver(world, {
@@ -509,12 +527,12 @@ function suite.coldTransitionHooksObserveEntityAndStateChanges(): nil
 end
 
 function suite.customPipelineOwnsDispatchControlsAndSnapshotClock(): nil
-    const systems: {tecs.ecs.SystemConfig} = {}
+    const systems: {SystemConfig} = {}
     const enabled: {[string]: boolean} = {}
     local factoryCalls: integer = 0
     local registeredPhase = ""
     local ran: integer = 0
-    const pipeline: tecs.ecs.Pipeline = {
+    const pipeline: Pipeline = {
         count = 0,
         fixedTimestep = 0.25,
         fixedAccumulator = 0.125,
@@ -524,19 +542,14 @@ function suite.customPipelineOwnsDispatchControlsAndSnapshotClock(): nil
         fixedTimeDropped = 0,
         fixedStepsDropped = 0,
         phaseStates = {true},
-        update = function(
-            self: tecs.ecs.Pipeline,
-            dt: number,
-            exclusive world: tecs.ecs.World,
-            borrows scope: tasks.Scope
-        ): nil
+        update = function(self: Pipeline, dt: number, exclusive world: World, borrows scope: tasks.Scope): nil
             self:run("Update", dt, world, scope)
         end,
         run = function(
-            self: tecs.ecs.Pipeline,
+            self: Pipeline,
             phase: string,
             dt: number,
-            exclusive world: tecs.ecs.World,
+            exclusive world: World,
             borrows scope: tasks.Scope
         ): nil
             if not self.phaseStates[1] then
@@ -549,12 +562,12 @@ function suite.customPipelineOwnsDispatchControlsAndSnapshotClock(): nil
                 end
             end
         end,
-        addSystem = function(self: tecs.ecs.Pipeline, config: tecs.ecs.SystemConfig): string
+        addSystem = function(self: Pipeline, config: SystemConfig): string
             systems[#systems + 1] = config
             self.count = self.count + 1
             return assert(config.name)
         end,
-        removeSystem = function(self: tecs.ecs.Pipeline, name: string): boolean
+        removeSystem = function(self: Pipeline, name: string): boolean
             for index = 1, #systems do
                 if systems[index].name == name then
                     table.remove(systems, index);
@@ -565,8 +578,8 @@ function suite.customPipelineOwnsDispatchControlsAndSnapshotClock(): nil
 
             return false
         end,
-        listSystems = function(_self: tecs.ecs.Pipeline): {tecs.ecs.SystemInfo}
-            const result: {tecs.ecs.SystemInfo} = {}
+        listSystems = function(_self: Pipeline): {SystemInfo}
+            const result: {SystemInfo} = {}
             for index = 1, #systems do
                 const system = systems[index]
                 result[
@@ -582,25 +595,25 @@ function suite.customPipelineOwnsDispatchControlsAndSnapshotClock(): nil
 
             return result
         end,
-        setSystemEnabled = function(_self: tecs.ecs.Pipeline, name: string, active: boolean): (boolean, string?)
+        setSystemEnabled = function(_self: Pipeline, name: string, active: boolean): (boolean, string?)
             enabled[name] = active;
             return true, nil
         end,
-        enablePhase = function(self: tecs.ecs.Pipeline, _phase: string): nil
+        enablePhase = function(self: Pipeline, _phase: string): nil
             self.phaseStates[1] = true
         end,
-        disablePhase = function(self: tecs.ecs.Pipeline, _phase: string): nil
+        disablePhase = function(self: Pipeline, _phase: string): nil
             self.phaseStates[1] = false
         end,
-        isPhaseEnabled = function(self: tecs.ecs.Pipeline, _phase: string): boolean
+        isPhaseEnabled = function(self: Pipeline, _phase: string): boolean
             return self.phaseStates[1]
         end,
-        registerPhase = function(_self: tecs.ecs.Pipeline, phase: tecs.ecs.PhaseDefinition): nil
+        registerPhase = function(_self: Pipeline, phase: PhaseDefinition): nil
             registeredPhase = phase.name
         end
     }
-    const world = tecs.ecs.newWorld({
-        pipelineFactory = function(): tecs.ecs.Pipeline
+    const world = ecs.newWorld({
+        pipelineFactory = function(): Pipeline
             factoryCalls = factoryCalls + 1;
             return pipeline
         end
@@ -611,7 +624,7 @@ function suite.customPipelineOwnsDispatchControlsAndSnapshotClock(): nil
     world:addSystem({
         name = "test.parity.pipeline",
         phase = "Update",
-        run = function(_dt: number, exclusive current: tecs.ecs.World): nil
+        run = function(_dt: number, exclusive current: World): nil
             current:spawn()
             ran = ran + 1
         end
@@ -641,9 +654,9 @@ function suite.customPipelineOwnsDispatchControlsAndSnapshotClock(): nil
 end
 
 function suite.snapshotLayersAndMalformedPipelineValidateBeforeReplacement(): nil
-    const world = tecs.ecs.newWorld()
-    const left = world:spawn(tecs.ecs.Transform2D(1, 2, 0, 1))
-    const right = world:spawn(tecs.ecs.Transform2D(3, 4, 0, 2))
+    const world = ecs.newWorld()
+    const left = world:spawn(ecs.Transform2D(1, 2, 0, 1))
+    const right = world:spawn(ecs.Transform2D(3, 4, 0, 2))
     const unlayered = world:spawn()
     world:commit()
     const selected = world:saveSnapshot({format = "binary", layers = {2}})
@@ -668,9 +681,9 @@ function suite.snapshotLayersAndMalformedPipelineValidateBeforeReplacement(): ni
 end
 
 function suite.relationshipCodecsReceiveTheDestinationWorld(): nil
-    const world = tecs.ecs.newWorld()
+    const world = ecs.newWorld()
     local seen: integer = 0
-    const edge = tecs.ecs.newRelationship(NativeEdge, {
+    const edge = ecs.newRelationship(NativeEdge, {
         name = "test.Parity.WorldAwareEdge",
         exclusive = true,
         construct = function(target: integer, weight: number): NativeEdge
@@ -679,7 +692,7 @@ function suite.relationshipCodecsReceiveTheDestinationWorld(): nil
         save = function(value: NativeEdge): any
             return {target = value.target, weight = value.weight}
         end,
-        deserialize = function(exclusive destination: tecs.ecs.World, value: any): NativeEdge
+        deserialize = function(exclusive destination: World, value: any): NativeEdge
             test.assert(destination == world)
             seen = seen + 1
             return new NativeEdge(value.target as number, value.weight as number)
@@ -694,16 +707,16 @@ function suite.relationshipCodecsReceiveTheDestinationWorld(): nil
 end
 
 function suite.binarySnapshotFileMatchesItsReusableBuffer(): nil
-    const world = tecs.ecs.newWorld()
-    const id = world:spawn(tecs.ecs.Transform3D(3, 4, 5))
+    const world = ecs.newWorld()
+    const id = world:spawn(ecs.Transform3D(3, 4, 5))
     world:commit()
-    with temporary = assert(nupp.io.files.createTemporaryFile()) do
+    with temporary = assert(files.createTemporaryFile()) do
         const output = buffer.new()
         world:saveSnapshot({format = "binary", buffer = output, path = temporary:toString()})
-        const bytes = assert(nupp.io.files.read(temporary:toString()))
+        const bytes = assert(files.read(temporary:toString()))
         test.equal(bytes, output:tostring())
         world:loadSnapshot(bytes)
-        test.equal(assert(world:get(id, tecs.ecs.Transform3D)).z, 5)
+        test.equal(assert(world:get(id, ecs.Transform3D)).z, 5)
     end
 end
 

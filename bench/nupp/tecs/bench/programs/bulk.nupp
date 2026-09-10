@@ -1,14 +1,17 @@
 -- Measures the complete public stage-and-publish boundary, including allocation.
+const ecs = require("tecs.ecs")
+
 local harness = require("tecs.bench.harness")
 
 const count = harness.count("BENCH_BULK_COUNT", 10000)
 const warmup = harness.optionalCount("BENCH_BULK_WARMUP", 20)
 const samples = harness.count("BENCH_BULK_SAMPLES", 51)
-const world = tecs.ecs.newWorld({maxEntities = count + 64})
-const tag = tecs.ecs.newTagComponent({name = "bench.BulkTag"})
-const query = world:newQuery({include = {tecs.ecs.Transform2D}})
+const world = ecs.newWorld({maxEntities = count + 64})
+const tag = ecs.newTagComponent({name = "bench.BulkTag"})
+const query = world:newQuery({include = {ecs.Transform2D}})
+
 local function spawn(): nil
-    world:batchSpawn(count, {tecs.ecs.Transform2D})
+    world:batchSpawn(count, {ecs.Transform2D})
     world:commit()
 end
 
@@ -53,6 +56,7 @@ harness.measure(stages[3], warmup, samples, remove, tagged)
 harness.measure(stages[4], warmup, samples, despawn, populated)
 print("Entities per batch: " .. tostring(count))
 print(harness.format(stages))
+
 local function allocation(name: string, prepare: function(): nil, run: function(): nil): nil
     prepare()
     collectgarbage("collect")
@@ -70,9 +74,10 @@ allocation("batchRemove", tagged, remove)
 allocation("batchDespawn", populated, despawn)
 
 -- Fixed inputs isolate queue and publication costs from caller constructors.
-const scalar = tecs.ecs.newScalarComponent({name = "bench.FlatScalar", kind = "number"})
+const scalar = ecs.newScalarComponent({name = "bench.FlatScalar", kind = "number"})
 const input = scalar(7)
 const bundle = world:newBundle("bench.flat", {required = {scalar}})
+
 local function scalarSpawns(): nil
     for index = 1, count do
         world:spawn(input)

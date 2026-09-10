@@ -1,10 +1,12 @@
+const io2 = require("nupp.io")
+
 local ecs = require("tecs.ecs")
 local gfx = require("tecs.gfx")
 local host = require("tecs.host")
 local images = require("tecs.gfx.images")
 local test = require("nupp.test")
 local window = require("tecs.platform.window")
-local suspension = nupp.suspension
+local suspension = require("nupp.suspension")
 
 local suite = {}
 
@@ -112,10 +114,10 @@ function suite.exposesOneBatchedRenderPacketAfterACompletedFrame(): nil
     host.init(session)
 
     test.equal(host.iterate(session, 0), "continue")
-    local reader = nupp.io.newScalarReader(host.renderPacket(session))
+    local reader = io2.newScalarReader(host.renderPacket(session))
     test.equal(reader:readUint32(), 0x54454353)
-    test.equal(reader:readUint32(), 7)
-    test.equal(reader:readUint32(), 128)
+    test.equal(reader:readUint32(), 9)
+    test.equal(reader:readUint32(), 140)
     test.equal(reader:readUint32(), 0)
     -- The graph revision and the section's byte length, neither of which this
     -- test pins: the render graph is declared elsewhere and may grow.
@@ -161,7 +163,7 @@ function suite.projectsThePacketThroughThePhysicalDrawableSize(): nil
     host.init(session)
 
     test.equal(host.iterate(session, 0), "continue")
-    local reader = nupp.io.newScalarReader(host.renderPacket(session))
+    local reader = io2.newScalarReader(host.renderPacket(session))
     reader:skip(40)
     test.equal(reader:readFloat32(), 640)
     test.equal(reader:readFloat32(), 360)
@@ -179,7 +181,7 @@ function suite.followsTheDrawableThroughAResize(): nil
     host.init(session)
 
     test.equal(host.iterate(session, 0), "continue")
-    local before = nupp.io.newScalarReader(host.renderPacket(session))
+    local before = io2.newScalarReader(host.renderPacket(session))
     before:skip(40)
     test.equal(before:readFloat32(), 1280)
     test.equal(before:readFloat32(), 720)
@@ -189,7 +191,7 @@ function suite.followsTheDrawableThroughAResize(): nil
 
     host.pushResize(session, false, 800, 450, 1600, 900, 2, 1, 1)
     test.equal(host.iterate(session, 0), "continue")
-    local after = nupp.io.newScalarReader(host.renderPacket(session))
+    local after = io2.newScalarReader(host.renderPacket(session))
     after:skip(40)
     test.equal(after:readFloat32(), 1600)
     test.equal(after:readFloat32(), 900)

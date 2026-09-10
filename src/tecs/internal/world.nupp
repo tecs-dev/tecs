@@ -11,10 +11,17 @@ query layers will build on.
 This module orders ECS systems, but owns no private task or completion runtime.
 Systems suspend through `nupp.tasks`; parallel work belongs to `nupp.workers`.
 ]]
+const {type Source} = require("nupp.events")
+const {type Observers} = require("nupp.events")
+const {type Store} = require("nupp.store")
+const {type DoubleArray} = require("tecs.internal.entitycolumn")
+const {type Emittable} = require("nupp.events")
+const {type Observer} = require("nupp.events")
+const store = require("nupp.store")
 
 local tasks = require("nupp.tasks")
 local ffi = require("ffi")
-local random = require("nupp.data.random")
+local random = require("nupp.random")
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
 local derived = require("tecs.internal.derived")
@@ -441,7 +448,7 @@ end
 ---
 --- A world is an event source: observers register against it by address and
 --- receive only the event they observed.
-export record World is nupp.events.Source<integer>
+export record World is Source<integer>
     private allocator: idallocator.IdAllocator
     private archetypes: {archetype.Archetype}
     private archetypeById: {[integer]: archetype.Archetype}
@@ -523,9 +530,9 @@ export record World is nupp.events.Source<integer>
 
     --- Observer registrations by address and event; `observers.count` is how
     --- many are live.
-    observers: nupp.events.Observers<integer>
+    observers: Observers<integer>
 
-    resources: nupp.data.Store
+    resources: Store
 
     spawn: function(exclusive self: World, ...: components.Input): integer
     spawnAt: function(exclusive self: World, id: integer, ...: components.Input): nil
@@ -622,7 +629,7 @@ export record World is nupp.events.Source<integer>
     findArchetypes: function(
         borrows self: World,
         component: components.Selector
-    ): function(): (archetype.Archetype?, integer?, tecs.internal.entitycolumn.DoubleArray?)
+    ): function(): (archetype.Archetype?, integer?, DoubleArray?)
 
     --- Captures archetypes with dirty components in registry order.
     --- @param self The world to inspect.
@@ -822,7 +829,7 @@ export record World is nupp.events.Source<integer>
     popState: function(exclusive self: World): nil
     peekState: function(borrows self: World): string?
     listStates: function(borrows self: World): {string}
-    newBundle: function(exclusive self: World, name: string, definition: BundleDefinition?): Bundle
+    newBundle: function(self: World, name: string, definition: BundleDefinition?): Bundle
     spawnBundle: function(exclusive self: World, name: string, ...: components.Input): integer
     getBundles: function(borrows self: World): {[string]: Bundle}
     getBundle: function(borrows self: World, name: string): Bundle?
@@ -850,39 +857,34 @@ export record World is nupp.events.Source<integer>
     loadSnapshot: function(exclusive self: World, snapshot: any): SnapshotPrelude
 
     addSnapshotHandler: function(exclusive self: World, handler: SnapshotHandler): nil
-    observe: function<E is nupp.events.Emittable>(
+    observe: function<E is Emittable>(
         exclusive self: World,
         address: integer,
         event: Type<E>,
-        callback: nupp.events.Observer<E>,
+        callback: Observer<E>,
         id: string?
     ): nil
-    observeOnce: function<E is nupp.events.Emittable>(
+    observeOnce: function<E is Emittable>(
         exclusive self: World,
         address: integer,
         event: Type<E>,
-        callback: nupp.events.Observer<E>,
+        callback: Observer<E>,
         id: string?
     ): nil
-    stopObserving: function<E is nupp.events.Emittable>(
+    stopObserving: function<E is Emittable>(
         exclusive self: World,
         address: integer,
         event: Type<E>,
-        callbackOrId: nupp.events.Observer<E> | string
+        callbackOrId: Observer<E> | string
     ): boolean
-    hasObservers: function<E is nupp.events.Emittable>(borrows self: World, address: integer, event: Type<E>): boolean
-    emit: function<E is nupp.events.Emittable>(
+    hasObservers: function<E is Emittable>(borrows self: World, address: integer, event: Type<E>): boolean
+    emit: function<E is Emittable>(
         exclusive self: World,
         address: integer,
         event: Type<E>,
         ...: unpackof Construction(E)
     ): nil
-    deliver: function<E is nupp.events.Emittable>(
-        exclusive self: World,
-        address: integer,
-        event: Type<E>,
-        instance: E
-    ): nil
+    deliver: function<E is Emittable>(exclusive self: World, address: integer, event: Type<E>, instance: E): nil
     clearObservers: function(exclusive self: World, address: integer): nil
 end
 
@@ -1003,7 +1005,7 @@ export function new(
         archetypeCount = 1,
         systemCount = 0,
         observers = nuppevents.newObservers(),
-        resources = nupp.data.newStore()
+        resources = store.newStore()
     )
 end
 
@@ -2388,6 +2390,7 @@ function World.traverse(
     const inverse = self.relationshipIndexes[metadata.componentId]
     const stack: {{integer}} = {}
     const seen: {[integer]: boolean} = {[root] = true}
+
     local function pushChildren(target: integer, depth: integer): nil
         const children: {integer} = {}
         if inverse ~= nil then
@@ -2508,11 +2511,11 @@ end
 --- @param callback what runs when one is delivered, with the event borrowed
 --- @param id an optional name used for later removal
 --- @raises when the same name already observes this event and address
-function World.observe<E is nupp.events.Emittable>(
+function World.observe<E is Emittable>(
     exclusive self: World,
     address: integer,
     event: Type<E>,
-    callback: nupp.events.Observer<E>,
+    callback: Observer<E>,
     id: string?
 ): nil
     nuppevents.observe(self, address, event, callback, id)
@@ -2528,11 +2531,11 @@ end
 --- @param callback what runs, once
 --- @param id an optional name used for later removal
 --- @raises when the same name already observes this event and address
-function World.observeOnce<E is nupp.events.Emittable>(
+function World.observeOnce<E is Emittable>(
     exclusive self: World,
     address: integer,
     event: Type<E>,
-    callback: nupp.events.Observer<E>,
+    callback: Observer<E>,
     id: string?
 ): nil
     nuppevents.observeOnce(self, address, event, callback, id)
@@ -2551,11 +2554,11 @@ end
 --- @param event the observed event declaration
 --- @param callbackOrId the callback registered, or the name supplied at registration
 --- @return whether a matching observer existed
-function World.stopObserving<E is nupp.events.Emittable>(
+function World.stopObserving<E is Emittable>(
     exclusive self: World,
     address: integer,
     event: Type<E>,
-    callbackOrId: nupp.events.Observer<E> | string
+    callbackOrId: Observer<E> | string
 ): boolean
     return nuppevents.stopObserving(self, address, event, callbackOrId)
 end
@@ -2565,7 +2568,7 @@ end
 --- @param address the world or entity address
 --- @param event the event declaration
 --- @return whether at least one observer is registered
-function World.hasObservers<E is nupp.events.Emittable>(borrows self: World, address: integer, event: Type<E>): boolean
+function World.hasObservers<E is Emittable>(borrows self: World, address: integer, event: Type<E>): boolean
     return nuppevents.hasObservers(self, address, event)
 end
 
@@ -2580,7 +2583,7 @@ end
 --- @param event the event declaration
 --- @param ... the event's fields, positional or named
 --- @raises what an observer raised, after the storage is released
-function World.emit<E is nupp.events.Emittable>(
+function World.emit<E is Emittable>(
     exclusive self: World,
     address: integer,
     event: Type<E>,
@@ -2598,12 +2601,7 @@ end
 --- @param event the event declaration
 --- @param instance the instance to deliver
 --- @raises what an observer raised
-function World.deliver<E is nupp.events.Emittable>(
-    exclusive self: World,
-    address: integer,
-    event: Type<E>,
-    instance: E
-): nil
+function World.deliver<E is Emittable>(exclusive self: World, address: integer, event: Type<E>, instance: E): nil
     nuppevents.deliver(self, address, event, instance)
 end
 
@@ -3148,11 +3146,11 @@ local function publishMutationBatch(exclusive world: World, batch: MutationBatch
             end
         end
     end
-    if batch.callback ~= nil then
+    if writerIds ~= nil then
         const writer = new BatchWrite(
-            ids = assert(writerIds),
+            ids = writerIds,
             component = assert(batch.writeComponent),
-            callback = batch.callback
+            callback = assert(batch.callback)
         )
         publishBatchWrite(world, writer)
     end
@@ -3451,10 +3449,10 @@ end
 function World.findArchetypes(
     borrows self: World,
     component: components.Selector
-): function(): (archetype.Archetype?, integer?, tecs.internal.entitycolumn.DoubleArray?)
+): function(): (archetype.Archetype?, integer?, DoubleArray?)
     const entries = self.componentArchetypes[components.select(component).componentId]
     local index: integer = 0
-    return function(): (archetype.Archetype?, integer?, tecs.internal.entitycolumn.DoubleArray?)
+    return function(): (archetype.Archetype?, integer?, DoubleArray?)
         index = index + 1
         const candidate = entries and entries[index] or nil
         if candidate == nil then
@@ -3825,12 +3823,15 @@ function Bundle.spawn(self: Bundle, ...: components.Input): integer
 end
 
 --- Creates and registers a reusable spawn bundle.
+---
+--- The receiver is plain rather than `exclusive`, because the bundle keeps the
+--- world it spawns into and so outlives a call-scoped borrow of it.
 --- @param self the world that owns the bundle
 --- @param name the world-unique bundle name
 --- @param definition required and defaulted components
 --- @return the registered bundle
 --- @raises when the name or component declaration is invalid
-function World.newBundle(exclusive self: World, name: string, definition: BundleDefinition?): Bundle
+function World.newBundle(self: World, name: string, definition: BundleDefinition?): Bundle
     if name == "" then
         error("Bundle requires a name", 2)
     end
@@ -4745,6 +4746,7 @@ local function orderSystems(systems: {RegisteredSystem}, phase: phases.Phase): {
         successors[index] = {}
         seen[index] = {}
     end
+
     local function edge(first: integer, second: integer): nil
         -- Self references impose no ordering constraint.
         if first == second or seen[first][second] then
@@ -5526,6 +5528,7 @@ end
 --- Returns detached archetype metadata for internal diagnostics.
 export function inspectArchetypes(borrows value: World): {any}
     local rows: {any} = {}
+
     local function byName(a: any, b: any): boolean
         return a.name < b.name
     end

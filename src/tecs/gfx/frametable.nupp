@@ -6,6 +6,8 @@ entity playing it shares one millisecond lookup table. Instances carry a start
 step and rate, so changing frames performs no CPU work and uploads no instances.
 The clock re-anchors every 524288 fixed steps to preserve millisecond precision.
 ]]
+const io2 = require("nupp.io")
+
 local sheet = require("tecs.gfx.sheet")
 local ecs = require("tecs.ecs")
 local rendercomponents = require("tecs.internal.rendercomponents")
@@ -186,8 +188,8 @@ export function packed(): string
         data[base], data[base + 1], data[base + 2], data[base + 3] = entryBase, tickBase, #value.ticks, #value.entries
     end
     assert(at <= 16777216, "animation tables exceed exact float32 addressing")
-    local buffer = nupp.io.newBuffer()
-    local writer = nupp.io.newScalarWriter(buffer)
+    local buffer = io2.newBuffer()
+    local writer = io2.newScalarWriter(buffer)
     for _, value in ipairs(data) do
         writer:writeFloat32(nupp.math.f32.narrow(value))
     end

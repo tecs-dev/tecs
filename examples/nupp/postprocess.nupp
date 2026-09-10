@@ -7,10 +7,17 @@ The exported `create` function matches the Rust host's managed entry contract.
 It installs three animated entities and delegates all platform and rendering
 ownership to `tecs.host`.
 ]]
+const {type Application} = require("tecs.application")
+const passes = require("tecs.gpu.passes")
+const ecs = require("tecs.ecs")
+const gfx = require("tecs.gfx")
+const {type Transform2D} = require("tecs.ecs")
+const {type Session} = require("tecs.host")
+const host = require("tecs.host")
 
-local function install(exclusive app: tecs.application.Application): nil
+local function install(exclusive app: Application): nil
     local width, height = app.window:getSize()
-    tecs.gpu.passes.setShader(
+    passes.setShader(
         "present",
         [=[
 fn postprocess(uv: vec2<f32>) -> vec4<f32> {
@@ -22,30 +29,30 @@ fn postprocess(uv: vec2<f32>) -> vec4<f32> {
 }
 ]=]
     )
-    tecs.gpu.passes.setParameters("present", {0.3, 1.5})
-    local moving = app.world:newQuery({include = {tecs.ecs.Transform2D, tecs.gfx.Renderable2D}})
+    passes.setParameters("present", {0.3, 1.5})
+    local moving = app.world:newQuery({include = {ecs.Transform2D, gfx.Renderable2D}})
     app.world:spawn(
-        tecs.ecs.Transform2D(width * 0.3, height * 0.5, 0, 1, -0.2, 180, 110),
-        tecs.gfx.Tint(0.15, 0.65, 1, 1),
-        tecs.gfx.Renderable2D
+        ecs.Transform2D(width * 0.3, height * 0.5, 0, 1, -0.2, 180, 110),
+        gfx.Tint(0.15, 0.65, 1, 1),
+        gfx.Renderable2D
     )
     app.world:spawn(
-        tecs.ecs.Transform2D(width * 0.5, height * 0.5, 0, 2, 0.15, 150, 150),
-        tecs.gfx.Tint(1, 0.35, 0.2, 0.9),
-        tecs.gfx.Renderable2D
+        ecs.Transform2D(width * 0.5, height * 0.5, 0, 2, 0.15, 150, 150),
+        gfx.Tint(1, 0.35, 0.2, 0.9),
+        gfx.Renderable2D
     )
     app.world:spawn(
-        tecs.ecs.Transform2D(width * 0.7, height * 0.5, 0, 3, 0.35, 110, 180),
-        tecs.gfx.Tint(0.55, 1, 0.3, 0.8),
-        tecs.gfx.Renderable2D
+        ecs.Transform2D(width * 0.7, height * 0.5, 0, 3, 0.35, 110, 180),
+        gfx.Tint(0.55, 1, 0.3, 0.8),
+        gfx.Renderable2D
     )
     app.world:addSystem({
         name = "example.postprocess.rotate",
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(dt: number): nil
             unsafe do
                 for candidate, count in moving:iter() do
-                    local transforms: tecs.ecs.Transform2D[?] = assert(candidate:getMut(tecs.ecs.Transform2D))
+                    local transforms: Transform2D[?] = assert(candidate:getMut(ecs.Transform2D))
                     for index = 1, count as integer do
                         transforms[index].rotation = transforms[index].rotation + dt * (0.35 + index * 0.1)
                     end
@@ -62,12 +69,6 @@ end
 --- @param debug whether guarded application failures may be cleared
 --- @param maxFrames an optional positive frame limit
 --- @return the session retained by the Rust host
-export function create(
-    title: string?,
-    width: integer?,
-    height: integer?,
-    debug: boolean?,
-    maxFrames: integer?
-): tecs.host.Session
-    return tecs.host.createWithPlugin(install, title or "Tecs postprocess", width, height, debug, maxFrames)
+export function create(title: string?, width: integer?, height: integer?, debug: boolean?, maxFrames: integer?): Session
+    return host.createWithPlugin(install, title or "Tecs postprocess", width, height, debug, maxFrames)
 end

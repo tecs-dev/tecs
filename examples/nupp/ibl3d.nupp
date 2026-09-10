@@ -1,10 +1,19 @@
 module ibl3d
 
-local function sphere(
-    name: string,
-    slices: integer,
-    stacks: integer
-): tecs.gfx.models.MeshInput, tecs.gfx.models.BoundsInput
+const {type MeshInput} = require("tecs.gfx.models")
+const {type BoundsInput} = require("tecs.gfx.models")
+const models = require("tecs.gfx.models")
+const {type Application} = require("tecs.application")
+const gfx = require("tecs.gfx")
+const meshes = require("tecs.gfx.meshes")
+const lighting2 = require("tecs.gfx.lighting")
+const flycamera3d = require("tecs.gfx.flycamera3d")
+const ecs = require("tecs.ecs")
+const files = require("tecs.files")
+const {type Session} = require("tecs.host")
+const host = require("tecs.host")
+
+local function sphere(name: string, slices: integer, stacks: integer): MeshInput, BoundsInput
     local vertices: {number} = {}
     local indices: {integer} = {}
     for row = 0, stacks do
@@ -40,13 +49,13 @@ local function sphere(
     end
     assert(#indices == slices * stacks * 6)
 
-    return tecs.gfx.models.newMesh({name = name, vertices = vertices, indices = indices})
+    return models.newMesh({name = name, vertices = vertices, indices = indices})
 end
 
-local function install(exclusive app: tecs.application.Application): nil
+local function install(exclusive app: Application): nil
     const world = app.world
-    const camera = tecs.gfx.newCamera3D()
-    const lighting = tecs.gfx.meshes.newLighting()
+    const camera = gfx.newCamera3D()
+    const lighting = meshes.newLighting()
     lighting.ambient = 0
     lighting.probe = {
         0.11,
@@ -72,30 +81,30 @@ local function install(exclusive app: tecs.application.Application): nil
     lighting.environmentIntensity = 2.4
     lighting.skyboxIntensity = 0.35
     lighting.environmentRotation = math.rad(18)
-    world:spawn(tecs.gfx.View({camera3D = camera, lighting = lighting}))
-    tecs.gfx.lighting.setBloom({threshold = 0.72, knee = 0.18, intensity = 0.55})
+    world:spawn(gfx.View({camera3D = camera, lighting = lighting}))
+    lighting2.setBloom({threshold = 0.72, knee = 0.18, intensity = 0.55})
     camera.y, camera.z = 1.2, 10.5
     camera.rotationX = math.sin(math.rad(-6) * 0.5)
     camera.rotationW = math.cos(math.rad(-6) * 0.5)
     camera.verticalFov = math.rad(52)
     camera.near, camera.far = 0.1, 100
 
-    const controller = tecs.gfx.flycamera3d.new(app.input, app.window, camera, {moveSpeed = 4, sprintMultiplier = 4})
+    const controller = flycamera3d.new(app.input, app.window, camera, {moveSpeed = 4, sprintMultiplier = 4})
     world:addSystem({
         name = "example.IblFlyCamera",
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(dt: number): nil
             controller:update(dt)
         end,
     })
 
-    world:spawn(tecs.ecs.Transform3D(-4.5, 5, 4), tecs.gfx.PointLight3D(16, 1.0, 0.72, 0.46, 8.0))
-    world:spawn(tecs.ecs.Transform3D(5, 2.5, 3), tecs.gfx.PointLight3D(14, 0.34, 0.55, 1.0, 5.0))
+    world:spawn(ecs.Transform3D(-4.5, 5, 4), gfx.PointLight3D(16, 1.0, 0.72, 0.46, 8.0))
+    world:spawn(ecs.Transform3D(5, 2.5, 3), gfx.PointLight3D(14, 0.34, 0.55, 1.0, 5.0))
 
     const mesh, bounds = sphere("example://ibl-sphere", 40, 24)
     const roughness: {number} = {0.05, 0.18, 0.32, 0.48, 0.65}
     for index, value in ipairs(roughness) do
-        const material = tecs.gfx.models.newMaterial({
+        const material = models.newMaterial({
             name = ("example://ibl-metal-%d"):format(index),
             metallic = 1.0,
             roughness = value,
@@ -104,14 +113,14 @@ local function install(exclusive app: tecs.application.Application): nil
             baseB = 0.22,
         })
         world:spawn(
-            tecs.ecs.Transform3D((index - 3) * 2.15, 1.15),
+            ecs.Transform3D((index - 3) * 2.15, 1.15),
             mesh,
             bounds,
             material,
-            tecs.gfx.Tint(1, 1, 1, 1),
-            tecs.gfx.Renderable3D
+            gfx.Tint(1, 1, 1, 1),
+            gfx.Renderable3D
         )
-        const dielectric = tecs.gfx.models.newMaterial({
+        const dielectric = models.newMaterial({
             name = ("example://ibl-dielectric-%d"):format(index),
             metallic = 0.0,
             roughness = value,
@@ -120,12 +129,12 @@ local function install(exclusive app: tecs.application.Application): nil
             baseB = 0.92,
         })
         world:spawn(
-            tecs.ecs.Transform3D((index - 3) * 2.15, -1.15),
+            ecs.Transform3D((index - 3) * 2.15, -1.15),
             mesh,
             bounds,
             dielectric,
-            tecs.gfx.Tint(1, 1, 1, 1),
-            tecs.gfx.Renderable3D
+            gfx.Tint(1, 1, 1, 1),
+            gfx.Renderable3D
         )
     end
 
@@ -134,9 +143,9 @@ local function install(exclusive app: tecs.application.Application): nil
     } = {"positive-x.svg", "negative-x.svg", "positive-y.svg", "negative-y.svg", "positive-z.svg", "negative-z.svg",}
     local faces: {string} = {}
     for index, face in ipairs(faceNames) do
-        faces[index] = tecs.files.assetPath("environment/ibl-demo/" .. face)
+        faces[index] = files.assetPath("environment/ibl-demo/" .. face)
     end
-    const environment, reason = tecs.gfx.models.loadEnvironment("ibl-demo", faces)
+    const environment, reason = models.loadEnvironment("ibl-demo", faces)
     lighting.environment = assert(environment, reason)
     print("ibl3d: loaded six CC0 environment faces and generated the roughness mip chain")
 
@@ -152,19 +161,6 @@ end
 --- @param debug enable guarded application failures
 --- @param maxFrames optional bounded run
 --- @return the native host session
-export function create(
-    title: string?,
-    width: integer?,
-    height: integer?,
-    debug: boolean?,
-    maxFrames: integer?
-): tecs.host.Session
-    return tecs.host.createWithPlugin(
-        install,
-        title or "Tecs specular IBL",
-        width or 1100,
-        height or 700,
-        debug,
-        maxFrames
-    )
+export function create(title: string?, width: integer?, height: integer?, debug: boolean?, maxFrames: integer?): Session
+    return host.createWithPlugin(install, title or "Tecs specular IBL", width or 1100, height or 700, debug, maxFrames)
 end

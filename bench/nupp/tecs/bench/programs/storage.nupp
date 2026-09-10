@@ -1,5 +1,7 @@
 -- Native ECS columns, derived declarations, direct arrays and managed rows.
 -- Every loop uses the same two-double layout and arithmetic. Setup is untimed.
+const ecs2 = require("tecs.ecs")
+
 local ffi = require("ffi")
 local buffer = require("string.buffer")
 local ffistorage = require("tecs.internal.ffistorage")
@@ -18,7 +20,7 @@ local record ManagedPoint
     x: number
     y: number
 end
-const native = tecs.ecs.newComponent(NativePoint, {
+const native = ecs2.newComponent(NativePoint, {
     name = "bench.NativePoint",
     construct = function(): NativePoint
         return new NativePoint(0, 1)
@@ -27,7 +29,7 @@ const native = tecs.ecs.newComponent(NativePoint, {
         return new NativePoint(0, 1)
     end
 })
-const managed = tecs.ecs.newComponent(ManagedPoint, {
+const managed = ecs2.newComponent(ManagedPoint, {
     name = "bench.ManagedPoint",
     construct = function(): ManagedPoint
         return new ManagedPoint(x = 0, y = 1)
@@ -36,9 +38,9 @@ const managed = tecs.ecs.newComponent(ManagedPoint, {
         return new ManagedPoint(x = 0, y = 1)
     end
 })
-const nativeWorld = tecs.ecs.newWorld({maxEntities = count + 64})
-const managedWorld = tecs.ecs.newWorld({maxEntities = count + 64})
-const derivedWorld = tecs.ecs.newWorld({maxEntities = count + 64})
+const nativeWorld = ecs2.newWorld({maxEntities = count + 64})
+const managedWorld = ecs2.newWorld({maxEntities = count + 64})
+const derivedWorld = ecs2.newWorld({maxEntities = count + 64})
 derivedWorld:batchSpawn(count, {NativePoint})
 derivedWorld:commit()
 const derivedQuery = derivedWorld:newQuery({include = {NativePoint}})

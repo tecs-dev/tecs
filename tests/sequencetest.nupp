@@ -85,10 +85,10 @@ function suite.resolvesBindingsWhenTheInstructionRuns(): nil
     local world = newWorld()
     local seen: integer? = nil
     sequence.registerAction(world, "test.seeBinding", function(
-        exclusive _world: ecs.World,
+        exclusive running: ecs.World,
         context: sequence.ActionContext
     ): nil
-        seen = context:entity("actor")
+        seen = context:entity(running, "actor")
     end)
     local program = sequence.define(uniqueName("test.bind."), {sequence.call("test.seeBinding")})
     local actor = world:spawn()

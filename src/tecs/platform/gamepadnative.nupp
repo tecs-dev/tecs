@@ -157,8 +157,22 @@ local function layoutMismatch(): string?
     return nil
 end
 
---- Wraps an open library context in the backend contract.
-local function wrap(context: voidptr?): gamepadbackend.Backend
+--- Opens a context with the thunk and wraps it in the backend contract.
+---
+--- The thunk opens the context here rather than a caller handing the pointer in,
+--- because the returned record is closures over that pointer: a closure over a
+--- parameter would be a view of the caller's frame, and the backend outlives it.
+--- The absent reason is a thunk too, since one caller reads it from the library
+--- only after the open failed.
+local function wrap(openContext: function(): voidptr?, absent: function(): string): (gamepadbackend.Backend?, string?)
+    local mismatch = layoutMismatch()
+    if mismatch ~= nil then
+        return nil, mismatch
+    end
+    local context = openContext()
+    if context == nil then
+        return nil, absent()
+    end
     local events = carray(tecsGamepadEvent, CAPACITY)
     local devices = carray(tecsGamepadDevice, CAPACITY)
     local info = ffi.new<tecsGamepadInfo>()
@@ -269,16 +283,9 @@ end
 --- @return the backend, or nil when the library opened nothing
 --- @return the reason, when the first return is nil
 export function open(): (gamepadbackend.Backend?, string?)
-    local mismatch = layoutMismatch()
-    if mismatch ~= nil then
-        return nil, mismatch
-    end
-    local context = tecs_gamepad_open()
-    if context == nil then
-        return nil, "tecsgamepad opened no context"
-    end
-
-    return wrap(context)
+    return wrap(tecs_gamepad_open, function(): string
+        return "tecsgamepad opened no context"
+    end)
 end
 
 --- Opens a context with no platform source, for a deterministic native test.
@@ -288,14 +295,7 @@ end
 --- @return the backend, or nil when the library opened nothing
 --- @return the reason, when the first return is nil
 export function openDetached(): (gamepadbackend.Backend?, string?)
-    local mismatch = layoutMismatch()
-    if mismatch ~= nil then
-        return nil, mismatch
-    end
-    local context = tecs_gamepad_open_detached()
-    if context == nil then
-        return nil, reason(nil, "tecsgamepad opened no context")
-    end
-
-    return wrap(context)
+    return wrap(tecs_gamepad_open_detached, function(): string
+        return reason(nil, "tecsgamepad opened no context")
+    end)
 end

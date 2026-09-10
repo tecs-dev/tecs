@@ -15,7 +15,7 @@ naming rules. `tecs.mcp` re-exports everything here; nothing else should require
 this module directly.
 ]]
 
-local json = require("nupp.data.json")
+local json = require("nupp.codec.json")
 local log = require("nupp.log")
 
 -- The externally typed logger name is `tecs.mcp`, independent of the module

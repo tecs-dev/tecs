@@ -8,6 +8,8 @@ handle, queues translated platform values through exported functions, and asks
 for one frame at a time. Records remain inside Nupp and no Lua stack layout or
 collector address becomes part of the host contract.
 ]]
+const screenshot = require("tecs.gfx.screenshot")
+const models = require("tecs.gfx.models")
 
 local application = require("tecs.application")
 local viewpacket = require("tecs.internal.viewpacket")
@@ -176,7 +178,7 @@ end
 
 --- Runs application shutdown once.
 export function shutdown(exclusive session: Session): boolean
-    tecs.gfx.screenshot.cancelPending()
+    screenshot.cancelPending()
     framepump.cancel(session.pump)
     return session.app:shutdown()
 end
@@ -598,7 +600,7 @@ end
 
 --- Consumes the next explicit frame capture request.
 export function nextCapture(exclusive session: Session): integer
-    return tecs.gfx.screenshot.nextRequest() or 0
+    return screenshot.nextRequest() or 0
 end
 
 --- Delivers one completed frame readback to its requester.
@@ -611,11 +613,11 @@ export function captureResult(
     png: string,
     reason: string?
 ): nil
-    tecs.gfx.screenshot.complete(id, width, height, rgba, png, reason)
+    screenshot.complete(id, width, height, rgba, png, reason)
 end
 
 --- Drains one pending model upload for the native renderer.
 --- @return The model ID and geometry packet, or zero and an empty string.
 export function nextModelUpload(): integer, string
-    return tecs.gfx.models.nextUpload()
+    return models.nextUpload()
 end

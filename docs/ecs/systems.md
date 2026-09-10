@@ -10,6 +10,7 @@ inside a plugin, then close over that query:
 
 ```nupp
 local Transform2D = tecs.ecs.Transform2D
+local Spin = tecs.ecs.newScalarComponent({name = "Spin", kind = "number", default = 0})
 
 local function spinPlugin(exclusive world: tecs.ecs.World): nil
     local spinning = world:newQuery({

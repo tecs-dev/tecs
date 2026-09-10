@@ -681,7 +681,7 @@ local function spawnRow(label: string, tabIndex: integer): integer
     return row
 end
 
-local lastRow = 0
+local lastRow: integer = 0
 for index = 1, 20 do
     lastRow = spawnRow(("Item %02d"):format(index), index)
 end

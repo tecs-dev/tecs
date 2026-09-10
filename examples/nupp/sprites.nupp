@@ -14,6 +14,15 @@ one frame exercises both an opaque and a blended batch.
 `create` matches the Rust host's managed entry contract, so the host selects it
 with `--entry sprites.create`.
 ]]
+const {type World} = require("tecs.ecs")
+const ecs = require("tecs.ecs")
+const gfx = require("tecs.gfx")
+const {type Application} = require("tecs.application")
+const images = require("tecs.gfx.images")
+const {type Transform2D} = require("tecs.ecs")
+const {type Camera2D} = require("tecs.gfx")
+const {type Session} = require("tecs.host")
+const host = require("tecs.host")
 
 --- The world field the camera moves inside, in world units.
 const FIELD_WIDTH = 4000.0
@@ -65,7 +74,7 @@ local function discPixels(): string
 end
 
 --- Fills the field, alternating the two images across three layers.
-local function spawnField(exclusive world: tecs.ecs.World, checker: integer, disc: integer): nil
+local function spawnField(exclusive world: World, checker: integer, disc: integer): nil
     -- A fixed multiplier rather than a random one, so two runs of the example
     -- produce the same scene and the packet stays comparable between them.
     local x = FIELD_WIDTH * 0.5
@@ -75,48 +84,34 @@ local function spawnField(exclusive world: tecs.ecs.World, checker: integer, dis
         y = (y + 271.0) % FIELD_HEIGHT
         const textured = index % 2 == 0
         world:spawn(
-            tecs.ecs.Transform2D(
-                x,
-                y,
-                index % 7,
-                1 + index % 3,
-                index * 0.01,
-                textured and 48 or 64,
-                textured and 48 or 64
-            ),
-            tecs.gfx.Tint(0.55 + (index % 5) * 0.09, 0.5 + (index % 3) * 0.16, 0.8, textured and 1 or 0.85),
-            tecs.gfx.Sprite(textured and checker or disc),
-            tecs.gfx.Renderable2D
+            ecs.Transform2D(x, y, index % 7, 1 + index % 3, index * 0.01, textured and 48 or 64, textured and 48 or 64),
+            gfx.Tint(0.55 + (index % 5) * 0.09, 0.5 + (index % 3) * 0.16, 0.8, textured and 1 or 0.85),
+            gfx.Sprite(textured and checker or disc),
+            gfx.Renderable2D
         )
     end
 end
 
-local function install(exclusive app: tecs.application.Application): nil
-    const checker = tecs.gfx.images.upload({name = CHECKER, width = 8, height = 8, pixels = checkerPixels()})
-    const disc = tecs.gfx.images.upload({
-        name = DISC,
-        width = 16,
-        height = 16,
-        pixels = discPixels(),
-        filter = "linear",
-    })
+local function install(exclusive app: Application): nil
+    const checker = images.upload({name = CHECKER, width = 8, height = 8, pixels = checkerPixels()})
+    const disc = images.upload({name = DISC, width = 16, height = 16, pixels = discPixels(), filter = "linear",})
 
-    app.world:spawn(tecs.gfx.Camera2D(FIELD_WIDTH * 0.5, FIELD_HEIGHT * 0.5, 1, 0), tecs.gfx.ActiveCamera)
+    app.world:spawn(gfx.Camera2D(FIELD_WIDTH * 0.5, FIELD_HEIGHT * 0.5, 1, 0), gfx.ActiveCamera)
     spawnField(app.world, checker, disc)
 
-    const sprites = app.world:newQuery({include = {tecs.ecs.Transform2D, tecs.gfx.Renderable2D}})
-    const eyes = app.world:newQuery({include = {tecs.gfx.Camera2D, tecs.gfx.ActiveCamera}})
+    const sprites = app.world:newQuery({include = {ecs.Transform2D, gfx.Renderable2D}})
+    const eyes = app.world:newQuery({include = {gfx.Camera2D, gfx.ActiveCamera}})
     local elapsed = 0.0
     app.world:addSystem({
         -- This system name reaches the debug server and is a compatibility
         -- surface.
         name = "example.sprites.animate",
-        phase = tecs.ecs.phases.Update,
+        phase = ecs.phases.Update,
         run = function(dt: number): nil
             elapsed = elapsed + dt
             unsafe do
                 for candidate, count in sprites:iter() do
-                    const transforms: tecs.ecs.Transform2D[?] = assert(candidate:getMut(tecs.ecs.Transform2D))
+                    const transforms: Transform2D[?] = assert(candidate:getMut(ecs.Transform2D))
                     for index = 1, count as integer do
                         transforms[index].rotation = transforms[index].rotation + dt * (0.2 + index % 5 * 0.06)
                     end
@@ -124,7 +119,7 @@ local function install(exclusive app: tecs.application.Application): nil
             end
             unsafe do
                 for candidate, count in eyes:iter() do
-                    const cameras: tecs.gfx.Camera2D[?] = assert(candidate:getMut(tecs.gfx.Camera2D))
+                    const cameras: Camera2D[?] = assert(candidate:getMut(gfx.Camera2D))
                     for index = 1, count as integer do
                         const camera = cameras[index]
                         camera.x = FIELD_WIDTH * 0.5 + math.cos(elapsed * 0.35) * FIELD_WIDTH * 0.3
@@ -145,12 +140,6 @@ end
 --- @param debug whether guarded application failures may be cleared
 --- @param maxFrames an optional positive frame limit
 --- @return the session retained by the Rust host
-export function create(
-    title: string?,
-    width: integer?,
-    height: integer?,
-    debug: boolean?,
-    maxFrames: integer?
-): tecs.host.Session
-    return tecs.host.createWithPlugin(install, title or "Tecs sprites", width or 1280, height or 720, debug, maxFrames)
+export function create(title: string?, width: integer?, height: integer?, debug: boolean?, maxFrames: integer?): Session
+    return host.createWithPlugin(install, title or "Tecs sprites", width or 1280, height or 720, debug, maxFrames)
 end
