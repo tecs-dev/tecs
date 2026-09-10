@@ -973,7 +973,7 @@ end
 --- Resolves a type witness once; explicit definitions take the direct path.
 --- @param selector The explicit definition or derived declaration.
 --- @return Returns the process-wide definition.
-export function select(selector: Selector): Component
+export function select(selector: const Selector): Component
     const raw: any = selector
     if type(raw) == "table" and rawget(raw, "storageType") ~= nil then
         return raw as Component
@@ -985,10 +985,13 @@ end
 --- Resolves declarations before storing a reusable component list.
 --- @param values The caller-owned definitions or type witnesses.
 --- @return Returns a fresh list of registered definitions.
-export function selectAll(values: {Selector}?): {Component}
+export function selectAll(values: const{Selector}?): {Component}
     const result: {Component} = {}
-    for index = 1, #(values or {}) do
-        result[index] = select(assert(values)[index])
+    if values == nil then
+        return result
+    end
+    for index = 1, #values do
+        result[index] = select(values[index])
     end
 
     return result

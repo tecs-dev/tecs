@@ -1,0 +1,7 @@
+local format = require("tecs.dev.format")
+
+-- Keep the frequent formatting path independent of the broader development launcher.
+local args: {string} = {...}
+const task = assert(table.remove(args, 1), "format task name is required")
+assert(task == "format" or task == "format-check", "format launcher only runs format tasks")
+format.apply(args, task == "format-check")

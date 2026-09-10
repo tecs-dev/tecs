@@ -207,7 +207,8 @@ Then `nupp task run mygame`. To give the game a short command, add a task:
 tasks = {
     mygame = {
         build = "mygame",
-        argv = {"nupp", "run", "tools/run.nupp", "host", "mygame"},
+        cwd = "tools",
+        argv = {"nupp", "run", "tecs/dev/main.nupp", "host", "mygame"},
     },
 }
 ```

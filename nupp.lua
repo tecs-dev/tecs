@@ -14,9 +14,11 @@ local descriptions = {
     clean = "Remove Nupp and native build outputs",
 }
 for name, description in pairs(descriptions) do
+    local program = (name == "format" or name == "format-check") and "tecs/dev/formatmain.nupp" or "tecs/dev/main.nupp"
     developmentTasks[name] = {
         description = description,
-        argv = { "nupp", "run", "tools/run.nupp", name },
+        cwd = "tools",
+        argv = { "nupp", "run", program, name },
     }
 end
 for _, name in ipairs({
@@ -45,7 +47,8 @@ for _, name in ipairs({
     developmentTasks["ex-" .. name] = {
         description = "Build and run the " .. name .. " component",
         build = "ex-" .. name,
-        argv = { "nupp", "run", "tools/run.nupp", "host", name },
+        cwd = "tools",
+        argv = { "nupp", "run", "tecs/dev/main.nupp", "host", name },
     }
 end
 developmentTasks["ex-nativesmoke"].description = "Run the native library loading smoke test"
@@ -53,7 +56,7 @@ developmentTasks["ex-shapes"].description = "Show the built-in shape gallery"
 developmentTasks["ex-uistandalone"].argv = {
     "nupp",
     "run",
-    "tools/run.nupp",
+    "tecs/dev/main.nupp",
     "host",
     "uistandalone",
     "--width",
@@ -63,7 +66,8 @@ developmentTasks["ex-uistandalone"].argv = {
 }
 developmentTasks["ex-physicssmoke"] = {
     description = "Build native services and run the physics example",
-    argv = { "nupp", "run", "tools/run.nupp", "physicssmoke" },
+    cwd = "tools",
+    argv = { "nupp", "run", "tecs/dev/main.nupp", "physicssmoke" },
 }
 for name, description in pairs({
     presets = "List native packaging presets",

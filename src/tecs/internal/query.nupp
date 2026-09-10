@@ -49,14 +49,14 @@ export type Descriptor = {
 
     --- Caller-writable. Requires all listed components and overrides their automatic
     --- exclusions.
-    include: {components.Selector}?,
+    include: const{components.Selector}?,
 
     --- Caller-writable. Requires at least one listed component; an empty list adds no
     --- constraint.
-    includeAny: {components.Selector}?,
+    includeAny: const{components.Selector}?,
 
     --- Caller-writable. Rejects every listed component.
-    exclude: {components.Selector}?,
+    exclude: const{components.Selector}?,
 
     --- Caller-writable. Receives entering rows after publication, including initial
     --- members.

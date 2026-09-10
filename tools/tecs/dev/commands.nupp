@@ -4,6 +4,12 @@ local files = require("nupp.io.files")
 local path = require("nupp.io.path")
 local process = require("nupp.io.process")
 
+export type Invocation = {
+    args: {string},
+    env: {[string]: string}?,
+    cwd: string?
+}
+
 --- The engine checkout, independent of the tooling process's working directory.
 export const root: string = os.getenv("TECS_PROJECT_ROOT") or assert(path.newPath(".."):absolute()):toString()
 
@@ -30,6 +36,44 @@ export function capture(args: {string}, env: {[string]: string}?, clearEnv: bool
     const options: process.Options = {args = args, cwd = cwd or root, env = env, clearEnv = clearEnv}
     with child = new process.Process(options) do
         return assert(child:communicate())
+    end
+end
+
+local function waitFor(borrows child: process.Process): process.Exit
+    return child:wait()
+end
+
+--- Runs independent commands concurrently and returns the first failing exit code.
+export function runTogether(invocations: {Invocation}): integer
+    -- The group retains each process's exact affine cleanup policy. The table only
+    -- keeps checked aliases, whose cleanup policy cannot currently be named here.
+    local children: {any} = {}
+    with group = nupp.managedGroup() do
+        for _, invocation in ipairs(invocations) do
+            const options: process.Options = {
+                args = invocation.args,
+                cwd = invocation.cwd or root,
+                env = invocation.env,
+                stdin = "inherit",
+                stdout = "inherit",
+                stderr = "inherit"
+            }
+            children[#children + 1] = group:adopt(nupp.manage(new process.Process(options)))
+        end
+
+        local exitCode: integer = 0
+        for _, child in ipairs(children) do
+            const status, problem = (child as any):with(waitFor)
+            if status == nil then
+                error(problem and problem.message or "the formatter process could not be observed", 0)
+            end
+            const exit = status as process.Exit
+            if exitCode == 0 and not exit:succeeded() then
+                exitCode = exit.exitCode == 0 and 1 or exit.exitCode
+            end
+        end
+
+        return exitCode
     end
 end
 

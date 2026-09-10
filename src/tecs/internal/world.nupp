@@ -3992,10 +3992,17 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
     const excluded: {components.Component} = {}
     self:emit(0, events.OnSnapshotSave, eventData, excluded)
     const descriptor = table.clone(options and options.filterQuery or {}) as query.Descriptor
-    descriptor.exclude = table.clone(descriptor.exclude or {})
-    for index = 1, #excluded do
-        assert(descriptor.exclude)[#assert(descriptor.exclude) + 1] = excluded[index]
+    const filteredExclude = descriptor.exclude
+    local snapshotExclude: {components.Component} = {}
+    if filteredExclude ~= nil then
+        for index = 1, #filteredExclude do
+            snapshotExclude[#snapshotExclude + 1] = components.select(filteredExclude[index])
+        end
     end
+    for index = 1, #excluded do
+        snapshotExclude[#snapshotExclude + 1] = excluded[index]
+    end
+    descriptor.exclude = snapshotExclude
     const selection = query.new(descriptor)
     local selectedLayers: {[integer]: boolean}? = nil
     if options ~= nil and options.layers ~= nil then

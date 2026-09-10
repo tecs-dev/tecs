@@ -6,10 +6,15 @@ local path = require("nupp.io.path")
 
 --- Formats the requested files, or all supported source files when none are named.
 export function apply(paths: {string}, check: boolean): nil
+    local invocations: {commands.Invocation} = {}
     if #paths == 0 then
-        commands.run(check and {"cargo", "fmt", "--all", "--", "--check"} or {"cargo", "fmt", "--all"})
-        commands.run({commands.compiler(), "fmt", check and "--check" or "--write"})
-        commands.run({commands.compiler(), "fmt", check and "--check" or "--write"}, nil, commands.root .. "/tools")
+        invocations[
+            #invocations + 1
+        ] = {args = check and {"cargo", "fmt", "--all", "--", "--check"} or {"cargo", "fmt", "--all"}}
+        invocations[#invocations + 1] = {args = {commands.compiler(), "fmt", check and "--check" or "--write"}}
+        invocations[
+            #invocations + 1
+        ] = {args = {commands.compiler(), "fmt", check and "--check" or "--write"}, cwd = commands.root .. "/tools"}
     end
     local groups: {[string]: {string}} = {stylua = {}, prettier = {}, nupp = {}, rustfmt = {}}
     const web: {
@@ -78,6 +83,10 @@ export function apply(paths: {string}, check: boolean): nil
         elseif check then
             argv[#argv + 1] = "--check"
         end
-        commands.run(commands.append(argv, names))
+        invocations[#invocations + 1] = {args = commands.append(argv, names)}
+    end
+    const exitCode = commands.runTogether(invocations)
+    if exitCode ~= 0 then
+        os.exit(exitCode)
     end
 end

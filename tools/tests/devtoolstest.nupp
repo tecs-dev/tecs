@@ -123,4 +123,44 @@ os.exit(7)
     end
 end
 
+function suite.commandsRunTogetherActuallyOverlap(): nil
+    with
+        scratch = assert(files.createTemporaryDirectory(new files.TemporaryOptions(prefix = "tecs parallel commands ")))
+    do
+        const root = scratch:toString()
+        const first = root .. "/first"
+        const second = root .. "/second"
+
+        local function rendezvous(mine: string, peer: string): string
+            return (
+                [[
+local files = require("nupp.io.files")
+local time = require("nupp.time")
+
+assert(files.write(%q, "ready"))
+for _ = 1, 100 do
+    if files.isFile(%q) then
+        return
+    end
+    time.sleep(20)
+end
+error("the peer command never started")
+]]
+            ):format(mine, peer)
+        end
+
+        const firstProgram = root .. "/first.nupp"
+        const secondProgram = root .. "/second.nupp"
+        assert(files.write(firstProgram, rendezvous(first, second)))
+        assert(files.write(secondProgram, rendezvous(second, first)))
+        test.equal(
+            commands.runTogether({
+                {args = {commands.compiler(), "run", firstProgram}, cwd = root},
+                {args = {commands.compiler(), "run", secondProgram}, cwd = root}
+            }),
+            0
+        )
+    end
+end
+
 return suite
