@@ -8,6 +8,11 @@
 }
 
 :root {
+    --tecs-c-near-black: #110f0d;
+    --tecs-c-purple: #372455;
+    --tecs-c-crimson: #dd2020;
+    --tecs-c-lavender: #867795;
+    --tecs-c-tan: #9b8d75;
     --nuppdoc-light-background: #e8e4dc;
     --nuppdoc-light-background-alt: #e0dcd4;
     --nuppdoc-light-border: #cdc8c0;
@@ -27,9 +32,6 @@
     --nuppdoc-dark-accent-hover: #d0b6e9;
     --nuppdoc-dark-accent-soft: #86779529;
     --nuppdoc-home-width: 1200px;
-    --nuppdoc-hero-glow-size: 760px;
-    --nuppdoc-hero-glow-blur: 60px;
-    --nuppdoc-hero-glow-opacity: 0.65;
 }
 
 .nuppdoc-header {
@@ -76,7 +78,7 @@
 }
 
 .nuppdoc-home-hero {
-    margin-bottom: 2.5rem;
+    margin-bottom: 5rem;
 }
 
 .nuppdoc-hero-main.has-image {
@@ -108,13 +110,46 @@
     border-radius: 4px;
 }
 
-/* The hero image is opaque edge to edge (no transparent margin around the TV
- * for a glow to show through), so the starburst has to be sized past the
- * image's own box to be visible at all, and its gradient has to fade to
- * transparent before the disc's clipped edge, or that edge shows as a hard
- * ring where it crosses outside the image. */
+/* The old arcade ramp sits as a circular glow behind the TV. Its transparent
+ * edge remains visible instead of being cropped into a rectangular panel. */
+.nuppdoc-hero-image {
+    isolation: isolate;
+    padding: clamp(1rem, 2.5vw, 2rem);
+}
+
 .nuppdoc-hero-starburst {
-    background: radial-gradient(circle, #dd2020 0%, #372455 30%, #867795 50%, #9b8d75 65%, transparent 80%);
+    overflow: visible;
+    z-index: 0;
+    width: min(94%, 500px);
+    background: conic-gradient(
+        from 210deg,
+        var(--tecs-c-purple),
+        var(--tecs-c-crimson) 27%,
+        var(--tecs-c-lavender) 52%,
+        var(--tecs-c-tan) 76%,
+        var(--tecs-c-purple)
+    );
+    clip-path: none;
+    filter: blur(34px);
+    -webkit-mask-image: radial-gradient(
+        circle,
+        #000 0%,
+        #000 18%,
+        rgb(0 0 0 / 68%) 30%,
+        rgb(0 0 0 / 36%) 42%,
+        rgb(0 0 0 / 12%) 52%,
+        transparent 62%
+    );
+    mask-image: radial-gradient(
+        circle,
+        #000 0%,
+        #000 18%,
+        rgb(0 0 0 / 68%) 30%,
+        rgb(0 0 0 / 36%) 42%,
+        rgb(0 0 0 / 12%) 52%,
+        transparent 62%
+    );
+    opacity: 1;
 }
 
 .nuppdoc-hero-action.brand {
@@ -182,7 +217,6 @@
 @media (max-width: 760px) {
     :root {
         --nuppdoc-home-gutter: 1.25rem;
-        --nuppdoc-hero-glow-size: 480px;
     }
 
     .nuppdoc-home-content {
