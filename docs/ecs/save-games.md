@@ -54,6 +54,29 @@ operate on another suspended dispatch.
 zero through 31. Entities without Transform2D pass the layer filter. A snapshot
 without a filter includes disabled and paused entities.
 
+## Where a save goes
+
+`nupp.io.files` owns the writable roots and names them from one application
+identity. A game names itself once, before it creates its application, and then
+asks for the data root and joins under it. `tecs.application.newApplication`
+names the identity `"tecs", "tecs"` when a game named none.
+
+```nupp
+const disk = require("nupp.io.files")
+
+disk.setApplicationIdentity("Ex Nihilo", "Starfarer")
+const saves = assert(disk.dataPath()):join("saves")
+const output = require("string.buffer").new()
+world:saveSnapshot({format = "binary", buffer = output})
+assert(disk.writeAtomic(saves:join("slot1.bin"), output:tostring()))
+```
+
+A joined path refuses a component that would leave the root, so a slot named
+from player input cannot reach a directory the game does not own. `dataPath`
+holds what a player would miss, `cachePath` holds what the game can rebuild and
+the operating system may empty between runs, and `tecs.files.assetPath` resolves
+shipped content, which is never a place to write.
+
 ## Durable world state
 
 Persist game meaning: entity relationships, health, inventory, animation state,

@@ -85,6 +85,18 @@ example: it existed to add a per-name threshold, seven modules then reached past
 it to `nupp.log` anyway, and the threshold it existed for stopped reaching them.
 It is gone, and every module names its logger to `nupp.log.named`.
 
+`tecs.files` is the second worked example, and it went the same way once Nupp
+grew application storage roots. It used to resolve the writable roots itself:
+`APPDATA` and `LOCALAPPDATA` on Windows, `~/Library` on Apple platforms, the XDG
+variables elsewhere, a sanitized publisher and game name under each, and the
+executable's directory guessed from `arg[0]`. `nupp.io.files` now answers all of
+it from one application identity, and it answers it better: configuration, data
+and cache are three separate directories rather than two, a joined path refuses
+a component that would escape the root, and the identity is encoded reversibly
+rather than mapped onto underscores. What is left here is the asset root, which
+Nupp cannot know, because where a build installed its content is a property of
+the product. The module went from 431 lines to 164.
+
 **`exclusive` is a call-scoped borrow, so a function that keeps its receiver
 does not take one.** Almost every engine function declares `exclusive world:
 World` or `exclusive self`, which is what stops a caller holding a second view

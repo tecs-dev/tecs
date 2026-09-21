@@ -1,5 +1,6 @@
 local application = require("tecs.application")
 local ecs = require("tecs.ecs")
+local files = require("nupp.io.files")
 local platformevents = require("tecs.platform.events")
 local test = require("nupp.test")
 
@@ -26,6 +27,24 @@ function suite.constructsInertThenRunsPluginBeforeStartup(): nil
 
     test.assert(startupObserved)
     test.equal(app:getState(), "running")
+end
+
+function suite.namesAnApplicationIdentityWithoutReplacingOne(): nil
+    -- `nupp.io.files` has no way to forget an identity, and the suites share a
+    -- process, so this case names one and checks that a later application
+    -- leaves it alone. The unnamed half is the default the engine ships.
+    files.setApplicationIdentity("Ex Nihilo", "Starfarer")
+    application.newApplication()
+    local organization, named = files.applicationIdentity()
+    test.equal(organization, "Ex Nihilo")
+    test.equal(named, "Starfarer")
+
+    files.setApplicationIdentity(application.DEFAULT_IDENTITY, application.DEFAULT_IDENTITY)
+    const root, reason = files.dataPath()
+    if root == nil then
+        test.skip("this platform has no writable root: " .. tostring(reason))
+    end
+    test.assert((root as files.ApplicationPath):toString():find(application.DEFAULT_IDENTITY, 1, true) ~= nil)
 end
 
 function suite.deliversASealedEventBatchBeforeTheFrame(): nil

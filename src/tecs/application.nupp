@@ -29,6 +29,7 @@ Repeated application shutdown does nothing.
 
 local assets = require("tecs.assets")
 local ecs = require("tecs.ecs")
+local files = require("nupp.io.files")
 local mcp = require("tecs.mcp")
 local mcpbindings = require("tecs.internal.mcpbindings")
 local hostcancellation = require("tecs.internal.hostcancellation")
@@ -38,6 +39,14 @@ local platformwindow = require("tecs.platform.window")
 
 --- A platform event already translated by the Rust host.
 export type HostEvent = platformevents.Event
+
+-- Compatibility surface. The identity names the directories `nupp.io.files`
+-- resolves this application's configuration, data and cache under, so a build
+-- that never names itself keeps finding the state it wrote last time.
+
+--- Read-only. Names the organization and the application `newApplication`
+--- selects when a game named neither.
+export const DEFAULT_IDENTITY = "tecs"
 
 --- The lifecycle state visible to host diagnostics.
 export type State = "created" | "running" | "stopped"
@@ -107,6 +116,20 @@ export type Config = {
 -- not silently redirect the first application's tools into another world.
 local debugOwner: Application? = nil
 
+--- Names the engine's default application identity when a game named none.
+---
+--- `nupp.io.files` owns the writable roots and resolves them from one
+--- process-wide identity, which has to be named before the first root is asked
+--- for. A game names itself with `nupp.io.files.setApplicationIdentity` before
+--- it creates an application, and this leaves that name alone.
+--- @return nil after naming an identity, or without changing one
+local function nameIdentity(): nil
+    const organization = files.applicationIdentity()
+    if organization == nil then
+        files.setApplicationIdentity(DEFAULT_IDENTITY, DEFAULT_IDENTITY)
+    end
+end
+
 local function captureFailure(exclusive app: Application, failure: any): nil
     if hostcancellation.is(failure) then
         error(failure, 0)
@@ -132,6 +155,7 @@ export function newApplication(config: Config?): Application
     if port ~= nil and (port < 0 or port > 65535 or port % 1 ~= 0) then
         error("application.newApplication: mcpPort must be an integer from zero to 65535", 2)
     end
+    nameIdentity()
     local world = ecs.newWorld(config and config.world)
     local inputState = input.install(world)
     local windowState = platformwindow.newWindow(config and config.window)

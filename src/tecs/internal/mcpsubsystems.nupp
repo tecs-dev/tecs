@@ -14,7 +14,6 @@ local materials = require("tecs.gpu.materials")
 local layers = require("tecs.gfx.layers")
 local physics = require("tecs.physics")
 local audio = require("tecs.audio")
-local paths = require("tecs.files")
 local files = require("nupp.io.files")
 local path = require("nupp.io.path")
 local json = require("nupp.codec.json")
@@ -339,11 +338,16 @@ register(
 
 local function artifact(name: string): string
     assert(name ~= "" and not path.newPath(name):isAbsolute(), "artifact name must be relative to the writable root")
+    const root, reason = files.dataPath()
+    assert(root ~= nil, reason)
+    local located = root as files.ApplicationPath
+    -- The root refuses a component that would leave it, so a name carrying `..`
+    -- raises here rather than resolving somewhere else.
     for segment in name:gmatch("[^/\\\\]+") do
-        assert(segment ~= "..", "artifact name must stay within the writable root")
+        located = located:join(segment)
     end
 
-    return paths.writablePath(name)
+    return located:toString()
 end
 
 register(

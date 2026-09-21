@@ -15,6 +15,14 @@ local files = require("nupp.io.files")
 local test = require("nupp.test")
 local suite = {}
 
+-- The snapshot tools write under the application data root, which
+-- `nupp.io.files` resolves from a process-wide identity. A host names one
+-- through `tecs.application`; a suite that binds a world without an application
+-- names it here.
+if files.applicationIdentity() == nil then
+    files.setApplicationIdentity("tecs", "tecs")
+end
+
 local function call(name: string, arguments: {[string]: any}?): any
     local reply = json.decode(
         mcp.dispatch(

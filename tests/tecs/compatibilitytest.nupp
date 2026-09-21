@@ -41,6 +41,8 @@ local platformevents = require("tecs.platform.events")
 local sequence = require("tecs.sequence")
 local text = require("tecs.gfx.text")
 local ui = require("tecs.ui")
+local application = require("tecs.application")
+local files = require("tecs.files")
 
 -- Internal modules carry three surfaces no public name reaches: the sequence
 -- bytecode's opcode numbering, the tween evaluator's registered name, and the
@@ -1138,6 +1140,21 @@ function suite.retainedUiAndTiledNames(): nil
     test.equal(ui.FocusScope.componentName, "UiFocusScope")
     test.equal(tiled.Tilemap.componentName, "Tilemap")
     test.equal(tiled.TileSource.componentName, "TileSource")
+end
+
+-------------------------------------------------------------------------------
+-- Path policy
+--
+-- The default application identity names the platform directories a build
+-- writes its state under, and the asset root's variable and global are typed by
+-- a developer and by a host. None of the three is reached by code this tree can
+-- see.
+-------------------------------------------------------------------------------
+
+function suite.pathPolicyNames(): nil
+    test.equal(application.DEFAULT_IDENTITY, "tecs")
+    test.equal(files.ASSET_ROOT_VARIABLE, "TECS_ASSETS")
+    test.equal(files.CONTENT_GLOBAL, "__tecsContent")
 end
 
 return suite
