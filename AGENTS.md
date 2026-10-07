@@ -352,7 +352,8 @@ Every public module starts with a long `--[[ ... ]]` doc comment holding its int
 constraints and primary examples. Write `--[==[` when the prose itself contains `]]`. Every public function,
 record and field carries a `---` docblock, and every public function carries `@param` for each parameter and
 `@return` for each return. `@raises` says what makes a function raise, one line per condition, because there is
-no signature to find that out from.
+no signature to find that out from. It begins with the type `error` is called with, which is `string` for an
+ordinary message: `@raises string when the name is empty`. The checker refuses one that names no type.
 
 Write every summary and tag as a complete sentence with an actor and a verb. A function says what it does:
 `Returns the number of queued messages.` A field says who controls it and what it means:

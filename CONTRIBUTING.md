@@ -48,7 +48,8 @@ the defect rather than the workaround.
 - **Public docblocks carry `@param` and `@return`**, and they say what the
   signature cannot: units, coordinate spaces, what nil means, what happens at a
   boundary. A tag that restates the parameter's name is worse than none.
-  `@raises` says what makes a function raise, because there is no signature to
+  `@raises` names the raised type and says what makes a function raise, as in
+  `@raises string when the name is empty`, because there is no signature to
   find that out from.
 
 ## Code style

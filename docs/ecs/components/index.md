@@ -79,7 +79,7 @@ native structs with storage selected by their declarations. `Renderable2D` is a 
 Tiled metadata and other components with strings or managed collections remain
 records.
 
-Native component columns are one-based `T[?]` arrays, indexed inside `unsafe do`
+Native component columns are one-based `T[?]` arrays, indexed inside `@unsafe do`
 using the query's row count. Reads return live row references; reacquire them
 after publication, compaction, clear or restore. Native assignment copies a
 value into the row rather than sharing a managed object.

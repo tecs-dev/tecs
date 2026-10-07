@@ -42,7 +42,7 @@ Built-in transforms, tint, shape material, camera, lights, animation, sound,
 physics values and numeric UI components use this storage and derive
 `nupp.derive.Debug` and `nupp.derive.Serde`. Derived methods work on constructed
 values and borrowed rows without changing column layout. Use
-`nupp.serde.json():prepare(nupp.serde.of(Velocity))` for a typed JSON
+`nupp.serde.newJsonCodec():prepare(nupp.serde.of(Velocity))` for a typed JSON
 codec; Nupp's separate `nupp.derive.JSON` provider currently admits records only.
 Generic Serde encoding describes physical component fields, whereas world
 snapshots use the component's registered codecs. Asset-bearing built-ins keep
