@@ -87,7 +87,7 @@ local function test(args: {string}): nil
         end
         os.exit(result.exit.exitCode == 0 and 1 or result.exit.exitCode)
     end
-    const report = json.decode(result.output)
+    const report = assert(json.decode(result.output))
     gates.tests(report, expected)
     if not structured then
         print(report.total .. " tests passed in " .. #expected .. " suites; zero skipped")

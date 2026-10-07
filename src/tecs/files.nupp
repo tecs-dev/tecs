@@ -127,9 +127,10 @@ export function assetRoot(): string
     end
     local override = environment(ASSET_ROOT_VARIABLE) or hostGlobal(CONTENT_GLOBAL)
     if override == nil then
-        override = files.executableDirectory()
+        const directory = files.executableDirectory()
+        override = directory and directory:toString()
     end
-    local answer = override == nil and "" or terminated(override as string)
+    local answer = override == nil and "" or terminated(override)
     assetsCache = answer
 
     return answer

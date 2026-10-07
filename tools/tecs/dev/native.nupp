@@ -37,7 +37,7 @@ export function libraries(release: boolean?): {[string]: string}
     }
     local result: {[string]: string} = {}
     for line in output:gmatch("[^\r\n]+") do
-        const event = json.decode(line)
+        const event = assert(json.decode(line))
         if event.reason == "compiler-artifact" and event.target then
             const variable = names[event.target.name]
             if variable then

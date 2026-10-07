@@ -96,8 +96,8 @@ local function acceptance(): nil
             assert(files.write(directory .. "/" .. stem .. ".stdout", result.output))
             assert(files.write(directory .. "/" .. stem .. ".stderr", result.errorOutput))
             assert(result:succeeded(), stem .. " failed; see " .. directory)
-            const report = json.decode(
-                assert(result.output:match("TECS_BENCH_JSON ([^\r\n]+)"), "benchmark emitted no report")
+            const report = assert(
+                json.decode(assert(result.output:match("TECS_BENCH_JSON ([^\r\n]+)"), "benchmark emitted no report"))
             )
             if workload.name == "physics" then
                 assert(report.metadata.bodies == tonumber(workload.count), stem .. " did not spawn every body")

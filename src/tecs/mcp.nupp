@@ -263,8 +263,8 @@ export function poll(exclusive self: Server, parked: boolean?): boolean
         return true
     end
 
-    local decoded, arguments = pcall(json.decode, request.arguments, json.NULL)
-    if not decoded or type(arguments) ~= "table" then
+    local arguments, malformed = json.decode(request.arguments, json.NULL)
+    if malformed ~= nil or type(arguments) ~= "table" then
         self.endpoint:respond(request, "invalid tool arguments", true, false)
 
         return true

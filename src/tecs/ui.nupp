@@ -957,7 +957,7 @@ local function layout(exclusive world: World, state: State, ids: {integer}): nil
         if source == state.previous then
             return
         end
-        local result = json.decode(uinative.sync(state.tree, source))
+        local result = assert(json.decode(uinative.sync(state.tree, source)))
         state.previous = source
         state.updates = state.updates + 1
         for _, box in ipairs(result) do

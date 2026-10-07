@@ -222,8 +222,8 @@ end
 --- @return the response as JSON text, which reports bad input in band rather
 ---     than by raising
 export function dispatch(text: string): string
-    local decoded, value = pcall(json.decode, text, json.NULL)
-    if not decoded then
+    local value, malformed = json.decode(text, json.NULL)
+    if malformed ~= nil then
         return fail(json.NULL, PARSE_ERROR, "invalid JSON")
     end
     if type(value) ~= "table" then

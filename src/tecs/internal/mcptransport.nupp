@@ -247,8 +247,8 @@ end
 --- no game state behind them, so they are answered here on the connection's own
 --- coroutine and never make `poll` report that it ran a handler.
 local function answer(exclusive self: Server, body: string): string?
-    local decoded, value = pcall(json.decode, body, json.NULL)
-    if not decoded or type(value) ~= "table" then
+    local value, malformed = json.decode(body, json.NULL)
+    if malformed ~= nil or type(value) ~= "table" then
         return registry.dispatch(body)
     end
 
@@ -292,8 +292,8 @@ local function answer(exclusive self: Server, body: string): string?
         end
         result.content = {{type = "text", text = queued.payload ?? ""}}
     else
-        local ok, structured = pcall(json.decode, queued.payload ?? "{}", json.NULL)
-        result.structuredContent = ok and structured or {}
+        local structured, malformed = json.decode(queued.payload ?? "{}", json.NULL)
+        result.structuredContent = malformed == nil and structured or {}
         result.content = {{type = "text", text = queued.payload ?? "{}"}}
     end
 

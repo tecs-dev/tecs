@@ -178,7 +178,7 @@ export type Map = {
 ---     unsupported
 export function load(path: string): Map
     local source = assetnative.load(path, 0)
-    local value = json.decode(source)
+    local value = assert(json.decode(source))
     value.revision, value.changes = 0, {}
     local map = value as Map
 

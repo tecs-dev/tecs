@@ -1331,7 +1331,11 @@ end
 export function fromAseprite(options: AsepriteOptions): Sheet
     local source = options.json
     if source is string then
-        source = json.decode(source)
+        const decoded, malformed = json.decode(source)
+        if malformed ~= nil then
+            error("gfx.sheet.fromAseprite: the export is not JSON: " .. malformed, 2)
+        end
+        source = decoded
     end
     if source == nil then
         error("gfx.sheet.fromAseprite: an Aseprite sheet needs the export to read", 2)
