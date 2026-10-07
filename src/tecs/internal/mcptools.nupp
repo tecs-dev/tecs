@@ -204,7 +204,7 @@ registry.register({
 
 --- Builds one platform event from the decoded tool arguments.
 ---
---- @raises when the kind is not one the host boundary translates
+--- @raises string when the kind is not one the host boundary translates
 local function buildEvent(kind: string, arguments: {[string]: any}): platformevents.Event
     local window = math.floor(tonumber(arguments.window) or tonumber(arguments.which) or 0) as integer
     local device = math.floor(tonumber(arguments.which) or 0) as integer
@@ -427,7 +427,7 @@ end
 
 --- Reads the required `name` argument the four single-name tools share.
 ---
---- @raises when the argument is absent or empty
+--- @raises string when the argument is absent or empty
 local function requiredName(arguments: {[string]: any}): string
     local wanted = arguments.name as string?
     if wanted == nil or wanted == "" then

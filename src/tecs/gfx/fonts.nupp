@@ -418,7 +418,7 @@ end
 ---     `DEFAULT_SIZE`, and `raster` to `"sdf"`
 --- @return the font, or nil when the file could not be read or parsed
 --- @return why the font could not be loaded, when unsuccessful
---- @raises when neither `source` nor `bytes` is given, when the size is not
+--- @raises string when neither `source` nor `bytes` is given, when the size is not
 ---     greater than zero, or when the raster is not one of its declared values
 export function newTTF(options: TTFOptions): Font?, string?
     const source = options.source

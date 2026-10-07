@@ -80,7 +80,7 @@ end
 --- @param value the argument to check
 --- @param label the function name to name in the message
 --- @return the same string
---- @raises when value is not a non-empty string
+--- @raises string when value is not a non-empty string
 local function required(value: string, label: string): string
     if value == "" then
         error("tecs.files." .. label .. ": a path is required", 3)
@@ -138,7 +138,7 @@ end
 --- Resolves `relative` against the asset root.
 --- @param relative a path under the content root, with `/` separators
 --- @return the joined path, without checking that anything is there
---- @raises when relative is empty
+--- @raises string when relative is empty
 export function assetPath(relative: string): string
     local suffix = required(relative, "assetPath")
 
@@ -148,7 +148,7 @@ end
 --- Overrides the asset root, for a test or a tool.
 --- @param root the content directory to read from, with or without a trailing
 ---     separator
---- @raises when root is empty
+--- @raises string when root is empty
 export function setAssetRoot(root: string): nil
     assetsCache = terminated(required(root, "setAssetRoot"))
 end

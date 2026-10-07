@@ -158,7 +158,7 @@ end
 --- @param wrapWidth the maximum line width in world units, defaulting to zero,
 ---     which disables wrapping
 --- @return the text value, which the caller owns
---- @raises when the alignment is not one of its declared values, or when the
+--- @raises string when the alignment is not one of its declared values, or when the
 ---     wrap width is negative
 export function newText(value: string?, font: fonts.Font?, size: number?, align: Align?, wrapWidth: number?): Text
     const chosen = align or "left"

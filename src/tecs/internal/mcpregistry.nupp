@@ -105,7 +105,7 @@ end
 --- A replacement keeps the name's original position, so the order a client
 --- sees is first-registration order rather than last.
 --- @param tool the declaration, stored by reference and never copied
---- @raises when the declaration carries no name or no handler
+--- @raises string when the declaration carries no name or no handler
 export function register(tool: Tool): nil
     if tool.name == nil or tool.handler == nil then
         error("tecs.mcp.register: a tool needs a name and a handler", 3)

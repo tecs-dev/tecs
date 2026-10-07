@@ -178,7 +178,7 @@ end
 --- omitted field takes its default instead of keeping its previous value.
 --- @param layer the band to configure, from one to `MAX`
 --- @param config the complete replacement configuration
---- @raises when the layer is outside the band range, when the sort is unknown,
+--- @raises string when the layer is outside the band range, when the sort is unknown,
 ---     or when one layer asks for screen pixels and virtual coordinates at once
 export function configure(layer: integer, config: Config): nil
     if layer < 1 or layer > MAX then
@@ -240,7 +240,7 @@ end
 --- which is what `resolution` reports.
 --- @param highestZ the highest height a scene expects to use
 --- @param halfExtent half the expected world extent, used by the position terms
---- @raises when either extent is not greater than zero
+--- @raises string when either extent is not greater than zero
 export function setExtents(highestZ: number, halfExtent: number): nil
     if not (highestZ > 0.0) then
         error("gfx.layers.setExtents: the height extent must be greater than zero", 2)
@@ -269,7 +269,7 @@ end
 --- aspect. It neither letterboxes nor preserves square pixels.
 --- @param width the authored width in virtual units
 --- @param height the authored height in virtual units
---- @raises when either dimension is not greater than zero
+--- @raises string when either dimension is not greater than zero
 export function setVirtualSize(width: number, height: number): nil
     if not (width > 0.0) or not (height > 0.0) then
         error("gfx.layers.setVirtualSize: both dimensions must be greater than zero", 2)

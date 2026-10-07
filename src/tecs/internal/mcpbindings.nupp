@@ -60,7 +60,7 @@ end
 
 --- Returns the bound world for a tool that cannot work without one.
 --- @return the bound world
---- @raises when no world is bound
+--- @raises string when no world is bound
 export function requireWorld(): ecs.World
     local found = boundWorld
     if found == nil then
@@ -72,7 +72,7 @@ end
 
 --- Returns the bound application for a tool that cannot work without one.
 --- @return the bound application
---- @raises when no application is bound
+--- @raises string when no application is bound
 export function requireApplication(): Application
     local found = boundApplication
     if found == nil then

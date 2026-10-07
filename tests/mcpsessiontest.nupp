@@ -113,7 +113,7 @@ local MAX_TURNS: integer = 4000
 --- The application is stepped outside this, not inside it: `world:update` opens
 --- a task scope of its own, and nesting one inside a driver that is already
 --- running this coroutine is not what the frame does in a real host.
---- @raises whatever the agent or the poller raised
+--- @raises any whatever the agent or the poller raised
 local function withSession<T>(server: mcp.Server, port: integer, agent: function(port: integer): T): T
     local finished = false
     local answers, failures = tasks.gather({

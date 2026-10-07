@@ -154,7 +154,7 @@ end
 --- Builds an inert application without opening platform services.
 --- @param config the copied world and lifecycle settings
 --- @return an application waiting for `init`
---- @raises when the debug frame limit or MCP port is invalid
+--- @raises string when the debug frame limit or MCP port is invalid
 export function newApplication(config: Config?): Application
     local maxFrames = config and config.debugMaxFrames or nil
     if maxFrames ~= nil and (maxFrames < 1 or maxFrames % 1 ~= 0) then
@@ -203,7 +203,7 @@ end
 --- Installs the game plugin and runs startup phases once.
 --- @param self the application the host is starting
 --- @return true so a host may continue serving a guarded startup failure
---- @raises when the host initializes an application more than once
+--- @raises string when the host initializes an application more than once
 function Application.init(exclusive self: Application): boolean
     if self.state == "created" then
         self.state = "running"
@@ -258,7 +258,7 @@ end
 --- @param dt elapsed simulation time in seconds
 --- @param batch the caller-owned sealed event batch for this iteration
 --- @return false after a quit request or configured frame limit
---- @raises for an invalid delta or when called outside the running lifecycle
+--- @raises string for an invalid delta or when called outside the running lifecycle
 function Application.iterate(exclusive self: Application, dt: number, batch: {platformevents.Event}?): boolean
     if self.state == "running" then
         -- The host is inside the only state that accepts iterations.

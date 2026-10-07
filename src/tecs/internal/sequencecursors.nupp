@@ -132,7 +132,7 @@ end
 --- @param program the program version this playback runs
 --- @param clock the clock it is scheduled against
 --- @return the fresh cursor at instruction zero
---- @raises when the arena is exhausted
+--- @raises string when the arena is exhausted
 export function alloc(
     state: sequencetypes.WorldState,
     program: sequencetypes.Program,

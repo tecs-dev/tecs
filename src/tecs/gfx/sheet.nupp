@@ -320,7 +320,7 @@ local displaced: {[string]: Sheet} = {}
 -------------------------------------------------------------------------------
 
 --- Fails on a frame index the sheet does not carry.
---- @raises when the frame is below one or past the sheet's frame count
+--- @raises string when the frame is below one or past the sheet's frame count
 local function checkFrame(self: Sheet, frame: integer, caller: string): nil
     if frame < 1 or frame > self.count then
         error("gfx.sheet." .. caller .. ": sheet '" .. self.name .. "' has no frame " .. tostring(frame), 3)
@@ -332,7 +332,7 @@ end
 --- @param frame the frame index, from one to `count`
 --- @return the left edge, then the top, then the width, then the height, in the
 ---     pixels of the image the sheet was cut from
---- @raises when the frame is outside the sheet, because that is a sheet and an
+--- @raises string when the frame is outside the sheet, because that is a sheet and an
 ---     animation disagreeing rather than something to paper over
 function Sheet.rect(self: Sheet, frame: integer): number, number, number, number
     checkFrame(self, frame, "rect")
@@ -346,7 +346,7 @@ end
 --- @param self the sheet to read
 --- @param frame the frame index, from one to `count`
 --- @return the authored frame duration in seconds
---- @raises when the frame is outside the sheet
+--- @raises string when the frame is outside the sheet
 function Sheet.duration(self: Sheet, frame: integer): number
     checkFrame(self, frame, "duration")
 
@@ -360,7 +360,7 @@ end
 --- @param self the sheet to read
 --- @param frame the frame index, from one to `count`
 --- @return the region's left edge, then its top, then its right, then its bottom
---- @raises when the frame is outside the sheet
+--- @raises string when the frame is outside the sheet
 function Sheet.uv(self: Sheet, frame: integer): number, number, number, number
     checkFrame(self, frame, "uv")
     const base = (frame - 1) * 4
@@ -385,7 +385,7 @@ end
 --- @param self the sheet to read
 --- @param name a tag this sheet was built with
 --- @return the tag's first frame index, then its last, then its direction
---- @raises when the sheet carries no such tag, because the alternative is an
+--- @raises string when the sheet carries no such tag, because the alternative is an
 ---     animation silently playing the whole sheet on a typo
 function Sheet.tag(self: Sheet, name: string): integer, integer, Direction
     const id = self.tagIds[name]
@@ -707,7 +707,7 @@ end
 --- @param frame the frame to show, from one to `count`, defaulting to one
 --- @return a fresh [`Sprite`](tecs.gfx.Sprite) value ready to spawn, which
 ---     the caller owns rather than a view onto the sheet
---- @raises when the frame is outside the sheet
+--- @raises string when the frame is outside the sheet
 function Sheet.sprite(
     self: Sheet,
     frame: integer?
@@ -806,7 +806,7 @@ end
 --- to hand them over, so the same table produces the same ids on every run.
 --- Index zero is the whole sheet forward and is always planned, since that is
 --- what an animation naming no tag plays.
---- @raises when a tag's span falls outside the sheet's frames or names a
+--- @raises string when a tag's span falls outside the sheet's frames or names a
 ---     direction that is not one of the three
 local function addTags(self: Sheet, tags: {[string]: Tag}?, level: integer): nil
     self.tagFrom[0] = 1
@@ -855,7 +855,7 @@ local function addTags(self: Sheet, tags: {[string]: Tag}?, level: integer): nil
 end
 
 --- Assigns slices, in the order they were given.
---- @raises when a slice has no name or carries no keys
+--- @raises string when a slice has no name or carries no keys
 local function addSlices(self: Sheet, slices: {Slice}?, level: integer): nil
     if slices == nil then
         return
@@ -875,7 +875,7 @@ local function addSlices(self: Sheet, slices: {Slice}?, level: integer): nil
 end
 
 --- Fields every sheet needs whatever cut its frames.
---- @raises when the name is empty or either image dimension is not positive
+--- @raises string when the name is empty or either image dimension is not positive
 local function newSheet(name: string, imageWidth: number, imageHeight: number, level: integer): Sheet
     if name == "" then
         error("gfx.sheet: a sheet needs a name", level)
@@ -914,7 +914,7 @@ local function newSheet(name: string, imageWidth: number, imageHeight: number, l
 end
 
 --- Registers a finished sheet and hands back its id.
---- @raises when the sheet has no frames, or when a tag or slice is malformed
+--- @raises string when the sheet has no frames, or when a tag or slice is malformed
 local function register(self: Sheet, tags: {[string]: Tag}?, slices: {Slice}?, level: integer): Sheet
     if self.count < 1 then
         error("gfx.sheet: sheet '" .. self.name .. "' has no frames", level)
@@ -1066,7 +1066,7 @@ end
 --- @param imageWidth the width in pixels of the image the frames are cut from
 --- @param imageHeight the height in pixels of that image
 --- @return a builder whose methods chain
---- @raises when the name is empty or either dimension is not positive
+--- @raises string when the name is empty or either dimension is not positive
 export function build(name: string, imageWidth: number, imageHeight: number): Builder
     return new Builder(sheet = newSheet(name, imageWidth, imageHeight, 3), tags = {}, slices = {})
 end
@@ -1080,7 +1080,7 @@ end
 --- @param duration the milliseconds the frame is held, defaulting to
 ---     `DEFAULT_DURATION`
 --- @return the builder
---- @raises when the frame has no positive size
+--- @raises string when the frame has no positive size
 function Builder.frame(self: Builder, x: number, y: number, w: number, h: number, duration: number?): Builder
     const target = self.sheet
     if w <= 0.0 or h <= 0.0 then
@@ -1114,7 +1114,7 @@ end
 --- @param to the last frame, inclusive
 --- @param direction the playback direction, defaulting to `"forward"`
 --- @return the builder
---- @raises when the name is empty
+--- @raises string when the name is empty
 function Builder.tag(self: Builder, name: string, from: integer, to: integer, direction: Direction?): Builder
     if name == "" then
         error("gfx.sheet: a tag needs a name", 2)
@@ -1163,7 +1163,7 @@ end
 --- Registers and returns the finished sheet.
 --- @param self the builder to finish
 --- @return the registered sheet, carrying an `id`
---- @raises when the sheet has no frames, when a tag's span falls outside them,
+--- @raises string when the sheet has no frames, when a tag's span falls outside them,
 ---     or when a slice has no name or no keys
 function Builder.finish(self: Builder): Sheet
     return register(self.sheet, self.tags, self.slices, 2)
@@ -1183,7 +1183,7 @@ end
 ---     tags, and slices
 --- @return the finished sheet, already registered under its name and carrying an
 ---     `id`
---- @raises on a missing name, a non-positive image or frame size, a grid that
+--- @raises string on a missing name, a non-positive image or frame size, a grid that
 ---     fits no cells, or a `count` past what the grid holds
 export function grid(options: GridOptions): Sheet
     const self = newSheet(options.name, options.imageWidth, options.imageHeight, 2)
@@ -1247,7 +1247,7 @@ end
 --- @param options the image size, the frame list, and the optional tags and slices
 --- @return the finished sheet, already registered under its name and carrying an
 ---     `id`
---- @raises on a missing name, a non-positive image size, an empty frame list, or
+--- @raises string on a missing name, a non-positive image size, an empty frame list, or
 ---     a frame with no positive size
 export function rects(options: RectsOptions): Sheet
     const self = newSheet(options.name, options.imageWidth, options.imageHeight, 2)
@@ -1287,7 +1287,7 @@ end
 --- Aseprite writes an array when the export is told to, and otherwise an object
 --- keyed by the frame's name. The names carry the frame number, so sorting them
 --- is what puts the object's frames back in order.
---- @raises when the export names no frames at all
+--- @raises string when the export names no frames at all
 local function asepriteFrames(export: {[string]: any}, level: integer): {{[string]: any}}
     const raw = export.frames
     if raw == nil then
@@ -1326,7 +1326,7 @@ end
 --- @param options the export as JSON text or an already-decoded table, and the
 ---     name to register it under; the name defaults to the export's image name
 --- @return the finished sheet, already registered
---- @raises when the export is not readable, when it names no image and the
+--- @raises string when the export is not readable, when it names no image and the
 ---     caller supplied no name, or when a frame carries no rectangle
 export function fromAseprite(options: AsepriteOptions): Sheet
     local source = options.json

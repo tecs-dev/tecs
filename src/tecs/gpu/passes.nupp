@@ -212,7 +212,7 @@ local function finite(value: number): boolean
 end
 
 --- Copies a clear so a caller's table cannot be rewritten under the graph.
---- @raises when a channel is not finite
+--- @raises string when a channel is not finite
 local function copyClear(value: Clear?, where: string): Clear?
     if value == nil then
         return nil
@@ -242,7 +242,7 @@ end
 --- Nothing is allocated here. The backend sizes the target on the first frame
 --- after the declaration reaches it.
 --- @param spec the target to declare, copied rather than retained
---- @raises when the name is already declared, when it is the reserved depth
+--- @raises string when the name is already declared, when it is the reserved depth
 ---     name, when the format is unknown, or when the scale is outside zero
 ---     exclusive to one inclusive
 export function declareTarget(spec: TargetSpec): nil
@@ -275,7 +275,7 @@ export function declareTarget(spec: TargetSpec): nil
 end
 
 --- Holds a pass against what the passes before it produce.
---- @raises when the name is already declared, when an input is undeclared or
+--- @raises string when the name is already declared, when an input is undeclared or
 ---     no earlier pass writes it, when an output is undeclared, when the depth
 ---     mode is unknown, or when a pass using depth writes a scaled target
 local function validate(spec: PassSpec, position: integer, level: integer): nil
@@ -373,7 +373,7 @@ end
 
 --- Declares a pass that runs after every pass declared so far.
 --- @param spec the pass to declare, copied rather than retained
---- @raises when the name is already declared, when an input is undeclared or
+--- @raises string when the name is already declared, when an input is undeclared or
 ---     is not written by an earlier pass, when an output is undeclared, or
 ---     when a pass using depth writes a target below frame scale
 export function declarePass(spec: PassSpec): nil
@@ -390,7 +390,7 @@ end
 --- what else the graph holds.
 --- @param before the name of the declared pass this one runs before
 --- @param spec the pass to declare, copied rather than retained
---- @raises when no pass carries the `before` name, and for every reason
+--- @raises string when no pass carries the `before` name, and for every reason
 ---     `declarePass` raises
 export function insertPassBefore(before: string, spec: PassSpec): nil
     local position: integer = 0
@@ -415,7 +415,7 @@ end
 --- @param name The caller supplies the existing custom pass name.
 --- @param values The caller supplies at most sixteen finite scalars; omitted lanes are
 ---     zero.
---- @raises When the pass has no custom shader or any scalar is invalid.
+--- @raises string when the pass has no custom shader or any scalar is invalid.
 export function setParameters(name: string, values: {number}): nil
     assert(#values <= 16, "passes: at most sixteen shader parameters")
     for _, value in ipairs(values) do
@@ -443,7 +443,7 @@ end
 --- @param name The caller supplies an existing pass name.
 --- @param source The caller supplies WGSL defining postprocess(uv: vec2<f32>) ->
 ---     vec4<f32>.
---- @raises When the source is empty, too large, or the pass writes multiple outputs.
+--- @raises string when the source is empty, too large, or the pass writes multiple outputs.
 export function setShader(name: string, source: string): nil
     assert(#source > 0 and #source <= 1048576, "passes: invalid shader source size")
     for _, pass in ipairs(passList) do

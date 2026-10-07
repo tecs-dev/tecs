@@ -112,7 +112,7 @@ end
 --- Shared by the suspension handler and by a connection waiting for the frame
 --- to answer its tool call, so both wake through one protocol: a resume that
 --- carries false is the server unwinding, and it raises rather than returning.
---- @raises when the server is being destroyed
+--- @raises string when the server is being destroyed
 local function park(): nil
     -- This driver owns every resumption and resumes false during shutdown so
     -- parked handlers unwind their subscriptions and connection owners.

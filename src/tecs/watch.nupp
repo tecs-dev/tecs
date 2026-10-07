@@ -212,7 +212,7 @@ end
 --- @param kind the content kind a change dispatches under, defaulting to
 ---     `"document"` and to `"shader"` for a `.glsl` or `.wgsl` suffix
 --- @return whether this call added the path rather than updating it
---- @raises when path is empty
+--- @raises string when path is empty
 export function add(path: string, kind: string?): boolean
     if path == "" then
         error("tecs.watch.add: a path is required", 2)
@@ -255,7 +255,7 @@ end
 ---
 --- @param kind the content kind to register under
 --- @param handler the handler to run, or nil to remove the current one
---- @raises when kind is empty
+--- @raises string when kind is empty
 export function on(kind: string, handler: ChangeHandler?): nil
     if kind == "" then
         error("tecs.watch.on: a handler needs a kind to be registered under", 2)
@@ -328,7 +328,7 @@ end
 --- register paths as it loads them and install once everything is loaded.
 ---
 --- @param config the polling options, or nil for the documented defaults
---- @raises when settle is negative or capacity is not a positive integer
+--- @raises string when settle is negative or capacity is not a positive integer
 export function install(config: Config?): nil
     local given = config
     interval = given ~= nil and given.intervalSeconds or DEFAULT_INTERVAL

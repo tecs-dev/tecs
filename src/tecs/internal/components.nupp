@@ -186,7 +186,7 @@ export record RelationshipComponent is Component
     --- @param self The relationship definition.
     --- @param target The packed target entity identifier.
     --- @return Returns a stable target-specific component definition.
-    --- @raises Raises when the relationship uses sparse storage or the target is
+    --- @raises string when the relationship uses sparse storage or the target is
     ---     invalid.
     targeting: function(self: RelationshipComponent, target: integer): RelationshipComponent
 end
@@ -205,7 +205,7 @@ export interface DataRelationship<T> is TableComponent<T>
     --- @param self The relationship definition.
     --- @param target The packed target entity identifier.
     --- @return Returns a component whose value is the edge record.
-    --- @raises Raises when the relationship uses sparse storage or the target is
+    --- @raises string when the relationship uses sparse storage or the target is
     ---     invalid.
     targeting: function(self: DataRelationship<T>, target: integer): RelationshipTarget<T>
 end
@@ -555,7 +555,7 @@ end
 --- Creates and permanently registers a tag component.
 --- @param options the process-unique component name and snapshot policy
 --- @return the registered component
---- @raises when the name is empty or already registered
+--- @raises string when the name is empty or already registered
 export function newTagComponent(options: TagComponentOptions): TagComponent
     const requirements = prepareRequires(options.requires)
     local name = options.name
@@ -614,14 +614,14 @@ end
 --- Creates and permanently registers a primitive-valued scalar component.
 --- @param options the name, primitive kind, default, and snapshot policy
 --- @return the registered scalar component
---- @raises when the name is empty or already registered
+--- @raises string when the name is empty or already registered
 export const newScalarComponent: NewScalarComponent = createScalarComponent as NewScalarComponent
 
 --- Creates and permanently registers a record-valued component.
 --- @param options the name, positional constructor, default factory, and snapshot
 ---     policy
 --- @return the registered table component
---- @raises when the name is empty or already registered
+--- @raises string when the name is empty or already registered
 export function newComponent<T>(options: TableComponentOptions<T>): TableComponent<T>
     const requirements = prepareRequires(options.requires)
     validateName(options.name, "newComponent")
@@ -684,8 +684,8 @@ end
 --- @param options The constructor, default struct, and optional paired codecs.
 --- @param witness The optional layout declaration, avoiding default construction.
 --- @return Returns the callable struct component definition.
---- @raises Raises when the layout is unsupported or the codec pair is incomplete.
---- @raises Raises when the name is empty or already registered.
+--- @raises string when the layout is unsupported or the codec pair is incomplete.
+--- @raises string when the name is empty or already registered.
 export function newFFIComponent<T>(options: TableComponentOptions<T>, witness: any?): FFIComponent<T>
     if (options.save == nil) ~= (options.load == nil and options.deserialize == nil) then
         error("newFFIComponent: snapshot save and load must be provided together", 2)
@@ -720,7 +720,7 @@ end
 --- Creates a target-only entity relationship.
 --- @param options the relationship identity and reverse-index behavior
 --- @return the callable relationship component
---- @raises Raises when cascade deletion lacks exclusivity or a reverse index.
+--- @raises string when cascade deletion lacks exclusivity or a reverse index.
 export function newRelationship(options: RelationshipOptions): RelationshipComponent
     const requirements = prepareRequires(options.requires)
     validateName(options.name, "newRelationship")
@@ -751,7 +751,7 @@ end
 --- @param options The storage policy and constructor, which must return a record with
 ---     the requested target.
 --- @return Returns the callable relationship; reading an edge returns its typed record.
---- @raises Raises for invalid storage policy, duplicate names, or missing snapshot
+--- @raises string for invalid storage policy, duplicate names, or missing snapshot
 ---     hooks.
 export function newDataRelationship<T>(options: DataRelationshipOptions<T>): DataRelationship<T>
     if options.load ~= nil and options.deserialize ~= nil then
@@ -812,7 +812,7 @@ end
 --- Registers typed native relationship payloads with automatic field codecs.
 --- @param options The struct layout, target-bearing constructor and edge policy.
 --- @return Returns the callable native relationship definition.
---- @raises Raises for an invalid struct, target field, policy or codec pair.
+--- @raises string for an invalid struct, target field, policy or codec pair.
 export function newFFIRelationship<T>(options: FFIRelationshipOptions<T>): FFIRelationship<T>
     const storage = ffistorage.new(options.default(), options.save ~= nil or options.transient == true)
     local hasTarget = false
@@ -1038,7 +1038,7 @@ end
 --- Reads the validated target at the heterogeneous relationship storage seam.
 --- @param value The target-bearing edge record.
 --- @return Returns its packed target identifier.
---- @raises Raises when a value has no valid integral target.
+--- @raises string when a value has no valid integral target.
 export function edgeTarget(value: any): integer
     if (
         type(value) ~= "table" and type(value) ~= "cdata"

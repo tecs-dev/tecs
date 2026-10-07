@@ -189,7 +189,7 @@ end
 --- an id whose pixels arrive later, or never.
 --- @param name the stable image name, which a snapshot stores
 --- @return the process-wide image id, which is always greater than zero
---- @raises when the name is empty
+--- @raises string when the name is empty
 export function id(name: string): integer
     if name == "" then
         error("gfx.images.id: name must not be empty", 2)
@@ -268,7 +268,7 @@ end
 --- @param filter the filtering mode, defaulting to `"nearest"`
 --- @param address the addressing mode, defaulting to `"clamp"`
 --- @return the sampler index, from zero to `SAMPLER_COUNT` minus one
---- @raises when either mode is not one of its declared values
+--- @raises string when either mode is not one of its declared values
 export function samplerIndex(filter: Filter?, address: Address?): integer
     local filterId = filterIds[(filter or "nearest") as string]
     if filterId == nil then
@@ -289,7 +289,7 @@ end
 --- reports the replacement complete.
 --- @param options the name, texel dimensions, RGBA8 pixels, and sampling modes
 --- @return the process-wide image id
---- @raises when the name is empty, a dimension is not positive, a sampling mode
+--- @raises string when the name is empty, a dimension is not positive, a sampling mode
 ---     is unknown, or the pixel length is not four bytes per texel
 export function upload(options: UploadOptions): integer
     if options.name == "" then
@@ -374,7 +374,7 @@ end
 --- @param serial the command serial the host applied
 --- @param ok whether the backend accepted the command
 --- @param reason the non-empty host failure, required when `ok` is false
---- @raises when a rejection carries no reason
+--- @raises string when a rejection carries no reason
 export function complete(image: integer, serial: integer, ok: boolean, reason: string?): nil
     if not ok and (reason == nil or reason == "") then
         error("gfx.images.complete: a rejection must carry a reason", 2)
@@ -404,7 +404,7 @@ end
 --- @param path the image file path
 --- @param name the stable image name; omitted uses the file path
 --- @return the image id, whose dimensions are immediately available
---- @raises when the file cannot be decoded
+--- @raises string when the file cannot be decoded
 export function load(path: string, name: string?): integer
     -- Keep image decoding optional for an ECS-only or raw-upload application.
     local native = require(

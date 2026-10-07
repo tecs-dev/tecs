@@ -625,7 +625,7 @@ export record World is Source<integer>
     ---     events.
     --- @return Returns a first packed id and nil for a contiguous range, or nil and an
     ---     explicit id list when slots or generations are non-contiguous.
-    --- @raises Raises for invalid count, exhausted capacity, bare relationships or
+    --- @raises string for invalid count, exhausted capacity, bare relationships or
     ---     EntityKey.
     batchSpawn: function(
         exclusive self: World,
@@ -639,7 +639,7 @@ export record World is Source<integer>
     --- @param ids The identities to restore; an empty list does nothing.
     --- @param inputs The shared component signature and initial values.
     --- @param callback The optional row initializer at publication.
-    --- @raises Raises before reserving any id if one is invalid, duplicated or
+    --- @raises string before reserving any id if one is invalid, duplicated or
     ---     occupied,
     ---     or the signature contains EntityKey or a bare relationship.
     batchSpawnAt: function(
@@ -657,7 +657,7 @@ export record World is Source<integer>
     --- @param inputs The shared signature. Unlike ordinary batch spawns, this
     ---     restoration path permits EntityKey, initialized before key registration.
     --- @param callback The optional initializer, called before indexes and observers.
-    --- @raises Raises before reservation for an invalid count, identity, duplicate,
+    --- @raises string before reservation for an invalid count, identity, duplicate,
     ---     occupied slot, or bare relationship.
     batchSpawnAtRaw: function(
         exclusive self: World,
@@ -672,7 +672,7 @@ export record World is Source<integer>
     --- @param selection The reusable query; membership is captured at this call.
     --- @param input The component value, or definition when supplying a callback.
     --- @param callback The optional writer, called for each contiguous affected range.
-    --- @raises Raises for a foreign query, EntityKey, or callback mode with an instance
+    --- @raises string for a foreign query, EntityKey, or callback mode with an instance
     ---     or relationship. Relationship values support constant mode.
     batchSet: function(
         exclusive self: World,
@@ -686,13 +686,13 @@ export record World is Source<integer>
     --- @param selection The reusable query to capture now.
     --- @param input The component definition or a relationship value selecting one
     ---     target.
-    --- @raises Raises when the query belongs to another world.
+    --- @raises string when the query belongs to another world.
     batchRemove: function(exclusive self: World, selection: query.Query, input: components.Input): nil
 
     --- Stages normal teardown, events and cascading for currently matching entities.
     --- @param self The world owning the query.
     --- @param selection The reusable query to capture now.
-    --- @raises Raises when the query belongs to another world.
+    --- @raises string when the query belongs to another world.
     batchDespawn: function(exclusive self: World, selection: query.Query): nil
 
     --- Visits every archetype, including empty and disabled ones, in registry order.
@@ -718,7 +718,7 @@ export record World is Source<integer>
     --- Prunes empty dead-target archetypes and rebuilds storage that has lost rows.
     --- @param self A quiet world with no pending mutations or active dispatch.
     --- @return Returns the number of archetypes pruned and surviving stores rebuilt.
-    --- @raises Raises during dispatch, publication, or with uncommitted work.
+    --- @raises string during dispatch, publication, or with uncommitted work.
     compact: function(exclusive self: World): (integer, integer)
 
     isAlive: function(borrows self: World, id: integer): boolean
@@ -772,7 +772,7 @@ export record World is Source<integer>
     --- @param relationship The reverse-indexed relationship.
     --- @param callback The callback receiving each source and the caller's context.
     --- @param context The caller-owned callback context.
-    --- @raises Raises when the relationship has no reverse index.
+    --- @raises string when the relationship has no reverse index.
     targets: function<T>(
         borrows self: World,
         target: integer,
@@ -787,7 +787,7 @@ export record World is Source<integer>
     --- @param relationship The reverse-indexed relationship.
     --- @return Returns an iterator yielding depth and entity; direct children have
     ---     depth zero.
-    --- @raises Raises when the relationship has no reverse index.
+    --- @raises string when the relationship has no reverse index.
     traverse: function(
         borrows self: World,
         root: integer,
@@ -802,7 +802,7 @@ export record World is Source<integer>
     ---     context; false stops traversal.
     --- @param context The caller-owned callback context.
     --- @param maxDepth The positive depth limit, defaulting to 100.
-    --- @raises Raises on a cycle or when the depth limit is exceeded.
+    --- @raises string on a cycle or when the depth limit is exceeded.
     walkUp: function<T>(
         borrows self: World,
         id: integer,
@@ -816,7 +816,7 @@ export record World is Source<integer>
     --- @param self The world that owns the query.
     --- @param descriptor The constraints and callbacks; nil matches enabled entities.
     --- @return Returns a persistent query unless temp is true.
-    --- @raises Raises for an invalid query type or temporary membership callbacks.
+    --- @raises string for an invalid query type or temporary membership callbacks.
     newQuery: function(exclusive self: World, descriptor: query.Descriptor?): query.Query
 
     set: function(exclusive self: World, id: integer, input: components.Input, value: any?): nil
@@ -826,7 +826,7 @@ export record World is Source<integer>
     --- Publishes staged mutations synchronously, including work staged by observers.
     --- Reentrant calls during publication join the active drain.
     --- @param self The world to publish; callers must leave query iteration first.
-    --- @raises Raises when a publication callback raises.
+    --- @raises string when a publication callback raises.
     commit: function(exclusive self: World): nil
 
     --- Requests publication after the current system and its predicate return.
@@ -834,7 +834,7 @@ export record World is Source<integer>
     --- this publishes synchronously; publication callbacks join the active drain.
     --- A failed system cancels the request without publishing its staged work.
     --- @param self The world whose pending mutations need a publication barrier.
-    --- @raises Raises when a synchronous publication callback raises.
+    --- @raises string when a synchronous publication callback raises.
     enqueueCommit: function(exclusive self: World): nil
 
     --- Returns this world's stable named Nupp random generator.
@@ -843,33 +843,33 @@ export record World is Source<integer>
     --- @param self The world that owns the generator and its snapshot state.
     --- @param name The non-empty stream name, preferably namespaced for its consumer.
     --- @return Returns the same mutable generator for each call with this name.
-    --- @raises Raises when the name is empty.
+    --- @raises string when the name is empty.
     randomStream: function(exclusive self: World, name: string): random.Random
 
     --- Restarts every named random stream without replacing captured generators.
     --- Streams created later derive their seeds from this seed too.
     --- @param self The world whose random sequences restart.
     --- @param seed The finite integer seed, interpreted as a 32-bit word.
-    --- @raises Raises when the seed is not a finite integer.
+    --- @raises string when the seed is not a finite integer.
     seedRandom: function(exclusive self: World, seed: integer): nil
 
     --- Clears entity data and pending batches while preserving systems, queries and
     --- resources.
     --- @param self The world to reset; reserved identities are invalidated too.
-    --- @raises Raises during publication. Use staged despawn from callbacks instead.
+    --- @raises string during publication. Use staged despawn from callbacks instead.
     clearEntities: function(exclusive self: World): nil
 
     --- Registers a system for the next external dispatch, copying its constraints.
     --- @param self The world to modify.
     --- @param config The phase, body, optional ordering, gate and barriers.
     --- @return Returns the unique explicit or generated system name.
-    --- @raises Raises when another registered system carries that name.
+    --- @raises string when another registered system carries that name.
     addSystem: function(exclusive self: World, config: SystemConfig): string
 
     --- Registers a custom leaf or tree without adding it to the default frame loop.
     --- @param self The world whose phase registry changes.
     --- @param phase The stable name, optional position and registered child names.
-    --- @raises Raises for duplicate names, invalid positions, unknown children or
+    --- @raises string for duplicate names, invalid positions, unknown children or
     ---     registration during dispatch.
     registerPhase: function(exclusive self: World, phase: phases.Definition): nil
 
@@ -878,7 +878,7 @@ export record World is Source<integer>
     --- Reports the next schedule in phase and dependency order.
     --- @param self The world to inspect without changing any active dispatch.
     --- @return Returns caller-owned metadata, including disabled systems.
-    --- @raises Raises when any phase contains an ordering cycle.
+    --- @raises string when any phase contains an ordering cycle.
     listSystems: function(borrows self: World): {SystemInfo}
 
     setSystemEnabled: function(exclusive self: World, name: string, enabled: boolean): (boolean, string?)
@@ -922,7 +922,7 @@ export record World is Source<integer>
     ---     metadata.
     --- @return Returns a detached table snapshot or a tagged binary buffer, according
     ---     to format.
-    --- @raises Raises during publication or another suspended dispatch, for invalid
+    --- @raises string during publication or another suspended dispatch, for invalid
     ---     options, duplicate or reserved metadata, unencodable values, or failed file
     ---     output.
     saveSnapshot: function(exclusive self: World, options: SnapshotOptions?): Snapshot
@@ -933,7 +933,7 @@ export record World is Source<integer>
     --- @param snapshot The current or version-one table, tagged output, byte string or
     ---     non-consuming buffer.
     --- @return Returns the validated snapshot prelude.
-    --- @raises Raises during publication or another suspended dispatch, or for invalid
+    --- @raises string during publication or another suspended dispatch, or for invalid
     ---     framing, identities, schemas, state or codecs.
     loadSnapshot: function(exclusive self: World, snapshot: any): SnapshotPrelude
 
@@ -983,7 +983,7 @@ export const DEFAULT_FIXED_OVERLOAD: FixedOverload = "drop"
 --- @param pipelineFactory The optional scheduler constructor, called before built-in
 ---     installation.
 --- @return the empty world
---- @raises when a capacity or fixed-clock option is invalid
+--- @raises string when a capacity or fixed-clock option is invalid
 export function new(
     maxEntities: integer?,
     timestep: number?,
@@ -1301,7 +1301,7 @@ end
 --- Reserves a new entity and stages it for the next barrier.
 --- @param self the world to modify
 --- @return the reserved packed entity id
---- @raises when the world has exhausted its fixed entity capacity
+--- @raises string when the world has exhausted its fixed entity capacity
 function World.spawn(exclusive self: World, ...: components.Input): integer
     local shape = self.spawnShapes
     local plain = true
@@ -1393,7 +1393,7 @@ end
 --- Reserves an externally supplied packed id for the next barrier.
 --- @param self the world to modify
 --- @param id the packed entity id to restore
---- @raises when the id is out of range or its slot is already reserved or alive
+--- @raises string when the id is out of range or its slot is already reserved or alive
 function World.spawnAt(exclusive self: World, id: integer, ...: components.Input): nil
     local slot = idallocator.slotOf(id)
     local pending = self.pendingSpawnBySlot[slot]
@@ -1674,7 +1674,7 @@ end
 --- @param id the entity to change
 --- @param input the component definition or scalar wrapper to add
 --- @param value an optional raw scalar value for the three-argument form
---- @raises Raises when a relationship has no valid target-bearing value.
+--- @raises string when a relationship has no valid target-bearing value.
 function World.set(exclusive self: World, id: integer, input: components.Input, value: any?): nil
     local component = components.definitionOf(input)
     local source = logicalArchetype(self, id)
@@ -2400,7 +2400,7 @@ end
 --- @param relationship the reverse-indexed relationship
 --- @param target the target entity id
 --- @return a sorted caller-owned source list
---- @raises Raises when the component is not a relationship with a reverse index.
+--- @raises string when the component is not a relationship with a reverse index.
 function World.relationshipSources(borrows self: World, relationship: components.Selector, target: integer): {integer}
     const metadata = assert(components.asRelationship(components.select(relationship)), "expected a relationship")
     if not metadata.reverseIndex then
@@ -2561,7 +2561,7 @@ end
 ---     construction.
 --- @return Returns a query excluding Disabled unless explicitly included, and Paused
 ---     for logic queries.
---- @raises Raises when a temporary query declares callbacks or a callback raises.
+--- @raises string when a temporary query declares callbacks or a callback raises.
 function World.newQuery(exclusive self: World, descriptor: query.Descriptor?): query.Query
     return registerQuery(self, query.new(descriptor, true))
 end
@@ -2584,7 +2584,7 @@ end
 --- @param event the event declaration
 --- @param callback what runs when one is delivered, with the event borrowed
 --- @param id an optional name used for later removal
---- @raises when the same name already observes this event and address
+--- @raises string when the same name already observes this event and address
 function World.observe<E is Emittable>(
     exclusive self: World,
     address: integer,
@@ -2604,7 +2604,7 @@ end
 --- @param event the event declaration
 --- @param callback what runs, once
 --- @param id an optional name used for later removal
---- @raises when the same name already observes this event and address
+--- @raises string when the same name already observes this event and address
 function World.observeOnce<E is Emittable>(
     exclusive self: World,
     address: integer,
@@ -2656,7 +2656,7 @@ end
 --- @param address zero for the world or an entity id
 --- @param event the event declaration
 --- @param ... the event's fields, positional or named
---- @raises what an observer raised, after the storage is released
+--- @raises any what an observer raised, after the storage is released
 function World.emit<E is Emittable>(
     exclusive self: World,
     address: integer,
@@ -2674,7 +2674,7 @@ end
 --- @param address zero for the world or an entity id
 --- @param event the event declaration
 --- @param instance the instance to deliver
---- @raises what an observer raised
+--- @raises any what an observer raised
 function World.deliver<E is Emittable>(exclusive self: World, address: integer, event: Type<E>, instance: E): nil
     nuppevents.deliver(self, address, event, instance)
 end
@@ -2775,7 +2775,7 @@ end
 --- @param world the world holding the index
 --- @param entity the entity claiming the key
 --- @param key the durable key
---- @raises when the key is empty or another live entity holds it
+--- @raises string when the key is empty or another live entity holds it
 local function claimKey(exclusive world: World, entity: integer, key: string): nil
     if key == "" then
         error("world: an entity key must not be empty", 3)
@@ -3619,7 +3619,7 @@ end
 --- @param self the world to search
 --- @param key the durable key
 --- @return the entity carrying the key
---- @raises when no live entity carries the key
+--- @raises string when no live entity carries the key
 function World.requireKey(borrows self: World, key: string): integer
     local id = self.keyIndex[key]
     if id == nil then
@@ -3683,7 +3683,7 @@ end
 --- @param name the world-unique state name
 --- @param policy optional lifecycle actions and callbacks
 --- @return the state tag applied to entities spawned while this state is active
---- @raises when the name is empty or already registered in this world
+--- @raises string when the name is empty or already registered in this world
 function World.createState(exclusive self: World, name: string, policy: StatePolicy?): components.Component
     if name == "" then
         error("world.createState: name must not be empty", 2)
@@ -3709,7 +3709,7 @@ end
 --- Pushes a registered state and makes it the auto-tagging state.
 --- @param self the world to modify
 --- @param name the registered state name
---- @raises when the state is unknown
+--- @raises string when the state is unknown
 function World.pushState(exclusive self: World, name: string): nil
     local component = self.stateComponents[name]
     if component == nil then
@@ -3734,7 +3734,7 @@ end
 
 --- Pops the active state and focuses the state below it.
 --- @param self the world to modify
---- @raises when the state stack is empty
+--- @raises string when the state stack is empty
 function World.popState(exclusive self: World): nil
     local index = #self.stateStack
     if index == 0 then
@@ -3803,7 +3803,7 @@ end
 --- @param self the bundle to instantiate
 --- @param ... required component inputs in declaration order
 --- @return the reserved entity id
---- @raises when a required input is missing, out of order, or extra
+--- @raises string when a required input is missing, out of order, or extra
 function Bundle.spawn(self: Bundle, ...: components.Input): integer
     if select("#", ...) > #self.requiredComponents then
         error("Bundle '" .. self.name .. "' received too many required components", 2)
@@ -3905,7 +3905,7 @@ end
 --- @param name the world-unique bundle name
 --- @param definition required and defaulted components
 --- @return the registered bundle
---- @raises when the name or component declaration is invalid
+--- @raises string when the name or component declaration is invalid
 function World.newBundle(self: World, name: string, definition: BundleDefinition?): Bundle
     if name == "" then
         error("Bundle requires a name", 2)
@@ -3973,7 +3973,7 @@ end
 --- @param name the registered bundle name
 --- @param ... required component inputs in declaration order
 --- @return the reserved entity id
---- @raises when the bundle is unknown or its required inputs are invalid
+--- @raises string when the bundle is unknown or its required inputs are invalid
 function World.spawnBundle(exclusive self: World, name: string, ...: components.Input): integer
     local bundle = self.bundles[name]
     if bundle == nil then
@@ -4804,7 +4804,7 @@ end
 --- Registers a named custom snapshot participant.
 --- @param self the world that owns the handler
 --- @param handler the stable key and optional save, load, and finish callbacks
---- @raises when the key is empty, already registered, or reserved as tecs.random
+--- @raises string when the key is empty, already registered, or reserved as tecs.random
 function World.addSnapshotHandler(exclusive self: World, handler: SnapshotHandler): nil
     if handler.name == randomstreams.snapshotKey
         or handler.name == "__tecs.pipeline"
@@ -5324,7 +5324,7 @@ end
 
 --- Runs the three startup phases in order.
 --- @param self the world to start
---- @raises when another dispatch is active or a startup system raises
+--- @raises string when another dispatch is active or a startup system raises
 function World.startup(exclusive self: World): nil
     if self.updating then
         error("world.startup: another world dispatch is active", 2)
@@ -5352,7 +5352,7 @@ end
 
 --- Runs the three shutdown phases in order.
 --- @param self the world to stop
---- @raises when another dispatch is active or a shutdown system raises
+--- @raises string when another dispatch is active or a shutdown system raises
 function World.shutdown(exclusive self: World): nil
     if self.updating then
         error("world.shutdown: another world dispatch is active", 2)
@@ -5382,7 +5382,7 @@ end
 --- @param self the world to dispatch
 --- @param phase the startup, frame, fixed, rendering, or shutdown leaf
 --- @param dt elapsed seconds passed to systems, or zero when omitted
---- @raises when another dispatch is active or a system raises
+--- @raises string when another dispatch is active or a system raises
 function World.runPhase(exclusive self: World, phase: phases.Selection, dt: number?): nil
     if self.updating then
         error("world.runPhase: another world dispatch is active", 2)
@@ -5421,7 +5421,7 @@ end
 --- argument settles before the update returns.
 --- @param self the world to update
 --- @param dt elapsed frame time in seconds
---- @raises when dt is negative or NaN, or when a system raises
+--- @raises string when dt is negative or NaN, or when a system raises
 function World.update(exclusive self: World, dt: number): nil
     if self.updating then
         error("world.update: another world dispatch is active", 2)
@@ -5547,7 +5547,7 @@ end
 --- Existing tick deadlines are unchanged. This setting is local to one world.
 --- @param self the world to configure.
 --- @param seconds the positive finite nominal duration in seconds.
---- @raises when seconds is not positive and finite.
+--- @raises string when seconds is not positive and finite.
 function World.setNominalFrameTime(exclusive self: World, seconds: number): nil
     if not (seconds > 0) or seconds == math.huge then
         error("world.setNominalFrameTime: seconds must be positive and finite", 2)

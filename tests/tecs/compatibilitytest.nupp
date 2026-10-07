@@ -730,7 +730,7 @@ end
 --- Returns the property keys of one tool's input schema, sorted.
 --- @param name the tool's registered name
 --- @return the argument keys, sorted
---- @raises when no tool carries that name, because a missing tool is the
+--- @raises string when no tool carries that name, because a missing tool is the
 ---     failure this suite exists to report
 local function argumentKeys(name: string): {string}
     local tools = mcp.listTools()

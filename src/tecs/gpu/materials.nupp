@@ -138,7 +138,7 @@ local version: integer = 0
 --- material, and the build that produces the dispatch decides which body wins.
 --- @param path a directory holding `*.wgsl` material files, with or without a
 ---     trailing separator
---- @raises when the path is empty
+--- @raises string when the path is empty
 export function addRoot(path: string): nil
     if path == "" then
         error("materials: a root path cannot be empty", 2)
@@ -152,7 +152,7 @@ end
 ---
 --- Resolving a name installs first, so a game rarely calls this. Adding a root
 --- puts it back on.
---- @raises when a root cannot be listed
+--- @raises string when a root cannot be listed
 export function install(): nil
     if installed then
         return
@@ -212,7 +212,7 @@ end
 --- what this is for. It renumbers the set on the next `install`, exactly as
 --- adding a file does.
 --- @param name the material's name, matching the name the pack's dispatch uses
---- @raises when the name is empty
+--- @raises string when the name is empty
 export function define(name: string): nil
     if name == "" then
         error("materials: a material name cannot be empty", 2)
@@ -233,7 +233,7 @@ end
 --- Returns the id an instance carries to select a material.
 --- @param name the material's file name without its extension
 --- @return the id, counting from zero
---- @raises when nothing carries the name, listing what the build has, because
+--- @raises string when nothing carries the name, listing what the build has, because
 ---     a misspelled material is a build mistake rather than a runtime state
 export function id(name: string): integer
     const found = find(name)

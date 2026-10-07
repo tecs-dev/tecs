@@ -173,7 +173,7 @@ local groupCount: integer = 0
 --- @param path the non-empty path, which is not checked against the filesystem
 --- @return an index from one up, shared by every mixer in the process and
 ---     meaningless in a file, which is why `Sound` serializes the path
---- @raises when the path is empty
+--- @raises string when the path is empty
 export function clipId(path: string): integer
     if path == "" then
         error("tecs.audio.clipId: a clip path cannot be empty", 2)
@@ -202,7 +202,7 @@ end
 --- @param name the non-empty name, which needs no declaring: naming one here
 ---     is all it takes for the group to exist
 --- @return an index from one up, shared by every mixer in the process
---- @raises when the name is empty
+--- @raises string when the name is empty
 export function groupId(name: string): integer
     if name == "" then
         error("tecs.audio.groupId: a group name cannot be empty", 2)
@@ -1170,7 +1170,7 @@ end
 ---
 --- @param config the settings, or nil for the defaults
 --- @return the mixer, which the caller has to `destroy`
---- @raises when `maxVoices` falls outside one to 65535
+--- @raises string when `maxVoices` falls outside one to 65535
 export function newAudio(config: Config?): Audio
     local maxVoices = (config and config.maxVoices) or DEFAULT_MAX_VOICES
     if maxVoices < 1 or maxVoices >= SLOT_SPAN then
@@ -1345,7 +1345,7 @@ end
 --- @param options the residency override, read only by the first call for a path
 --- @return the cached clip, or nil when the file could not be read
 --- @return the reason, when the first return is nil
---- @raises when the path is empty
+--- @raises string when the path is empty
 function Audio.load(exclusive self: Audio, path: string, options: LoadOptions?): (Clip?, string?)
     local id = clipId(path)
     local existing = self.clipsById[id]
@@ -2380,7 +2380,7 @@ end
 --- @param world the world to install into, which expects one mixer
 --- @param config the mixer settings, or nil for the defaults
 --- @return the new mixer, also available through `of`
---- @raises when the world already has a mixer installed
+--- @raises string when the world already has a mixer installed
 export function install(exclusive world: ecs.World, config: Config?): Audio
     if installed[world] ~= nil then
         error("tecs.audio.install: the world already has a mixer installed", 2)
@@ -2498,7 +2498,7 @@ end
 ---     reads them. Nil on failure, with the reason beside it, and nothing is
 ---     left open in that case.
 --- @return the reason, when the first return is nil
---- @raises when `frequency` is not a positive integer, when `channels` is not
+--- @raises string when `frequency` is not a positive integer, when `channels` is not
 ---     an integer from 1 to 32, or when `bufferFrames` is not a positive
 ---     integer
 export function openMicrophone(config: MicrophoneConfig?): (Microphone?, string?)
@@ -2568,7 +2568,7 @@ end
 --- @param ready the frames the capture has
 --- @param maxFrames the caller's ceiling, or nil for everything ready
 --- @return the frames to take
---- @raises when `maxFrames` is not a non-negative integer
+--- @raises string when `maxFrames` is not a non-negative integer
 local function capped(ready: integer, maxFrames: integer?): integer
     if maxFrames == nil then
         return ready

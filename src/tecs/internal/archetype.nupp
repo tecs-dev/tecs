@@ -169,7 +169,7 @@ export record Archetype
     --- @param self The archetype to update.
     --- @param row The one-based live row.
     --- @param input The constructed component value.
-    --- @raises Raises when the row or component is absent, or the input changes
+    --- @raises string when the row or component is absent, or the input changes
     ---     relationship membership or a durable key.
     set: function(self: Archetype, row: integer, input: components.Input): nil
 
@@ -228,7 +228,7 @@ end
 --- Produces the canonical signature for a component collection.
 --- @param values the components to canonicalize
 --- @return the sorted signature
---- @raises when one component appears more than once
+--- @raises string when one component appears more than once
 export function signatureOf(values: {components.Component}): string
     local ids: {integer} = {}
     local seen: {[integer]: boolean} = {}

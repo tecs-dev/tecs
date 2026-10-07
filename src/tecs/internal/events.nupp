@@ -58,7 +58,7 @@ export record OnSnapshotSave
     --- @param self The call-scoped save event.
     --- @param key The unique nonempty metadata key.
     --- @param value The serializable metadata value.
-    --- @raises Raises when a key is empty or repeated.
+    --- @raises string when a key is empty or repeated.
     function addData(self: OnSnapshotSave, key: string, value: any): nil
         if key == "" or self.data[key] ~= nil then
             error("snapshot data key is empty or written twice", 2)
@@ -90,7 +90,7 @@ export record StartSnapshotLoad
     --- @param key The nonempty metadata key.
     --- @param callback The callback; multiple listeners receive the same key in
     ---     registration order.
-    --- @raises Raises when the key is empty.
+    --- @raises string when the key is empty.
     function onData(self: StartSnapshotLoad, key: string, callback: function(value: any)): nil
         if key == "" then
             error("snapshot data key must not be empty", 2)

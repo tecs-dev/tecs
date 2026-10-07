@@ -548,7 +548,7 @@ end
 --- @return the caller's hold, which it releases when its consumer has taken
 ---   ownership
 --- @return a failure reason, when the asset could not be acquired
---- @raises when the path is empty or the loader has shut down
+--- @raises string when the path is empty or the loader has shut down
 function Assets.request(self: Assets, kind: Kind, path: string): (Handle?, string?)
     if not self.open then
         error("assets.request: the loader has shut down", 2)
@@ -603,7 +603,7 @@ end
 --- @param handle the resident handle to replace in place
 --- @return whether the handle now holds a newly acquired payload
 --- @return a failure reason, when the acquisition failed
---- @raises when the loader has shut down, the handle is released, or the handle
+--- @raises string when the loader has shut down, the handle is released, or the handle
 ---   belongs to another loader or another kind
 function Assets.reload(self: Assets, kind: Kind, handle: Handle): (boolean, string?)
     if not self.open then
@@ -688,7 +688,7 @@ end
 --- @param self the running loader
 --- @return whether the loader drained
 --- @return a failure reason, when the loader shut down while draining
---- @raises when the loader has already shut down
+--- @raises string when the loader has already shut down
 function Assets.drain(exclusive self: Assets): (boolean, string?)
     if not self.open then
         error("assets.drain: the loader has shut down", 2)
@@ -839,7 +839,7 @@ end
 --- two owners release independently.
 ---
 --- @param self the handle to hold
---- @raises when the payload has already been freed
+--- @raises string when the payload has already been freed
 function Handle.retain(exclusive self: Handle): nil
     if self.refs <= 0 then
         error("assets.retain: the handle has been released", 2)

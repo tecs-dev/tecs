@@ -912,7 +912,7 @@ end
 ---     beside it.
 --- @param options The caller may tune imported materials before upload.
 --- @return The shared model, or nil and the decoder's reason when loading fails.
---- @raises When the supplied path is empty.
+--- @raises string when the supplied path is empty.
 export function load(path: string, options: LoadOptions?): Model?, string?
     assert(path ~= "", "model path cannot be empty")
     const ok, result = pcall(function(): string
@@ -954,7 +954,7 @@ export type MeshOptions = {
 --- @param options The caller supplies a stable name, position/normal/tangent/UV
 ---     vertices and zero-based triangle indices.
 --- @return The mesh component and its computed local bounding sphere.
---- @raises When streams are empty, malformed or contain nonfinite values or invalid
+--- @raises string when streams are empty, malformed or contain nonfinite values or invalid
 ---     indices.
 export function newMesh(options: MeshOptions): MeshInput, BoundsInput
     assert(
@@ -1225,7 +1225,7 @@ export const MATERIAL_LAMBERT: integer = 2
 --- @param options The caller supplies an identity, shading model, factors and optional
 ---     maps.
 --- @return Returns a shared MeshMaterial component ready to spawn.
---- @raises When a map cannot load or a material factor is invalid.
+--- @raises string when a map cannot load or a material factor is invalid.
 export function newMaterial(options: MaterialOptions): MaterialInput
     assert(options.name ~= "", "material requires a stable name")
     const mode = options.alphaMode ?? "opaque"

@@ -36,7 +36,7 @@ end
 --- Allows one dispatch after a delay and removes the system before its body runs.
 --- @param delay The non-negative finite delay in seconds; zero fires on the first call.
 --- @return Returns a new stateful system predicate.
---- @raises Raises when delay is negative or non-finite.
+--- @raises string when delay is negative or non-finite.
 export function after(delay: number): world.RunIf
     validateDuration(delay, "after", false)
     local elapsed: number = 0
@@ -62,7 +62,7 @@ end
 --- @param generator The caller-owned random generator, required for nonzero jitter.
 --- @return Returns a new timer, firing at most once per call. The first interval is
 ---     unjittered; later intervals clamp to at least one percent of the base interval.
---- @raises Raises for invalid durations or nonzero jitter without a generator.
+--- @raises string for invalid durations or nonzero jitter without a generator.
 export function every(interval: number, jitter: number?, generator: random.Random?): world.RunIf
     validateDuration(interval, "every", true)
     const variance = jitter or 0
@@ -91,7 +91,7 @@ end
 --- @param duration The non-negative finite cooldown in seconds; zero always allows a
 ---     run.
 --- @return Returns a new timer that discards elapsed overshoot after each run.
---- @raises Raises when duration is negative or non-finite.
+--- @raises string when duration is negative or non-finite.
 export function cooldown(duration: number): world.RunIf
     validateDuration(duration, "cooldown", false)
     local elapsed = duration

@@ -38,7 +38,7 @@ end
 --- Returns a detached tree of nil, booleans, numbers, strings, and tables.
 --- @param value the component or custom value to detach
 --- @return a recursively independent plain value
---- @raises when the graph contains an unsupported value, key, or cycle
+--- @raises string when the graph contains an unsupported value, key, or cycle
 export function clone(value: any): any
     return cloneValue(value, {})
 end

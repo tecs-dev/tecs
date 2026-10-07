@@ -223,7 +223,7 @@ end
 --- @param clock the clock this program's waits count
 --- @param nodes the authored steps, which may be empty
 --- @return the compiled immutable program
---- @raises when an entry is not a node or names an unknown step
+--- @raises string when an entry is not a node or names an unknown step
 export function compile(
     name: string,
     version: integer,

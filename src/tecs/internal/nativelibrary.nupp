@@ -67,7 +67,7 @@ end
 --- call name a bare symbol rather than a file.
 --- @param stem the library name without prefix or extension
 --- @param override the environment variable naming an exact file, if any
---- @raises when no candidate can be loaded
+--- @raises string when no candidate can be loaded
 export function open(stem: string, override: string?): nil
     if override ~= nil then
         local named = os.getenv(override)

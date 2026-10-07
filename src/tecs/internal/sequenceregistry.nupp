@@ -160,7 +160,7 @@ local awaitables: {[string]: sequencetypes.Awaitable} = {}
 --- Registering a name twice replaces it, which is what a reload wants.
 --- @param name the process-wide evaluator name
 --- @param evaluator the evaluator, which must carry `step`
---- @raises when the name is empty or the evaluator has no `step`
+--- @raises string when the name is empty or the evaluator has no `step`
 export function registerEvaluator(name: string, evaluator: sequencetypes.Evaluator): nil
     if name == "" then
         error("sequence: an evaluator needs a non-empty name", 3)
@@ -216,7 +216,7 @@ end
 --- parked on the name asks the new one at the next fixed step.
 --- @param name the process-wide provider name
 --- @param provider the provider, which must carry `isPending`
---- @raises when the name is empty or the provider has no `isPending`
+--- @raises string when the name is empty or the provider has no `isPending`
 export function registerAwaitable(name: string, provider: sequencetypes.Awaitable): nil
     if name == "" then
         error("sequence: an awaitable needs a non-empty name", 3)

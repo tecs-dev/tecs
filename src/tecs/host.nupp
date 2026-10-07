@@ -97,7 +97,7 @@ end
 --- @param config the application settings, including world timing and optional MCP
 ---     port.
 --- @return the session a component's constructor gives the Rust host.
---- @raises when application configuration is invalid.
+--- @raises string when application configuration is invalid.
 export function newSession(config: application.Config?): Session
     const app = application.newApplication(config)
     return new Session(
@@ -523,7 +523,7 @@ end
 --- @param dy the movement since this finger's previous event
 --- @param timestamp the host time the platform reported
 --- @param sequence the host's ordering number for this batch
---- @raises when the phase is not one of the four kinds
+--- @raises string when the phase is not one of the four kinds
 export function pushTouch(
     exclusive session: Session,
     phase: string,

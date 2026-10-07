@@ -230,7 +230,7 @@ end
 --- @param name the binding name, which must not be empty
 --- @return a reference to put in a `call` or `emit` argument list, or to hand
 ---     to `playTween` or `await`
---- @raises when the name is empty
+--- @raises string when the name is empty
 export function bind(name: string): EntityRef
     if name == "" then
         error("sequence.bind requires a non-empty binding name", 2)
@@ -250,7 +250,7 @@ end
 ---     every playback of this program; put anything that differs between two
 ---     playbacks in `PlayOptions.params` instead
 --- @return a step for `define`, not to be put in a second program
---- @raises when the action name is empty
+--- @raises string when the action name is empty
 export function call(action: string, ...: any): Node
     if action == "" then
         error("sequence.call requires a non-empty action name", 2)
@@ -267,7 +267,7 @@ end
 --- on within this one.
 --- @param seconds the non-negative duration
 --- @return a step for `define`, not to be put in a second program
---- @raises when the duration is negative
+--- @raises string when the duration is negative
 export function wait(seconds: number): Node
     if seconds < 0 then
         error("sequence.wait requires a non-negative duration", 2)
@@ -280,7 +280,7 @@ end
 --- @param steps the non-negative tick count, where zero yields until the next
 ---     tick
 --- @return a step for `define`, not to be put in a second program
---- @raises when the count is negative or not a whole number
+--- @raises string when the count is negative or not a whole number
 export function waitSteps(steps: integer): Node
     if steps < 0 or steps % 1 ~= 0 then
         error("sequence.waitSteps requires a non-negative whole number", 2)
@@ -296,7 +296,7 @@ end
 --- before the wait is not remembered.
 --- @param name the signal name, which is registered nowhere
 --- @return a step for `define`, not to be put in a second program
---- @raises when the name is empty
+--- @raises string when the name is empty
 export function waitSignal(name: string): Node
     if name == "" then
         error("sequence.waitSignal requires a non-empty signal name", 2)
@@ -317,7 +317,7 @@ end
 ---     instruction runs
 --- @param condition `"any"` to wait for a match or `"empty"` to wait for none
 --- @return a step for `define`, not to be put in a second program
---- @raises when the name is empty or the condition is neither value
+--- @raises string when the name is empty or the condition is neither value
 export function waitQuery(name: string, condition: QueryCondition): Node
     if name == "" then
         error("sequence.waitQuery requires a non-empty query name", 2)
@@ -338,7 +338,7 @@ end
 --- @param ... the constants delivered on the emission with every entity
 ---     reference already resolved
 --- @return a step for `define`, not to be put in a second program
---- @raises when the event name is empty
+--- @raises string when the event name is empty
 export function emit(event: string, ...: any): Node
     if event == "" then
         error("sequence.emit requires a non-empty event name", 2)
@@ -352,7 +352,7 @@ end
 --- @param nodes the block, which must not be empty and which is run in order
 ---     and started again from its first node
 --- @return a step for `define`, not to be put in a second program
---- @raises when the count is not a positive whole number, or the block is
+--- @raises string when the count is not a positive whole number, or the block is
 ---     empty
 export function loop(count: integer?, nodes: {Node}): Node
     if count ~= nil and (count < 1 or count % 1 ~= 0) then
@@ -376,7 +376,7 @@ end
 --- @param nodes the branch body, which must not be empty and which reads and
 ---     writes the forking playback's own bindings table rather than a copy
 --- @return a step for `define`, not to be put in a second program
---- @raises when the block is empty
+--- @raises string when the block is empty
 export function fork(nodes: {Node}): Node
     if #nodes == 0 then
         error("sequence.fork requires a non-empty block", 2)
@@ -400,7 +400,7 @@ end
 --- order, and each shares the playback's bindings table as a `fork` does.
 --- @param blocks one non-empty block per branch
 --- @return a step for `define`, not to be put in a second program
---- @raises when no block is supplied or one of them is empty
+--- @raises string when no block is supplied or one of them is empty
 export function parallel(blocks: {{Node}}): Node
     if #blocks == 0 then
         error("sequence.parallel requires at least one block", 2)
@@ -428,7 +428,7 @@ end
 --- @param params the started playback's parameters, so `mode`, `count`,
 ---     `speed`, `delay` and `channel` shape it as they do for `play`
 --- @return a step for `define`, not to be put in a second program
---- @raises when the timeline name is empty or the target is not a `bind`
+--- @raises string when the timeline name is empty or the target is not a `bind`
 ---     reference
 export function playTween(timeline: string, target: EntityRef, params: {[string]: any}?): Node
     if timeline == "" then
@@ -467,7 +467,7 @@ end
 ---     must remain plain data and the evaluator must not write per-playback
 ---     state into it
 --- @return a step for `define`, not to be put in a second program
---- @raises when the evaluator name is empty
+--- @raises string when the evaluator name is empty
 export function eval(evaluator: string, data: any): Node
     if evaluator == "" then
         error("sequence.eval requires a non-empty evaluator name", 2)
@@ -490,7 +490,7 @@ end
 --- @param key handed to the provider unread, for a provider that answers about
 ---     more than one thing per entity
 --- @return a step for `define`, not to be put in a second program
---- @raises when the provider name is empty or the target is not a `bind`
+--- @raises string when the provider name is empty or the target is not a `bind`
 ---     reference
 export function await(provider: string, target: EntityRef, key: string?): Node
     if provider == "" then
@@ -553,7 +553,7 @@ end
 --- @param component the component to read from that entity.
 --- @param fields the fields aligned with the target's fields.
 --- @return the keyed tracking source.
---- @raises when the key is empty.
+--- @raises string when the key is empty.
 export function sourceKey(key: string, component: ecs.Component, fields: {string}): TrackSource
     return tweeneval.sourceKey(key, component, fields)
 end
@@ -593,7 +593,7 @@ end
 --- @param t4 the destination for the fourth field, with anything past the
 ---     target's field count ignored and an omitted field treated as zero
 --- @return an operation for a timeline spec
---- @raises when the curve names no built-in
+--- @raises string when the curve names no built-in
 export function tweenTo(
     duration: number,
     curve: EasingName | EasingFunction,
@@ -616,7 +616,7 @@ end
 --- @param t3 the change applied to the third field
 --- @param t4 the change applied to the fourth field
 --- @return an operation for a timeline spec
---- @raises when the curve names no built-in
+--- @raises string when the curve names no built-in
 export function tweenAdjust(
     duration: number,
     curve: EasingName | EasingFunction,
@@ -642,7 +642,7 @@ end
 ---     line up with them
 --- @param from where the destination is read each tick
 --- @return an operation for a timeline spec
---- @raises when the curve names no built-in
+--- @raises string when the curve names no built-in
 export function tweenTrack(
     duration: number,
     curve: EasingName | EasingFunction,
@@ -683,7 +683,7 @@ end
 --- @param options omit to run the nested timeline once; `"loop"` and
 ---     `"pingPong"` need a `count` here
 --- @return an operation for a timeline spec
---- @raises when a repeating nested run carries no finite count
+--- @raises string when a repeating nested run carries no finite count
 export function tweenRun(spec: {TimelineNode}, options: RunOptions?): TimelineNode
     return tweeneval.run(spec, options and options.mode, options and options.count)
 end
@@ -717,7 +717,7 @@ end
 --- @param options the clock the program's waits count, defaulting to `"fixed"`
 --- @return the compiled program, immutable and shared by every playback of it,
 ---     so the same value plays on any number of worlds
---- @raises when the name is empty, the clock is not one of the three names, or
+--- @raises string when the name is empty, the clock is not one of the three names, or
 ---     an entry is not a step
 export function define(name: string, nodes: {Node}, options: DefineOptions?): Program
     if name == "" then
@@ -754,7 +754,7 @@ end
 ---     `"presentation"`; `"fixed"` makes it deterministic from a snapshot
 ---     alone at the cost of stepping at the simulation's rate
 --- @return the compiled program, also reachable by name through `program`
---- @raises when the clock is neither `"fixed"` nor `"presentation"`, or an
+--- @raises string when the clock is neither `"fixed"` nor `"presentation"`, or an
 ---     operation is invalid
 export function timeline(name: string, spec: {TimelineNode}, options: TimelineOptions?): Program
     local clock = (options and options.clock) or "presentation"
@@ -818,7 +818,7 @@ end
 ---     one up
 --- @param action the body, which faults its playback with `actionError` when
 ---     it raises, leaving whatever it already wrote to the world written
---- @raises when the name is empty
+--- @raises string when the name is empty
 export function registerAction(exclusive world: ecs.World, name: string, action: Action): nil
     if name == "" then
         error("sequence.registerAction requires a non-empty action name", 2)
@@ -842,7 +842,7 @@ end
 --- @param world the world that owns the query registry
 --- @param name the query name
 --- @param descriptor the include and exclude constraints
---- @raises when the name is empty
+--- @raises string when the name is empty
 export function registerQuery(exclusive world: ecs.World, name: string, descriptor: ecs.QueryDescriptor): nil
     if name == "" then
         error("sequence.registerQuery requires a non-empty query name", 2)
@@ -867,7 +867,7 @@ end
 --- @param evaluator the evaluator, which must carry `step`; without `save` and
 ---     `load` a playback evaluating this name comes back from a snapshot at the
 ---     start of its state rather than where it was
---- @raises when the name is empty or the evaluator has no `step`
+--- @raises string when the name is empty or the evaluator has no `step`
 export function registerEvaluator(name: string, evaluator: Evaluator): nil
     sequenceregistry.registerEvaluator(name, evaluator)
 end
@@ -881,7 +881,7 @@ end
 --- @param provider the provider, which must carry `isPending`; without
 ---     `setPaused` it leaves its work running when a pause stops the waiting
 ---     playback
---- @raises when the name is empty or the provider has no `isPending`
+--- @raises string when the name is empty or the provider has no `isPending`
 export function registerAwaitable(name: string, provider: Awaitable): nil
     sequenceregistry.registerAwaitable(name, provider)
 end
@@ -895,7 +895,7 @@ end
 --- @param name the signal name, registered nowhere
 --- @return the number of playbacks waiting on the name now, which may differ
 ---     from the set the next fixed step wakes
---- @raises when the name is empty
+--- @raises string when the name is empty
 export function signal(exclusive world: ecs.World, name: string): integer
     if name == "" then
         error("sequence.signal requires a non-empty signal name", 2)
@@ -927,7 +927,7 @@ end
 --- @param name the signal to raise, once per emission
 --- @param event the event definition, observed at address zero and only there;
 ---     the observer lasts for the life of the world
---- @raises when the name is empty
+--- @raises string when the name is empty
 export function signalOnEvent<E is events.Emittable>(exclusive world: ecs.World, name: string, event: Type<E>): nil
     if name == "" then
         error("sequence.signalOnEvent requires a non-empty signal name", 2)
@@ -1170,7 +1170,7 @@ end
 --- as a scheduler. It applies to playbacks started after this call.
 --- @param world the world the budget applies to
 --- @param instructions the budget, which must be at least one
---- @raises when the budget is less than one
+--- @raises string when the budget is less than one
 export function setInstructionBudget(exclusive world: ecs.World, instructions: integer): nil
     if instructions < 1 then
         error("sequence.setInstructionBudget requires a positive count", 2)
@@ -1195,7 +1195,7 @@ end
 --- wake is a tick number fixed when the wait runs and never revisited.
 --- @param world the world whose future waits use this duration.
 --- @param seconds the positive finite nominal duration in seconds.
---- @raises when the duration is not positive and finite.
+--- @raises string when the duration is not positive and finite.
 export function setNominalFrameTime(exclusive world: ecs.World, seconds: number): nil
     world:setNominalFrameTime(seconds)
 end

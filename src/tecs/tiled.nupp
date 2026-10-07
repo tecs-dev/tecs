@@ -174,7 +174,7 @@ export type Map = {
 --- Loads a TMX map and resolves its external TSX files and templates.
 --- @param path the TMX file path
 --- @return the editable map
---- @raises when the library cannot load the map or its orientation is unsupported
+--- @raises string when the library cannot load the map or its orientation is unsupported
 export function load(path: string): Map
     local source = assetnative.load(path, 0)
     local value = json.decode(source)
@@ -228,7 +228,7 @@ end
 --- @param x the zero-based tile column
 --- @param y the zero-based tile row
 --- @param tile the replacement, or nil to clear the cell
---- @raises when the layer, coordinate, tileset or tile ID is invalid
+--- @raises string when the layer, coordinate, tileset or tile ID is invalid
 export function setTile(map: Map, layer: integer, x: integer, y: integer, tile: TileRef?): nil
     local value = assert(map.layers[layer], "tiled: layer does not exist")
     assert(value.kind == "tiles", "tiled: layer is not a tile layer")

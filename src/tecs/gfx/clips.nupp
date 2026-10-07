@@ -118,7 +118,7 @@ end
 --- caller reusing an index across frames writes the whole rectangle each time.
 --- @param index the region to set, from one to `MAX - 1`
 --- @param region the rectangle in target pixels, measured from the top left
---- @raises when the index is zero or outside the table, or when the rectangle
+--- @raises string when the index is zero or outside the table, or when the rectangle
 ---     has a negative width or height
 export function setRegion(index: integer, region: Region): nil
     checkIndex(index, "setRegion")
@@ -141,7 +141,7 @@ end
 --- removes content.
 --- @param index the region to clear, from one to `MAX - 1`; clearing one nobody
 ---     set is not an error
---- @raises when the index is zero or outside the table
+--- @raises string when the index is zero or outside the table
 export function clearRegion(index: integer): nil
     checkIndex(index, "clearRegion")
     const base = index * 4

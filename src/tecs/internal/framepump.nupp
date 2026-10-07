@@ -96,7 +96,7 @@ end
 --- @param pump the idle application pump
 --- @param body the lifecycle operation to run
 --- @return whether the operation parked, completed, or stopped the application
---- @raises when another operation is still parked
+--- @raises string when another operation is still parked
 export function start(pump: Pump, body: function(): boolean): State
     if pump.active ~= nil then
         error("framepump.start: an operation is already parked", 2)
@@ -124,7 +124,7 @@ end
 --- Polls readiness once; callbacks resume the operation during that pass.
 --- @param pump the application pump
 --- @return whether the operation remains parked, completed, or stopped the application
---- @raises when no operation is parked
+--- @raises string when no operation is parked
 export function poll(exclusive pump: Pump): State
     if pump.active == nil then
         error("framepump.poll: no operation is parked", 2)

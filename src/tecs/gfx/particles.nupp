@@ -759,7 +759,7 @@ end
 --- author wants them rather than spaced evenly.
 --- @param keys nonempty age/value keys with ages in zero through one
 --- @return compiled scalar samples
---- @raises when keys contain invalid ages or values
+--- @raises string when keys contain invalid ages or values
 export function newCurve(keys: {CurveKey}): Curve
     return {
         samples = sampleKeys(
@@ -780,7 +780,7 @@ end
 --- writes opaque and the only fade that works is the size curve going to zero.
 --- @param keys nonempty age/value keys with ages in zero through one
 --- @return compiled RGBA samples
---- @raises when keys contain invalid ages or values
+--- @raises string when keys contain invalid ages or values
 export function newGradient(keys: {CurveKey}): Gradient
     return {
         samples = sampleKeys(
@@ -807,7 +807,7 @@ const BLENDING: {[string]: Blending} = {opaque = {forward = 0}, alpha = {forward
 --- @param options The caller supplies a named schedule, spawn, simulation and rendering
 ---     recipe.
 --- @return Returns the shared effect for ParticleEmitter.
---- @raises When the name is duplicated or any option is invalid.
+--- @raises string when the name is duplicated or any option is invalid.
 export function newEffect(options: EffectOptions): Effect
     if options == nil then
         error("tecs: an effect needs options", 2)
@@ -1593,7 +1593,7 @@ end
 --- @param options The caller sets fixed pool limits, defaulting to 16384 slots and 256
 ---     emitters.
 --- @return The operation returns no value.
---- @raises When pool limits are outside the supported range.
+--- @raises string when pool limits are outside the supported range.
 export function plugin(exclusive world: ecs.World, options: PoolOptions?): nil
     if pools[world] ~= nil then
         return

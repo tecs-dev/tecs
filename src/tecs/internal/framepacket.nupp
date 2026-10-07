@@ -534,7 +534,7 @@ end
 --- A world with no camera entity draws through a camera centered on the render
 --- target at zoom one, which is the mapping that puts one world unit on one
 --- target pixel with the origin at the top left corner.
---- @raises when the selected camera's zoom is not greater than zero, or when
+--- @raises string when the selected camera's zoom is not greater than zero, or when
 ---     any of its four values is not finite
 local function view(borrows self: Extractor, width: number, height: number): number, number, number, number
     local camera = self.cameraOverride
@@ -608,7 +608,7 @@ local function sources(borrows self: Extractor): function(): (archetype.Archetyp
 end
 
 --- Reads dirty archetype runs into the retained extraction arrays.
---- @raises when an entity selects a material id this build does not carry
+--- @raises string when an entity selects a material id this build does not carry
 local function collect(exclusive self: Extractor): nil
     local needed: integer = 0
     for _, run in pairs(self.runs) do
@@ -812,7 +812,7 @@ local function collect(exclusive self: Extractor): nil
 end
 
 --- Reads every light entity into the extractor's reused arrays.
---- @raises when a light holds a radius that is not greater than zero, or any
+--- @raises string when a light holds a radius that is not greater than zero, or any
 ---     value that is not finite
 local function collectLights(exclusive self: Extractor): nil
     const needed = self.lights:count()

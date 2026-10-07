@@ -244,7 +244,7 @@ end
 --- @param state the per-world composition state
 --- @param entity the entity to resolve
 --- @return the entity's world transform, or nil when it carries none
---- @raises when `ChildOf` links the entity into a parent cycle
+--- @raises string when `ChildOf` links the entity into a parent cycle
 local resolve: function(
     exclusive world: entityworld.World,
     state: Hierarchy,

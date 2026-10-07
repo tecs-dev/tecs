@@ -274,7 +274,7 @@ end
 ---     own timing, looping, and playing
 --- @return a component value ready for `world:spawn` or `world:set`, not an
 ---     entity
---- @raises when the sheet does not carry the named tag, because an author naming
+--- @raises string when the sheet does not carry the named tag, because an author naming
 ---     a tag here has one in mind and the sheet is already in hand to check
 export function of(
     source: sheet.Sheet,
@@ -305,7 +305,7 @@ end
 --- @param tag a tag the sheet names, or nil for the whole sheet
 --- @param options the speed, loop, and playing overrides, or nil for the
 ---     defaults
---- @raises when the sheet does not carry the named tag
+--- @raises string when the sheet does not carry the named tag
 export function play(
     exclusive world: ecs.World,
     entity: integer,

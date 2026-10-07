@@ -76,7 +76,7 @@ end
 --- @param totalDuration the timeline's own length in seconds
 --- @return the repeat mode, its pass count, the speed multiplier, and the
 ---     delay in seconds
---- @raises when speed is not positive, delay is negative, or a repeating
+--- @raises string when speed is not positive, delay is negative, or a repeating
 ---     timeline has no duration
 export function resolveOptions(
     params: {[string]: any}?,

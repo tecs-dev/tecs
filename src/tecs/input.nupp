@@ -833,7 +833,7 @@ end
 --- @param name the non-empty diagnostic layer name
 --- @param blocking whether the layer hides lower layers, defaulting to true
 --- @return the new top layer
---- @raises when the layer name is empty
+--- @raises string when the layer name is empty
 function Input.pushLayer(exclusive self: Input, name: string, blocking: boolean?): Layer
     if name == "" then
         error("input.pushLayer: name must not be empty", 2)
@@ -1020,7 +1020,7 @@ end
 --- @param button a positional name or a positive backend button code
 --- @param layer the reading layer, or the base layer when omitted
 --- @return whether the layer may read and the button is held
---- @raises when the name is not one this module declares
+--- @raises string when the name is not one this module declares
 function Gamepad.buttonDown(borrows self: Gamepad, button: GamepadButton | integer, layer: Layer?): boolean
     return self.gateRead(layer) and self.down[buttonCode(button)] == true
 end
@@ -1030,7 +1030,7 @@ end
 --- @param button a positional name or a positive backend button code
 --- @param layer the reading layer, or the base layer when omitted
 --- @return whether the button was pressed
---- @raises when the name is not one this module declares
+--- @raises string when the name is not one this module declares
 function Gamepad.buttonPressed(borrows self: Gamepad, button: GamepadButton | integer, layer: Layer?): boolean
     local edges = self.gateFixed() and self.latchedPressed or self.pressed
     return self.gateRead(layer) and edges[buttonCode(button)] == true
@@ -1041,7 +1041,7 @@ end
 --- @param button a positional name or a positive backend button code
 --- @param layer the reading layer, or the base layer when omitted
 --- @return whether the button was released
---- @raises when the name is not one this module declares
+--- @raises string when the name is not one this module declares
 function Gamepad.buttonReleased(borrows self: Gamepad, button: GamepadButton | integer, layer: Layer?): boolean
     local edges = self.gateFixed() and self.latchedReleased or self.released
     return self.gateRead(layer) and edges[buttonCode(button)] == true
@@ -1057,7 +1057,7 @@ end
 ---     0.15
 --- @param layer the reading layer, or the base layer when omitted
 --- @return the reading, and zero when the layer may not read
---- @raises when the name is not one this module declares
+--- @raises string when the name is not one this module declares
 function Gamepad.axis(borrows self: Gamepad, axis: GamepadAxis | integer, deadzone: number?, layer: Layer?): number
     if not self.gateRead(layer) then
         return 0
@@ -1076,7 +1076,7 @@ end
 --- @param button a positional name or a positive backend button code
 --- @return whether the platform says the device has it, and false once the
 ---     device has gone away
---- @raises when the name is not one this module declares
+--- @raises string when the name is not one this module declares
 function Gamepad.hasButton(borrows self: Gamepad, button: GamepadButton | integer): boolean
     return self.connected and self.backend.hasButton(self.id, buttonCode(button))
 end
@@ -1086,7 +1086,7 @@ end
 --- @param axis an axis name or a positive backend axis code
 --- @return whether the platform says the device has it, and false once the
 ---     device has gone away
---- @raises when the name is not one this module declares
+--- @raises string when the name is not one this module declares
 function Gamepad.hasAxis(borrows self: Gamepad, axis: GamepadAxis | integer): boolean
     return self.connected and self.backend.hasAxis(self.id, axisCode(axis))
 end
@@ -1133,7 +1133,7 @@ end
 --- @param backend the gamepad source, defaulting to the process-wide platform
 ---     one
 --- @return the new input state, also available through `of`
---- @raises when the world already owns input state
+--- @raises string when the world already owns input state
 export function install(exclusive world: ecs.World, backend: gamepadbackend.Backend?): Input
     if world.resources:get(worldInputKey) ~= nil then
         error("input.install: world input state is already installed", 2)

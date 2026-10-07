@@ -269,7 +269,7 @@ const NULL_INDEX: integer = 0xFFFFFFFF
 ---
 --- The numbers repeat what `layout_is_pinned` asserts on the Rust side, so a
 --- reordered field there fails here the first time a game asks for physics.
---- @raises when the loaded library does not match these declarations
+--- @raises string when the loaded library does not match these declarations
 local function assertLayout(): nil
     local sizes: {
         [string]: integer
@@ -455,7 +455,7 @@ local nextSimulationId: integer = 1
 --- @param options the gravity in meters per second squared, the substep count
 ---     and the requested solver width
 --- @return the simulation, ready to receive queued commands
---- @raises when the native library cannot create a world
+--- @raises string when the native library cannot create a world
 export function create(options: contract.Options?): contract.Simulation
     local settings = options or {}
     local world = tecsPhysicsWorldCreate(

@@ -261,7 +261,7 @@ local function finite(value: number): boolean
 end
 
 --- Reads one optional tuning number and holds it to a range.
---- @raises when the value is not finite or falls outside the range
+--- @raises string when the value is not finite or falls outside the range
 local function reading(value: number?, fallback: number, low: number, high: number, name: string): number
     if value == nil then
         return fallback
@@ -281,7 +281,7 @@ end
 --- @param r the red channel, at or above zero
 --- @param g the green channel, at or above zero
 --- @param b the blue channel, at or above zero
---- @raises when a channel is negative or not finite
+--- @raises string when a channel is negative or not finite
 export function setAmbient(r: number, g: number, b: number): nil
     if not finite(r) or not finite(g) or not finite(b) or r < 0.0 or g < 0.0 or b < 0.0 then
         error("lighting: every ambient channel must be finite and at or above zero", 2)
@@ -302,7 +302,7 @@ end
 --- them.
 --- @param spec the tuning, whose omitted fields take the defaults documented on
 ---     `Shadows`, or nil to disable shadows
---- @raises when a field is not finite or falls outside its range
+--- @raises string when a field is not finite or falls outside its range
 export function setShadows(spec: ShadowSpec?): nil
     if spec == nil then
         shadowSettings = nil
@@ -332,7 +332,7 @@ end
 --- Enables bloom and sets its tuning, or disables it.
 --- @param spec the tuning, whose omitted fields take the defaults documented on
 ---     `Bloom`, or nil to disable bloom
---- @raises when a field is not finite or falls outside its range
+--- @raises string when a field is not finite or falls outside its range
 export function setBloom(spec: BloomSpec?): nil
     if spec == nil then
         bloomSettings = nil

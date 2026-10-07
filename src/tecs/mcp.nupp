@@ -132,7 +132,7 @@ local builtInsInstalled: boolean = tools.installed() and worldtools.installed() 
 --- @param tool the declaration, stored by reference and never copied, so a
 ---     later mutation changes what the server dispatches but not what a
 ---     connected agent has been told
---- @raises when the declaration carries no name or no handler
+--- @raises string when the declaration carries no name or no handler
 export function register(tool: Tool): nil
     registry.register(tool)
 end

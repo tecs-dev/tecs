@@ -286,7 +286,7 @@ end
 --- cleared. A nil payload clears the world's playbacks and stops there.
 --- @param state the world's sequencer state
 --- @param value the payload written by `save`, or nil
---- @raises when the payload is not a table or carries an unsupported layout
+--- @raises string when the payload is not a table or carries an unsupported layout
 ---     version
 export function load(state: sequencetypes.WorldState, value: any): nil
     if value ~= nil then

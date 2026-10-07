@@ -734,7 +734,7 @@ end
 --- @param timestamp the host time the platform reported
 --- @param sequence the host's ordering number for the batch
 --- @return the constructed touch event
---- @raises when the finger identity is empty
+--- @raises string when the finger identity is empty
 export function touch(
     phase: "fingerDown" | "fingerUp" | "fingerMotion" | "fingerCanceled",
     touchDevice: string,
@@ -865,7 +865,7 @@ end
 --- @param timestamp the host time the platform reported
 --- @param sequence the host's ordering number for the batch
 --- @return the constructed button event
---- @raises when the button code is not positive
+--- @raises string when the button code is not positive
 export function gamepadButton(
     down: boolean,
     which: integer,
@@ -907,7 +907,7 @@ end
 --- @param timestamp the host time the platform reported
 --- @param sequence the host's ordering number for the batch
 --- @return the constructed axis event
---- @raises when the axis code is not positive
+--- @raises string when the axis code is not positive
 export function gamepadAxis(
     which: integer,
     axis: integer,

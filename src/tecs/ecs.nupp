@@ -539,7 +539,7 @@ end
 --- Marks a record or struct as an ECS component and selects its physical storage.
 --- @param info The declaration being derived.
 --- @return Returns its metadata and reusable initializer recipe.
---- @raises Raises when the declaration cannot supply a reusable initializer.
+--- @raises string when the declaration cannot supply a reusable initializer.
 @comptime
 export function Component(info: nupp.derive.Info): nupp.derive.Result<derived.Value>
     if info.kind ~= "record" and info.kind ~= "struct" then
@@ -551,7 +551,7 @@ end
 --- Marks a target-bearing record or struct as an ECS relationship.
 --- @param info The declaration being derived.
 --- @return Returns its metadata and reusable initializer recipe.
---- @raises Raises when the target, policies or initializer are invalid.
+--- @raises string when the target, policies or initializer are invalid.
 @comptime
 export function Relationship(info: nupp.derive.Info): nupp.derive.Result<derived.Edge>
     if info.kind ~= "record" and info.kind ~= "struct" then
@@ -937,7 +937,7 @@ export const DEFAULT_FIXED_MAX_STEPS: integer = entityworld.DEFAULT_FIXED_MAX_ST
 --- installing anything.
 --- @param config the world settings, or nil for defaults
 --- @return the empty world
---- @raises when a capacity or fixed-clock option is invalid
+--- @raises string when a capacity or fixed-clock option is invalid
 export function newWorld(config: WorldConfig?): World
     const value = entityworld.new(
         config and config.maxEntities,
@@ -955,8 +955,8 @@ end
 --- Creates and registers a marker component with no per-entity value.
 --- @param options the process-unique component name and snapshot policy
 --- @return the registered tag component
---- @raises when the name is empty or already registered
---- @raises Raises when a requirement is unregistered or names an untargeted
+--- @raises string when the name is empty or already registered
+--- @raises string when a requirement is unregistered or names an untargeted
 ---     relationship.
 export function newTagComponent(options: TagComponentOptions): Component
     return components.newTagComponent(options)
@@ -965,8 +965,8 @@ end
 --- Creates and registers a scalar component whose column stores raw values.
 --- @param options the process-unique name, primitive kind, default, and snapshot policy
 --- @return the registered scalar component specialized to the selected kind
---- @raises when the name is empty or already registered
---- @raises Raises when a requirement is unregistered or names an untargeted
+--- @raises string when the name is empty or already registered
+--- @raises string when a requirement is unregistered or names an untargeted
 ---     relationship.
 export const newScalarComponent: components.NewScalarComponent = components.newScalarComponent
 
@@ -976,12 +976,12 @@ export const newScalarComponent: components.NewScalarComponent = components.newS
 --- @param witness The record or struct declaration whose values this definition stores.
 --- @param options The optional identity, constructor, defaults and snapshot policy.
 --- @return Returns a callable definition with the declaration's exact column type.
---- @raises Raises when the name is empty or already belongs to another definition.
---- @raises Raises when a declaration has neither an initializer nor an explicit
+--- @raises string when the name is empty or already belongs to another definition.
+--- @raises string when a declaration has neither an initializer nor an explicit
 ---     constructor.
---- @raises Raises when a native layout is unsupported or snapshot codecs are
+--- @raises string when a native layout is unsupported or snapshot codecs are
 ---     incomplete.
---- @raises Raises when a requirement is unregistered or names an untargeted
+--- @raises string when a requirement is unregistered or names an untargeted
 ---     relationship.
 export function newComponent<T>(witness: Type<T>, options: ComponentOptions<T>?): ComponentDefinition<T>
     return components.fromType(witness, options, false) as ComponentDefinition<T>
@@ -1001,10 +1001,10 @@ end
 ---     declaration.
 --- @param options The optional identity, edge policies, constructor and snapshot codec.
 --- @return Returns a callable relationship definition with typed payload access.
---- @raises Raises when cascade deletion lacks exclusivity or reverse indexing.
---- @raises Raises when the name is invalid or already belongs to another definition.
---- @raises Raises when a payload declaration does not provide a valid target field.
---- @raises Raises when a native layout is unsupported or snapshot codecs are
+--- @raises string when cascade deletion lacks exclusivity or reverse indexing.
+--- @raises string when the name is invalid or already belongs to another definition.
+--- @raises string when a payload declaration does not provide a valid target field.
+--- @raises string when a native layout is unsupported or snapshot codecs are
 ---     incomplete.
 export const newRelationship: NewRelationship = createRelationship as NewRelationship
 
@@ -1012,7 +1012,7 @@ export const newRelationship: NewRelationship = createRelationship as NewRelatio
 --- @param relationship The derived edge declaration.
 --- @param target The committed or reserved target identifier.
 --- @return Returns a reusable selector with the edge's exact physical column type.
---- @raises Raises when the relationship is sparse or the target is invalid.
+--- @raises string when the relationship is sparse or the target is invalid.
 export function targeting<T is derived.Edge>(relationship: Type<T>, target: integer): ComponentDefinition<T>
     const definition = components.select(relationship)
     return assert(components.asRelationship(definition)):targeting(target) as ComponentDefinition<T>

@@ -83,7 +83,7 @@ end
 --- Creates an empty stage.
 --- @param name the label the report row carries
 --- @return the stage, which the caller keeps for the whole run
---- @raises when the name is empty
+--- @raises string when the name is empty
 export function newStage(name: string): Stage
     if name == "" then
         error("harness.newStage: name must not be empty", 2)
@@ -118,7 +118,7 @@ end
 --- @param samples the timed repetitions, which must be positive
 --- @param run the operation being measured
 --- @param prepare an optional per-repetition setup, or nil when there is none
---- @raises when the sample count is not positive
+--- @raises string when the sample count is not positive
 export function measure(
     stage: Stage,
     warmup: integer,
@@ -244,7 +244,7 @@ end
 --- @param name the environment variable to read
 --- @param fallback the value used when the variable is unset
 --- @return the configured count
---- @raises when the variable is set to anything but a positive integer
+--- @raises string when the variable is set to anything but a positive integer
 export function count(name: string, fallback: integer): integer
     const text = os.getenv(name)
     if text == nil then
@@ -265,7 +265,7 @@ end
 --- @param name the environment variable to read
 --- @param fallback the value used when the variable is unset
 --- @return the configured count
---- @raises when the variable is set to anything but a non-negative integer
+--- @raises string when the variable is set to anything but a non-negative integer
 export function optionalCount(name: string, fallback: integer): integer
     const text = os.getenv(name)
     if text == nil then
@@ -283,7 +283,7 @@ end
 --- @param name the environment variable to read
 --- @param fallback the value used when the variable is unset
 --- @return the configured value
---- @raises when the variable is set to anything but a number
+--- @raises string when the variable is set to anything but a number
 export function amount(name: string, fallback: number): number
     const text = os.getenv(name)
     if text == nil then

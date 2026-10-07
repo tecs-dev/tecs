@@ -184,7 +184,7 @@ export const View = views.Component
 --- @param options The caller supplies world position, positive zoom and radians of
 ---     rotation.
 --- @return The camera value, centered at zero with zoom one by default.
---- @raises When zoom is not positive or a value is not finite.
+--- @raises string when zoom is not positive or a value is not finite.
 export function newCamera2D(options: {
     x: number?,
     y: number?,

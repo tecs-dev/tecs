@@ -112,7 +112,7 @@ end
 --- Validates and detaches a persisted random registry.
 --- @param value The dynamic payload saved under tecs.random.
 --- @return Returns validated signed words and non-empty stream names.
---- @raises Raises for invalid seed, names, word counts or state values.
+--- @raises string for invalid seed, names, word counts or state values.
 export function prepare(value: any): State
     if type(value) ~= "table" or type(value.streams) ~= "table" then
         error("world.loadSnapshot: invalid tecs.random registry", 2)

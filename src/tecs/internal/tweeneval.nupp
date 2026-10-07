@@ -461,7 +461,7 @@ end
 --- pool, so a curve this module cannot name is rejected.
 --- @param value a built-in curve name or one of the built-in curve values
 --- @return the curve name and the curve itself
---- @raises when the value names no built-in curve
+--- @raises string when the value names no built-in curve
 export function resolveEasing(value: EasingName | EasingFunction): string, EasingFunction
     if type(value) == "string" then
         local name = value as string
@@ -591,7 +591,7 @@ local builtinTargets: {
 --- Resolves an authored target to its runtime form.
 --- @param value a built-in target name or a target built here
 --- @return the target
---- @raises when a name names no built-in target
+--- @raises string when a name names no built-in target
 export function resolveTarget(value: TargetName | Target): Target
     if type(value) == "string" then
         local builtin = builtinTargets[value as string]
@@ -623,7 +623,7 @@ end
 --- @param component the component to read.
 --- @param fields the fields aligned with the target's fields.
 --- @return the keyed source.
---- @raises when the key is empty.
+--- @raises string when the key is empty.
 export function sourceKey(key: string, component: components.Component, fields: {string}): TrackSource
     if key == "" then
         error("tween.sourceKey: the key must not be empty", 2)
@@ -695,7 +695,7 @@ end
 --- @param count the authored pass count, or nil
 --- @param finite whether an endless repeat is refused
 --- @return the mode and its pass count, which is minus one when endless
---- @raises when the mode is unknown, the count is not positive, `"once"`
+--- @raises string when the mode is unknown, the count is not positive, `"once"`
 ---     carries a count, or an endless repeat is refused
 export function playbackMode(mode: PlaybackMode?, count: integer?, finite: boolean?): PlaybackMode, integer
     local resolved = mode or "once"
@@ -960,7 +960,7 @@ end
 --- @param spec the operations in execution order
 --- @return the compiled timeline, which the caller does not own the spec of:
 ---     the spec is read rather than rewritten and compiles again unchanged
---- @raises when an operation is unknown or carries an invalid duration, mode,
+--- @raises string when an operation is unknown or carries an invalid duration, mode,
 ---     or count
 export function compile(spec: {TimelineNode}): Timeline
     local timeline = new Timeline(slots = {}, runs = {}, emits = {}, totalDuration = 0, stateSize = 0)
@@ -988,7 +988,7 @@ end
 --- names one.
 --- @param data the serialized target row
 --- @return the target
---- @raises when the named component is not registered
+--- @raises string when the named component is not registered
 export function deserializeTarget(data: {[string]: any}): Target
     local id = data.id as string
     local builtin = builtinTargets[id]
@@ -1024,7 +1024,7 @@ end
 --- Rebuilds a tracking source from plain data.
 --- @param data the serialized source row, or nil
 --- @return the source, or nil
---- @raises when a named component is not registered
+--- @raises string when a named component is not registered
 export function deserializeSource(data: {[string]: any}?): TrackSource?
     if data == nil then
         return nil
@@ -1104,7 +1104,7 @@ end
 --- Rebuilds a compiled timeline from plain data.
 --- @param data the serialized timeline tree
 --- @return the timeline
---- @raises when a named easing curve or component is unknown
+--- @raises string when a named easing curve or component is unknown
 export function deserializeTimeline(data: {[string]: any}): Timeline
     local slots: {Slot} = {}
     local savedSlots = (data.slots as {{[string]: any}}?) or {}

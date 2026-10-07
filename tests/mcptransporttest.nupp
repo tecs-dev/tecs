@@ -57,7 +57,7 @@ end
 --- way round. Nothing outside this process is involved.
 --- @param client what to run against the bound port
 --- @return whatever `client` returned
---- @raises the first failure either the client or the poller had
+--- @raises any the first failure either the client or the poller had
 local function withServer<T>(client: function(port: integer): T): T
     local server = assert(mcp.listen(0))
     local port = server.port

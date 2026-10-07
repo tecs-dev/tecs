@@ -473,7 +473,7 @@ end
 --- Attaches the OS window and atomically installs its initial observed state.
 --- @param window the contract the host created the OS window for
 --- @param state the complete initial state
---- @raises when already attached or when the state is invalid
+--- @raises string when already attached or when the state is invalid
 export function attach(exclusive window: Window, state: HostState): nil
     if window.attached then
         error("platform.window.attach: window is already attached", 2)

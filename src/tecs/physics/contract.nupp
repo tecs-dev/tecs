@@ -423,7 +423,7 @@ export record Simulation
     --- body, collider and joint creation, then body redeclaration, collider
     --- replacement, and queued actions. The queues are empty afterwards.
     --- @param dt the interval to advance, in seconds
-    --- @raises when the simulation cannot apply the batch
+    --- @raises string when the simulation cannot apply the batch
     step: function(dt: number): nil
 
     --- Returns the body and collider assigned to one queued creation.

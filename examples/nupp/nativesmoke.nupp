@@ -40,7 +40,7 @@ const SERVICES: {
 }
 
 --- Loads every native binding module and raises on the first that fails.
---- @raises when a binding module cannot be loaded, naming its library
+--- @raises string when a binding module cannot be loaded, naming its library
 local function install(exclusive _app: Application): nil
     for index = 1, #SERVICES do
         const entry = SERVICES[index]

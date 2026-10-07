@@ -781,7 +781,7 @@ local function colliderDefOf(entity: integer, borrows shape: ColliderValue): con
 end
 
 --- Builds the collider component one set of attach options describes.
---- @raises when a capsule is requested without a positive radius
+--- @raises string when a capsule is requested without a positive radius
 local function colliderFrom(options: BodyOptions): ecs.ComponentInput
     local shape = contract.SHAPE_BOX
     local halfWidth, halfHeight = options.halfWidth, options.halfHeight
@@ -854,7 +854,7 @@ end
 ---     not already carry them
 --- @param options the initial body and collider settings, or nil for a
 ---     dynamic eight-pixel box
---- @raises when the world has no simulation, the body kind is unknown, or a
+--- @raises string when the world has no simulation, the body kind is unknown, or a
 ---     capsule has no positive radius
 export function attach(exclusive world: ecs.World, entity: integer, options: BodyOptions?): nil
     if stateOf(world) == nil then
@@ -890,7 +890,7 @@ end
 --- @param body an entity carrying `Body`
 --- @param options the shape, material, filter and offset settings; body-level
 ---     fields have no effect
---- @raises when a capsule is requested without a positive radius
+--- @raises string when a capsule is requested without a positive radius
 export function attachCollider(exclusive world: ecs.World, entity: integer, body: integer, options: BodyOptions?): nil
     world:set(entity, colliderFrom(options or {}))
     world:set(entity, ColliderOf(body))
@@ -911,7 +911,7 @@ end
 --- @param bodyA the first constrained entity
 --- @param bodyB the second constrained entity
 --- @param options the joint kind, anchors, limits and motor settings
---- @raises when the joint kind is unknown
+--- @raises string when the joint kind is unknown
 export function attachJoint(
     exclusive world: ecs.World,
     entity: integer,
@@ -1871,7 +1871,7 @@ end
 --- @param options the gravity, substep count, solver width, and an explicit
 ---     simulation to drive instead of the default native one
 --- @return the installed simulation, also available through `of`
---- @raises when the world already has a simulation
+--- @raises string when the world already has a simulation
 export function install(exclusive world: ecs.World, options: Options?): contract.Simulation
     if world.resources:get(stateKey) ~= nil then
         error("physics.install: this world already has a simulation", 2)

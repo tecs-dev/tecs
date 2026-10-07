@@ -48,7 +48,7 @@ end
 --- Registration rather than presence: a component nothing in this world carries
 --- is still nameable, because `spawn` and `set` are how it comes to be carried.
 --- Only a name nobody registered is refused.
---- @raises when no component carries that name
+--- @raises string when no component carries that name
 local function component(name: string?): ecs.Component
     local found = name ~= nil and ecs.findComponentByName(name) or nil
     if found == nil then
