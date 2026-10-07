@@ -799,7 +799,7 @@ export record Audio
     @private
     clipsById: {[integer]: Clip}
     @private
-    variance: random.Random
+    variance: random.Xoshiro128
     @private
     now: number
     @private
@@ -1249,7 +1249,7 @@ export function newAudio(config: Config?): Audio
         limits = {},
         buckets = {},
         clipsById = {},
-        variance = random.newRandom(),
+        variance = new random.Xoshiro128(),
         now = 0,
         pending = {},
         pendingCount = 0,

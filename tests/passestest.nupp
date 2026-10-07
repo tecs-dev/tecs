@@ -95,7 +95,7 @@ local function decode(section: string): Graph
         )
     end
     test.assert(reader:atEnd(), "the section holds nothing the decoder did not read")
-    reader:drop()
+    nupp.drop(reader)
 
     return new Graph(targets = targets, passes = decoded)
 end

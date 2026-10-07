@@ -29,8 +29,8 @@ const {type Input} = require("tecs.input")
 const {type Layer} = require("tecs.input")
 const {type Query} = require("tecs.ecs")
 const {type Event as Event2} = require("tecs.platform.events")
-const {type Key} = require("nupp.store")
-const store = require("nupp.store")
+const {type Key} = require("nupp.util")
+const util = require("nupp.util")
 const {type World} = require("tecs.ecs")
 const text = require("tecs.gfx.text")
 const images = require("tecs.gfx.images")
@@ -594,7 +594,7 @@ local record State
     inputLayer: Layer?
     updates: integer
 end
-local stateKey: Key<State> = store.newKey("tecs.ui.state")
+local stateKey: Key<State> = util.newKey("tecs.ui.state")
 
 local function parentOf(borrows world: World, entity: integer): integer
     local link = world:get(entity, ecs.ChildOf)
@@ -724,10 +724,13 @@ export function focus(exclusive world: World, entity: integer): boolean
         return false
     end
     local value = world:get(entity, Interaction)
-    if value == nil or not value.enabled or not value.focusable or world:has(
-        entity,
-        ecs.Disabled
-    ) or state.hidden[entity] or not inScope(world, state, entity) then
+    if value == nil
+        or not value.enabled
+        or not value.focusable
+        or world:has(entity, ecs.Disabled)
+        or state.hidden[entity]
+        or not inScope(world, state, entity)
+    then
         return false
     end
     if state.focused == entity then
@@ -1058,10 +1061,8 @@ local function apply(exclusive world: World, state: State, ids: {integer}): nil
             x, y, sx, sy = current.x, current.y, current.scaleX, current.scaleY
             if root.space == "screen" then
                 layer = state.layer
-                sx, sy = root.sizing == "auto"
-                    and state.density
-                    or root.pixelDensity, root.sizing == "auto"
-                    and state.density
+                sx, sy = root.sizing == "auto" and state.density
+                    or root.pixelDensity, root.sizing == "auto" and state.density
                     or root.pixelDensity
             end
             if root.sizing == "camera" then
@@ -1145,13 +1146,11 @@ local function scrollbars(exclusive world: World, ids: {integer}): nil
                 local extent = horizontal and area.width or area.height
                 local content = horizontal and scroll.contentWidth or scroll.contentHeight
                 local track = math.max(0, extent - thumb.inset * 2)
-                local size = content > extent and math.min(
-                    track,
-                    math.max(thumb.minLength, track * extent / content)
-                ) or 0
-                local offset = content > extent and (
-                    horizontal and scroll.x or scroll.y
-                ) / (content - extent) * (track - size) or 0
+                local size = content > extent and math.min(track, math.max(thumb.minLength, track * extent / content))
+                    or 0
+                local offset = content > extent
+                    and (horizontal and scroll.x or scroll.y) / (content - extent) * (track - size)
+                    or 0
                 local x = horizontal and thumb.inset + offset or area.width - thumb.thickness - thumb.inset
                 local y = horizontal and area.height - thumb.thickness - thumb.inset or thumb.inset + offset
                 local width, height = horizontal and size or thumb.thickness, horizontal and thumb.thickness or size
@@ -1282,9 +1281,12 @@ local function geometry(exclusive world: World, state: State, ids: {integer}): n
             end
             local interaction = world:get(entity, Interaction)
             local style = world:get(entity, Style)
-            if not hidden and interaction and interaction.enabled and (
-                style == nil or style.style.display ~= "none"
-            ) and inScope(world, state, entity) then
+            if not hidden
+                and interaction
+                and interaction.enabled
+                and (style == nil or style.style.display ~= "none")
+                and inScope(world, state, entity)
+            then
                 hit.order = interaction.order * 1000000 + hit.order
                 state.hits[#state.hits + 1] = hit
             elseif not hidden and inScope(world, state, entity) and world:has(entity, Scroll) then
@@ -1307,10 +1309,12 @@ end
 
 local function hitAt(borrows world: World, state: State, x: number, y: number): integer
     for _, hit in ipairs(state.hits) do
-        if x >= hit.left and y >= hit.top and x < hit.right and y < hit.bottom and world:has(
-            hit.entity,
-            Interaction
-        ) then
+        if x >= hit.left
+            and y >= hit.top
+            and x < hit.right
+            and y < hit.bottom
+            and world:has(hit.entity, Interaction)
+        then
             return hit.entity
         end
     end
@@ -1374,9 +1378,11 @@ local function pointerEvent(exclusive world: World, state: State, p: Pointer, ki
         emit(world, "pointerDown", hit, p)
     elseif kind == "move" then
         local captured = world:get(p.captured, Interaction)
-        if captured and (
-            captured.draggable or world:has(p.captured, Scrollbar)
-        ) and not p.dragging and (x - p.startX) ^ 2 + (y - p.startY) ^ 2 >= state.dragThreshold ^ 2 then
+        if captured
+            and (captured.draggable or world:has(p.captured, Scrollbar))
+            and not p.dragging
+            and (x - p.startX) ^ 2 + (y - p.startY) ^ 2 >= state.dragThreshold ^ 2
+        then
             p.dragging = true
             assert(world:getMut(p.captured, InteractionState)).dragging = true
             emit(world, "dragStart", p.captured, p)
@@ -1481,9 +1487,8 @@ local function inputs(exclusive world: World, state: State): nil
                 )
             end
         elseif event is TouchEvent then
-            local kind = event.kind == "fingerDown" and "down" or (
-                event.kind == "fingerUp" and "up" or (event.kind == "fingerCanceled" and "cancel" or "move")
-            )
+            local kind = event.kind == "fingerDown" and "down"
+                or (event.kind == "fingerUp" and "up" or (event.kind == "fingerCanceled" and "cancel" or "move"))
             pointerEvent(
                 world,
                 state,
@@ -1506,14 +1511,10 @@ local function inputs(exclusive world: World, state: State): nil
             end
         elseif event is WheelEvent then
             for _, hit in ipairs(state.hits) do
-                if event.x
-                    * state.density >= hit.left
-                    and event.y
-                    * state.density >= hit.top
-                    and event.x
-                    * state.density < hit.right
-                    and event.y
-                    * state.density < hit.bottom
+                if event.x * state.density >= hit.left
+                    and event.y * state.density >= hit.top
+                    and event.x * state.density < hit.right
+                    and event.y * state.density < hit.bottom
                 then
                     local entity = hit.entity
                     while entity ~= 0 and not world:has(entity, Scroll) do
@@ -1521,12 +1522,13 @@ local function inputs(exclusive world: World, state: State): nil
                     end
                     if entity ~= 0 then
                         local wheelX, wheelY = event.wheelX, event.wheelY
-                        if wheelX == 0 and input and (
-                            input:keyDown(
-                                "ShiftLeft",
-                                state.inputLayer
-                            ) or input:keyDown("ShiftRight", state.inputLayer)
-                        ) then
+                        if wheelX == 0
+                            and input
+                            and (
+                                input:keyDown("ShiftLeft", state.inputLayer)
+                                or input:keyDown("ShiftRight", state.inputLayer)
+                            )
+                        then
                             wheelX, wheelY = wheelY, 0
                         end
                         local pointer = pointerFor(state, "mouse", "mouse")
@@ -1558,11 +1560,10 @@ local function inputs(exclusive world: World, state: State): nil
                     navigate(
                         world,
                         state,
-                        input ~= nil and (
-                            input:keyDown(
-                                "ShiftLeft",
-                                state.inputLayer
-                            ) or input:keyDown("ShiftRight", state.inputLayer)
+                        input ~= nil
+                        and (
+                            input:keyDown("ShiftLeft", state.inputLayer)
+                            or input:keyDown("ShiftRight", state.inputLayer)
                         )
                     )
                 elseif event.physicalKey == "Enter" or event.physicalKey == "Space" then
@@ -1625,18 +1626,24 @@ export function update(exclusive world: World): nil
     end
     if state.focused ~= 0 then
         local focusValue = world:get(state.focused, Interaction)
-        if focusValue == nil or not focusValue.enabled or state.hidden[
-            state.focused
-        ] or world:has(state.focused, ecs.Disabled) or not inScope(world, state, state.focused) then
+        if focusValue == nil
+            or not focusValue.enabled
+            or state.hidden[state.focused]
+            or world:has(state.focused, ecs.Disabled)
+            or not inScope(world, state, state.focused)
+        then
             blur(world)
         end
     end
     for _, pointer in pairs(state.pointers) do
         if pointer.captured ~= 0 then
             local target = world:get(pointer.captured, Interaction)
-            if target == nil or not target.enabled or state.hidden[
-                pointer.captured
-            ] or world:has(pointer.captured, ecs.Disabled) or not inScope(world, state, pointer.captured) then
+            if target == nil
+                or not target.enabled
+                or state.hidden[pointer.captured]
+                or world:has(pointer.captured, ecs.Disabled)
+                or not inScope(world, state, pointer.captured)
+            then
                 pointerEvent(world, state, pointer, "cancel", pointer.x, pointer.y)
             end
         end
@@ -1678,9 +1685,9 @@ export function install(exclusive world: World, options: Options?): nil
         "ui viewport must be positive"
     )
     assert(
-        (
-            values.firstClip or 1
-        ) >= 1 and (values.lastClip or 255) <= 255 and (values.firstClip or 1) <= (values.lastClip or 255),
+        (values.firstClip or 1) >= 1
+        and (values.lastClip or 255) <= 255
+        and (values.firstClip or 1) <= (values.lastClip or 255),
         "invalid UI clip range"
     )
     assert((values.dragThreshold or 4) >= 0 and (values.wheelStep or 40) >= 0, "invalid UI interaction settings")

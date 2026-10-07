@@ -157,7 +157,7 @@ end
 const bytes = #packet
 local reader = io2.newScalarReader(packet:sub(37, 40))
 const instances = reader:readUint32() as integer
-reader:drop()
+nupp.drop(reader)
 assert(instances == COUNT, "benchmark packet lost instances")
 print(
     (

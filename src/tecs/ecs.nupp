@@ -352,7 +352,7 @@ alive, but it will not adopt a new archetype that later reuses the same ID.
 
 ## World-managed random streams
 
-`world:randomStream(name)` returns a `nupp.random.Random` owned by the world.
+`world:randomStream(name)` returns a `nupp.random.Xoshiro128` owned by the world.
 The world seed and the non-empty stream name determine its sequence, independently
 of which other streams exist or how many values they draw. Repeated calls return
 the same generator. Use namespaced names and capture streams during setup.
@@ -372,7 +372,7 @@ The initial world seed is the fixed value `0x5EED1234`, not a clock reading.
 `seedRandom(seed)` reads a 32-bit word and restarts all existing streams in
 place; future streams derive their seeds from the new world seed too. Drawing,
 shuffling, ranges and individual state access use Nupp's generator methods
-directly. Independent generators outside a world use `nupp.random.newRandom`.
+directly. Independent generators outside a world use `new nupp.random.Xoshiro128(seed)`.
 Generators are mutable and must not be shared across concurrent workers.
 
 The first stream or seed call enables snapshot persistence under `tecs.random`.
@@ -468,7 +468,7 @@ Combinators short-circuit, including their operands' side effects. The example
 pauses its timer outside `game`; swapping the operands keeps the timer advancing
 and spends ticks outside that state. A disabled system or phase never evaluates
 its predicates. Use `every(interval, jitter, generator)` for jitter, supplying a
-`nupp.random.Random` directly. The first interval is unjittered and later
+`nupp.random.Xoshiro128` directly. The first interval is unjittered and later
 intervals clamp to one percent of the base interval. Pass a named world stream
 to snapshot its random state; there is no implicit stream or automatic timer
 rewind when an entity snapshot is restored.

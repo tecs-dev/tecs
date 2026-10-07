@@ -54,11 +54,16 @@ export record Request
     --- agent sent, which the frame decodes.
     arguments: string
 
-    @private task: thread
-    @private payload: string?
-    @private isError: boolean
-    @private wasCrashed: boolean
-    @private answered: boolean
+    @private
+    task: thread
+    @private
+    payload: string?
+    @private
+    isError: boolean
+    @private
+    wasCrashed: boolean
+    @private
+    answered: boolean
 end
 
 --- A loopback-only Streamable HTTP endpoint at `/mcp`.
@@ -67,13 +72,20 @@ export record Server
     --- the caller asked for unless it asked for zero.
     port: integer
 
-    @private toolsJSON: string
-    @private tasks: {thread}
-    @private runnable: {thread}
-    @private queued: {[thread]: boolean}
-    @private pending: {Request}
-    @private destroyed: boolean
-    @private handler: suspension.Handler
+    @private
+    toolsJSON: string
+    @private
+    tasks: {thread}
+    @private
+    runnable: {thread}
+    @private
+    queued: {[thread]: boolean}
+    @private
+    pending: {Request}
+    @private
+    destroyed: boolean
+    @private
+    handler: suspension.Handler
 
     setTools: function(exclusive self: Server, toolsJSON: string): nil
     pump: function(exclusive self: Server): nil
@@ -117,7 +129,8 @@ local function park(): nil
     -- This driver owns every resumption and resumes false during shutdown so
     -- parked handlers unwind their subscriptions and connection owners.
     local keepRunning: any
-    @unsafe do
+    @unsafe
+    do
         keepRunning = coroutine.yield()
     end
     if keepRunning == false then
@@ -346,7 +359,7 @@ local function spawn(exclusive self: Server, takes stream: net.Stream?, takes li
         takes connection: net.Stream?,
         takes accepting: net.Listener?
     ): nil
-        handle suspension with server.handler do
+        with installation = suspension.install(server.handler) do
             if connection == nil then
                 acceptLoop(server, assert(accepting))
             else
@@ -397,7 +410,7 @@ end
 export function listen(port: integer, toolsJSON: string): (Server?, string?)
     local listener, why = net.listen({host = "127.0.0.1", port = port})
     if listener == nil then
-        return nil, why ?? "the listener could not bind"
+        return nil, why?.message ?? "the listener could not bind"
     end
 
     local self = new Server(

@@ -14,7 +14,10 @@ local function cloneValue(value: any, active: {[table]: boolean}): any
         return value
     end
     if kind == "table" then
-        local source = value as table
+        -- Snapshot tables hold whatever was saved, so say so. A bare `table`
+        -- would be as honest, but `pairs` cannot infer through one under the
+        -- current checker (NUPP2148), which looks like a checker defect.
+        local source = value as {[any]: any}
         if active[source] then
             error("snapshot value cannot contain a cycle", 3)
         end

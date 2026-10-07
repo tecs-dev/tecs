@@ -10,7 +10,7 @@ systems. Games use them directly from `tecs.ecs`, including `Transform2D`,
 which every spatial subsystem shares.
 
 The durable entity-key component uses the public name `EntityKey` and the
-externally typed registered name `"Key"`. Typed resource keys and stores come from `nupp.store`.
+externally typed registered name `"Key"`. Typed resource keys and stores come from `nupp.util`.
 
 ## Name {#name}
 

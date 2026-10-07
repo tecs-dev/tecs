@@ -132,9 +132,9 @@ function Collector.frame(exclusive self: Collector, width: integer, height: inte
             self.extractors[id], self.lastSeen[id], self.meshRevisions[id], self.spritesEnabled[id] = nil, nil, nil, nil
         end
     end
-    writer:drop()
+    nupp.drop(writer)
     const bytes = buffer:getString()
-    buffer:drop()
+    nupp.drop(buffer)
 
     return bytes
 end

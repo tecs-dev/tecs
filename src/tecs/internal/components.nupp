@@ -395,8 +395,8 @@ local function register<C is Component>(component: C): C
     return component
 end
 
-ScalarComponent.__call = function<T>(self: ScalarComponent, value: T): ScalarInstance<T>
-    return new ScalarInstance(componentType = self as ScalarComponent<T>, value = value)
+function ScalarComponent.__call<T>(self: ScalarComponent<T>, value: T): ScalarInstance<T>
+    return new ScalarInstance(componentType = self, value = value)
 end
 
 RelationshipComponent.__call = function(self: RelationshipComponent, target: integer): RelationshipInstance
@@ -943,9 +943,11 @@ export function fromType(witness: any, options: any, relationship: boolean): Com
     if metadata ~= nil and configured.name == metadata.name then
         derivedByWitness[witness] = definition
     end
-    if native and not relationship and initializer ~= nil and (
-        options == nil or (options.default == nil and options.construct == nil)
-    ) then
+    if native
+        and not relationship
+        and initializer ~= nil
+        and (options == nil or (options.default == nil and options.construct == nil))
+    then
         assert(ffistorage.find(definition.componentId)).initialize = function(value: any): nil
             initializer(value)
         end
@@ -1040,13 +1042,12 @@ end
 --- @return Returns its packed target identifier.
 --- @raises string when a value has no valid integral target.
 export function edgeTarget(value: any): integer
-    if (
-        type(value) ~= "table" and type(value) ~= "cdata"
-    ) or type(
-        value.target
-    ) ~= "number" or value.target ~= math.floor(
-        value.target
-    ) or value.target < 1 or value.target > 9007199254740991 then
+    if (type(value) ~= "table" and type(value) ~= "cdata")
+        or type(value.target) ~= "number"
+        or value.target ~= math.floor(value.target)
+        or value.target < 1
+        or value.target > 9007199254740991
+    then
         error("relationship value requires a packed target entity id", 2)
     end
 

@@ -76,7 +76,7 @@ function suite.readsMaterialFilesFromAddedRoots(): nil
     test.equal(materials.find("notes"), nil)
 
     materials.reset()
-    directory:drop()
+    nupp.drop(directory)
 end
 
 function suite.storesTheNameRatherThanTheNumber(): nil

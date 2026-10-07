@@ -1247,13 +1247,11 @@ export function valuesFromSource(
     end
     local fields = source.fields
 
-    return values[
-        fields[1]
-    ] or 0, fields[
-        2
-    ] ~= nil and (
-        values[fields[2]] or 0
-    ) or 0, fields[3] ~= nil and (values[fields[3]] or 0) or 0, fields[4] ~= nil and (values[fields[4]] or 0) or 0
+    return values[fields[1]]
+        or 0, fields[2] ~= nil and (values[fields[2]] or 0)
+        or 0, fields[3] ~= nil and (values[fields[3]] or 0)
+        or 0, fields[4] ~= nil and (values[fields[4]] or 0)
+        or 0
 end
 
 local function captureStart(

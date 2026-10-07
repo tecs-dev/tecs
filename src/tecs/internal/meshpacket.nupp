@@ -176,17 +176,17 @@ local function collect(exclusive self: Collector): string
             end
         end
     end
-    writer:drop()
-    paletteWriter:drop()
+    nupp.drop(writer)
+    nupp.drop(paletteWriter)
     local output = io2.newBuffer()
     local prefix = io2.newScalarWriter(output)
     prefix:writeUint32(nupp.math.u32.wrap(count)):writeUint32(nupp.math.u32.wrap(paletteCount))
     prefix:writeBytes(buffer:getString()):writeBytes(palette:getString())
-    prefix:drop()
+    nupp.drop(prefix)
     const result = output:getString()
-    output:drop()
-    buffer:drop()
-    palette:drop()
+    nupp.drop(output)
+    nupp.drop(buffer)
+    nupp.drop(palette)
 
     return result
 end
@@ -266,9 +266,9 @@ function Collector.frame(
     if not retained then
         writer:writeBytes(self.payload)
     end
-    writer:drop()
+    nupp.drop(writer)
     const result = buffer:getString()
-    buffer:drop()
+    nupp.drop(buffer)
 
     return result
 end

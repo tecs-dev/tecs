@@ -19,8 +19,8 @@ local function exchange(port: integer, method: string, target: string, body: str
     local request = `${method} ${target} HTTP/1.1\r\nHost: 127.0.0.1\r\n`
         .. "Accept: application/json, text/event-stream\r\n"
         .. `Content-Type: application/json\r\nContent-Length: ${tostring(
-        #payload
-    )}\r\n\r\n` .. payload
+            #payload
+        )}\r\n\r\n` .. payload
     assert(stream:write(request))
 
     local received = ""

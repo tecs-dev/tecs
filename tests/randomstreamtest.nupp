@@ -14,7 +14,7 @@ local function equalWords(first: {integer}, second: {integer}): nil
     end
 end
 
-local function sameDraws(first: random.Random, second: random.Random): nil
+local function sameDraws(first: random.Xoshiro128, second: random.Xoshiro128): nil
     for _ = 1, 30 do
         test.equal(first:next(), second:next())
     end
@@ -32,7 +32,7 @@ end
 function suite.retainsIdentityAndKeepsWorldsIndependent(): nil
     const first = ecs.newWorld()
     const second = ecs.newWorld()
-    const loot: random.Random = first:randomStream("game.loot")
+    const loot: random.Xoshiro128 = first:randomStream("game.loot")
     test.assert(loot == first:randomStream("game.loot"))
     test.assert(loot ~= first:randomStream("game.Loot"))
     test.assert(loot ~= second:randomStream("game.loot"))
@@ -230,7 +230,7 @@ function suite.acceptsTheLegacyPayloadAndUnsignedStateWords(): nil
     test.equal(saved.data[1].key, "tecs.random")
     saved.data[1].value = {seed = 42, streams = {loot = {1782179806, 3659676363, 1046902905, 2627504192}}}
     world:loadSnapshot(saved)
-    const expected = random.newRandom()
+    const expected = new random.Xoshiro128()
     expected:setState({1782179806, -635290933, 1046902905, -1667463104})
     sameDraws(world:randomStream("loot"), expected)
 end
@@ -287,7 +287,7 @@ end
 function suite.suppliesTheNuppGeneratorDirectlyToJitterPredicates(): nil
     const world = ecs.newWorld()
     const stream = world:randomStream("game.jitter")
-    const expected = random.newRandom()
+    const expected = new random.Xoshiro128()
     expected:setState(stream:state())
     world:addSystem({
         phase = ecs.phases.Update,

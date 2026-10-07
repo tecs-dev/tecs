@@ -94,7 +94,7 @@ function suite.usesCustomComponentSnapshotHooks(): nil
             return {packed = tostring(value.x) .. ":" .. value.label}
         end,
         load = function(value: any): SnapshotPosition
-            local packed = (value as {[string]: string}).packed
+            local packed = assert((value as {[string]: string}).packed)
             local divider = assert(packed:find(":"))
             return new SnapshotPosition(
                 x = assert(tonumber(packed:sub(1, divider - 1))),

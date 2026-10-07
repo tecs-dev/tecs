@@ -23,7 +23,7 @@ local function packets(bytes: string): {string}, {integer}, integer
         reader:skip(reader:readUint32() as integer)
     end
     test.assert(reader:atEnd())
-    reader:drop()
+    nupp.drop(reader)
 
     return packets, ids, revision
 end
@@ -32,7 +32,7 @@ local function word(bytes: string, offset: integer): integer
     local reader = io2.newScalarReader(bytes)
     reader:skip(offset)
     const value = reader:readUint32() as integer
-    reader:drop()
+    nupp.drop(reader)
 
     return value
 end

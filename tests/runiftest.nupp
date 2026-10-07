@@ -129,8 +129,8 @@ end
 
 function suite.jitterUsesTheSuppliedReproducibleGenerator(): nil
     const world = ecs.newWorld()
-    const first = ecs.runif.every(0.25, 0.125, random.newRandom(42))
-    const second = ecs.runif.every(0.25, 0.125, random.newRandom(42))
+    const first = ecs.runif.every(0.25, 0.125, new random.Xoshiro128(42))
+    const second = ecs.runif.every(0.25, 0.125, new random.Xoshiro128(42))
     local runs = 0
     for index = 1, 256 do
         const fired = first(0.03125, world, "first")
@@ -140,7 +140,7 @@ function suite.jitterUsesTheSuppliedReproducibleGenerator(): nil
         end
     end
     test.assert(runs > 20 and runs < 50)
-    const clamp = ecs.runif.every(1, 1000, random.newRandom(42))
+    const clamp = ecs.runif.every(1, 1000, new random.Xoshiro128(42))
     test.assert(clamp(1, world, "clamp"))
     test.assert(not clamp(0, world, "clamp"))
 end
@@ -174,7 +174,7 @@ function suite.rejectsInvalidTimerArgumentsAtConstruction(): nil
         function(): nil
             ecs.runif.every(1, 0.1)
         end,
-        "requires a nupp.random.Random"
+        "requires a nupp.random.Xoshiro128"
     )
     test.raises(
         function(): nil

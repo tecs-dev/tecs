@@ -18,9 +18,12 @@ export type State = "parked" | "continue" | "stopped"
 export record Pump
     handler: suspension.Handler
 
-    @private active: thread?
-    @private result: boolean?
-    @private failure: any?
+    @private
+    active: thread?
+    @private
+    result: boolean?
+    @private
+    failure: any?
 end
 
 local function resumeTask(exclusive pump: Pump, task: thread, keepRunning: boolean?): nil
@@ -105,7 +108,7 @@ export function start(pump: Pump, body: function(): boolean): State
     pump.failure = nil
     local task = coroutine.create(function(): nil
         local succeeded, result = pcall(function(): boolean
-            handle suspension with pump.handler do
+            with installation = suspension.install(pump.handler) do
                 return body()
             end
         end)

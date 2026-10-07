@@ -173,7 +173,7 @@ export function install(): nil
         if matches ~= nil then
             for slot = 1, #matches do
                 const path = matches[slot]
-                const stem = path:match("([^/\\]+)%.wgsl$")
+                const stem = path:stem()
                 if stem ~= nil then
                     found[stem] = true
                 end

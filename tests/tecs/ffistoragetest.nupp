@@ -533,7 +533,7 @@ function suite.derivesSurviveNativeStorageRelocationAndRestore(): nil
     const world = ecs.newWorld()
     const id = world:spawn(point(11, 23))
     world:commit()
-    const codec = serde.json():prepare(serde.of(Point))
+    const codec = serde.newJsonCodec():prepare(serde.of(Point))
     for _ = 1, 3 do
         const value = assert(world:get(id, point))
         test.equal(value:debug(), "Point { x = 11, y = 23 }")

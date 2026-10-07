@@ -1451,9 +1451,9 @@ local function packedEffects(): string
     for _, value in ipairs(data) do
         writer:writeFloat32(nupp.math.f32.narrow(value))
     end
-    writer:drop()
+    nupp.drop(writer)
     effectBytes = buffer:getString()
-    buffer:drop()
+    nupp.drop(buffer)
     effectAt = revision
 
     return effectBytes
@@ -1706,9 +1706,9 @@ export function section(borrows world: ecs.World): string
             end
         end
     end
-    writer:drop()
+    nupp.drop(writer)
     pool.bytes = buffer:getString()
-    buffer:drop()
+    nupp.drop(buffer)
     pool.packedSerial, pool.packedRevision = pool.serial, revision
 
     return pool.bytes

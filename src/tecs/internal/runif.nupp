@@ -14,7 +14,7 @@ advancing and spends ticks outside that state. `every` fires at most once per
 dispatch and retains excess elapsed time. `cooldown` discards excess time when
 it fires. `after` removes its system before its one allowed body call.
 
-Jitter uses a caller-supplied `nupp.random.Random`, not a hidden global
+Jitter uses a caller-supplied `nupp.random.Xoshiro128`, not a hidden global
 generator. Pass `world:randomStream(name)` for automatic random-state snapshots,
 or preserve a standalone generator through Nupp's `state` and `setState`.
 Predicates are runtime closures, not snapshot data; loading an entity snapshot
@@ -63,12 +63,12 @@ end
 --- @return Returns a new timer, firing at most once per call. The first interval is
 ---     unjittered; later intervals clamp to at least one percent of the base interval.
 --- @raises string for invalid durations or nonzero jitter without a generator.
-export function every(interval: number, jitter: number?, generator: random.Random?): world.RunIf
+export function every(interval: number, jitter: number?, generator: random.Xoshiro128?): world.RunIf
     validateDuration(interval, "every", true)
     const variance = jitter or 0
     validateDuration(variance, "every jitter", false)
     if variance > 0 and generator == nil then
-        error("runif.every: nonzero jitter requires a nupp.random.Random", 2)
+        error("runif.every: nonzero jitter requires a nupp.random.Xoshiro128", 2)
     end
     local elapsed: number = 0
     local nextInterval = interval

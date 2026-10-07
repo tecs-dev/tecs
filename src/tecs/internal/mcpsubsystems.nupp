@@ -1,6 +1,6 @@
 module tecs.internal.mcpsubsystems
 
-const {type Store} = require("nupp.store")
+const {type Store} = require("nupp.util")
 
 -- Subsystem tools. Input schemas and tool names are compatibility surfaces.
 local registry = require("tecs.internal.mcpregistry")
@@ -163,15 +163,9 @@ local function cameraInfo(): {[string]: any}
     if app ~= nil then
         width, height = app.window:getPixelSize()
     end
-    local result: {
-        [string]: any
-    } = current ~= nil and {
-        x = current.x,
-        y = current.y,
-        zoom = current.zoom,
-        rotation = current.rotation,
-        entity = entity
-    } or {x = width * 0.5, y = height * 0.5, zoom = 1, rotation = 0, implicit = true}
+    local result: {[string]: any} = current ~= nil
+        and {x = current.x, y = current.y, zoom = current.zoom, rotation = current.rotation, entity = entity}
+        or {x = width * 0.5, y = height * 0.5, zoom = 1, rotation = 0, implicit = true}
     if app ~= nil then
         result.viewport = {width = width, height = height}
     end
@@ -339,7 +333,7 @@ register(
 local function artifact(name: string): string
     assert(name ~= "" and not path.newPath(name):isAbsolute(), "artifact name must be relative to the writable root")
     const root, reason = files.dataPath()
-    assert(root ~= nil, reason)
+    assert(root ~= nil, reason?.message)
     local located = root as files.ApplicationPath
     -- The root refuses a component that would leave it, so a name carrying `..`
     -- raises here rather than resolving somewhere else.
@@ -360,7 +354,7 @@ register(
         world:saveSnapshot({format = "binary", buffer = output})
         local bytes = output:tostring()
         local ok, reason = files.writeAtomic(destination, bytes)
-        assert(ok, reason)
+        assert(ok, reason?.message)
 
         return {path = destination, format = "binary", bytes = #bytes}
     end,
@@ -374,11 +368,10 @@ register(
         local bytes: string
         do
             local input, reason = files.open(args.path, "r")
-            assert(input ~= nil, reason)
+            assert(input ~= nil, reason?.message)
             local size, sizeReason = input:size()
-            assert(size ~= nil, sizeReason)
-            local reader = input:newReader()
-            local chunk, failure = reader:read(size + 1)
+            assert(size ~= nil, sizeReason?.message)
+            local chunk, failure = input:read(size + 1)
             assert(chunk ~= nil, failure)
             assert(#chunk == size, "snapshot changed during the read")
             bytes = chunk
@@ -397,14 +390,21 @@ register(
     true
 )
 
-local session: profile.SampleSession? = nil
+-- The sampler outlives the tool call that starts it, so it lives in a managed
+-- cell this slot holds the alias to. `profile_stop` takes the session back out.
+local session: alias(profile.SampleSession)? = nil
 register(
     "profile_start",
     "Start the Nupp process sampler with an optional zone filter.",
     function(args: {[string]: any}): {[string]: any}
         assert(session == nil, "a tool sampling session is already running")
         local interval = math.floor(args.intervalMs or 10) as integer
-        session = profile.sample({intervalMs = interval, zone = args.zone})
+        const owner = nupp.manage(profile.sample({intervalMs = interval, zone = args.zone}))
+        session = owner:alias()
+        -- Custody passes to the module slot until `profile_stop` takes it.
+        @unsafe
+        nupp.release(owner)
+
         return {running = true, intervalMs = interval, zone = args.zone}
     end,
     true,
@@ -417,10 +417,15 @@ register(
         local running = session
         assert(running ~= nil, "no tool sampling session is running")
         local destination = artifact(args.name or "profile.collapsed")
-        local report = running:stop()
         session = nil
+        const taken, problem = running:take()
+        if taken == nil then
+            error(tostring(problem), 0)
+        end
+        local report = taken:stop()
+        nupp.drop(taken)
         local ok, reason = files.writeAtomic(destination, report.text)
-        assert(ok, reason)
+        assert(ok, reason?.message)
 
         return {path = destination, samples = report.samples, stacks = report.stacks, bytes = #report.text}
     end,

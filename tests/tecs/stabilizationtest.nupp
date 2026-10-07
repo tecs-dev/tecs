@@ -229,7 +229,7 @@ function suite.ownsAnIndependentLoaderAndClosesItAfterWorldShutdown(): nil
     test.assert(not first.assets:running())
     test.assert(second.assets:running())
     test.assert(first:shutdown())
-    test.assert(first:crashed():find("shutdown regression", 1, true) ~= nil)
+    test.assert(assert(first:crashed()):find("shutdown regression", 1, true) ~= nil)
     second:shutdown()
 end
 
@@ -241,7 +241,7 @@ function suite.shutsDownAssetsAfterAGuardedStartupFailure(): nil
             end
         },
         function(session: host.Session): nil
-            test.assert(host.crashed(session):find("startup regression", 1, true) ~= nil)
+            test.assert(assert(host.crashed(session)):find("startup regression", 1, true) ~= nil)
             host.shutdown(session)
             test.assert(not session.app.assets:running())
             test.assert(host.shutdown(session))
@@ -520,7 +520,7 @@ function suite.refusesASecondApplicationDebugListenerWithoutRebindingTheFirst():
     withSession({mcpPort = 0, debug = true}, function(first: host.Session): nil
         withSession({mcpPort = 0, debug = true}, function(second: host.Session): nil
             test.equal(second.app.debugServer, nil)
-            test.assert(host.crashed(second):find("another application", 1, true) ~= nil)
+            test.assert(assert(host.crashed(second)):find("another application", 1, true) ~= nil)
             test.assert(callOverHTTP(first, "ping").isError ~= true)
             test.equal(host.crashed(first), nil)
         end)

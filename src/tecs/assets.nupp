@@ -289,7 +289,7 @@ export function readJob(path: string): (Job?, string?)
             finished = true
             local bytes, reason = files.read(path)
             if bytes == nil then
-                return "failed", nil, reason or ("cannot read " .. path)
+                return "failed", nil, reason?.message ?? ("cannot read " .. path)
             end
 
             return "ready", bytes

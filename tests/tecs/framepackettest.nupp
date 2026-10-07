@@ -223,7 +223,7 @@ function suite.defaultsToACameraCenteredOnTheTarget(): nil
     test.equal(read.cameraY, 180)
     test.equal(read.zoom, 1)
     test.equal(read.rotation, 0)
-    reader:drop()
+    nupp.drop(reader)
 end
 
 function suite.tracksTheTargetThroughAResize(): nil
@@ -234,7 +234,7 @@ function suite.tracksTheTargetThroughAResize(): nil
 
     local first = io2.newScalarReader(extractor:packet(640, 360))
     test.equal(header(first).cameraX, 320)
-    first:drop()
+    nupp.drop(first)
 
     local second = io2.newScalarReader(extractor:packet(1920, 1080))
     local read = header(second)
@@ -242,7 +242,7 @@ function suite.tracksTheTargetThroughAResize(): nil
     test.equal(read.targetHeight, 1080)
     test.equal(read.cameraX, 960)
     test.equal(read.cameraY, 540)
-    second:drop()
+    nupp.drop(second)
 
     test.raises(
         function(): nil
@@ -269,13 +269,13 @@ function suite.projectsThroughTheLowestActiveCamera(): nil
     test.equal(read.cameraY, 200)
     test.equal(read.zoom, 2)
     test.equal(read.rotation, 0.5)
-    reader:drop()
+    nupp.drop(reader)
 
     world:despawn(chosen)
     world:commit()
     local after = io2.newScalarReader(extractor:packet(640, 360))
     test.equal(header(after).cameraX, -1)
-    after:drop()
+    nupp.drop(after)
 end
 
 function suite.fallsBackToAnUntaggedCamera(): nil
@@ -289,7 +289,7 @@ function suite.fallsBackToAnUntaggedCamera(): nil
     local read = header(reader)
     test.equal(read.cameraX, 64)
     test.equal(read.zoom, 0.5)
-    reader:drop()
+    nupp.drop(reader)
 end
 
 function suite.rejectsACameraZoomThatCannotProject(): nil
@@ -356,7 +356,7 @@ function suite.encodesOneOrderedBatchForRust(): nil
     test.equal(nearY, 100)
     test.assert(nearDepth < farDepth, "a higher layer draws nearer")
     test.assert(reader:atEnd())
-    reader:drop()
+    nupp.drop(reader)
 end
 
 function suite.splitsBatchesOnTheBlendedLane(): nil
@@ -389,7 +389,7 @@ function suite.splitsBatchesOnTheBlendedLane(): nil
     test.equal(nearest.lane, framepacket.LANE_OPAQUE)
     test.equal(nearest.first, 3)
     test.equal(nearest.count, 1)
-    reader:drop()
+    nupp.drop(reader)
 end
 
 function suite.carriesTheMaterialAndItsParameter(): nil
@@ -416,7 +416,7 @@ function suite.carriesTheMaterialAndItsParameter(): nil
     test.equal(reader:readFloat32(), 0.25)
     reader:skip(36)
     test.equal(reader:readUint32(), 0)
-    reader:drop()
+    nupp.drop(reader)
 end
 
 function suite.rejectsAMaterialTheBuildDoesNotCarry(): nil
@@ -443,13 +443,13 @@ function suite.carriesTheDeclaredGraphInEveryPacket(): nil
     local read = header(reader)
     test.equal(read.graphBytes, #section)
     test.equal(read.graphRevision, passes.revision())
-    reader:drop()
+    nupp.drop(reader)
 
     -- The declaration rides in every packet rather than being sent once, so a
     -- backend that lost its device rebuilds from the next frame.
     local again = io2.newScalarReader(extractor:packet(320, 200))
     test.equal(header(again).graphBytes, #section)
-    again:drop()
+    nupp.drop(again)
 end
 
 function suite.ordersEqualDepthsByEntityId(): nil
@@ -470,7 +470,7 @@ function suite.ordersEqualDepthsByEntityId(): nil
     test.equal(firstX, 1)
     test.equal(secondX, 2)
     test.equal(thirdX, 3)
-    reader:drop()
+    nupp.drop(reader)
 end
 
 function suite.repeatsItselfExactlyBetweenFrames(): nil
@@ -495,7 +495,7 @@ function suite.repeatsItselfExactlyBetweenFrames(): nil
     world:commit()
     local shrunk = io2.newScalarReader(extractor:packet(640, 360))
     test.equal(header(shrunk).instances, 7)
-    shrunk:drop()
+    nupp.drop(shrunk)
 end
 
 function suite.carriesSpriteIdentityAndSamplerIntoBatches(): nil
@@ -544,7 +544,7 @@ function suite.carriesSpriteIdentityAndSamplerIntoBatches(): nil
     test.equal(reader:readFloat32(), 0)
     test.equal(reader:readFloat32(), 0.5)
     test.equal(reader:readFloat32(), 0.5)
-    reader:drop()
+    nupp.drop(reader)
 end
 
 function suite.drawsAMissingImageAgainstTheFallback(): nil
@@ -572,7 +572,7 @@ function suite.drawsAMissingImageAgainstTheFallback(): nil
     local only = batch(reader)
     test.equal(only.image, 0)
     test.equal(only.count, 2)
-    reader:drop()
+    nupp.drop(reader)
 end
 
 function suite.keepsTransparentRowsInBackToFrontOrder(): nil
@@ -599,7 +599,7 @@ function suite.keepsTransparentRowsInBackToFrontOrder(): nil
     test.equal(secondX, 2)
     test.equal(thirdX, 3)
     test.assert(firstDepth > secondDepth and secondDepth > thirdDepth, "written back to front")
-    reader:drop()
+    nupp.drop(reader)
 end
 
 function suite.encodesAnEmptyScene(): nil
@@ -614,7 +614,7 @@ function suite.encodesAnEmptyScene(): nil
     test.equal(read.batches, 0)
     test.equal(read.instances, 0)
     test.assert(reader:atEnd())
-    reader:drop()
+    nupp.drop(reader)
 end
 
 function suite.carriesLightsInAscendingEntityOrder(): nil
@@ -642,7 +642,7 @@ function suite.carriesLightsInAscendingEntityOrder(): nil
     test.equal(leading.intensity, 3)
     test.equal(trailing.x, 30)
     test.equal(trailing.radius, 20)
-    reader:drop()
+    nupp.drop(reader)
 end
 
 function suite.carriesTheTuningEveryFrameAndFlagsWhatIsOn(): nil
@@ -659,7 +659,7 @@ function suite.carriesTheTuningEveryFrameAndFlagsWhatIsOn(): nil
     -- one layout and the flag alone decides.
     test.equal(off.shadowSteps, 24)
     test.assert(off.bloomThreshold > 0.79 and off.bloomThreshold < 0.81, "the default threshold rides too")
-    reader:drop()
+    nupp.drop(reader)
 
     lighting.setAmbient(0.25, 0.5, 0.75)
     lighting.setShadows({steps = 8, margin = 12, height = 50, dropOpacity = 0.5, dropLength = 64})
@@ -676,7 +676,7 @@ function suite.carriesTheTuningEveryFrameAndFlagsWhatIsOn(): nil
     test.equal(on.bloomThreshold, 1.5)
     test.equal(on.bloomKnee, 0.25)
     test.equal(on.bloomIntensity, 0.5)
-    second:drop()
+    nupp.drop(second)
     lighting.reset()
 end
 
@@ -719,7 +719,7 @@ function suite.marksACasterAndLeavesATranslucentOneAlone(): nil
     local fourthHeight, fourthFlags = castOf(reader)
     test.equal(fourthFlags, framepacket.FLAG_BLENDED)
     test.equal(fourthHeight, 0)
-    reader:drop()
+    nupp.drop(reader)
 end
 
 function suite.dropsTheLightsPastTheCeiling(): nil
@@ -732,7 +732,7 @@ function suite.dropsTheLightsPastTheCeiling(): nil
 
     local reader = io2.newScalarReader(extractor:packet(64, 64))
     test.equal(header(reader).lights, lighting.MAX_LIGHTS)
-    reader:drop()
+    nupp.drop(reader)
 end
 
 function suite.refusesALightThatCannotProject(): nil
@@ -772,12 +772,12 @@ function suite.bulkInstancesMatchScalarRoundingAndOwnTheirBytes(): nil
         writer:writeFloat32(nupp.math.f32.narrow(x))
             :writeFloat32(nupp.math.f32.narrow(-0.1))
             :writeFloat32(nupp.math.f32.narrow(0.3))
-        writer:drop()
+        nupp.drop(writer)
         test.equal(original:sub(at, at + 11), expected:getString())
-        expected:drop()
+        nupp.drop(expected)
         at = at + 80
     end
-    reader:drop()
+    nupp.drop(reader)
     for index = 1, #entities do
         world:despawn(entities[index])
     end
@@ -785,12 +785,12 @@ function suite.bulkInstancesMatchScalarRoundingAndOwnTheirBytes(): nil
     local empty = io2.newScalarReader(extractor:packet(640, 360))
     test.equal(header(empty).instances, 0)
     test.assert(empty:atEnd())
-    empty:drop()
+    nupp.drop(empty)
     -- Returned strings survive subsequent packets and buffer reclamation.
     collectgarbage("collect")
     local retained = io2.newScalarReader(original)
     test.equal(header(retained).instances, 300)
-    retained:drop()
+    nupp.drop(retained)
 end
 
 function suite.refreshesCachedOrderAfterChangesAndARefusedPacket(): nil
@@ -815,7 +815,7 @@ function suite.refreshesCachedOrderAfterChangesAndARefusedPacket(): nil
     test.equal(batch(reader).count, 2)
     test.equal(select(1, instance(reader)), 30)
     test.equal(select(1, instance(reader)), 10)
-    reader:drop()
+    nupp.drop(reader)
     -- Another depth edit invalidates the cached order without an error path.
     assert(world:getMut(first, ecs.Transform2D)).layer = 1
     test.equal(extractor:packet(640, 360), original)
@@ -844,7 +844,7 @@ function suite.packsClipsAndKeepsScreenOverlaysStillUnderACamera(): nil
     test.equal(reader:readUint32(), 9)
     test.equal(reader:readUint32(), 11 + 20 * 65536)
     test.equal(reader:readUint32(), 111 + 70 * 65536)
-    reader:drop()
+    nupp.drop(reader)
     clips.clearRegion(250)
     layers.configure(16, {sort = "topdown"})
     test.equal(h.instances, 1)

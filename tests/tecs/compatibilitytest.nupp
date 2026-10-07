@@ -342,8 +342,8 @@ end
 
 function suite.aLoggerNameStampsItsLines(): nil
     local seen: {string} = {}
-    local previousLevel = nupplog.level("debug")
-    local previousSink = nupplog.sink(function(
+    local previousLevel = nupplog.setLevel("debug")
+    local previousSink = nupplog.setSink(function(
         _severity: integer,
         module: string,
         _line: integer,
@@ -352,8 +352,8 @@ function suite.aLoggerNameStampsItsLines(): nil
         seen[#seen + 1] = module
     end)
     nupplog.named("tecs.audio"):info("probe")
-    nupplog.sink(previousSink)
-    nupplog.level(previousLevel)
+    nupplog.setSink(previousSink)
+    nupplog.setLevel(previousLevel)
     test.equal(#seen, 1)
     test.equal(seen[1], "tecs.audio")
 end

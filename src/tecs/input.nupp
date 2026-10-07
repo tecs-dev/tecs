@@ -57,8 +57,8 @@ standalone motion sensors are not part of the input surface. A game that wants a
 `"cross"` glyph rather than a `"south"` name reads the pad's `name` and chooses
 its own art.
 ]]
-const {type Key} = require("nupp.store")
-const store = require("nupp.store")
+const {type Key} = require("nupp.util")
+const util = require("nupp.util")
 
 local ecs = require("tecs.ecs")
 local gamepadbackend = require("tecs.platform.gamepadbackend")
@@ -357,7 +357,7 @@ local function devices(): gamepadbackend.Backend
     return opened
 end
 
-local worldInputKey: Key<Input> = store.newKey("tecs.input")
+local worldInputKey: Key<Input> = util.newKey("tecs.input")
 
 --- Clears one pad's frame-local edges.
 local function padBeginFrame(exclusive pad: Gamepad): nil

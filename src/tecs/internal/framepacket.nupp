@@ -1078,9 +1078,9 @@ local function rebuildBatches(exclusive self: Extractor): nil
             :writeUint32(wrap(runLength))
     end
 
-    batchWriter:drop()
+    nupp.drop(batchWriter)
     self.cachedBatchBytes = batchBuffer:getString()
-    batchBuffer:drop()
+    nupp.drop(batchBuffer)
     self.cachedBatches = #self.cachedBatchBytes // 20
     local casters: integer = 0
     for index = 1, rows do
@@ -1116,9 +1116,9 @@ local function prefix(exclusive self: Extractor, eye: View, mode: integer, revis
                 local tileBuffer = io2.newBuffer()
                 local tileWriter = io2.newScalarWriter(tileBuffer)
                 tileWriter:writeUint32(wrap(run.tileSlot)):writeBytes(run.tileBytes)
-                tileWriter:drop()
+                nupp.drop(tileWriter)
                 tileUpdates[#tileUpdates + 1] = tileBuffer:getString()
-                tileBuffer:drop()
+                nupp.drop(tileBuffer)
             end
         end
     end
@@ -1193,9 +1193,9 @@ local function prefix(exclusive self: Extractor, eye: View, mode: integer, revis
     if mode == 0 then
         writer:writeBytes(self.cachedBatchBytes)
     end
-    writer:drop()
+    nupp.drop(writer)
     const bytes = buffer:getString()
-    buffer:drop()
+    nupp.drop(buffer)
 
     return bytes
 end
@@ -1312,9 +1312,9 @@ local function payload(exclusive self: Extractor, delta: boolean, baseRevision: 
             const offset, size = self.ranges:at(index)
             writer:writeUint32(wrap(offset)):writeUint32(wrap(size))
         end
-        writer:drop()
+        nupp.drop(writer)
         pieces[1] = buffer:getString()
-        buffer:drop()
+        nupp.drop(buffer)
     end
     local input = self.instanceWords:read()
     do

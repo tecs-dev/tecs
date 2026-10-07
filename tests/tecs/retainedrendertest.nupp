@@ -15,7 +15,7 @@ local function word(bytes: string, offset: integer): integer
     local reader = io2.newScalarReader(bytes)
     reader:skip(offset)
     const value = reader:readUint32() as integer
-    reader:drop()
+    nupp.drop(reader)
 
     return value
 end
@@ -58,7 +58,7 @@ local function apply(previous: string, patch: string): string
         const value = reader:readBytes(sizes[index])
         result = result:sub(1, offsets[index]) .. value .. result:sub(offsets[index] + sizes[index] + 1)
     end
-    reader:drop()
+    nupp.drop(reader)
 
     return result
 end
@@ -311,7 +311,7 @@ function suite.tileChunksPreservePackedAtlasGeometryAndEveryFlip(): nil
     for index = 1, 8 do
         test.equal(reader:readUint32(), tiles[index])
     end
-    reader:drop()
+    nupp.drop(reader)
     const saved = world:saveSnapshot()
     world:loadSnapshot(saved)
     @unsafe
@@ -337,7 +337,7 @@ function suite.sparseTileChunksPreserveTheirLastCellAndEmptyChunksDrawNothing():
     const reader = io2.newScalarReader(body(bytes))
     test.equal(reader:readFloat32(), 0)
     test.equal(reader:readFloat32(), 0)
-    reader:drop()
+    nupp.drop(reader)
     world:shutdown()
 end
 

@@ -172,11 +172,9 @@ registry.register({
             after = 0
         end
         handle:seek(after, "set")
-        -- The reader borrows the open file rather than owning it, so closing
-        -- the file is the one release this needs. It is bound rather than
-        -- chained, because a temporary has no scope to be released at.
-        local reader = handle:newReader()
-        local window = reader:read(WINDOW) or ""
+        -- The open file is itself the reader, so closing it is the one
+        -- release this needs.
+        local window = handle:read(WINDOW) or ""
         handle:close()
 
         -- Only whole lines, so a cursor never lands mid-record and the next
@@ -510,9 +508,8 @@ registry.register({
         local rows: {any} = {}
         for index = 1, #listed do
             local info = listed[index]
-            local admitted = (
-                wantedPhase == nil or info.phase == wantedPhase
-            ) and (not onlyDisabled or not info.enabled)
+            local admitted = (wantedPhase == nil or info.phase == wantedPhase)
+            and (not onlyDisabled or not info.enabled)
             if admitted then
                 rows[#rows + 1] = systemData(info)
             end
@@ -602,9 +599,8 @@ registry.register({
         local world = bindings.requireWorld()
         local stack = world:listStates()
         local payload = stackData(stack)
-        payload.message = #stack == 0 and "the state stack is empty" or `${tostring(
-            #stack
-        )} states, ${stack[#stack]} on top`
+        payload.message = #stack == 0 and "the state stack is empty"
+        or `${tostring(#stack)} states, ${stack[#stack]} on top`
 
         return payload
     end

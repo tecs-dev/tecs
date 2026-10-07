@@ -47,8 +47,8 @@ A body declared during a frame becomes live during that frame's next fixed
 step, and its `RigidBody` row appears at the end of that step's `FixedUpdate`,
 which is where the solver hands back the slot it assigned.
 ]]
-const {type Key} = require("nupp.store")
-const store = require("nupp.store")
+const {type Key} = require("nupp.util")
+const util = require("nupp.util")
 const world2 = require("tecs.internal.world")
 
 local ecs = require("tecs.ecs")
@@ -677,7 +677,7 @@ end
 --- Names the world resource holding physics state.
 ---
 --- The key name is the compatibility surface `SNAPSHOT_KEY` declares.
-const stateKey: Key<State> = store.newKey(SNAPSHOT_KEY)
+const stateKey: Key<State> = util.newKey(SNAPSHOT_KEY)
 
 local function toMeters(pixels: number): number
     return pixels / pixelsPerMeter

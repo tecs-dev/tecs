@@ -53,7 +53,7 @@ function suite.drawsACameraAndTwoImagesThroughItsEntry(): nil
     test.assert(reader:readFloat32() > 0, "the zoom projects")
     reader:skip(4)
     test.equal(reader:readUint32(), framepacket.LIGHT_STRIDE)
-    reader:drop()
+    nupp.drop(reader)
 
     -- Both images are resident and the field alternates between them, so the
     -- run-length batching splits the frame rather than collapsing it.

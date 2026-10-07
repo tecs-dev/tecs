@@ -442,7 +442,7 @@ export function newTTF(options: TTFOptions): Font?, string?
     if bytes == nil then
         local read, reason = files.read(source as string)
         if read == nil then
-            return nil, "gfx.fonts.newTTF: " .. (reason or "the font could not be read")
+            return nil, "gfx.fonts.newTTF: " .. (reason?.message ?? "the font could not be read")
         end
         bytes = read
     end

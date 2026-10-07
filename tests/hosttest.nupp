@@ -129,7 +129,7 @@ function suite.exposesOneBatchedRenderPacketAfterACompletedFrame(): nil
     test.equal(reader:readUint32(), 1)
     test.equal(reader:readFloat32(), 320)
     test.equal(reader:readFloat32(), 180)
-    reader:drop()
+    nupp.drop(reader)
     test.assert(host.shutdown(session))
 end
 
@@ -169,7 +169,7 @@ function suite.projectsThePacketThroughThePhysicalDrawableSize(): nil
     test.equal(reader:readFloat32(), 360)
     test.equal(reader:readFloat32(), 320)
     test.equal(reader:readFloat32(), 180)
-    reader:drop()
+    nupp.drop(reader)
     test.assert(host.shutdown(session))
 end
 
@@ -187,7 +187,7 @@ function suite.followsTheDrawableThroughAResize(): nil
     test.equal(before:readFloat32(), 720)
     test.equal(before:readFloat32(), 640)
     test.equal(before:readFloat32(), 360)
-    before:drop()
+    nupp.drop(before)
 
     host.pushResize(session, false, 800, 450, 1600, 900, 2, 1, 1)
     test.equal(host.iterate(session, 0), "continue")
@@ -199,7 +199,7 @@ function suite.followsTheDrawableThroughAResize(): nil
     -- window's edges rather than the content under the middle of it.
     test.equal(after:readFloat32(), 800)
     test.equal(after:readFloat32(), 450)
-    after:drop()
+    nupp.drop(after)
     test.assert(host.shutdown(session))
 end
 

@@ -844,7 +844,7 @@ export type LoadOptions = {
 local function register(bytes: string, path: string, options: LoadOptions?): Model
     local reader = io2.newScalarReader(bytes)
     const metadataBytes = reader:readBytes(reader:readUint32() as integer)
-    reader:drop()
+    nupp.drop(reader)
     const source = json2.decode(metadataBytes) as Metadata
     if options ~= nil then
         for _, material in ipairs(source.materials) do
@@ -857,9 +857,9 @@ local function register(bytes: string, path: string, options: LoadOptions?): Mod
             :writeBytes(metadata)
             :writeBytes(string.rep("\0", (4 - #metadata % 4) % 4))
         writer:writeBytes(bytes:sub(5 + #metadataBytes + (4 - #metadataBytes % 4) % 4))
-        writer:drop()
+        nupp.drop(writer)
         bytes = buffer:getString()
-        buffer:drop()
+        nupp.drop(buffer)
     end
     const nextId = meshregistry.register(path)
     local animations: {Animation} = {}
@@ -954,7 +954,8 @@ export type MeshOptions = {
 --- @param options The caller supplies a stable name, position/normal/tangent/UV
 ---     vertices and zero-based triangle indices.
 --- @return The mesh component and its computed local bounding sphere.
---- @raises string when streams are empty, malformed or contain nonfinite values or invalid
+--- @raises string when streams are empty, malformed or contain nonfinite values or
+---     invalid
 ---     indices.
 export function newMesh(options: MeshOptions): MeshInput, BoundsInput
     assert(
@@ -1037,7 +1038,7 @@ export function newMesh(options: MeshOptions): MeshInput, BoundsInput
         end
         skinBytes = vertexCount * 32
     end
-    writer:drop()
+    nupp.drop(writer)
     const metadata: any = {
         version = 1,
         path = options.name,
@@ -1074,10 +1075,10 @@ export function newMesh(options: MeshOptions): MeshInput, BoundsInput
         :writeBytes(json)
         :writeBytes(string.rep("\0", (4 - #json % 4) % 4))
         :writeBytes(data:getString())
-    prefix:drop()
-    data:drop()
+    nupp.drop(prefix)
+    nupp.drop(data)
     const bytes = output:getString()
-    output:drop()
+    nupp.drop(output)
     const model = register(bytes, options.name)
 
     return model._meshes[1], model._bounds[1]
@@ -1127,9 +1128,9 @@ export function loadEnvironment(name: string, faces: {string}): string?, string?
         for _, bytes in ipairs(pixels) do
             writer:writeBytes(bytes)
         end
-        writer:drop()
+        nupp.drop(writer)
         const bytes = buffer:getString()
-        buffer:drop()
+        nupp.drop(buffer)
 
         return bytes
     end)
@@ -1313,9 +1314,9 @@ export function newMaterial(options: MaterialOptions): MaterialInput
     for _, bytes in ipairs(pixels) do
         writer:writeBytes(bytes)
     end
-    writer:drop()
+    nupp.drop(writer)
     const bytes = buffer:getString()
-    buffer:drop()
+    nupp.drop(buffer)
 
     return register(bytes, options.name)._materials[1]
 end

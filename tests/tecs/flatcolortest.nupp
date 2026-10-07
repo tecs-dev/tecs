@@ -50,7 +50,7 @@ function suite.installsACompleteGameThroughItsEntry(): nil
     reader:skip(frameTableBytes + particleBytes + graphBytes + 2 * (framepacket.BATCH_STRIDE as integer))
     test.equal(reader:readFloat32(), 240)
     test.equal(reader:readFloat32(), 225)
-    reader:drop()
+    nupp.drop(reader)
 
     test.equal(host.iterate(session, 1), "stopped")
     test.equal(host.crashed(session), nil)

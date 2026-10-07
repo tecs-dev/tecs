@@ -13,11 +13,11 @@ Systems suspend through `nupp.tasks`; parallel work belongs to `nupp.workers`.
 ]]
 const {type Source} = require("nupp.events")
 const {type Observers} = require("nupp.events")
-const {type Store} = require("nupp.store")
+const {type Store} = require("nupp.util")
 const {type DoubleArray} = require("tecs.internal.entitycolumn")
 const {type Emittable} = require("nupp.events")
 const {type Observer} = require("nupp.events")
-const store = require("nupp.store")
+const util = require("nupp.util")
 
 local tasks = require("nupp.tasks")
 local ffi = require("ffi")
@@ -844,7 +844,7 @@ export record World is Source<integer>
     --- @param name The non-empty stream name, preferably namespaced for its consumer.
     --- @return Returns the same mutable generator for each call with this name.
     --- @raises string when the name is empty.
-    randomStream: function(exclusive self: World, name: string): random.Random
+    randomStream: function(exclusive self: World, name: string): random.Xoshiro128
 
     --- Restarts every named random stream without replacing captured generators.
     --- Streams created later derive their seeds from this seed too.
@@ -1085,8 +1085,8 @@ export function new(
         liveCount = 0,
         archetypeCount = 1,
         systemCount = 0,
-        observers = nuppevents.newObservers(),
-        resources = store.newStore()
+        observers = nuppevents.newObservers<integer>(),
+        resources = util.newStore()
     )
 end
 
@@ -3351,7 +3351,7 @@ local function ensureRandom(exclusive world: World): randomstreams.Registry
     return registry
 end
 
-function World.randomStream(exclusive self: World, name: string): random.Random
+function World.randomStream(exclusive self: World, name: string): random.Xoshiro128
     if name == "" then
         error("world.randomStream: a stream needs a non-empty name", 2)
     end
@@ -4617,7 +4617,7 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
             if type(pipeline.phaseStates) ~= "table" then
                 error("snapshot has invalid phase states", 2)
             end
-            for key, enabled in pairs(pipeline.phaseStates as table) do
+            for key, enabled in pairs(pipeline.phaseStates as {[any]: any}) do
                 if type(key) ~= "number" or key % 1 ~= 0 or key < 1 or type(enabled) ~= "boolean" then
                     error("snapshot has invalid phase states", 2)
                 end
@@ -4627,7 +4627,7 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
             if type(pipeline.disabledPhases) ~= "table" then
                 error("snapshot has invalid disabled phases", 2)
             end
-            for key, disabled in pairs(pipeline.disabledPhases as table) do
+            for key, disabled in pairs(pipeline.disabledPhases as {[any]: any}) do
                 if type(key) ~= "string" or type(disabled) ~= "boolean" then
                     error("snapshot has invalid disabled phases", 2)
                 end

@@ -28,8 +28,8 @@ const {type World} = require("tecs.ecs")
 const {type FFIInstance} = require("tecs.internal.components")
 const {type TileChunk} = require("tecs.gfx")
 const {type Query} = require("tecs.ecs")
-const {type Key} = require("nupp.store")
-const store = require("nupp.store")
+const {type Key} = require("nupp.util")
+const util = require("nupp.util")
 const images2 = require("tecs.gfx.images")
 const {type MaterialMaps} = require("tecs.gfx.images")
 const files = require("nupp.io.files")
@@ -174,7 +174,8 @@ export type Map = {
 --- Loads a TMX map and resolves its external TSX files and templates.
 --- @param path the TMX file path
 --- @return the editable map
---- @raises string when the library cannot load the map or its orientation is unsupported
+--- @raises string when the library cannot load the map or its orientation is
+---     unsupported
 export function load(path: string): Map
     local source = assetnative.load(path, 0)
     local value = json.decode(source)
@@ -418,7 +419,7 @@ local record State
     width: number
     height: number
 end
-local stateKey: Key<State> = store.newKey("tecs.tiled.state")
+local stateKey: Key<State> = util.newKey("tecs.tiled.state")
 local images: {[string]: integer} = {}
 
 local function imageOf(source: Image): integer

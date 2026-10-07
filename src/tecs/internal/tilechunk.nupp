@@ -183,9 +183,9 @@ export function packed(borrows value: TileChunk): string
             writer:writeUint32(value.tiles[index])
         end
     end
-    writer:drop()
+    nupp.drop(writer)
     const bytes = buffer:getString()
-    buffer:drop()
+    nupp.drop(buffer)
 
     return bytes
 end

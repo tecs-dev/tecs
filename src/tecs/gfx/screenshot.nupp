@@ -72,7 +72,9 @@ export function save(capture: Capture, path: string): boolean, string?
         return false, reason
     end
 
-    return files.write(path, bytes)
+    const written, failure = files.write(path, bytes)
+
+    return written, failure?.message
 end
 
 --- Consumes a queued request for the rendering host.

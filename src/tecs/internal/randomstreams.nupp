@@ -21,7 +21,7 @@ export record Registry
     seed: integer
 
     --- Engine-owned. Retains generators so captured references survive restoration.
-    streams: {[string]: random.Random}
+    streams: {[string]: random.Xoshiro128}
 end
 
 --- Carries detached, validated state between snapshot preparation and restore.
@@ -66,12 +66,12 @@ end
 --- @param registry The world-owned stream registry.
 --- @param name The non-empty name validated by the public world method.
 --- @return Returns the cached Nupp generator.
-export function stream(exclusive registry: Registry, name: string): random.Random
+export function stream(exclusive registry: Registry, name: string): random.Xoshiro128
     const existing = registry.streams[name]
     if existing ~= nil then
         return assert(registry.streams[name])
     end
-    const generator = random.newRandom(streamSeed(registry.seed, name))
+    const generator = new random.Xoshiro128(streamSeed(registry.seed, name))
     registry.streams[name] = generator
 
     return generator
@@ -166,7 +166,7 @@ export function restore(exclusive registry: Registry, borrows state: State): nil
     end
     for name, words in pairs(state.streams) do
         if registry.streams[name] == nil then
-            const generator = random.newRandom()
+            const generator = new random.Xoshiro128()
             generator:setState(words)
             registry.streams[name] = generator
         end

@@ -193,9 +193,9 @@ export function packed(): string
     for _, value in ipairs(data) do
         writer:writeFloat32(nupp.math.f32.narrow(value))
     end
-    writer:drop()
+    nupp.drop(writer)
     bytes = buffer:getString()
-    buffer:drop()
+    nupp.drop(buffer)
     assembled = current
 
     return bytes

@@ -443,7 +443,8 @@ end
 --- @param name The caller supplies an existing pass name.
 --- @param source The caller supplies WGSL defining postprocess(uv: vec2<f32>) ->
 ---     vec4<f32>.
---- @raises string when the source is empty, too large, or the pass writes multiple outputs.
+--- @raises string when the source is empty, too large, or the pass writes multiple
+---     outputs.
 export function setShader(name: string, source: string): nil
     assert(#source > 0 and #source <= 1048576, "passes: invalid shader source size")
     for _, pass in ipairs(passList) do
@@ -643,9 +644,9 @@ export function section(): string
             end
         end
     end
-    writer:drop()
+    nupp.drop(writer)
     const encoded = buffer:getString()
-    buffer:drop()
+    nupp.drop(buffer)
     cachedSection = encoded
 
     return encoded

@@ -9,10 +9,10 @@ order: 20
 
 Three things, and only one of them is installed for you:
 
-- **The Nupp compiler on `PATH`.** Use a build that provides declaration witnesses,
-  exported derive providers, the method-based `nupp.store.Store` API, and the
-  standard library split into `nupp.codec.json`, `nupp.store`, `nupp.random`,
-  `nupp.serde` and `nupp.text.utf8`; the CI workflow pins the compiler revision.
+- **The Nupp compiler on `PATH`.** Use a build that spells privacy, unsafe regions
+  and compile-time functions as annotations (`@private`, `@unsafe`, `@comptime`),
+  keeps typed keys and stores in `nupp.util`, and answers `nupp.io` failures as
+  `nupp.io.Error`; the CI workflow pins the compiler revision.
   With sibling checkouts, run `export PATH="$(cd ../nupp/bin && pwd):$PATH"` from
   the Tecs root to select that compiler.
 - **The Rust toolchain** `rust-toolchain.toml` pins. `rustup` fetches it on the

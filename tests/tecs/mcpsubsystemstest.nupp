@@ -1,5 +1,5 @@
-const {type Key} = require("nupp.store")
-const store = require("nupp.store")
+const {type Key} = require("nupp.util")
+const util = require("nupp.util")
 
 local ecs = require("tecs.ecs")
 local gfx = require("tecs.gfx")
@@ -87,8 +87,8 @@ function suite.inspectionReadsCommittedArchetypesAndAnonymousResources(): nil
     local world = ecs.newWorld()
     local entity = world:spawn(gfx.Camera2D(3, 4))
     world:commit()
-    local key: Key<string> = store.newKey("test.mcp.resource")
-    local anonymous: Key<integer> = store.newKey(nil)
+    local key: Key<string> = util.newKey("test.mcp.resource")
+    local anonymous: Key<integer> = util.newKey(nil)
     world.resources:set(key, "data")
     world.resources:set(anonymous, 4)
     mcp.bind(world)
