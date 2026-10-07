@@ -20,7 +20,7 @@ end
 
 --- Renders a site with Nupp's own link and anchor validation.
 export function build(destination: string): nil
-    commands.run({commands.compiler(), "build", "--target", "docs", "--out-dir", destination})
+    commands.run({commands.compiler(), "build", "--target", "docs", "--output", destination})
 end
 
 --- Validates the documentation in a temporary directory.
@@ -153,7 +153,7 @@ export function serve(port: integer): nil
                         "build",
                         "--target",
                         "docs",
-                        "--out-dir",
+                        "--output",
                         fresh
                     })
                     io.stderr:write(result.errorOutput)
