@@ -183,7 +183,7 @@ says.
 - Interfaces describe capabilities and families: `Component`,
   `ScalarComponent<T>`, `ComponentDefinition<T>`.
 - Closed string sets are union aliases rather than a bare `string` field.
-- A record field that is private to the module is declared `private`, and the
+- A record field that is private to the module is declared `@private`, and the
   documentation generator hides it, so it never becomes part of a contract by
   accident.
 

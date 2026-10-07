@@ -51,7 +51,8 @@ function suite.nativeColumnsAreContiguousAndCopyInputValues(): nil
         const column: Point[?] = assert(candidate:get(point))
         test.equal(type(column), "cdata")
         test.equal(count, 2)
-        unsafe do
+        @unsafe
+        do
             const firstAddress = tonumber(ffi.cast("uintptr_t", ffi.cast("void *", column[1]))) as number
             const secondAddress = tonumber(ffi.cast("uintptr_t", ffi.cast("void *", column[2]))) as number
             test.equal(secondAddress - firstAddress, ffi.sizeof(Point))
@@ -64,7 +65,8 @@ function suite.growthPreservesRowsAndBatchWritersUseNativeMemory(): nil
     const firstId = assert(
         world:batchSpawn(5000, {point}, function(candidate: Archetype, first: integer, last: integer): nil
             const column = assert(candidate:getMut(point))
-            unsafe do
+            @unsafe
+            do
                 for row = first, last do
                     test.equal(column[row].x, 3)
                     column[row].x = row
@@ -133,7 +135,8 @@ function suite.sharedStructLayoutsKeepDistinctComponentIdentity(): nil
     test.equal(assert(world:get(id, twin)).x, 19)
     for candidate in world:newQuery({include = {point}}):iter() do
         const typed: Point[?] = assert(candidate:get(input.componentType))
-        unsafe do
+        @unsafe
+        do
             test.equal(typed[1].y, 17)
         end
     end
@@ -196,7 +199,8 @@ function suite.compactionAndClearRetainNativeStorage(): nil
         archetype.clear(assert(candidate))
         test.equal(type(assert(candidate:get(point))), "cdata")
         archetype.append(assert(candidate), 999, {})
-        unsafe do
+        @unsafe
+        do
             const points = assert(candidate:get(point))
             test.equal(points[1].x, 3)
         end
@@ -258,12 +262,14 @@ end
 function suite.rawStorageRelocatesWithABulkCopy(): nil
     const storage = assert(ffistorage.find(point.componentId))
     const source = ffistorage.allocate(storage, 2) as Point[?]
-    unsafe do
+    @unsafe
+    do
         source[1] = new Point(13, 17)
         source[2] = new Point(19, 23)
     end
     const target = ffistorage.resize(storage, source, 2, 100) as Point[?]
-    unsafe do
+    @unsafe
+    do
         test.equal(target[1].x, 13)
         test.equal(target[2].y, 23)
         test.equal(target[100].x, 0)
@@ -317,7 +323,8 @@ function suite.rawColumnIOIsBoundedAndDoesNotCopyPaddingRowZero(): nil
     const storage = assert(ffistorage.find(arrays.componentId))
     const source = ffistorage.allocate(storage, 3) as ArrayValue[?]
     const target = ffistorage.allocate(storage, 3) as ArrayValue[?]
-    unsafe do
+    @unsafe
+    do
         source[1].values[1] = 9
         source[2].values[2] = 11
     end
@@ -326,7 +333,8 @@ function suite.rawColumnIOIsBoundedAndDoesNotCopyPaddingRowZero(): nil
     test.equal(#bytes, storage.width * 2)
     ffistorage.readRows(storage, target, 2, 2, bytes)
     test.equal(#bytes, 0)
-    unsafe do
+    @unsafe
+    do
         test.equal(target[0].values[1], 0)
         test.equal(target[2].values[1], 9)
         test.equal(target[3].values[2], 11)
@@ -412,7 +420,8 @@ function suite.customBackingIsRootedAndUsedAgainOnGrowth(): nil
         return ffi.cast<voidptr>(owner), owner
     end)
     const source = ffistorage.allocate(storage, 10) as Point[?]
-    unsafe do
+    @unsafe
+    do
         source[1].x = 91
     end
     collectgarbage("collect")
@@ -421,7 +430,8 @@ function suite.customBackingIsRootedAndUsedAgainOnGrowth(): nil
     collectgarbage("collect")
     test.equal(allocations, 2)
     test.equal(ffistorage.capacity(target), 100)
-    unsafe do
+    @unsafe
+    do
         test.equal(target[1].x, 91)
     end
     ffistorage.setAllocator(storage, nil)
@@ -673,7 +683,8 @@ end
 
 function suite.rawBatchRestoreUsesZeroBasedIdsAndRegistersInitializedKeys(): nil
     const ids = ffi.new("double[?]", 3) as number[?]
-    unsafe do
+    @unsafe
+    do
         ids[0] = 11
         ids[1] = 5
         ids[2] = 7
@@ -704,7 +715,8 @@ function suite.rawBatchRestoreUsesZeroBasedIdsAndRegistersInitializedKeys(): nil
         "native identity array"
     )
     const duplicate = ffi.new("double[?]", 2) as number[?]
-    unsafe do
+    @unsafe
+    do
         duplicate[0] = 3
         duplicate[1] = 3
     end

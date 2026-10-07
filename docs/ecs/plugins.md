@@ -44,7 +44,7 @@ local function spinPlugin(exclusive world: tecs.ecs.World, speed: number): nil
         run = function(dt: number): nil
             for archetype, count in spinning:iter() do
                 local transforms = assert(archetype:getMut(tecs.ecs.Transform2D))
-                unsafe do
+                @unsafe do
                     for row = 1, count as integer do
                         transforms[row].rotation = transforms[row].rotation + speed * dt
                     end

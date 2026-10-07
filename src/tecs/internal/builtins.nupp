@@ -334,7 +334,8 @@ export function install(exclusive world: entityworld.World): nil
         name = "tecs.SnapshotTransforms",
         phase = phases.FixedFirst,
         run = function(): nil
-            unsafe do
+            @unsafe
+            do
                 for candidate, count in interpolated:iter() do
                     const active = candidate as archetype.Archetype
                     const current = assert(active:get(rendercomponents.Transform2DComponent))
@@ -360,7 +361,8 @@ export function install(exclusive world: entityworld.World): nil
         name = "ttl",
         phase = phases.FixedUpdate,
         run = function(dt: number, exclusive running: entityworld.World): nil
-            unsafe do
+            @unsafe
+            do
                 for candidate, count in expiring:iter() do
                     const active = candidate as archetype.Archetype
                     -- Every row is written, so the column is dirty either way and

@@ -18,7 +18,7 @@ for archetype, length in movers:iter() do
     local entities = archetype.entities
     local transforms = assert(archetype:getMut(tecs.ecs.Transform2D))
     local velocities = assert(archetype:get(Velocity))
-    unsafe do
+    @unsafe do
         for row = 1, length as integer do
             local transform = transforms[row]
             local velocity = velocities[row]
@@ -69,7 +69,7 @@ local firstId, ids = world:batchSpawn(
     {tecs.ecs.Transform2D},
     function(archetype: tecs.ecs.Archetype, first: integer, last: integer): nil
         local transforms = assert(archetype:getMut(tecs.ecs.Transform2D))
-        unsafe do
+        @unsafe do
             for row = first, last do
                 transforms[row].x = row * 2
             end

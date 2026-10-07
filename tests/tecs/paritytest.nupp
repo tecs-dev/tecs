@@ -216,7 +216,8 @@ function suite.binarySnapshotsRestoreNativeColumnsAndRetainTheInputBuffer(): nil
     test.equal(world:newQuery({include = {ecs.Transform3D}}):count(), count)
     for candidate, rows in world:newQuery({include = {ecs.Transform3D}}):iter() do
         const values = assert(candidate:get(ecs.Transform3D))
-        unsafe do
+        @unsafe
+        do
             for row = 1, assert(rows) do
                 test.equal(values[row].z, 3);
                 test.equal(values[row].scaleX, 1)

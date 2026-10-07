@@ -330,16 +330,26 @@ export record Bundle
     name: string
     required: {string}
     defaulted: {string}
-    private world: any
-    private requiredComponents: {components.Component}
-    private defaultComponents: {components.Component}
-    private defaultFactories: {BundleFactory?}
-    private cachedTarget: archetype.Archetype?
-    private cachedState: components.Component?
-    private requiredDefaults: {[integer]: any}
-    private plain: boolean
-    private scratchInputs: {components.Input}
-    private busy: boolean
+    @private
+    world: any
+    @private
+    requiredComponents: {components.Component}
+    @private
+    defaultComponents: {components.Component}
+    @private
+    defaultFactories: {BundleFactory?}
+    @private
+    cachedTarget: archetype.Archetype?
+    @private
+    cachedState: components.Component?
+    @private
+    requiredDefaults: {[integer]: any}
+    @private
+    plain: boolean
+    @private
+    scratchInputs: {components.Input}
+    @private
+    busy: boolean
 
     spawn: function(self: Bundle, ...: components.Input): integer
 end
@@ -358,7 +368,8 @@ local record RegisteredSystem
 end
 
 --- The parameters an event is constructed with, so `emit` binds them by name.
-local comptime function Construction(E: type): typepack
+@comptime
+local function Construction(E: type): typepack
     return nupp.types.construction(E)
 end
 
@@ -449,81 +460,149 @@ end
 --- A world is an event source: observers register against it by address and
 --- receive only the event they observed.
 export record World is Source<integer>
-    private allocator: idallocator.IdAllocator
-    private archetypes: {archetype.Archetype}
-    private archetypeById: {[integer]: archetype.Archetype}
-    private maxArchetypeId: integer
-    private freeArchetypeIds: {integer}
-    private archetypeBySignature: {[string]: archetype.Archetype}
-    private componentArchetypes: {[integer]: {archetype.Archetype}}
-    private dirtyQueue: archetype.DirtyQueue
-    private pendingSpawns: {PendingSpawn}
+    @private
+    allocator: idallocator.IdAllocator
+    @private
+    archetypes: {archetype.Archetype}
+    @private
+    archetypeById: {[integer]: archetype.Archetype}
+    @private
+    maxArchetypeId: integer
+    @private
+    freeArchetypeIds: {integer}
+    @private
+    archetypeBySignature: {[string]: archetype.Archetype}
+    @private
+    componentArchetypes: {[integer]: {archetype.Archetype}}
+    @private
+    dirtyQueue: archetype.DirtyQueue
+    @private
+    pendingSpawns: {PendingSpawn}
     -- Each fixed-signature row is [archetype, id, optional promoted record,
     -- component values...]. Native slot offsets replace per-entity records.
-    private flatSpawns: {any}
-    private flatSpawnCount: integer
-    private flatSealedCount: integer
-    private spawnShapes: SpawnShape
-    private spawnScratch: {[integer]: any}
-    private flatMoves: {any}
-    private flatMoveCount: integer
-    private flatMovesSealed: integer
-    private moveScratch: PendingMove
-    private mutationValues: {[integer]: any}
-    private emptyValues: {[integer]: any}
-    private pendingSegments: {PendingSegment}
-    private pendingSpawnBySlot: {[integer]: PendingSpawn}
-    private spawnBatches: {SpawnBatch}
-    private mutationBatches: {MutationBatch}
-    private pendingMoves: {PendingMove}
-    private pendingMoveBySlot: {[integer]: PendingMove}
-    private publishingMove: PendingMove?
-    private pendingDespawns: {integer}
-    private pendingDespawnBySlot: {[integer]: boolean}
-    private queries: {query.Query}
-    private queryOwner: query.Owner
-    private queryObservers: {query.Query}
-    private relationshipIndexes: {[integer]: inverseindex.InverseIndex}
-    private keyIndex: {[string]: integer}
-    private systems: {RegisteredSystem}
-    private schedule: {[phases.Phase]: {RegisteredSystem}}
-    private scheduleDirty: boolean
-    private pipeline: Pipeline?
-    private customPhases: {[string]: phases.Definition}
-    private phaseOrder: {string}
-    private systemNames: {[string]: RegisteredSystem}
-    private anonymousSystemCount: integer
-    private disabledPhases: {[string]: boolean}
-    private bundles: {[string]: Bundle}
-    private snapshotHandlers: {SnapshotHandler}
-    private snapshotHandlerNames: {[string]: boolean}
-    private randomRegistry: randomstreams.Registry?
-    private stateComponents: {[string]: components.Component}
-    private statePolicies: {[string]: StatePolicy}
-    private stateStack: {string}
-    private autoStateComponent: components.Component?
-    private updating: boolean
+    @private
+    flatSpawns: {any}
+    @private
+    flatSpawnCount: integer
+    @private
+    flatSealedCount: integer
+    @private
+    spawnShapes: SpawnShape
+    @private
+    spawnScratch: {[integer]: any}
+    @private
+    flatMoves: {any}
+    @private
+    flatMoveCount: integer
+    @private
+    flatMovesSealed: integer
+    @private
+    moveScratch: PendingMove
+    @private
+    mutationValues: {[integer]: any}
+    @private
+    emptyValues: {[integer]: any}
+    @private
+    pendingSegments: {PendingSegment}
+    @private
+    pendingSpawnBySlot: {[integer]: PendingSpawn}
+    @private
+    spawnBatches: {SpawnBatch}
+    @private
+    mutationBatches: {MutationBatch}
+    @private
+    pendingMoves: {PendingMove}
+    @private
+    pendingMoveBySlot: {[integer]: PendingMove}
+    @private
+    publishingMove: PendingMove?
+    @private
+    pendingDespawns: {integer}
+    @private
+    pendingDespawnBySlot: {[integer]: boolean}
+    @private
+    queries: {query.Query}
+    @private
+    queryOwner: query.Owner
+    @private
+    queryObservers: {query.Query}
+    @private
+    relationshipIndexes: {[integer]: inverseindex.InverseIndex}
+    @private
+    keyIndex: {[string]: integer}
+    @private
+    systems: {RegisteredSystem}
+    @private
+    schedule: {[phases.Phase]: {RegisteredSystem}}
+    @private
+    scheduleDirty: boolean
+    @private
+    pipeline: Pipeline?
+    @private
+    customPhases: {[string]: phases.Definition}
+    @private
+    phaseOrder: {string}
+    @private
+    systemNames: {[string]: RegisteredSystem}
+    @private
+    anonymousSystemCount: integer
+    @private
+    disabledPhases: {[string]: boolean}
+    @private
+    bundles: {[string]: Bundle}
+    @private
+    snapshotHandlers: {SnapshotHandler}
+    @private
+    snapshotHandlerNames: {[string]: boolean}
+    @private
+    randomRegistry: randomstreams.Registry?
+    @private
+    stateComponents: {[string]: components.Component}
+    @private
+    statePolicies: {[string]: StatePolicy}
+    @private
+    stateStack: {string}
+    @private
+    autoStateComponent: components.Component?
+    @private
+    updating: boolean
 
     --- The entity addresses something has observed, so clearing every entity
     --- can clear their registrations without touching the world's own.
-    private observedEntities: {[integer]: boolean}
+    @private
+    observedEntities: {[integer]: boolean}
 
-    private transitionObserver: TransitionObserver?
+    @private
+    transitionObserver: TransitionObserver?
 
-    private committing: boolean
-    private runningSystem: boolean
-    private systemThread: thread?
-    private commitRequested: boolean
-    private nominalFrameTime: number
-    private fixedTimestep: number
-    private fixedAccumulator: number
-    private fixedStepTotal: integer
-    private fixedMaxSteps: integer
-    private fixedOverload: FixedOverload
-    private fixedTimeDropped: number
-    private fixedStepsDropped: integer
-    private beforeFixedCallbacks: {function(exclusive world: World)}?
-    private afterFixedCallbacks: {function(exclusive world: World)}?
+    @private
+    committing: boolean
+    @private
+    runningSystem: boolean
+    @private
+    systemThread: thread?
+    @private
+    commitRequested: boolean
+    @private
+    nominalFrameTime: number
+    @private
+    fixedTimestep: number
+    @private
+    fixedAccumulator: number
+    @private
+    fixedStepTotal: integer
+    @private
+    fixedMaxSteps: integer
+    @private
+    fixedOverload: FixedOverload
+    @private
+    fixedTimeDropped: number
+    @private
+    fixedStepsDropped: integer
+    @private
+    beforeFixedCallbacks: {function(exclusive world: World)}?
+    @private
+    afterFixedCallbacks: {function(exclusive world: World)}?
     liveCount: integer
     archetypeCount: integer
     systemCount: integer
@@ -667,13 +746,13 @@ export record World is Source<integer>
         ): nil
     )
         & (
-        function<T is derived.Edge>(
-            borrows self: World,
-            id: integer,
-            relationship: Type<T>,
-            callback: function(value: T)
-        ): nil
-    )
+            function<T is derived.Edge>(
+                borrows self: World,
+                id: integer,
+                relationship: Type<T>,
+                callback: function(value: T)
+            ): nil
+        )
 
     --- Returns the first edge in target order.
     --- @param self The world to inspect.
@@ -683,7 +762,9 @@ export record World is Source<integer>
     getFirstRelationship: (
         function<C is components.Component>(borrows self: World, id: integer, relationship: C): C.Value?
     )
-        & (function<T is derived.Edge>(borrows self: World, id: integer, relationship: Type<T>): T?)
+        & (
+            function<T is derived.Edge>(borrows self: World, id: integer, relationship: Type<T>): T?
+        )
 
     --- Visits sources targeting an entity in ascending identifier order.
     --- @param self The world to inspect.
@@ -1317,10 +1398,11 @@ function World.spawnAt(exclusive self: World, id: integer, ...: components.Input
     local slot = idallocator.slotOf(id)
     local pending = self.pendingSpawnBySlot[slot]
     local archetypeId = idallocator.placement(self.allocator, slot)
-    if pending ~= nil or idallocator.flatSpawnAt(
-        self.allocator,
-        slot
-    ) ~= 0 or idallocator.spawnBatchAt(self.allocator, slot) ~= 0 or archetypeId ~= 0 then
+    if pending ~= nil
+        or idallocator.flatSpawnAt(self.allocator, slot) ~= 0
+        or idallocator.spawnBatchAt(self.allocator, slot) ~= 0
+        or archetypeId ~= 0
+    then
         error("world.spawnAt: slot " .. tostring(slot) .. " is already reserved or alive", 2)
     end
     local definitions, supplied = collectInputs({...})
@@ -1629,10 +1711,8 @@ function World.set(exclusive self: World, id: integer, input: components.Input, 
             raw = ffistorage.capture(assert(ffistorage.find(component.componentId)), raw)
         end
     end
-    const reusable = archetype.has(
-        source,
-        component
-    ) or (#components.requiresClosure(component) == 0 and archetype.transition(source, component, true) ~= nil)
+    const reusable = archetype.has(source, component)
+        or (#components.requiresClosure(component) == 0 and archetype.transition(source, component, true) ~= nil)
     local supplied: {[integer]: any} = reusable and self.mutationValues or {}
     table.clear(supplied)
     if component.storageType ~= "tag" then
@@ -1807,7 +1887,8 @@ end
 
 local function batchId(batch: SpawnBatch, index: integer): integer
     if batch.rawIds ~= nil then
-        unsafe do
+        @unsafe
+        do
             return batch.rawIds[index - 1] as integer
         end
     end
@@ -1903,17 +1984,12 @@ function World.batchSpawnAt(
         if id < 1 or id > 9007199254740991 or id % 1 ~= 0 or slot < 1 or slot > self.allocator.maxSlotCount then
             error("batchSpawnAt: invalid packed entity id", 2)
         end
-        if seen[
-            slot
-        ] or self.pendingSpawnBySlot[
-            slot
-        ] ~= nil or idallocator.spawnBatchAt(
-            self.allocator,
-            slot
-        ) ~= 0 or idallocator.flatSpawnAt(
-            self.allocator,
-            slot
-        ) ~= 0 or idallocator.placement(self.allocator, slot) ~= 0 then
+        if seen[slot]
+            or self.pendingSpawnBySlot[slot] ~= nil
+            or idallocator.spawnBatchAt(self.allocator, slot) ~= 0
+            or idallocator.flatSpawnAt(self.allocator, slot) ~= 0
+            or idallocator.placement(self.allocator, slot) ~= 0
+        then
             error("batchSpawnAt: duplicate or occupied entity slot", 2)
         end
         seen[slot] = true
@@ -1959,31 +2035,28 @@ function World.batchSpawnAtRaw(
         return
     end
     const seen: {[integer]: boolean} = {}
-    unsafe do
+    @unsafe
+    do
         for index = 0, count - 1 do
             const id = ids[index] as integer
             const slot = idallocator.slotOf(id)
             if id < 1 or id > 9007199254740991 or id % 1 ~= 0 or slot < 1 or slot > self.allocator.maxSlotCount then
                 error("batchSpawnAtRaw: invalid packed entity id", 2)
             end
-            if seen[
-                slot
-            ] or self.pendingSpawnBySlot[
-                slot
-            ] ~= nil or idallocator.spawnBatchAt(
-                self.allocator,
-                slot
-            ) ~= 0 or idallocator.flatSpawnAt(
-                self.allocator,
-                slot
-            ) ~= 0 or idallocator.placement(self.allocator, slot) ~= 0 then
+            if seen[slot]
+                or self.pendingSpawnBySlot[slot] ~= nil
+                or idallocator.spawnBatchAt(self.allocator, slot) ~= 0
+                or idallocator.flatSpawnAt(self.allocator, slot) ~= 0
+                or idallocator.placement(self.allocator, slot) ~= 0
+            then
                 error("batchSpawnAtRaw: duplicate or occupied entity slot", 2)
             end
             seen[slot] = true
         end
     end
     const target, supplied, shared = batchSignature(self, inputs, false, true)
-    unsafe do
+    @unsafe
+    do
         for index = 0, count - 1 do
             idallocator.stakeId(self.allocator, ids[index] as integer)
         end
@@ -2039,9 +2112,10 @@ local function tryStageBulk(
             for row = 1, count do
                 const id = selected.entities[row]
                 const slot = idallocator.slotOf(id)
-                if world.pendingMoveBySlot[
-                    slot
-                ] ~= nil or pendingDespawn(world, slot) or logicalArchetype(world, id) ~= source then
+                if world.pendingMoveBySlot[slot] ~= nil
+                    or pendingDespawn(world, slot)
+                    or logicalArchetype(world, id) ~= source
+                then
                     return false
                 end
             end
@@ -2076,7 +2150,8 @@ local function tryStageBulk(
                 return false
             end
             const ids = ffi.new("double[?]", count) as number[?]
-            unsafe do
+            @unsafe
+            do
                 for row = 1, count do
                     ids[row - 1] = selected.entities[row]
                 end
@@ -2102,7 +2177,8 @@ local function tryStageBulk(
     for index = 1, #batches do
         const batch = batches[index]
         world.mutationBatches[batch.index] = batch
-        unsafe do
+        @unsafe
+        do
             for row = 0, batch.count - 1 do
                 const slot = idallocator.slotOf(batch.ids[row] as integer)
                 if despawning then
@@ -2154,10 +2230,8 @@ function World.batchSet(
                 local target = targets[source]
                 if target == nil then
                     const required: {[integer]: any} = {}
-                    target = archetype.has(
-                        source,
-                        component
-                    ) and source or resolveTransition(self, source, component, true, required)
+                    target = archetype.has(source, component) and source
+                        or resolveTransition(self, source, component, true, required)
                     targets[source] = target
                     requirements[source] = required
                 end
@@ -2180,9 +2254,9 @@ end
 
 function World.batchRemove(exclusive self: World, selection: query.Query, input: components.Input): nil
     const component = components.definitionOf(input)
-    if components.asRelationship(
-        component
-    ) == nil and tryStageBulk(self, selection, component, nil, false, true, nil, false) then
+    if components.asRelationship(component) == nil
+        and tryStageBulk(self, selection, component, nil, false, true, nil, false)
+    then
         return
     end
     const ids = batchIds(self, selection)
@@ -2628,13 +2702,11 @@ function World.despawn(exclusive self: World, id: integer): nil
     end
     local pending = self.pendingSpawnBySlot[slot]
     const batch = idallocator.spawnBatchAt(self.allocator, slot)
-    if (
-        pending == nil or pending.id ~= id
-    ) and (
-        batch == 0 or idallocator.isStale(self.allocator, id)
-    ) and (
-        idallocator.flatSpawnAt(self.allocator, slot) == 0 or idallocator.isStale(self.allocator, id)
-    ) and not self:isAlive(id) then
+    if (pending == nil or pending.id ~= id)
+        and (batch == 0 or idallocator.isStale(self.allocator, id))
+        and (idallocator.flatSpawnAt(self.allocator, slot) == 0 or idallocator.isStale(self.allocator, id))
+        and not self:isAlive(id)
+    then
         return
     end
     self.pendingDespawns[#self.pendingDespawns + 1] = id
@@ -2661,10 +2733,9 @@ function World.despawn(exclusive self: World, id: integer): nil
             for childIndex = 1, children.count do
                 const childId = batchId(children, childIndex)
                 const childSlot = idallocator.slotOf(childId)
-                if idallocator.spawnBatchAt(
-                    self.allocator,
-                    childSlot
-                ) == children.index and not pendingDespawn(self, childSlot) then
+                if idallocator.spawnBatchAt(self.allocator, childSlot) == children.index
+                    and not pendingDespawn(self, childSlot)
+                then
                     const target = assert(logicalArchetype(self, childId))
                     for componentIndex = 1, #target.components do
                         const relationship = components.asRelationship(target.components[componentIndex])
@@ -2729,9 +2800,10 @@ end
 local function linkOutgoing(exclusive world: World, source: archetype.Archetype, row: integer, entity: integer): nil
     for index = 1, #source.components do
         local relationship = components.asRelationship(source.components[index])
-        if relationship ~= nil and relationship.componentId == source.components[
-            index
-        ].componentId and relationship.reverseIndex then
+        if relationship ~= nil
+            and relationship.componentId == source.components[index].componentId
+            and relationship.reverseIndex
+        then
             const edges = archetype.edgeValues(source, row, relationship)
             const inverse = relationshipIndex(world, relationship)
             for edgeIndex = 1, #edges do
@@ -2748,9 +2820,10 @@ end
 local function unlinkOutgoing(exclusive world: World, source: archetype.Archetype, row: integer, entity: integer): nil
     for index = 1, #source.components do
         local relationship = components.asRelationship(source.components[index])
-        if relationship ~= nil and relationship.componentId == source.components[
-            index
-        ].componentId and relationship.reverseIndex then
+        if relationship ~= nil
+            and relationship.componentId == source.components[index].componentId
+            and relationship.reverseIndex
+        then
             const edges = archetype.edgeValues(source, row, relationship)
             const inverse = relationshipIndex(world, relationship)
             for edgeIndex = 1, #edges do
@@ -3049,12 +3122,13 @@ local function publishMutationBatch(exclusive world: World, batch: MutationBatch
     const target = batch.target
     local whole = #source.entities == batch.count
     if whole then
-        unsafe do
+        @unsafe
+        do
             for index = 0, batch.count - 1 do
                 const id = batch.ids[index] as integer
-                if source.entities[
-                    index + 1
-                ] ~= id or (not batch.despawn and pendingDespawn(world, idallocator.slotOf(id))) then
+                if source.entities[index + 1] ~= id
+                    or (not batch.despawn and pendingDespawn(world, idallocator.slotOf(id)))
+                then
                     whole = false
                     break
                 end
@@ -3121,7 +3195,8 @@ local function publishMutationBatch(exclusive world: World, batch: MutationBatch
         notices = {}
         writerIds = {}
     end
-    unsafe do
+    @unsafe
+    do
         for index = 0, batch.count - 1 do
             const id = batch.ids[index] as integer
             const slot = idallocator.slotOf(id)
@@ -3347,10 +3422,9 @@ function World.commit(exclusive self: World): nil
         end
         for _, pending in pairs(self.pendingSpawnBySlot) do
             const slot = idallocator.slotOf(pending.id)
-            if idallocator.placement(
-                self.allocator,
-                slot
-            ) == 0 and idallocator.generationAt(self.allocator, slot) == idallocator.generationPartOf(pending.id) then
+            if idallocator.placement(self.allocator, slot) == 0
+                and idallocator.generationAt(self.allocator, slot) == idallocator.generationPartOf(pending.id)
+            then
                 self:clearObservers(pending.id)
                 idallocator.freeSlot(self.allocator, slot)
             end
@@ -3769,9 +3843,10 @@ function Bundle.spawn(self: Bundle, ...: components.Input): integer
     local id: integer
     if self.plain then
         local target = self.cachedTarget
-        if target == nil or self.cachedState ~= world.autoStateComponent or world.archetypeById[
-            target.id
-        ] ~= target then
+        if target == nil
+            or self.cachedState ~= world.autoStateComponent
+            or world.archetypeById[target.id] ~= target
+        then
             const state = world.autoStateComponent
             if state ~= nil then
                 local present = false
@@ -4249,11 +4324,11 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
     end
     local decoded: snapshotcodec.Decoded? = nil
     local snapshot: Snapshot
-    if type(
-        source
-    ) == "string" or type(
-        source
-    ) == "cdata" or type(source) == "userdata" or (type(source) == "table" and source.format == "binary") then
+    if type(source) == "string"
+        or type(source) == "cdata"
+        or type(source) == "userdata"
+        or (type(source) == "table" and source.format == "binary")
+    then
         local bytes: string
         if type(source) == "string" then
             bytes = source as string
@@ -4389,20 +4464,25 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
                 const component = savedColumn.component
                 const native = ffistorage.find(component.componentId)
                 const relationship = components.asRelationship(component)
-                if savedColumn.present ~= nil or (
-                    relationship ~= nil and (
-                        relationship.sparse or components.targetOf(
-                            component
-                        ) == nil or #components.requiresClosure(relationship) > 0
+                if savedColumn.present ~= nil
+                    or (
+                        relationship ~= nil
+                        and (
+                            relationship.sparse
+                            or components.targetOf(component) == nil
+                            or #components.requiresClosure(relationship) > 0
+                        )
                     )
-                ) or (
-                    component.storageType ~= "tag" and (
-                        native == nil
-                        or not native.rawCodec
-                        or native ~= savedColumn.storage
-                        or savedColumn.pointer == nil
+                    or (
+                        component.storageType ~= "tag"
+                        and (
+                            native == nil
+                            or not native.rawCodec
+                            or native ~= savedColumn.storage
+                            or savedColumn.pointer == nil
+                        )
                     )
-                ) then
+                then
                     fast = false
                 end
                 if relationship ~= nil
@@ -4521,16 +4601,15 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
         randomState = randomstreams.prepare(dataByKey[randomstreams.snapshotKey])
     end
     const pipeline: any = snapshot.pipeline or dataByKey["__tecs.pipeline"]
-    if pipeline ~= nil and (
-        type(
-            pipeline
-        ) ~= "table" or type(
-            pipeline.fixedAccumulator
-        ) ~= "number"
-        or pipeline.fixedAccumulator < 0
-        or pipeline.fixedAccumulator == math.huge
-        or pipeline.fixedAccumulator ~= pipeline.fixedAccumulator
-    ) then
+    if pipeline ~= nil
+        and (
+            type(pipeline) ~= "table"
+            or type(pipeline.fixedAccumulator) ~= "number"
+            or pipeline.fixedAccumulator < 0
+            or pipeline.fixedAccumulator == math.huge
+            or pipeline.fixedAccumulator ~= pipeline.fixedAccumulator
+        )
+    then
         error("snapshot has invalid fixed accumulator", 2)
     end
     if pipeline ~= nil then
@@ -4594,7 +4673,8 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
                     end
                 end
                 const target = resolveArchetype(self, definitions)
-                unsafe do
+                @unsafe
+                do
                     for index = 0, frame.count - 1 do
                         idallocator.stakeId(self.allocator, frame.ids[index] as integer)
                     end

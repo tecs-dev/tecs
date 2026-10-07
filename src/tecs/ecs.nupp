@@ -32,7 +32,7 @@ world:batchSpawn(1000, {Velocity})
 world:commit()
 for candidate, count in world:newQuery({include = {Velocity}}):iter() do
     local column = assert(candidate:getMut(Velocity))
-    unsafe do
+    @unsafe do
         for row = 1, assert(count) do column[row].x += 1 end
     end
 end
@@ -52,7 +52,7 @@ their custom name-based codecs and never persist process-local IDs as assets.
 array for a table or scalar component. Native rows use the same **one-based**
 indices as the query's entity list; row zero is padding. Use the query count,
 not `#column`, `pairs`, `ipairs`, or table library operations on a native column.
-Direct C-array indexing requires Nupp's `unsafe` scope. `world:get` still returns
+Direct C-array indexing requires a Nupp `@unsafe` scope. `world:get` still returns
 one typed struct value, and `world:getMut` marks the owning column dirty first.
 
 Native column assignments copy bytes, including inline fixed arrays. Entities never
@@ -156,7 +156,7 @@ local moving = world:newQuery({
 })
 for candidate, count, entities in moving:iter() do
     local transforms = assert(candidate:getMut(tecs.ecs.Transform2D))
-    unsafe do
+    @unsafe do
         for row = 1, count do
             transforms[row].x = transforms[row].x + 1
         end
@@ -259,7 +259,7 @@ restoration path also permits initializing `EntityKey` before index registration
 local firstId, ids = world:batchSpawn(100, {tecs.ecs.Transform2D},
     function(candidate: tecs.ecs.Archetype, first: integer, last: integer)
         local transforms = assert(candidate:getMut(tecs.ecs.Transform2D))
-        unsafe do
+        @unsafe do
             for row = first, last do
                 transforms[row].x = row * 10
             end
@@ -522,7 +522,8 @@ export type ComponentValue = derived.Value
 --- contract.
 export type RelationshipPayload = derived.Edge
 
-local comptime function componentOptions(info: nupp.derive.Info, edge: boolean): any
+@comptime
+local function componentOptions(info: nupp.derive.Info, edge: boolean): any
     local result = {name = info.qualifiedName, representation = info.kind, relationship = edge}
     for _, annotation in ipairs(info.annotations) do
         if annotation.name == (edge and "relationship" or "component") then
@@ -539,7 +540,8 @@ end
 --- @param info The declaration being derived.
 --- @return Returns its metadata and reusable initializer recipe.
 --- @raises Raises when the declaration cannot supply a reusable initializer.
-export comptime function Component(info: nupp.derive.Info): nupp.derive.Result<derived.Value>
+@comptime
+export function Component(info: nupp.derive.Info): nupp.derive.Result<derived.Value>
     if info.kind ~= "record" and info.kind ~= "struct" then
         return nupp.derive.error("Component requires a record or fixed-layout struct", info.reference)
     end
@@ -550,7 +552,8 @@ end
 --- @param info The declaration being derived.
 --- @return Returns its metadata and reusable initializer recipe.
 --- @raises Raises when the target, policies or initializer are invalid.
-export comptime function Relationship(info: nupp.derive.Info): nupp.derive.Result<derived.Edge>
+@comptime
+export function Relationship(info: nupp.derive.Info): nupp.derive.Result<derived.Edge>
     if info.kind ~= "record" and info.kind ~= "struct" then
         return nupp.derive.error("Relationship requires a record or fixed-layout struct", info.reference)
     end

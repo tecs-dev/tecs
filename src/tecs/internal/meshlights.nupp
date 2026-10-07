@@ -14,11 +14,16 @@ local record Version
     visit: integer = 0
 end
 export record Collector
-    private points: query.Query
-    private spots: query.Query
-    private versions: {[integer]: Version} = {}
-    private visit: integer = 0
-    private payload: string = ""
+    @private
+    points: query.Query
+    @private
+    spots: query.Query
+    @private
+    versions: {[integer]: Version} = {}
+    @private
+    visit: integer = 0
+    @private
+    payload: string = ""
     frame: function(exclusive self: Collector): string
 end
 export function new(exclusive value: world.World): Collector
@@ -63,7 +68,8 @@ function Collector.frame(exclusive self: Collector): string
     end
     local buffer = io2.newBuffer()
     local writer = io2.newScalarWriter(buffer)
-    unsafe do
+    @unsafe
+    do
         for lane, query in ipairs({self.points, self.spots}) do
             for candidate, size in query:iter() do
                 const active = candidate as archetype.Archetype
@@ -83,8 +89,7 @@ function Collector.frame(exclusive self: Collector): string
                             light.innerAngle >= 0
                             and light.innerAngle <= light.outerAngle
                             and light.outerAngle > 0
-                            and light.outerAngle < math.pi
-                            / 2,
+                            and light.outerAngle < math.pi / 2,
                             "invalid spot light cone"
                         )
                         inner, outer = math.cos(light.innerAngle), math.cos(light.outerAngle)

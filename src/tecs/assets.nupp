@@ -157,22 +157,27 @@ export record Handle
 
     --- Engine-owned. Counts the callers holding this payload. Ordinary game code
     --- reads `holds` instead.
-    private refs: integer
+    @private
+    refs: integer
 
     --- Engine-owned. Holds the acquired payload until the last release, and nil
     --- after it. Ordinary game code reads `value` instead.
-    private payload: any?
+    @private
+    payload: any?
 
     --- Engine-owned. Counts the replacements this handle has taken. Ordinary
     --- game code reads `revision` instead.
-    private replacements: integer
+    @private
+    replacements: integer
 
     --- Engine-owned. Frees the payload at the last release, or nil where the
     --- collector owns it.
-    private free: (function(value: any): nil)?
+    @private
+    free: (function(value: any): nil)?
 
     --- Engine-owned. Names the loader that counts this handle as resident.
-    private owner: Assets
+    @private
+    owner: Assets
 
     value: function(borrows self: Handle): any?
     resident: function(borrows self: Handle): boolean
@@ -212,30 +217,38 @@ end
 export record Assets
     --- Engine-owned. Indexes acquisitions in flight by kind and path so two
     --- overlapping requests share one. Ordinary game code reads `pending`.
-    private entries: {[string]: Entry}
+    @private
+    entries: {[string]: Entry}
 
     --- Engine-owned. Holds the same acquisitions in a stable order the readiness
     --- pump walks without allocating.
-    private order: {Entry}
+    @private
+    order: {Entry}
 
     --- Engine-owned. Counts acquisitions in flight.
-    private inFlight: integer
+    @private
+    inFlight: integer
 
     --- Engine-owned. Counts handles still holding a payload.
-    private residentCount: integer
+    @private
+    residentCount: integer
 
     --- Engine-owned. Numbers private replacement acquisitions so two reloads
     --- never share an entry.
-    private serial: integer
+    @private
+    serial: integer
 
     --- Engine-owned. Holds the callers parked in `drain`.
-    private drainers: {Waiter}
+    @private
+    drainers: {Waiter}
 
     --- Engine-owned. Holds the registered readiness pump until shutdown.
-    private pump: suspension.Source?
+    @private
+    pump: suspension.Source?
 
     --- Engine-owned. Reports whether this loader still accepts requests.
-    private open: boolean
+    @private
+    open: boolean
 
     request: function(self: Assets, kind: Kind, path: string): (Handle?, string?)
     reload: function(self: Assets, kind: Kind, handle: Handle): (boolean, string?)

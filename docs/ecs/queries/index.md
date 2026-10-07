@@ -18,7 +18,7 @@ for archetype, length in movers:iter() do
     local entities = archetype.entities
     local transforms = assert(archetype:getMut(Transform2D))
     local velocities = assert(archetype:get(Velocity))
-    unsafe do
+    @unsafe do
         for row = 1, length as integer do
             transforms[row].x = transforms[row].x + velocities[row].x * dt
             print(entities[row])
@@ -45,7 +45,7 @@ marks that component dirty:
 for archetype, length in movers:iter() do
     local transforms = assert(archetype:getMut(Transform2D))
     local velocities = assert(archetype:get(Velocity))
-    unsafe do
+    @unsafe do
         for row = 1, length as integer do
             local transform = transforms[row]
             local velocity = velocities[row]
@@ -93,7 +93,7 @@ local expiring = world:newQuery({
 for archetype, length in expiring:iter() do
     local entities = archetype.entities
     local ttls = assert(archetype:getMut(tecs.ecs.TTL))
-    unsafe do
+    @unsafe do
         for row = 1, length as integer do
             ttls[row].remaining = ttls[row].remaining - dt
             if ttls[row].remaining <= 0 then

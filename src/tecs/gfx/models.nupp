@@ -184,16 +184,26 @@ export record Model
     --- Read-only. Reports the number of decoded clips.
     animationCount: integer
 
-    private _draws: {Draw}
-    private _nodes: {Node}
-    private _skins: {Skin}
-    private _meshes: {MeshInput}
-    private _bounds: {BoundsInput}
-    private _materials: {MaterialInput}
-    private _materialNames: {string}
-    private _order: {integer}
-    private _animationByName: {[string]: integer}
-    private _nextInstance: integer = 0
+    @private
+    _draws: {Draw}
+    @private
+    _nodes: {Node}
+    @private
+    _skins: {Skin}
+    @private
+    _meshes: {MeshInput}
+    @private
+    _bounds: {BoundsInput}
+    @private
+    _materials: {MaterialInput}
+    @private
+    _materialNames: {string}
+    @private
+    _order: {integer}
+    @private
+    _animationByName: {[string]: integer}
+    @private
+    _nextInstance: integer = 0
 
     --- Creates an independently animated instance.
     --- @return Returns reusable primitive templates plus private joint
@@ -233,18 +243,30 @@ export record Instance
     --- Caller-writable. Controls whether `update` advances playback.
     playing: boolean
 
-    private _model: Model
-    private _world: World?
-    private _entities: {[integer]: integer}
-    private _pose: {number}
-    private _localMatrices: {number}
-    private _worldMatrices: {number}
-    private _palettes: {{number}}
-    private _skins: {SkinInput}
-    private _morphs: {MorphInput}
-    private _morphWeights: {{number}}
-    private _temporary: {number}
-    private _inverse: {number}
+    @private
+    _model: Model
+    @private
+    _world: World?
+    @private
+    _entities: {[integer]: integer}
+    @private
+    _pose: {number}
+    @private
+    _localMatrices: {number}
+    @private
+    _worldMatrices: {number}
+    @private
+    _palettes: {{number}}
+    @private
+    _skins: {SkinInput}
+    @private
+    _morphs: {MorphInput}
+    @private
+    _morphWeights: {{number}}
+    @private
+    _temporary: {number}
+    @private
+    _inverse: {number}
 
     --- Binds one primitive to an existing entity's `Transform3D`.
     --- @param world The caller supplies the entity's world. Every binding on
@@ -355,11 +377,10 @@ local function writeTransform(matrix: {number}, offset: integer, target: mesh.Tr
     const r00, r01, r02 = matrix[offset] / sx, matrix[offset + 4] / sy, matrix[offset + 8] / sz
     const r10, r11, r12 = matrix[offset + 1] / sx, matrix[offset + 5] / sy, matrix[offset + 9] / sz
     const r20, r21, r22 = matrix[offset + 2] / sx, matrix[offset + 6] / sy, matrix[offset + 10] / sz
-    if math.abs(
-        r00 * r01 + r10 * r11 + r20 * r21
-    ) > 1e-4 or math.abs(
-        r00 * r02 + r10 * r12 + r20 * r22
-    ) > 1e-4 or math.abs(r01 * r02 + r11 * r12 + r21 * r22) > 1e-4 then
+    if math.abs(r00 * r01 + r10 * r11 + r20 * r21) > 1e-4
+        or math.abs(r00 * r02 + r10 * r12 + r20 * r22) > 1e-4
+        or math.abs(r01 * r02 + r11 * r12 + r21 * r22) > 1e-4
+    then
         error("tecs: an animated node hierarchy produces shear", 3)
     end
     local qx, qy, qz, qw = 0.0, 0.0, 0.0, 1.0

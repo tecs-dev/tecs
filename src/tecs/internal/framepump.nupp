@@ -18,9 +18,9 @@ export type State = "parked" | "continue" | "stopped"
 export record Pump
     handler: suspension.Handler
 
-    private active: thread?
-    private result: boolean?
-    private failure: any?
+    @private active: thread?
+    @private result: boolean?
+    @private failure: any?
 end
 
 local function resumeTask(exclusive pump: Pump, task: thread, keepRunning: boolean?): nil

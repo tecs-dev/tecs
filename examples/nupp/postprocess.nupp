@@ -50,7 +50,8 @@ fn postprocess(uv: vec2<f32>) -> vec4<f32> {
         name = "example.postprocess.rotate",
         phase = ecs.phases.Update,
         run = function(dt: number): nil
-            unsafe do
+            @unsafe
+            do
                 for candidate, count in moving:iter() do
                     local transforms: Transform2D[?] = assert(candidate:getMut(ecs.Transform2D))
                     for index = 1, count as integer do

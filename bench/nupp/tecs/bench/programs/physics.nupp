@@ -184,7 +184,8 @@ world:addSystem({
     run = function(_dt: number): nil
         -- One sixtieth of a second of force, as the Teal scene applies it.
         const strength = BLOWER_FORCE / 60.0
-        unsafe do
+        @unsafe
+        do
             for candidate, count in bodies:iter() do
                 const archetype = assert(candidate)
                 -- `get`, not `getMut`: the blower reads positions and never writes

@@ -558,7 +558,8 @@ end
 --- Reports whether `item` differs from what its glyphs were built from.
 local neutralTint = carray(rendercomponents.Tint, 1)
 
-unsafe do
+@unsafe
+do
     neutralTint[0] = new rendercomponents.Tint(1, 1, 1, 1)
 end
 
@@ -743,7 +744,8 @@ local function publish(
     const needed = #missing
     if needed > 0 then
         const staged = carray(StagedGlyph, needed + 1)
-        unsafe do
+        @unsafe
+        do
             for index = 1, needed do
                 const source = missing[index]
                 staged[index].x, staged[index].y = placedX[source], placedY[source]
@@ -765,7 +767,8 @@ local function publish(
                 const transforms = assert(candidate:getMut(rendercomponents.Transform2DComponent))
                 const sprites = assert(candidate:getMut(rendercomponents.SpriteComponent))
                 local source: integer = 1
-                unsafe do
+                @unsafe
+                do
                     for row = first, last do
                         -- Publication preserves reservation order, but a glyph
                         -- canceled before the barrier leaves a hole in it.
@@ -783,7 +786,8 @@ local function publish(
                 end
             end
         )
-        unsafe do
+        @unsafe
+        do
             for index = 1, needed do
                 const spawned = firstId ~= nil and firstId + index - 1 or assert(ids)[index]
                 staged[index].entity = spawned
@@ -807,9 +811,10 @@ end
 local function sweep(exclusive world: ecs.World, state: Install, tagged: integer): nil
     const owned: {[integer]: boolean} = {}
     for entity, held in pairs(state.owned) do
-        if world:isAlive(
-            entity
-        ) and world:get(entity, TextComponent) ~= nil and not world:has(entity, ecs.Disabled) then
+        if world:isAlive(entity)
+            and world:get(entity, TextComponent) ~= nil
+            and not world:has(entity, ecs.Disabled)
+        then
             for index = 1, #held do
                 owned[held[index]] = true
             end
@@ -846,16 +851,17 @@ local function run(exclusive world: ecs.World, state: Install): nil
     state.epoch = epoch
 
     local live: integer = 0
-    unsafe do
+    @unsafe
+    do
         for candidate, count in state.texts:iter() do
             const active = candidate as archetype.Archetype
             const rows = count as integer
             live = live + rows
-            if repacked or active:isComponentDirty(
-                TextComponent
-            ) or active:isComponentDirty(
-                rendercomponents.TintComponent
-            ) or active:isComponentDirty(rendercomponents.Transform2DComponent) then
+            if repacked
+                or active:isComponentDirty(TextComponent)
+                or active:isComponentDirty(rendercomponents.TintComponent)
+                or active:isComponentDirty(rendercomponents.Transform2DComponent)
+            then
                 const column: {Text} = assert(active:get(TextComponent))
                 const transforms: rendercomponents.Transform2D[
                     ?
@@ -913,13 +919,13 @@ local function run(exclusive world: ecs.World, state: Install): nil
     for _, count in state.glyphs:iter() do
         tagged = tagged + (count as integer)
     end
-    if (
-        state.ownerCount > live or tagged ~= state.residentCount
-    ) and (
-        state.residentCount ~= state.sweptResident
-        or state.ownerCount ~= state.sweptOwners
-        or tagged ~= state.sweptTagged
-    ) then
+    if (state.ownerCount > live or tagged ~= state.residentCount)
+        and (
+            state.residentCount ~= state.sweptResident
+            or state.ownerCount ~= state.sweptOwners
+            or tagged ~= state.sweptTagged
+        )
+    then
         sweep(world, state, tagged)
     end
 end

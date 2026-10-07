@@ -13,7 +13,8 @@ end
 --- Selects the physical column without introducing a runtime dispatch.
 --- @param T The declared value type.
 --- @return Returns its native or managed column type.
-export comptime function StorageColumn(T: type): type
+@comptime
+export function StorageColumn(T: type): type
     if nupp.types.describe(T).declarationKind == "struct" then
         return nupp.types.carray(T)
     end
@@ -24,7 +25,8 @@ end
 --- @param T The declared component or edge value type.
 --- @param EdgeType The relationship declaration contract.
 --- @return Returns a native component column or a managed wildcard edge view.
-export comptime function Column(T: type, EdgeType: type): type
+@comptime
+export function Column(T: type, EdgeType: type): type
     if nupp.derive.claims(T, EdgeType) then
         return nupp.types.array(T)
     end

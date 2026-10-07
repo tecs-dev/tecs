@@ -304,65 +304,122 @@ end
 --- Clean runs preserve their packed bytes; the receiver supplies the generation
 --- it has already validated and uploaded.
 export record Extractor
-    private cameraOverride: rendercomponents.Camera2D? = nil
+    @private
+    cameraOverride: rendercomponents.Camera2D? = nil
     setCamera: function(exclusive self: Extractor, camera: rendercomponents.Camera2D): nil
     revision: function(borrows self: Extractor): integer
-    private world: world.World
-    private drawCapacity: integer
-    private lightCapacity: integer
-    private drawables: query.Query
-    private activeCameras: query.Query
-    private cameras: query.Query
-    private lights: query.Query
-    private order: {integer}
-    private entities: {integer}
-    private depths: {number}
-    private transforms: rendercomponents.Transform2D[?]
-    private tints: rendercomponents.Tint[?]
-    private clipIds: {integer}
-    private imageIds: {integer}
-    private samplers: {integer}
-    private lanes: {integer}
-    private chunkKinds: {boolean}
-    private castFlags: {integer}
-    private castHeights: {number}
-    private materialIds: {integer}
-    private params: {number}
-    private u0: {number}
-    private v0: {number}
-    private u1: {number}
-    private v1: {number}
-    private cacheValid: boolean
-    private sceneRevision: integer
-    private runs: {[integer]: Run}
-    private ranges: dirtyranges.Ranges
-    private drawSlots: {integer}
-    private relayout: boolean
-    private batchDirty: boolean
-    private rewritten: integer
-    private frameTableAt: integer = -1
-    private cachedAlpha: number
-    private cachedView: {number}
-    private cachedLayers: integer
-    private cachedClips: integer
-    private cachedImages: integer
-    private cachedMaterials: integer
-    private cachedBatches: integer
-    private cachedCasters: integer
-    private cachedBatchBytes: string
-    private screenSpace: boolean
-    private instanceWords: array.Array<uint32>
-    private orderChanged: boolean
-    private rowCount: integer
-    private sorted: integer
-    private before: function(left: integer, right: integer): boolean
-    private lightOrder: {integer}
-    private lightEntities: {integer}
-    private lightTransforms: rendercomponents.Transform2D[?]
-    private lightValues: lighting.PointLight2D[?]
-    private lightCount: integer
-    private lightsSorted: integer
-    private beforeLight: function(left: integer, right: integer): boolean
+    @private
+    world: world.World
+    @private
+    drawCapacity: integer
+    @private
+    lightCapacity: integer
+    @private
+    drawables: query.Query
+    @private
+    activeCameras: query.Query
+    @private
+    cameras: query.Query
+    @private
+    lights: query.Query
+    @private
+    order: {integer}
+    @private
+    entities: {integer}
+    @private
+    depths: {number}
+    @private
+    transforms: rendercomponents.Transform2D[?]
+    @private
+    tints: rendercomponents.Tint[?]
+    @private
+    clipIds: {integer}
+    @private
+    imageIds: {integer}
+    @private
+    samplers: {integer}
+    @private
+    lanes: {integer}
+    @private
+    chunkKinds: {boolean}
+    @private
+    castFlags: {integer}
+    @private
+    castHeights: {number}
+    @private
+    materialIds: {integer}
+    @private
+    params: {number}
+    @private
+    u0: {number}
+    @private
+    v0: {number}
+    @private
+    u1: {number}
+    @private
+    v1: {number}
+    @private
+    cacheValid: boolean
+    @private
+    sceneRevision: integer
+    @private
+    runs: {[integer]: Run}
+    @private
+    ranges: dirtyranges.Ranges
+    @private
+    drawSlots: {integer}
+    @private
+    relayout: boolean
+    @private
+    batchDirty: boolean
+    @private
+    rewritten: integer
+    @private
+    frameTableAt: integer = -1
+    @private
+    cachedAlpha: number
+    @private
+    cachedView: {number}
+    @private
+    cachedLayers: integer
+    @private
+    cachedClips: integer
+    @private
+    cachedImages: integer
+    @private
+    cachedMaterials: integer
+    @private
+    cachedBatches: integer
+    @private
+    cachedCasters: integer
+    @private
+    cachedBatchBytes: string
+    @private
+    screenSpace: boolean
+    @private
+    instanceWords: array.Array<uint32>
+    @private
+    orderChanged: boolean
+    @private
+    rowCount: integer
+    @private
+    sorted: integer
+    @private
+    before: function(left: integer, right: integer): boolean
+    @private
+    lightOrder: {integer}
+    @private
+    lightEntities: {integer}
+    @private
+    lightTransforms: rendercomponents.Transform2D[?]
+    @private
+    lightValues: lighting.PointLight2D[?]
+    @private
+    lightCount: integer
+    @private
+    lightsSorted: integer
+    @private
+    beforeLight: function(left: integer, right: integer): boolean
 
     --- Encodes a complete standalone snapshot, including every batch and instance.
     --- @param width the physical target width in pixels
@@ -586,7 +643,8 @@ local function collect(exclusive self: Extractor): nil
     local orderChanged = self.orderChanged
     -- Keep an interrupted collection invalid until a complete sort succeeds.
     self.orderChanged = true
-    unsafe do
+    @unsafe
+    do
         for candidate, first, last, runKey in sources(self) do
             local active = candidate as archetype.Archetype
             const run = assert(self.runs[assert(runKey)])
@@ -722,9 +780,9 @@ local function collect(exclusive self: Extractor): nil
                         end
                         if rowPivots ~= nil and not hasChunk then
                             const pivot = rowPivots[index]
-                            if u0[
-                                rows
-                            ] >= 0 or not frametable.hasPivot((-u0[rows]) as integer, pivot.sheet, pivot.slice) then
+                            if u0[rows] >= 0
+                                or not frametable.hasPivot((-u0[rows]) as integer, pivot.sheet, pivot.slice)
+                            then
                                 const dx, dy = (0.5 - pivot.x) * transform.scaleX, (0.5 - pivot.y) * transform.scaleY
                                 const c, sine = math.cos(transform.rotation), math.sin(transform.rotation)
                                 transform.x = transform.x + dx * c - dy * sine
@@ -732,9 +790,11 @@ local function collect(exclusive self: Extractor): nil
                             end
                         end
 
-                        if oldImage ~= imageIds[
-                            rows
-                        ] or oldSampler ~= samplers[rows] or oldLane ~= lanes[rows] or oldFlag ~= castFlags[rows] then
+                        if oldImage ~= imageIds[rows]
+                            or oldSampler ~= samplers[rows]
+                            or oldLane ~= lanes[rows]
+                            or oldFlag ~= castFlags[rows]
+                        then
                             self.batchDirty = true
                         end
                         ::nextTile::
@@ -767,7 +827,8 @@ local function collectLights(exclusive self: Extractor): nil
     const lightValues = self.lightValues
     local _, _, alpha = self.world:getFixedTiming()
     local found: integer = 0
-    unsafe do
+    @unsafe
+    do
         for candidate, count in self.lights:iter() do
             local active = candidate as archetype.Archetype
             local rowTransforms: rendercomponents.Transform2D[
@@ -781,11 +842,12 @@ local function collectLights(exclusive self: Extractor): nil
                 if not (light.radius > 0.0) or not finite(light.radius) then
                     error("framepacket: a PointLight2D radius must be greater than zero", 3)
                 end
-                if not finite(
-                    light.height
-                ) or not finite(
-                    light.r
-                ) or not finite(light.g) or not finite(light.b) or not finite(light.intensity) then
+                if not finite(light.height)
+                    or not finite(light.r)
+                    or not finite(light.g)
+                    or not finite(light.b)
+                    or not finite(light.intensity)
+                then
                     error("framepacket: a PointLight2D holds a value that is not finite", 3)
                 end
                 found = found + 1
@@ -880,7 +942,8 @@ local function sceneChanged(exclusive self: Extractor, eye: View, snapshot: bool
     local relayout = not self.cacheValid
     local changed = force
     local _, _, alpha = self.world:getFixedTiming()
-    unsafe do
+    @unsafe
+    do
         for candidate, first, last, runKey in sources(self) do
             const active = candidate as archetype.Archetype
             const count = assert(last) - assert(first) + 1
@@ -901,9 +964,9 @@ local function sceneChanged(exclusive self: Extractor, eye: View, snapshot: bool
                 relayout = true
             end
             const structural = active:structuralCount()
-            run.dirty = force or run.structAt ~= structural or (
-                alpha ~= self.cachedAlpha and active:get(rendercomponents.PreviousTransform2DComponent) ~= nil
-            )
+            run.dirty = force
+                or run.structAt ~= structural
+                or (alpha ~= self.cachedAlpha and active:get(rendercomponents.PreviousTransform2DComponent) ~= nil)
             run.structAt = structural
             for index, component in ipairs(watched) do
                 const writes = active:writeCount(component)
@@ -922,9 +985,9 @@ local function sceneChanged(exclusive self: Extractor, eye: View, snapshot: bool
                     end
                 end
                 const signature = table.concat(parts)
-                run.dirty = force or run.signature ~= signature or (
-                    alpha ~= self.cachedAlpha and active:get(rendercomponents.PreviousTransform2DComponent) ~= nil
-                )
+                run.dirty = force
+                    or run.signature ~= signature
+                    or (alpha ~= self.cachedAlpha and active:get(rendercomponents.PreviousTransform2DComponent) ~= nil)
                 run.signature = signature
             end
             local length = run.length
@@ -986,9 +1049,11 @@ local function rebuildBatches(exclusive self: Extractor): nil
     local runLength: integer = 0
     for index = 1, rows do
         const row = order[index]
-        if imageIds[
-            row
-        ] ~= runImage or samplers[row] ~= runSampler or lanes[row] ~= runLane or self.chunkKinds[row] ~= runChunk then
+        if imageIds[row] ~= runImage
+            or samplers[row] ~= runSampler
+            or lanes[row] ~= runLane
+            or self.chunkKinds[row] ~= runChunk
+        then
             if runLength > 0 then
                 batchWriter:writeUint32(wrap(runImage))
                     :writeUint32(wrap(runSampler))
@@ -1107,7 +1172,8 @@ local function prefix(exclusive self: Extractor, eye: View, mode: integer, revis
     const lightOrder = self.lightOrder
     const lightTransforms = self.lightTransforms
     const lightValues = self.lightValues
-    unsafe do
+    @unsafe
+    do
         for index = 1, lightCount do
             const slot = lightOrder[index]
             const transform = lightTransforms[slot]
@@ -1161,7 +1227,8 @@ local function packInstances(exclusive self: Extractor, eye: View, full: boolean
     do
         local pointer, length = output:ref()
         assert(wordsNeeded <= length)
-        unsafe do
+        @unsafe
+        do
             local raw = (pointer as uint32*) + 0
             local floats = borrowFrom(ffi.cast<float[?]>(raw), output)
             local words = borrowFrom(ffi.cast<uint32[?]>(raw), output)
@@ -1253,7 +1320,8 @@ local function payload(exclusive self: Extractor, delta: boolean, baseRevision: 
     do
         local pointer, length = input:ref()
         assert(self.rowCount * 20 <= length)
-        unsafe do
+        @unsafe
+        do
             local raw = (pointer as uint8*) + 0
             local bytes = borrowFrom(ffi.cast<uint8*>(raw), input)
             if delta then

@@ -66,7 +66,7 @@ Use `getMut` to mark the component dirty before changing its native array:
 
 ```nupp
 const chunk = assert(world:getMut(entity, tecs.gfx.TileChunk))
-unsafe do
+@unsafe do
     chunk.tiles[128] = 5
 end
 ```
@@ -75,7 +75,7 @@ The old explicit dirty tag is also supported when editing a shared view:
 
 ```nupp
 const chunk = assert(world:get(entity, tecs.gfx.TileChunk))
-unsafe do
+@unsafe do
     chunk.tiles[128] = 5
 end
 world:set(entity, tecs.gfx.DirtyTileChunk)

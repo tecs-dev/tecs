@@ -706,7 +706,8 @@ export record Microphone
     --- with. This is the requested value, not the device's own.
     channels: integer
 
-    private capture: audiobackend.Capture?
+    @private
+    capture: audiobackend.Capture?
 
     --- Read-only. Reports terminal capture failure, or nil while the stream is
     --- healthy. Frames already buffered remain readable; after draining, `read`
@@ -764,31 +765,51 @@ export record Audio
     --- mixer; there is no automatic reopen or replay on the default device.
     failureReason: string?
 
-    private closed: boolean
+    @private
+    closed: boolean
 
     --- Read-only. Reports whether an output opened and remains usable as of
     --- the last `update`. False also describes a device-free mixer.
     available: boolean
 
-    private backend: audiobackend.Backend
-    private streamSeconds: number
-    private voices: {Voice}
-    private free: {integer}
-    private live: integer
-    private master: number
-    private mutedFlag: boolean
-    private groupGains: {[string]: number}
-    private groupMutedFlags: {[string]: boolean}
-    private groupPausedFlags: {[string]: boolean}
-    private limits: {[string]: Limit}
-    private buckets: {[string]: Bucket}
-    private clipsById: {[integer]: Clip}
-    private variance: random.Random
-    private now: number
-    private pending: {audiobackend.Command}
-    private pendingCount: integer
-    private finished: {integer}
-    private playSystem: ecs.System?
+    @private
+    backend: audiobackend.Backend
+    @private
+    streamSeconds: number
+    @private
+    voices: {Voice}
+    @private
+    free: {integer}
+    @private
+    live: integer
+    @private
+    master: number
+    @private
+    mutedFlag: boolean
+    @private
+    groupGains: {[string]: number}
+    @private
+    groupMutedFlags: {[string]: boolean}
+    @private
+    groupPausedFlags: {[string]: boolean}
+    @private
+    limits: {[string]: Limit}
+    @private
+    buckets: {[string]: Bucket}
+    @private
+    clipsById: {[integer]: Clip}
+    @private
+    variance: random.Random
+    @private
+    now: number
+    @private
+    pending: {audiobackend.Command}
+    @private
+    pendingCount: integer
+    @private
+    finished: {integer}
+    @private
+    playSystem: ecs.System?
 
     flush: function(exclusive self: Audio): nil
     destroy: function(exclusive self: Audio): nil
@@ -2138,7 +2159,8 @@ local rowOptions: PlayOptions = {}
 --- Archetype-shaped rather than per-row: a disabled entity sits in an archetype
 --- of its own, so a world with nothing disabled matches nothing.
 local function hush(hushed: ecs.Query): nil
-    unsafe do
+    @unsafe
+    do
         for source, length in hushed:iter() do
             local rows = source:get(SoundComponent)
             local total = length or 0
@@ -2175,7 +2197,8 @@ local function reconcile(exclusive self: Audio, sounds: ecs.Query, hushed: ecs.Q
 
     hush(hushed)
 
-    unsafe do
+    @unsafe
+    do
         for source, length in sounds:iter() do
             local rows = source:get(SoundComponent)
             local total = length or 0

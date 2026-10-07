@@ -14,11 +14,16 @@ export record Capture
     --- Read-only to callers. True after completion, including failure.
     ready: boolean
 
-    private width: integer
-    private height: integer
-    private rgba: string
-    private png: string
-    private reason: string?
+    @private
+    width: integer
+    @private
+    height: integer
+    @private
+    rgba: string
+    @private
+    png: string
+    @private
+    reason: string?
 end
 
 local queue: {integer} = {}

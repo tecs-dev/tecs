@@ -89,7 +89,7 @@ world:addSystem({
     run = function(dt: number): nil
         for candidate, count in moving:iter() do
             local transforms: tecs.ecs.Transform2D[?] = assert(candidate:getMut(tecs.ecs.Transform2D))
-            unsafe do
+            @unsafe do
                 for index = 1, count as integer do
                     transforms[index].x = transforms[index].x + dt * 30
                 end

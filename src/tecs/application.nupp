@@ -72,15 +72,24 @@ export record Application is mcpbindings.Application
     elapsed: number
     frame: integer
 
-    private state: State
-    private plugin: Plugin?
-    private onEvent: (function(event: platformevents.Event, exclusive app: Application): nil)?
-    private bindDebug: function(): nil
-    private mcpPort: integer?
-    private debug: boolean
-    private debugMaxFrames: integer?
-    private failure: string?
-    private shutdownDone: boolean
+    @private
+    state: State
+    @private
+    plugin: Plugin?
+    @private
+    onEvent: (function(event: platformevents.Event, exclusive app: Application): nil)?
+    @private
+    bindDebug: function(): nil
+    @private
+    mcpPort: integer?
+    @private
+    debug: boolean
+    @private
+    debugMaxFrames: integer?
+    @private
+    failure: string?
+    @private
+    shutdownDone: boolean
 
     --- Polls optional debugging once per host turn, outside the world update scope.
     --- @param self the application to serve.

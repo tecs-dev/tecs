@@ -88,28 +88,50 @@ export record Archetype
     --- storage seam is public for world internals; game code uses get or getMut.
     columns: {[integer]: any}
 
-    private dirty: {[integer]: boolean}
-    private structureVersion: integer
-    private valueVersions: {[integer]: integer}
-    private sparseEdges: {[integer]: {[integer]: {any}}}
-    private storageHighWater: integer
-    private nativeCapacity: integer
-    private nativeColumns: {[integer]: ffistorage.Storage}?
-    private nativeAliases: {[integer]: integer}?
-    private observers: {EntityObserver}
-    private activated: boolean
-    private dirtyQueue: DirtyQueue?
-    private dirtyEpoch: integer
-    private residueFrom: integer
-    private addedFrom: integer
-    private touched: {integer}
-    private touchedAll: boolean
-    private countedValues: {[integer]: boolean}
-    private valueVersion: integer
-    private plain: boolean
-    private addEdges: {[integer]: Archetype}
-    private removeEdges: {[integer]: Archetype}
-    private movePlans: {[Archetype]: MovePlan}
+    @private
+    dirty: {[integer]: boolean}
+    @private
+    structureVersion: integer
+    @private
+    valueVersions: {[integer]: integer}
+    @private
+    sparseEdges: {[integer]: {[integer]: {any}}}
+    @private
+    storageHighWater: integer
+    @private
+    nativeCapacity: integer
+    @private
+    nativeColumns: {[integer]: ffistorage.Storage}?
+    @private
+    nativeAliases: {[integer]: integer}?
+    @private
+    observers: {EntityObserver}
+    @private
+    activated: boolean
+    @private
+    dirtyQueue: DirtyQueue?
+    @private
+    dirtyEpoch: integer
+    @private
+    residueFrom: integer
+    @private
+    addedFrom: integer
+    @private
+    touched: {integer}
+    @private
+    touchedAll: boolean
+    @private
+    countedValues: {[integer]: boolean}
+    @private
+    valueVersion: integer
+    @private
+    plain: boolean
+    @private
+    addEdges: {[integer]: Archetype}
+    @private
+    removeEdges: {[integer]: Archetype}
+    @private
+    movePlans: {[Archetype]: MovePlan}
 
     --- Registers publication callbacks without replaying existing rows.
     --- @param self The archetype to observe.
@@ -182,13 +204,13 @@ export record Archetype
         ): nil
     )
         & (
-        function<T is derived.Edge>(
-            self: Archetype,
-            relationship: Type<T>,
-            row: integer,
-            callback: function(value: T)
-        ): nil
-    )
+            function<T is derived.Edge>(
+                self: Archetype,
+                relationship: Type<T>,
+                row: integer,
+                callback: function(value: T)
+            ): nil
+        )
 
     --- Returns the first edge in target order.
     --- @param self The archetype containing the row.
@@ -198,7 +220,9 @@ export record Archetype
     getFirstRelationship: (
         function<C is components.Component>(self: Archetype, relationship: C, row: integer): C.Value?
     )
-        & (function<T is derived.Edge>(self: Archetype, relationship: Type<T>, row: integer): T?)
+        & (
+            function<T is derived.Edge>(self: Archetype, relationship: Type<T>, row: integer): T?
+        )
 end
 
 --- Produces the canonical signature for a component collection.
@@ -895,9 +919,11 @@ export function moveAll(
             const component = target.components[index]
             const id = component.componentId
             const previous = source.columns[id]
-            if component.storageType ~= "tag" and supplied[
-                id
-            ] == nil and previous ~= nil and component ~= resetComponent then
+            if component.storageType ~= "tag"
+                and supplied[id] == nil
+                and previous ~= nil
+                and component ~= resetComponent
+            then
                 if base == 0 then
                     source.columns[id], target.columns[id] = target.columns[id], previous
                 else

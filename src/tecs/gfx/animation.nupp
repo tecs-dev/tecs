@@ -379,7 +379,8 @@ end
 local function encode(query: ecs.Query, borrows world: ecs.World, clock: number, runs: {[integer]: EncodedRun}): nil
     const timestep = world:getFixedTiming()
     const changedSheets = sheet.revision()
-    unsafe do
+    @unsafe
+    do
         for candidate, count in query:iter() do
             const active = candidate as archetype.Archetype
             local run = runs[active.id]
@@ -387,11 +388,12 @@ local function encode(query: ecs.Query, borrows world: ecs.World, clock: number,
                 run = new EncodedRun()
                 runs[active.id] = run
             end
-            if run.structural ~= active:structuralCount() or run.animation ~= active:writeCount(
-                AnimationComponent
-            ) or run.sprite ~= active:writeCount(
-                SpriteComponent
-            ) or run.sheets ~= changedSheets or run.timestep ~= timestep then
+            if run.structural ~= active:structuralCount()
+                or run.animation ~= active:writeCount(AnimationComponent)
+                or run.sprite ~= active:writeCount(SpriteComponent)
+                or run.sheets ~= changedSheets
+                or run.timestep ~= timestep
+            then
                 const pivots = active:get(sheet.Pivot)
                 const animations = assert(active:get(AnimationComponent))
                 const sprites = assert(active:get(SpriteComponent))
@@ -410,9 +412,7 @@ local function encode(query: ecs.Query, borrows world: ecs.World, clock: number,
                         const rate = not held
                             and instance.playing
                             and instance.speed > 0
-                            and timestep
-                            * instance.speed
-                            * frametable.TICK_HZ
+                            and timestep * instance.speed * frametable.TICK_HZ
                             or 0
                         assert(rate == rate and rate < math.huge, "animation speed must be finite")
                         target.image = source:boundImage()
@@ -432,7 +432,8 @@ local function encode(query: ecs.Query, borrows world: ecs.World, clock: number,
 end
 
 local function report(exclusive world: ecs.World, query: ecs.Query, before: number, after: number): nil
-    unsafe do
+    @unsafe
+    do
         for candidate, count in query:iter() do
             const active = candidate as archetype.Archetype
             const animations = assert(active:get(AnimationComponent))
@@ -463,7 +464,8 @@ local function report(exclusive world: ecs.World, query: ecs.Query, before: numb
 end
 
 local function rebase(query: ecs.Query, clock: number, shift: number): nil
-    unsafe do
+    @unsafe
+    do
         for candidate, count in query:iter() do
             const active = candidate as archetype.Archetype
             const sprites = assert(active:get(SpriteComponent))

@@ -21,7 +21,7 @@ for archetype, length in movers:iter() do
     local transforms =
         assert(archetype:getMut(tecs.ecs.Transform2D))
     local velocities = assert(archetype:get(Velocity))
-    unsafe do
+    @unsafe do
         for row = 1, length as integer do
             local transform = transforms[row]
             local velocity = velocities[row]
@@ -42,7 +42,7 @@ For a conditional write, read first and mark only when the condition succeeds:
 local transforms = assert(archetype:get(tecs.ecs.Transform2D))
 local changed = false
 
-unsafe do
+@unsafe do
     for row = 1, length as integer do
         if needsCorrection(transforms[row]) then
             correct(transforms[row])

@@ -51,14 +51,16 @@ managedWorld:commit()
 const nativeQuery = nativeWorld:newQuery({include = {native}})
 const managedQuery = managedWorld:newQuery({include = {managed}})
 const baseline = carray(NativePoint, count)
-unsafe do
+@unsafe
+do
     for row = 0, count - 1 do
         baseline[row].y = 1
     end
 end
 
 local function directLoop(): nil
-    unsafe do
+    @unsafe
+    do
         for row = 0, count - 1 do
             baseline[row].x += baseline[row].y
         end
@@ -68,7 +70,8 @@ end
 local function nativeLoop(): nil
     for candidate, rows in nativeQuery:iter() do
         const column = assert(candidate:getMut(native))
-        unsafe do
+        @unsafe
+        do
             for row = 1, assert(rows) do
                 column[row].x += column[row].y
             end
@@ -88,7 +91,8 @@ end
 local function derivedLoop(): nil
     for candidate, rows in derivedQuery:iter() do
         const column = assert(candidate:getMut(NativePoint))
-        unsafe do
+        @unsafe
+        do
             for row = 1, assert(rows) do
                 column[row].x += column[row].y
             end
@@ -117,7 +121,8 @@ const raw = harness.newStage("direct raw save")
 const nativeRaw = harness.newStage("native raw save")
 harness.measure(raw, warmup, samples, function(): nil
     bytes:reset()
-    unsafe do
+    @unsafe
+    do
         bytes:putcdata(ffi.cast<voidptr>(baseline), count * 16)
     end
 end)
@@ -176,6 +181,7 @@ print("Rows per window: " .. tostring(count))
 print(harness.format({direct, ecs, derived, tables, raw, nativeRaw, nativeBatch, derivedBatch}))
 print("Native ECS allocations over 100 full query loops: " .. tostring(allocated) .. " bytes")
 print("Derived ECS allocations over 100 full query loops: " .. tostring(derivedAllocated) .. " bytes")
-unsafe do
+@unsafe
+do
     assert(baseline[0].x == warmup + samples)
 end

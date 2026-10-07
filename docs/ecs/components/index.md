@@ -28,7 +28,7 @@ world:addSystem({
         for archetype, length in movers:iter() do
             local transforms = assert(archetype:getMut(Transform2D))
             local velocities = assert(archetype:get(Velocity))
-            unsafe do
+            @unsafe do
                 for row = 1, length as integer do
                     transforms[row].x = transforms[row].x
                         + velocities[row].x * dt

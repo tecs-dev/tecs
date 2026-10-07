@@ -128,7 +128,8 @@ function suite.groupsStaticTilesAndKeepsAnimatedSprites(): nil
         end
     end
     const chunk = assert(world:get(chunkId, gfx.TileChunk))
-    unsafe do
+    @unsafe
+    do
         test.equal(chunk.tiles[2], 2)
         test.equal(chunk.tiles[17], 2147483650)
         test.equal(chunk.tiles[18], 1073741826)

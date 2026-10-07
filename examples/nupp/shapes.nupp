@@ -84,7 +84,8 @@ local function install(exclusive app: Application, interactive: boolean): nil
                     const transforms = assert(candidate:getMut(ecs.Transform2D))
                     const tints = assert(candidate:getMut(gfx.Tint))
                     const materials = assert(candidate:getMut(gfx.Material))
-                    unsafe do
+                    @unsafe
+                    do
                         for row = first, last do
                             const index = row - first
                             transforms[row].x = (index % columns + 0.5) * cellWidth
@@ -116,24 +117,32 @@ local function install(exclusive app: Application, interactive: boolean): nil
                     return
                 end
                 local dx, dy = 0, 0
-                if input:keyDown(
-                    "ArrowLeft"
-                ) or input:keyDown("KeyA") or input:keyPressed("ArrowLeft") or input:keyPressed("KeyA") then
+                if input:keyDown("ArrowLeft")
+                or input:keyDown("KeyA")
+                or input:keyPressed("ArrowLeft")
+                or input:keyPressed("KeyA")
+                then
                     dx = dx - 1
                 end
-                if input:keyDown(
-                    "ArrowRight"
-                ) or input:keyDown("KeyD") or input:keyPressed("ArrowRight") or input:keyPressed("KeyD") then
+                if input:keyDown("ArrowRight")
+                or input:keyDown("KeyD")
+                or input:keyPressed("ArrowRight")
+                or input:keyPressed("KeyD")
+                then
                     dx = dx + 1
                 end
-                if input:keyDown(
-                    "ArrowUp"
-                ) or input:keyDown("KeyW") or input:keyPressed("ArrowUp") or input:keyPressed("KeyW") then
+                if input:keyDown("ArrowUp")
+                or input:keyDown("KeyW")
+                or input:keyPressed("ArrowUp")
+                or input:keyPressed("KeyW")
+                then
                     dy = dy - 1
                 end
-                if input:keyDown(
-                    "ArrowDown"
-                ) or input:keyDown("KeyS") or input:keyPressed("ArrowDown") or input:keyPressed("KeyS") then
+                if input:keyDown("ArrowDown")
+                or input:keyDown("KeyS")
+                or input:keyPressed("ArrowDown")
+                or input:keyPressed("KeyS")
+                then
                     dy = dy + 1
                 end
                 -- Wheel notches and smooth trackpad pixels use different units.
@@ -161,7 +170,8 @@ local function install(exclusive app: Application, interactive: boolean): nil
             run = function(): nil
                 for candidate, amount in moving:iter() do
                     const transforms = assert(candidate:getMut(ecs.Transform2D))
-                    unsafe do
+                    @unsafe
+                    do
                         for row = 1, amount as integer do
                             transforms[row].rotation = transforms[row].rotation + 0.01
                         end
