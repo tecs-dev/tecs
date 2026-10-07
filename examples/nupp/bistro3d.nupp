@@ -64,19 +64,13 @@ local function tuneLegacyMaterial(exclusive material: MaterialInfo, lambert: int
     -- on surfaces that plausibly have them instead of sweeping over the whole
     -- street as the camera moves.
     local name = material.name:lower()
-    if name:find(
-        "metal",
-        1,
-        true
-    ) or name:find(
-        "bronze",
-        1,
-        true
-    ) or name:find(
-        "steel",
-        1,
-        true
-    ) or name:find("iron", 1, true) or name:find("chain", 1, true) or name:find("manhole", 1, true) then
+    if name:find("metal", 1, true)
+        or name:find("bronze", 1, true)
+        or name:find("steel", 1, true)
+        or name:find("iron", 1, true)
+        or name:find("chain", 1, true)
+        or name:find("manhole", 1, true)
+    then
         material.metallic = 0.7
         material.roughness = 0.48
     elseif name:find("glass", 1, true) or name:find("wet", 1, true) then

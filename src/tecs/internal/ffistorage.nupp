@@ -280,10 +280,8 @@ local function integer64(spelling: string, value: any): any
     end
     const negative = value:sub(1, 1) == "-"
     const digits = (negative and value:sub(2) or value):gsub("^0+", "")
-    const limit = spelling == "uint64_t"
-        and "18446744073709551615"
-        or negative
-        and "9223372036854775808"
+    const limit = spelling == "uint64_t" and "18446744073709551615"
+        or negative and "9223372036854775808"
         or "9223372036854775807"
     if (negative and spelling == "uint64_t") or #digits > #limit or (#digits == #limit and digits > limit) then
         error("64-bit snapshot integer is out of range", 3)
@@ -330,9 +328,7 @@ local function rowBytes(storage: Storage, column: any, first: integer, count: in
         or count < 0
         or first % 1 ~= 0
         or count % 1 ~= 0
-        or first
-        + count
-        - 1 > metadata.capacity
+        or first + count - 1 > metadata.capacity
     then
         error("FFI column range is out of bounds", 3)
     end

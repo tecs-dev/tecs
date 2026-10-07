@@ -57,10 +57,8 @@ export function validate(value: View): nil
         and value.y >= 0
         and value.width > 0
         and value.height > 0
-        and value.x
-        + value.width <= 1
-        and value.y
-        + value.height <= 1,
+        and value.x + value.width <= 1
+        and value.y + value.height <= 1,
         "View viewport must be positive and contained within the frame"
     )
 end
@@ -96,7 +94,8 @@ export const Component: components.TableComponent<View> = components.newComponen
             order = value.order,
             enabled = value.enabled,
             camera2D = c2 ~= nil and {x = c2.x, y = c2.y, zoom = c2.zoom, rotation = c2.rotation} or nil,
-            camera3D = c3 ~= nil and {
+            camera3D = c3 ~= nil
+            and {
                 x = c3.x,
                 y = c3.y,
                 z = c3.z,
@@ -107,7 +106,8 @@ export const Component: components.TableComponent<View> = components.newComponen
                 verticalFov = c3.verticalFov,
                 near = c3.near,
                 far = c3.far
-            } or nil
+            }
+            or nil
         }
     end,
     load = function(value: any): View

@@ -124,9 +124,11 @@ export function write(
                     entry
                 ] = new events.SnapshotComponentEntry(
                     name = component.componentName,
-                    fingerprint = storage ~= nil and storage.rawCodec and (
-                        relationship == nil or target ~= nil
-                    ) and storage.fingerprint or nil
+                    fingerprint = storage ~= nil
+                    and storage.rawCodec
+                    and (relationship == nil or target ~= nil)
+                    and storage.fingerprint
+                    or nil
                 )
             end
             indices[#indices + 1] = entry
@@ -258,9 +260,7 @@ local function savedSchema(fingerprint: string): ffistorage.Storage
             or scalar == "unsigned char"
             or scalar == "short"
             or scalar == "unsigned short"
-            or scalar:match(
-            "^u?int[1368][0246]?_t$"
-        ) ~= nil
+            or scalar:match("^u?int[1368][0246]?_t$") ~= nil
         if not allowed then
             error("snapshot FFI schema contains an unsupported scalar", 3)
         end
@@ -317,9 +317,8 @@ export function read(bytes: string, maximum: integer): Decoded
         definitions[index] = component
         if fingerprint ~= nil then
             const current = ffistorage.find(component.componentId)
-            layouts[
-                index
-            ] = current ~= nil and current.fingerprint == fingerprint and current or savedSchema(fingerprint as string)
+            layouts[index] = current ~= nil and current.fingerprint == fingerprint and current
+                or savedSchema(fingerprint as string)
         end
     end
     const frames: {Frame} = {}

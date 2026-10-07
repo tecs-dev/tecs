@@ -179,9 +179,9 @@ function suite.readsAPivotOutOfASliceThatMoves(): nil
         :frame(0, 0, 32, 32)
         :frame(32, 0, 32, 32)
         :sliceKeys("hand", "right", {
-        {frame = 1, x = 8, y = 8, w = 8, h = 8, pivotX = 4, pivotY = 4},
-        {frame = 2, x = 16, y = 8, w = 8, h = 8, pivotX = 0, pivotY = 0},
-    })
+            {frame = 1, x = 8, y = 8, w = 8, h = 8, pivotX = 4, pivotY = 4},
+            {frame = 2, x = 16, y = 8, w = 8, h = 8, pivotX = 0, pivotY = 0},
+        })
         :slice("foot", 0, 24, 8, 8)
         :finish()
 
