@@ -51,7 +51,7 @@ end
 
 local function test(args: {string}): nil
     if args[1] == "--help" or args[1] == "-h" then
-        commands.run({commands.compiler(), "test-runner", "--help"})
+        commands.run({commands.compiler(), "test", "--internal-runner", "--help"})
         return
     end
     local expected: {string} = {}
@@ -71,7 +71,10 @@ local function test(args: {string}): nil
         end
     end
     const env = native.libraries()
-    const result = commands.capture(commands.append({commands.compiler(), "test-runner", "--json"}, args), env)
+    const result = commands.capture(
+        commands.append({commands.compiler(), "test", "--internal-runner", "--json"}, args),
+        env
+    )
     io.stderr:write(result.errorOutput)
     assert(files.createDirectory(commands.root .. "/out/validation"))
     assert(files.write(commands.root .. "/out/validation/nupp-tests.json", result.output))

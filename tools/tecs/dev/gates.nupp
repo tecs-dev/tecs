@@ -31,7 +31,7 @@ export function tests(value: unknown, expected: {string}): nil
 end
 
 --- Requires one complete stage per budget and returns p95 violations.
-export function performance(value: unknown, budgets: {[string]: number}): {string}
+export function performance(value: unknown, budgets: {@readonly [string]: number}): {string}
     const report = value as any
     assert(type(report) == "table" and type(report.stages) == "table", "missing performance stages")
     local violations: {string} = {}

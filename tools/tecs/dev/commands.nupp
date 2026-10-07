@@ -13,6 +13,19 @@ export type Invocation = {
 --- The engine checkout, independent of the tooling process's working directory.
 export const root: string = os.getenv("TECS_PROJECT_ROOT") or assert(path.newPath(".."):absolute()):toString()
 
+--- Starts a child process.
+--- @param options how to start it
+--- @return the running child, which the caller closes
+--- @raises string when the child cannot be started
+local function spawn(options: process.Options): process.Process
+    const child, problem = process.spawn(options)
+    if child == nil then
+        error("cannot start " .. options.args[1] .. ": " .. tostring(problem), 0)
+    end
+
+    return child
+end
+
 --- Runs an argv without a shell and preserves the child's exit status.
 export function run(args: {string}, env: {[string]: string}?, cwd: string?): nil
     const options: process.Options = {
@@ -23,7 +36,7 @@ export function run(args: {string}, env: {[string]: string}?, cwd: string?): nil
         stdout = "inherit",
         stderr = "inherit"
     }
-    with child = new process.Process(options) do
+    with child = spawn(options) do
         const status = child:wait()
         if not status:succeeded() then
             os.exit(status.exitCode == 0 and 1 or status.exitCode)
@@ -34,7 +47,7 @@ end
 --- Captures both streams, draining them together until the child exits.
 export function capture(args: {string}, env: {[string]: string}?, clearEnv: boolean?, cwd: string?): process.Result
     const options: process.Options = {args = args, cwd = cwd or root, env = env, clearEnv = clearEnv}
-    with child = new process.Process(options) do
+    with child = spawn(options) do
         return assert(child:communicate())
     end
 end
@@ -58,7 +71,7 @@ export function runTogether(invocations: {Invocation}): integer
                 stdout = "inherit",
                 stderr = "inherit"
             }
-            children[#children + 1] = group:adopt(nupp.manage(new process.Process(options)))
+            children[#children + 1] = group:adopt(nupp.manage(spawn(options)))
         end
 
         local exitCode: integer = 0

@@ -1,9 +1,9 @@
-local files = require("nupp.io.files")
+local path = require("nupp.io.path")
 local process = require("nupp.io.process")
 
 -- Enter the tooling project before compiling its modules. The game manifest
 -- must never acquire the process-launch capabilities its development tools use.
-const root = assert(files.currentDirectory())
+const root = assert(path.currentDirectory()):toString()
 const compilerRoot = os.getenv("NUPP_COMPILER_ROOT")
 local args = {compilerRoot and compilerRoot .. "/bin/nupp" or "nupp", "run", "tecs/dev/main.nupp"}
 for _, value in ipairs({...} as {string}) do
@@ -17,7 +17,11 @@ const options: process.Options = {
     stdout = "inherit",
     stderr = "inherit"
 }
-with child = new process.Process(options) do
+const spawned, problem = process.spawn(options)
+if spawned == nil then
+    error("cannot start " .. args[1] .. ": " .. tostring(problem), 0)
+end
+with child = spawned do
     const status = child:wait()
     if not status:succeeded() then
         os.exit(status.exitCode == 0 and 1 or status.exitCode)

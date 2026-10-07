@@ -77,8 +77,8 @@ function suite.previewResolvesCleanRoutesAndRefusesTraversal(): nil
 end
 
 function suite.benchmarkModulesCannotShadowRuntimeModules(): nil
-    for _, source in ipairs(assert(files.glob(commands.root .. "/bench/nupp/**/*.nupp"))) do
-        const relative = source:sub(#commands.root + #"/bench/nupp/" + 1)
+    for _, found in ipairs(assert(files.glob(commands.root .. "/bench/nupp/**/*.nupp"))) do
+        const relative = found:toString():sub(#commands.root + #"/bench/nupp/" + 1)
         test.equal(files.exists(commands.root .. "/src/" .. relative), false)
         test.equal(files.exists(commands.root .. "/src/" .. relative:gsub("%.nupp$", "/init.nupp")), false)
     end

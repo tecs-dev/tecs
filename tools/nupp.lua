@@ -6,5 +6,5 @@ return {
         default = "tools",
         targets = { tools = { kind = "modules" } },
     },
-    test = { build = "tools", argv = { "nupp", "test-runner" } },
+    test = { build = "tools" },
 }
