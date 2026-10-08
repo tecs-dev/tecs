@@ -1139,18 +1139,12 @@ export record Emitter
     --- Caller-writable color multiplier.
     tint: Color? = nil
 
-    @private
-    clock: number = 0
-    @private
-    start: number = 0
-    @private
-    clearAt: number = -1
-    @private
-    generation: number = 1
-    @private
-    queued: number = 0
-    @private
-    timestep: number = 0.016666666666666666
+    @private clock: number = 0
+    @private start: number = 0
+    @private clearAt: number = -1
+    @private generation: number = 1
+    @private queued: number = 0
+    @private timestep: number = 0.016666666666666666
 
     --- Starts or resumes emission. A stopped emitter starts its schedule again.
     --- @return The operation returns no value.
@@ -1365,34 +1359,20 @@ export record Pool
     --- Read-only maximum number of simultaneous emitters, including draining ones.
     maxEmitters: integer
 
-    @private
-    id: integer
-    @private
-    serial: integer = 0
-    @private
-    step: integer
-    @private
-    timestep: number = 0.016666666666666666
-    @private
-    alpha: number = 0
-    @private
-    query: ecs.Query
-    @private
-    nextToken: integer = 0
-    @private
-    holdings: {[Emitter]: Holding} = {}
-    @private
-    refused: {[Emitter]: boolean} = {}
-    @private
-    indices: {[integer]: Holding} = {}
-    @private
-    free: {RangeSlot}
-    @private
-    bytes: string = ""
-    @private
-    packedSerial: integer = -1
-    @private
-    packedRevision: integer = -1
+    @private id: integer
+    @private serial: integer = 0
+    @private step: integer
+    @private timestep: number = 0.016666666666666666
+    @private alpha: number = 0
+    @private query: ecs.Query
+    @private nextToken: integer = 0
+    @private holdings: {[Emitter]: Holding} = {}
+    @private refused: {[Emitter]: boolean} = {}
+    @private indices: {[integer]: Holding} = {}
+    @private free: {RangeSlot}
+    @private bytes: string = ""
+    @private packedSerial: integer = -1
+    @private packedRevision: integer = -1
 end
 
 local pools: {[ecs.World]: Pool} = setmetatable({}, {__mode = "k"}) as {[ecs.World]: Pool}
@@ -1545,8 +1525,7 @@ local function sync(exclusive pool: Pool, borrows world: ecs.World): nil
                 assert(item.effect == holding.effect, "an admitted emitter cannot change effect; spawn a new emitter")
                 holding.seen, holding.draining = true, false
                 holding.previousX, holding.previousY = holding.x, holding.y
-                @unsafe
-                do
+                @unsafe do
                     holding.x, holding.y, holding.rotation = transforms[
                         row
                     ].x, transforms[row].y, transforms[row].rotation

@@ -102,8 +102,7 @@ local function backdrop(exclusive app: Application): nil
             for candidate, count in spinning:iter() do
                 const transforms = assert(candidate:getMut(ecs.Transform2D))
                 for row = 1, count as integer do
-                    @unsafe
-                    do
+                    @unsafe do
                         transforms[row].rotation = transforms[row].rotation + dt * 1.5
                     end
                 end
@@ -113,8 +112,7 @@ local function backdrop(exclusive app: Application): nil
                 const transforms = assert(candidate:getMut(ecs.Transform2D))
                 for row = 1, count as integer do
                     const angle = elapsed * 0.6 + index * 2.094
-                    @unsafe
-                    do
+                    @unsafe do
                         transforms[row].x = width * (0.5 + 0.3 * math.cos(angle))
                         transforms[row].y = height * (0.5 + 0.3 * math.sin(angle))
                     end

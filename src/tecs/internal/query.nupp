@@ -83,35 +83,23 @@ export type MembershipCallback = function(
 
 --- A reusable query whose matching archetypes are updated by its world.
 export record Query
-    @private
-    owner: Owner?
+    @private owner: Owner?
 
     --- Read-only. Describes the normalized query; mutation after construction is
     --- unsupported.
     descriptor: Descriptor
 
-    @private
-    include: {components.Component}
-    @private
-    exclude: {components.Component}
-    @private
-    includeAny: {components.Component}
-    @private
-    active: {archetype.Archetype}
-    @private
-    positions: {[archetype.Archetype]: integer}
-    @private
-    lifecycle: archetype.EntityObserver?
-    @private
-    matched: {[archetype.Archetype]: boolean}
-    @private
-    groupIds: {integer}
-    @private
-    groupPositions: {[integer]: integer}
-    @private
-    grouped: {[integer]: GroupState}
-    @private
-    archetypeGroups: {[archetype.Archetype]: integer}
+    @private include: {components.Component}
+    @private exclude: {components.Component}
+    @private includeAny: {components.Component}
+    @private active: {archetype.Archetype}
+    @private positions: {[archetype.Archetype]: integer}
+    @private lifecycle: archetype.EntityObserver?
+    @private matched: {[archetype.Archetype]: boolean}
+    @private groupIds: {integer}
+    @private groupPositions: {[integer]: integer}
+    @private grouped: {[integer]: GroupState}
+    @private archetypeGroups: {[archetype.Archetype]: integer}
 
     --- Iterates nonempty archetypes, in ascending group order when grouped.
     --- @param self The query to read.

@@ -184,26 +184,16 @@ export record Model
     --- Read-only. Reports the number of decoded clips.
     animationCount: integer
 
-    @private
-    _draws: {Draw}
-    @private
-    _nodes: {Node}
-    @private
-    _skins: {Skin}
-    @private
-    _meshes: {MeshInput}
-    @private
-    _bounds: {BoundsInput}
-    @private
-    _materials: {MaterialInput}
-    @private
-    _materialNames: {string}
-    @private
-    _order: {integer}
-    @private
-    _animationByName: {[string]: integer}
-    @private
-    _nextInstance: integer = 0
+    @private _draws: {Draw}
+    @private _nodes: {Node}
+    @private _skins: {Skin}
+    @private _meshes: {MeshInput}
+    @private _bounds: {BoundsInput}
+    @private _materials: {MaterialInput}
+    @private _materialNames: {string}
+    @private _order: {integer}
+    @private _animationByName: {[string]: integer}
+    @private _nextInstance: integer = 0
 
     --- Creates an independently animated instance.
     --- @return Returns reusable primitive templates plus private joint
@@ -243,30 +233,18 @@ export record Instance
     --- Caller-writable. Controls whether `update` advances playback.
     playing: boolean
 
-    @private
-    _model: Model
-    @private
-    _world: World?
-    @private
-    _entities: {[integer]: integer}
-    @private
-    _pose: {number}
-    @private
-    _localMatrices: {number}
-    @private
-    _worldMatrices: {number}
-    @private
-    _palettes: {{number}}
-    @private
-    _skins: {SkinInput}
-    @private
-    _morphs: {MorphInput}
-    @private
-    _morphWeights: {{number}}
-    @private
-    _temporary: {number}
-    @private
-    _inverse: {number}
+    @private _model: Model
+    @private _world: World?
+    @private _entities: {[integer]: integer}
+    @private _pose: {number}
+    @private _localMatrices: {number}
+    @private _worldMatrices: {number}
+    @private _palettes: {{number}}
+    @private _skins: {SkinInput}
+    @private _morphs: {MorphInput}
+    @private _morphWeights: {{number}}
+    @private _temporary: {number}
+    @private _inverse: {number}
 
     --- Binds one primitive to an existing entity's `Transform3D`.
     --- @param world The caller supplies the entity's world. Every binding on

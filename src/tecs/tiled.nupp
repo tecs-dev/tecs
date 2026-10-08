@@ -700,8 +700,7 @@ local function addStatic(
     const encoded = cell.id + 1 + (
         cell.flipH and 2147483648 or 0
     ) + (cell.flipV and 1073741824 or 0) + (cell.flipD and 536870912 or 0)
-    @unsafe
-    do
+    @unsafe do
         chunk.value.value.tiles[chunkIndex(cell)] = encoded
     end
 end
@@ -1030,8 +1029,7 @@ local function step(exclusive world: World, state: State, dt: number): nil
                         if oldGroup ~= nil then
                             const oldChunk = assert(active.chunks[oldGroup])
                             const oldCell = assert(oldChunk.cells[changed])
-                            @unsafe
-                            do
+                            @unsafe do
                                 oldChunk.value.value.tiles[chunkIndex(oldCell)] = 0
                             end
                             oldChunk.cells[changed], active.cellChunks[changed] = nil, nil

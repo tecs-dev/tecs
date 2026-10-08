@@ -77,8 +77,7 @@ local function fill(exclusive value: ecs.World, kind: integer, base: number, spr
         function(candidate: ecs.Archetype, first: integer, last: integer): nil
             const transforms = assert(candidate:getMut(ecs.Transform2D))
             const tints = assert(candidate:getMut(gfx.Tint))
-            @unsafe
-            do
+            @unsafe do
                 for row = first, last do
                     transforms[row].x = originX + math.random() * AREA_W
                     transforms[row].y = originY + math.random() * AREA_H
@@ -108,8 +107,7 @@ world:addSystem({
     phase = MODE == "fixed" and ecs.phases.FixedUpdate or ecs.phases.Update,
     run = function(dt: number): nil
         const step = dt * 40.0
-        @unsafe
-        do
+        @unsafe do
             for candidate, count in moving:iter() do
                 const transforms: ecs.Transform2D[?] = assert(candidate:getMut(ecs.Transform2D))
                 for row = 1, count as integer do

@@ -54,16 +54,11 @@ export record Request
     --- agent sent, which the frame decodes.
     arguments: string
 
-    @private
-    task: thread
-    @private
-    payload: string?
-    @private
-    isError: boolean
-    @private
-    wasCrashed: boolean
-    @private
-    answered: boolean
+    @private task: thread
+    @private payload: string?
+    @private isError: boolean
+    @private wasCrashed: boolean
+    @private answered: boolean
 end
 
 --- A loopback-only Streamable HTTP endpoint at `/mcp`.
@@ -72,20 +67,13 @@ export record Server
     --- the caller asked for unless it asked for zero.
     port: integer
 
-    @private
-    toolsJSON: string
-    @private
-    tasks: {thread}
-    @private
-    runnable: {thread}
-    @private
-    queued: {[thread]: boolean}
-    @private
-    pending: {Request}
-    @private
-    destroyed: boolean
-    @private
-    handler: suspension.Handler
+    @private toolsJSON: string
+    @private tasks: {thread}
+    @private runnable: {thread}
+    @private queued: {[thread]: boolean}
+    @private pending: {Request}
+    @private destroyed: boolean
+    @private handler: suspension.Handler
 
     setTools: function(exclusive self: Server, toolsJSON: string): nil
     pump: function(exclusive self: Server): nil
@@ -129,8 +117,7 @@ local function park(): nil
     -- This driver owns every resumption and resumes false during shutdown so
     -- parked handlers unwind their subscriptions and connection owners.
     local keepRunning: any
-    @unsafe
-    do
+    @unsafe do
         keepRunning = coroutine.yield()
     end
     if keepRunning == false then

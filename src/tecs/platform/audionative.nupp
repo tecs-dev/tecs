@@ -296,8 +296,7 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
             -- The index stays below `CAPACITY` because the flush below resets
             -- it there, which is the bound the checker has no way to read off
             -- a `carray` handle.
-            @unsafe
-            do
+            @unsafe do
                 local target = commands[written]
                 target.kind = source.kind as uint32
                 target.handle = source.handle as uint32
@@ -333,8 +332,7 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
         for index = 0, count - 1 do
             -- The library answers with at most the capacity it was given, so
             -- the read stays inside the array this call allocated.
-            @unsafe
-            do
+            @unsafe do
                 if events[index].kind as integer == EVENT_FINISHED then
                     written = written + 1
                     out[written] = events[index].handle as integer
@@ -601,8 +599,7 @@ local function wrapCapture(
         -- The block holds `capacityFrames * width` samples and the read above
         -- was bounded by both, which is the fact the checker cannot read off an
         -- `ffi.new` handle.
-        @unsafe
-        do
+        @unsafe do
             for index = 0, frames * width - 1 do
                 out[index + 1] = samples[index].value as number
             end
@@ -623,8 +620,7 @@ local function wrapCapture(
             if chunk > capacityFrames then
                 chunk = capacityFrames
             end
-            @unsafe
-            do
+            @unsafe do
                 for index = 0, chunk * width - 1 do
                     samples[index].value = nupp.math.f32.narrow(source[offset + index + 1])
                 end

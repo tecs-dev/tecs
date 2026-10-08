@@ -106,19 +106,16 @@ export record Server
 
     --- Engine-owned. Holds the HTTP transport. Ordinary game code should
     --- ignore this field.
-    @private
-    endpoint: transport.Server
+    @private endpoint: transport.Server
 
     --- Engine-owned. Holds the registry revision the published listing was
     --- encoded from, which is what `poll` compares to decide whether to
     --- publish again. Ordinary game code should ignore this field.
-    @private
-    publishedRevision: integer
+    @private publishedRevision: integer
 
     --- Engine-owned. Reports whether `destroy` has stopped the server.
     --- Ordinary game code should ignore this field.
-    @private
-    destroyed: boolean
+    @private destroyed: boolean
 end
 
 -- Requiring the two tool modules is what registers the built-in tools, and a

@@ -84,8 +84,7 @@ local function install(exclusive app: Application, interactive: boolean): nil
                     const transforms = assert(candidate:getMut(ecs.Transform2D))
                     const tints = assert(candidate:getMut(gfx.Tint))
                     const materials = assert(candidate:getMut(gfx.Material))
-                    @unsafe
-                    do
+                    @unsafe do
                         for row = first, last do
                             const index = row - first
                             transforms[row].x = (index % columns + 0.5) * cellWidth
@@ -170,8 +169,7 @@ local function install(exclusive app: Application, interactive: boolean): nil
             run = function(): nil
                 for candidate, amount in moving:iter() do
                     const transforms = assert(candidate:getMut(ecs.Transform2D))
-                    @unsafe
-                    do
+                    @unsafe do
                         for row = 1, amount as integer do
                             transforms[row].rotation = transforms[row].rotation + 0.01
                         end

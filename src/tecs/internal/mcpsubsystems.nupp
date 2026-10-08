@@ -402,8 +402,7 @@ register(
         const owner = nupp.manage(profile.sample({intervalMs = interval, zone = args.zone}))
         session = owner:alias()
         -- Custody passes to the module slot until `profile_stop` takes it.
-        @unsafe
-        nupp.release(owner)
+        @unsafe nupp.release(owner)
 
         return {running = true, intervalMs = interval, zone = args.zone}
     end,

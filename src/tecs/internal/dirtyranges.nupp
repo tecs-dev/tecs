@@ -8,11 +8,9 @@ export const MAX: integer = 64
 
 --- Reusable, bounded ranges of modified buffer bytes.
 export record Ranges
-    @private
-    entries: {integer}
+    @private entries: {integer}
     count: integer
-    @private
-    collapsed: boolean
+    @private collapsed: boolean
     bytes: integer
     mark: function(self: Ranges, offset: integer, size: integer): nil
     at: function(self: Ranges, index: integer): (integer, integer)

@@ -96,26 +96,16 @@ export record Face
     --- at index zero.
     numGlyphs: integer
 
-    @private
-    bytes: string
-    @private
-    locaAt: integer
-    @private
-    locaLong: boolean
-    @private
-    glyfAt: integer
-    @private
-    hmtxAt: integer
-    @private
-    hMetrics: integer
-    @private
-    cmapAt: integer
-    @private
-    cmapFormat: integer
-    @private
-    kernAt: integer
-    @private
-    kernPairs: {[integer]: number}?
+    @private bytes: string
+    @private locaAt: integer
+    @private locaLong: boolean
+    @private glyfAt: integer
+    @private hmtxAt: integer
+    @private hMetrics: integer
+    @private cmapAt: integer
+    @private cmapFormat: integer
+    @private kernAt: integer
+    @private kernPairs: {[integer]: number}?
 
     glyphIndex: function(borrows self: Face, codepoint: integer): integer
     advanceOf: function(borrows self: Face, glyph: integer): number

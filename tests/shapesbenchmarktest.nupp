@@ -12,8 +12,7 @@ local function eye(session: Session): Camera2D
     const cameras = session.app.world:newQuery({include = {gfx.Camera2D, gfx.ActiveCamera}})
     for candidate, count in cameras:iter() do
         test.equal(count, 1)
-        @unsafe
-        do
+        @unsafe do
             const rows = assert(candidate:get(gfx.Camera2D))
             const c = rows[1]
             return gfx.newCamera2D({x = c.x, y = c.y, zoom = c.zoom, rotation = c.rotation})

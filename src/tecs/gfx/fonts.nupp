@@ -124,12 +124,9 @@ export record Glyph
     --- Read-only. Reports the region height in atlas texels.
     height: integer
 
-    @private
-    atlasX: integer
-    @private
-    atlasY: integer
-    @private
-    coverage: {integer}
+    @private atlasX: integer
+    @private atlasY: integer
+    @private coverage: {integer}
 end
 
 --- A loaded font and the atlas its glyphs live in.
@@ -168,36 +165,21 @@ export record Font
     --- is the ascent less the descent plus the leading.
     lineHeight: number
 
-    @private
-    face: truetype.Face
-    @private
-    padding: integer
-    @private
-    scale: number
-    @private
-    cells: {[integer]: Glyph}
-    @private
-    ordered: {Glyph}
-    @private
-    atlasWidth: integer
-    @private
-    atlasHeight: integer
-    @private
-    shelfX: integer
-    @private
-    shelfY: integer
-    @private
-    shelfHeight: integer
-    @private
-    rows: {string}
-    @private
-    rowDirty: {boolean}
-    @private
-    changed: boolean
-    @private
-    uploaded: boolean
-    @private
-    imageId: integer
+    @private face: truetype.Face
+    @private padding: integer
+    @private scale: number
+    @private cells: {[integer]: Glyph}
+    @private ordered: {Glyph}
+    @private atlasWidth: integer
+    @private atlasHeight: integer
+    @private shelfX: integer
+    @private shelfY: integer
+    @private shelfHeight: integer
+    @private rows: {string}
+    @private rowDirty: {boolean}
+    @private changed: boolean
+    @private uploaded: boolean
+    @private imageId: integer
 end
 
 --- Every loaded font by identity.

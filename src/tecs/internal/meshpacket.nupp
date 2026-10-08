@@ -31,18 +31,12 @@ local record Run
     seen: integer
 end
 export record Collector
-    @private
-    lights: Collector2
-    @private
-    query: query.Query
-    @private
-    versions: {[integer]: Run} = {}
-    @private
-    revision: integer = 0
-    @private
-    visit: integer = 0
-    @private
-    payload: string = ""
+    @private lights: Collector2
+    @private query: query.Query
+    @private versions: {[integer]: Run} = {}
+    @private revision: integer = 0
+    @private visit: integer = 0
+    @private payload: string = ""
     currentRevision: function(borrows self: Collector): integer
     frame: function(
         exclusive self: Collector,
@@ -102,8 +96,7 @@ local function collect(exclusive self: Collector): string
     local writer, paletteWriter = io2.newScalarWriter(buffer), io2.newScalarWriter(palette)
     local count: integer = 0
     local paletteCount: integer = 0
-    @unsafe
-    do
+    @unsafe do
         for candidate, size in self.query:iter() do
             const active = candidate as archetype.Archetype
             const transforms = assert(active:get(mesh.Transform3DComponent))

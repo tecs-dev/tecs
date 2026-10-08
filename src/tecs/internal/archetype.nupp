@@ -88,50 +88,28 @@ export record Archetype
     --- storage seam is public for world internals; game code uses get or getMut.
     columns: {[integer]: any}
 
-    @private
-    dirty: {[integer]: boolean}
-    @private
-    structureVersion: integer
-    @private
-    valueVersions: {[integer]: integer}
-    @private
-    sparseEdges: {[integer]: {[integer]: {any}}}
-    @private
-    storageHighWater: integer
-    @private
-    nativeCapacity: integer
-    @private
-    nativeColumns: {[integer]: ffistorage.Storage}?
-    @private
-    nativeAliases: {[integer]: integer}?
-    @private
-    observers: {EntityObserver}
-    @private
-    activated: boolean
-    @private
-    dirtyQueue: DirtyQueue?
-    @private
-    dirtyEpoch: integer
-    @private
-    residueFrom: integer
-    @private
-    addedFrom: integer
-    @private
-    touched: {integer}
-    @private
-    touchedAll: boolean
-    @private
-    countedValues: {[integer]: boolean}
-    @private
-    valueVersion: integer
-    @private
-    plain: boolean
-    @private
-    addEdges: {[integer]: Archetype}
-    @private
-    removeEdges: {[integer]: Archetype}
-    @private
-    movePlans: {[Archetype]: MovePlan}
+    @private dirty: {[integer]: boolean}
+    @private structureVersion: integer
+    @private valueVersions: {[integer]: integer}
+    @private sparseEdges: {[integer]: {[integer]: {any}}}
+    @private storageHighWater: integer
+    @private nativeCapacity: integer
+    @private nativeColumns: {[integer]: ffistorage.Storage}?
+    @private nativeAliases: {[integer]: integer}?
+    @private observers: {EntityObserver}
+    @private activated: boolean
+    @private dirtyQueue: DirtyQueue?
+    @private dirtyEpoch: integer
+    @private residueFrom: integer
+    @private addedFrom: integer
+    @private touched: {integer}
+    @private touchedAll: boolean
+    @private countedValues: {[integer]: boolean}
+    @private valueVersion: integer
+    @private plain: boolean
+    @private addEdges: {[integer]: Archetype}
+    @private removeEdges: {[integer]: Archetype}
+    @private movePlans: {[Archetype]: MovePlan}
 
     --- Registers publication callbacks without replaying existing rows.
     --- @param self The archetype to observe.

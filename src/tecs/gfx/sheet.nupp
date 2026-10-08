@@ -188,56 +188,38 @@ export record Sheet
 
     --- Engine-owned. Stores each frame's pixel rectangle, four numbers a
     --- frame. Ordinary game code should call `rect`.
-    @private
-    rects: {number}
+    @private rects: {number}
 
     --- Engine-owned. Stores each frame's duration in seconds. Construction
     --- converts the authored milliseconds once so playback never divides.
-    @private
-    durations: {number}
+    @private durations: {number}
 
     --- Engine-owned. Stores each frame's region, four numbers a frame.
-    @private
-    uvs: {number}
+    @private uvs: {number}
 
-    @private
-    tagFrom: {[integer]: integer}
-    @private
-    tagTo: {[integer]: integer}
-    @private
-    tagDirection: {[integer]: Direction}
-    @private
-    tagNames: {string}
-    @private
-    tagIds: {[string]: integer}
+    @private tagFrom: {[integer]: integer}
+    @private tagTo: {[integer]: integer}
+    @private tagDirection: {[integer]: Direction}
+    @private tagNames: {string}
+    @private tagIds: {[string]: integer}
 
     --- Engine-owned. Stores the frame shown at each step of a tag's cycle,
     --- which is what collapses the three directions into one lookup: the
     --- direction decides the order once, when the sheet is built.
-    @private
-    tagOrder: {[integer]: {integer}}
+    @private tagOrder: {[integer]: {integer}}
 
     --- Engine-owned. Stores the elapsed seconds each step of a tag's cycle
     --- ends on.
-    @private
-    tagTiming: {[integer]: {number}}
+    @private tagTiming: {[integer]: {number}}
 
-    @private
-    tagCycle: {[integer]: number}
-    @private
-    sliceList: {Slice}
-    @private
-    sliceIds: {[string]: integer}
-    @private
-    image: integer
-    @private
-    originU: number
-    @private
-    originV: number
-    @private
-    scaleU: number
-    @private
-    scaleV: number
+    @private tagCycle: {[integer]: number}
+    @private sliceList: {Slice}
+    @private sliceIds: {[string]: integer}
+    @private image: integer
+    @private originU: number
+    @private originV: number
+    @private scaleU: number
+    @private scaleV: number
 
     rect: function(self: Sheet, frame: integer): (number, number, number, number)
     duration: function(self: Sheet, frame: integer): number
@@ -272,12 +254,9 @@ end
 --- What every constructor here goes through, and what an importer for a format
 --- nothing else reads writes into.
 export record Builder
-    @private
-    sheet: Sheet
-    @private
-    tags: {[string]: Tag}
-    @private
-    slices: {Slice}
+    @private sheet: Sheet
+    @private tags: {[string]: Tag}
+    @private slices: {Slice}
 
     frame: function(self: Builder, x: number, y: number, w: number, h: number, duration: number?): Builder
     tag: function(self: Builder, name: string, from: integer, to: integer, direction: Direction?): Builder

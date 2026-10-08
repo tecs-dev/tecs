@@ -158,18 +158,12 @@ end
 
 --- The game-facing handle for one Rust-owned window.
 export record Window
-    @private
-    create: CreateOptions
-    @private
-    state: HostState
-    @private
-    attached: boolean
-    @private
-    nextSerial: integer
-    @private
-    pending: {Command}
-    @private
-    failures: {CommandFailure}
+    @private create: CreateOptions
+    @private state: HostState
+    @private attached: boolean
+    @private nextSerial: integer
+    @private pending: {Command}
+    @private failures: {CommandFailure}
 
     creationOptions: function(borrows self: Window): CreateOptions
     isAttached: function(borrows self: Window): boolean

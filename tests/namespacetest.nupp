@@ -22,8 +22,7 @@ function suite.usesQualifiedValuesTypesAndNestedModulesWithoutImports(): nil
         name = "namespace.move",
         phase = ecs.phases.Update,
         run = function(dt: number): nil
-            @unsafe
-            do
+            @unsafe do
                 for candidate, count in query:iter() do
                     local transforms: Transform2D[?] = assert(candidate:getMut(ecs.Transform2D))
                     for index = 1, count as integer do

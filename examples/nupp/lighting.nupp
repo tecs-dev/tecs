@@ -125,8 +125,7 @@ local function install(exclusive app: Application): nil
             elapsed = elapsed + dt
             const middle = FIELD * 0.5
             local slot = 0
-            @unsafe
-            do
+            @unsafe do
                 for candidate, count in lights:iter() do
                     const transforms: Transform2D[?] = assert(candidate:getMut(ecs.Transform2D))
                     for index = 1, count as integer do

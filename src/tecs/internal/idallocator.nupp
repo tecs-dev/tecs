@@ -37,14 +37,10 @@ end
 
 --- An allocator for packed entity identities and their current placement.
 export record IdAllocator
-    @private
-    slots: EntitySlot[?]
-    @private
-    capacity: integer
-    @private
-    highWater: integer
-    @private
-    freeStack: FreeSlot[?]
+    @private slots: EntitySlot[?]
+    @private capacity: integer
+    @private highWater: integer
+    @private freeStack: FreeSlot[?]
     maxSlotCount: integer
     nextFreshSlot: integer
     freeCount: integer
@@ -59,8 +55,7 @@ local function slotEntry(exclusive allocator: IdAllocator, slot: integer): Entit
         const capacity = math.min(allocator.maxSlotCount, math.max(slot, allocator.capacity * 2))
         const fresh = carray(EntitySlot, capacity + 1)
         const free = carray(FreeSlot, capacity + 1)
-        @unsafe
-        do
+        @unsafe do
             ffi.copy(fresh, allocator.slots, (allocator.capacity + 1) * ffi.sizeof(EntitySlot))
             ffi.copy(free, allocator.freeStack, (allocator.freeCount + 1) * ffi.sizeof(FreeSlot))
         end
@@ -69,8 +64,7 @@ local function slotEntry(exclusive allocator: IdAllocator, slot: integer): Entit
         allocator.capacity = capacity
     end
     allocator.highWater = math.max(allocator.highWater, slot)
-    @unsafe
-    do
+    @unsafe do
         return allocator.slots[slot]
     end
 end
@@ -95,8 +89,7 @@ export function flatSpawnAt(borrows allocator: IdAllocator, slot: integer): inte
     if slot < 1 or slot > allocator.highWater then
         return 0
     end
-    @unsafe
-    do
+    @unsafe do
         return allocator.slots[slot].flatSpawn
     end
 end
@@ -111,8 +104,7 @@ export function flatMoveAt(borrows allocator: IdAllocator, slot: integer): integ
     if slot < 1 or slot > allocator.highWater then
         return 0
     end
-    @unsafe
-    do
+    @unsafe do
         return allocator.slots[slot].flatMove
     end
 end
@@ -122,8 +114,7 @@ export function spawnBatchAt(borrows allocator: IdAllocator, slot: integer): int
     if slot < 1 or slot > allocator.highWater then
         return 0
     end
-    @unsafe
-    do
+    @unsafe do
         return allocator.slots[slot].spawnBatch
     end
 end
@@ -138,16 +129,14 @@ export function mutationBatchAt(borrows allocator: IdAllocator, slot: integer): 
     if slot < 1 or slot > allocator.highWater then
         return 0
     end
-    @unsafe
-    do
+    @unsafe do
         return allocator.slots[slot].mutationBatch
     end
 end
 
 --- Clears transient stamps after a successful or interrupted publication.
 export function clearStamps(exclusive allocator: IdAllocator): nil
-    @unsafe
-    do
+    @unsafe do
         for slot = 1, allocator.highWater do
             allocator.slots[slot].spawnBatch = 0
             allocator.slots[slot].mutationBatch = 0
@@ -228,8 +217,7 @@ export function allocSlot(exclusive allocator: IdAllocator): integer
     local freeCount = allocator.freeCount
     if freeCount > 0 then
         allocator.freeCount = freeCount - 1
-        @unsafe
-        do
+        @unsafe do
             return allocator.freeStack[freeCount].slot
         end
     end
@@ -281,8 +269,7 @@ export function placement(borrows allocator: IdAllocator, slot: integer): intege
     if slot > allocator.highWater then
         return 0, 0
     end
-    @unsafe
-    do
+    @unsafe do
         return allocator.slots[slot].archetypeId, allocator.slots[slot].row
     end
 end
@@ -295,8 +282,7 @@ export function generationAt(borrows allocator: IdAllocator, slot: integer): int
     if slot > allocator.highWater then
         return 0
     end
-    @unsafe
-    do
+    @unsafe do
         return allocator.slots[slot].generation
     end
 end
@@ -328,8 +314,7 @@ export function freeSlot(exclusive allocator: IdAllocator, slot: integer): nil
         allocator.maxGeneration = generation
     end
     local freeCount = allocator.freeCount
-    @unsafe
-    do
+    @unsafe do
         allocator.freeStack[freeCount + 1].slot = slot
     end
     allocator.freeCount = freeCount + 1
@@ -350,8 +335,7 @@ export function rebuildFreeStack(exclusive allocator: IdAllocator, reserved: {[i
             and (reserved == nil or not reserved[slot])
         then
             count = count + 1
-            @unsafe
-            do
+            @unsafe do
                 allocator.freeStack[count].slot = slot
             end
         end
@@ -363,8 +347,7 @@ end
 export function unfree(exclusive allocator: IdAllocator, slot: integer): nil
     local count = allocator.freeCount
     local found: integer? = nil
-    @unsafe
-    do
+    @unsafe do
         for index = 1, count do
             if allocator.freeStack[index].slot == slot then
                 found = index
@@ -373,8 +356,7 @@ export function unfree(exclusive allocator: IdAllocator, slot: integer): nil
         end
     end
     if found ~= nil then
-        @unsafe
-        do
+        @unsafe do
             allocator.freeStack[found].slot = allocator.freeStack[count].slot
         end
         allocator.freeCount = count - 1
@@ -416,8 +398,7 @@ export function reset(exclusive allocator: IdAllocator): nil
     if newGeneration >= GEN_COUNT then
         newGeneration = 0
     end
-    @unsafe
-    do
+    @unsafe do
         for slot = 1, allocator.highWater do
             const entry = allocator.slots[slot]
             entry.generation = newGeneration

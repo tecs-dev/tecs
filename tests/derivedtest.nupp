@@ -115,8 +115,7 @@ function suite.derivedValuesPreserveTypedNativeAndManagedColumns(): nil
     test.equal(assert(world:get(id, Description)).text, "Player")
     for candidate, count in world:newQuery({include = {Velocity, Description}}):iter() do
         const column: Velocity[?] = assert(candidate:getMut(Velocity))
-        @unsafe
-        do
+        @unsafe do
             for row = 1, assert(count) do
                 column[row].x += 2
             end
@@ -140,8 +139,7 @@ function suite.derivedRelationshipsCarryTypedNativePayloads(): nil
     const selected = ecs.targeting(Spring, target)
     for candidate in world:newQuery({include = {selected}}):iter() do
         const column: Spring[?] = assert(candidate:get(selected))
-        @unsafe
-        do
+        @unsafe do
             test.equal(column[1].stiffness, 0.5)
         end
     end

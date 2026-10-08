@@ -157,8 +157,7 @@ function suite.switchesEveryOriginalSceneThroughPointerInput(): nil
     frame(session)
     local cameras = world:newQuery({include = {gfx.Camera2D, gfx.ActiveCamera}})
     for candidate, _ in cameras:iter() do
-        @unsafe
-        do
+        @unsafe do
             const cameras = assert(candidate:get(gfx.Camera2D))
             test.equal(cameras[1].zoom, 2)
         end

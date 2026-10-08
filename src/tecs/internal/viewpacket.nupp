@@ -10,24 +10,15 @@ local meshpacket = require("tecs.internal.meshpacket")
 local framepacket = require("tecs.internal.framepacket")
 
 export record Collector
-    @private
-    world: world.World
-    @private
-    query: query.Query
-    @private
-    extractors: {[integer]: framepacket.Extractor}
-    @private
-    meshRevisions: {[integer]: integer} = {}
-    @private
-    meshes: meshpacket.Collector
-    @private
-    empty: world.World
-    @private
-    lastSeen: {[integer]: integer} = {}
-    @private
-    spritesEnabled: {[integer]: boolean} = {}
-    @private
-    sent: integer = 0
+    @private world: world.World
+    @private query: query.Query
+    @private extractors: {[integer]: framepacket.Extractor}
+    @private meshRevisions: {[integer]: integer} = {}
+    @private meshes: meshpacket.Collector
+    @private empty: world.World
+    @private lastSeen: {[integer]: integer} = {}
+    @private spritesEnabled: {[integer]: boolean} = {}
+    @private sent: integer = 0
     frame: function(exclusive self: Collector, width: integer, height: integer, resident: integer?): string?
 end
 

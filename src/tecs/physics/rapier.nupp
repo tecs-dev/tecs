@@ -498,8 +498,7 @@ export function create(options: contract.Options?): contract.Simulation
         if slot + 1 > buffers.createBodyCapacity then
             local capacity = grownCapacity(buffers.createBodyCapacity, slot + 1)
             local grown = carray(TecsPhysicsBodyCreate, capacity)
-            @unsafe
-            do
+            @unsafe do
                 for index = 0, slot - 1 do
                     grown[index] = buffers.createBodies[index]
                 end
@@ -507,8 +506,7 @@ export function create(options: contract.Options?): contract.Simulation
             buffers.createBodies = grown
             buffers.createBodyCapacity = capacity
         end
-        @unsafe
-        do
+        @unsafe do
             local target = buffers.createBodies[slot]
             target.entity = command.entity as uint64
             writeColliderDef(target.collider, command.collider)
@@ -538,8 +536,7 @@ export function create(options: contract.Options?): contract.Simulation
         if slot + 1 > buffers.createColliderCapacity then
             local capacity = grownCapacity(buffers.createColliderCapacity, slot + 1)
             local grown = carray(TecsPhysicsColliderCreate, capacity)
-            @unsafe
-            do
+            @unsafe do
                 for index = 0, slot - 1 do
                     grown[index] = buffers.createColliders[index]
                 end
@@ -547,8 +544,7 @@ export function create(options: contract.Options?): contract.Simulation
             buffers.createColliders = grown
             buffers.createColliderCapacity = capacity
         end
-        @unsafe
-        do
+        @unsafe do
             local target = buffers.createColliders[slot]
             writeColliderDef(target.def, command.def)
             target.body.index = (command.bodyIndex1 - 1) as uint32
@@ -566,8 +562,7 @@ export function create(options: contract.Options?): contract.Simulation
         if slot + 1 > buffers.createJointCapacity then
             local capacity = grownCapacity(buffers.createJointCapacity, slot + 1)
             local grown = carray(TecsPhysicsJointCreate, capacity)
-            @unsafe
-            do
+            @unsafe do
                 for index = 0, slot - 1 do
                     grown[index] = buffers.createJoints[index]
                 end
@@ -575,8 +570,7 @@ export function create(options: contract.Options?): contract.Simulation
             buffers.createJoints = grown
             buffers.createJointCapacity = capacity
         end
-        @unsafe
-        do
+        @unsafe do
             local target = buffers.createJoints[slot]
             target.entity = command.entity as uint64
             target.bodyA.index = (command.bodyAIndex1 - 1) as uint32
@@ -622,8 +616,7 @@ export function create(options: contract.Options?): contract.Simulation
         if slot + 1 > buffers.updateBodyCapacity then
             local capacity = grownCapacity(buffers.updateBodyCapacity, slot + 1)
             local grown = carray(TecsPhysicsBodyUpdate, capacity)
-            @unsafe
-            do
+            @unsafe do
                 for index = 0, slot - 1 do
                     grown[index] = buffers.updateBodies[index]
                 end
@@ -631,8 +624,7 @@ export function create(options: contract.Options?): contract.Simulation
             buffers.updateBodies = grown
             buffers.updateBodyCapacity = capacity
         end
-        @unsafe
-        do
+        @unsafe do
             local target = buffers.updateBodies[slot]
             target.body.index = (index1 - 1) as uint32
             target.body.generation = generation as uint32
@@ -654,8 +646,7 @@ export function create(options: contract.Options?): contract.Simulation
         if slot + 1 > buffers.updateColliderCapacity then
             local capacity = grownCapacity(buffers.updateColliderCapacity, slot + 1)
             local grown = carray(TecsPhysicsColliderUpdate, capacity)
-            @unsafe
-            do
+            @unsafe do
                 for index = 0, slot - 1 do
                     grown[index] = buffers.updateColliders[index]
                 end
@@ -663,8 +654,7 @@ export function create(options: contract.Options?): contract.Simulation
             buffers.updateColliders = grown
             buffers.updateColliderCapacity = capacity
         end
-        @unsafe
-        do
+        @unsafe do
             local target = buffers.updateColliders[slot]
             writeColliderDef(target.def, command.def)
             target.collider.index = (command.index1 - 1) as uint32
@@ -692,8 +682,7 @@ export function create(options: contract.Options?): contract.Simulation
         if slot + 1 > buffers.actionCapacity then
             local capacity = grownCapacity(buffers.actionCapacity, slot + 1)
             local grown = carray(TecsPhysicsBodyAction, capacity)
-            @unsafe
-            do
+            @unsafe do
                 for index = 0, slot - 1 do
                     grown[index] = buffers.actions[index]
                 end
@@ -701,8 +690,7 @@ export function create(options: contract.Options?): contract.Simulation
             buffers.actions = grown
             buffers.actionCapacity = capacity
         end
-        @unsafe
-        do
+        @unsafe do
             local target = buffers.actions[slot]
             target.body.index = (index1 - 1) as uint32
             target.body.generation = generation as uint32
@@ -721,8 +709,7 @@ export function create(options: contract.Options?): contract.Simulation
         if slot + 1 > buffers.destroyBodyCapacity then
             local capacity = grownCapacity(buffers.destroyBodyCapacity, slot + 1)
             local grown = carray(TecsPhysicsHandle, capacity)
-            @unsafe
-            do
+            @unsafe do
                 for index = 0, slot - 1 do
                     grown[index] = buffers.destroyBodies[index]
                 end
@@ -730,8 +717,7 @@ export function create(options: contract.Options?): contract.Simulation
             buffers.destroyBodies = grown
             buffers.destroyBodyCapacity = capacity
         end
-        @unsafe
-        do
+        @unsafe do
             buffers.destroyBodies[slot].index = (index1 - 1) as uint32
             buffers.destroyBodies[slot].generation = generation as uint32
         end
@@ -743,8 +729,7 @@ export function create(options: contract.Options?): contract.Simulation
         if slot + 1 > buffers.destroyColliderCapacity then
             local capacity = grownCapacity(buffers.destroyColliderCapacity, slot + 1)
             local grown = carray(TecsPhysicsHandle, capacity)
-            @unsafe
-            do
+            @unsafe do
                 for index = 0, slot - 1 do
                     grown[index] = buffers.destroyColliders[index]
                 end
@@ -752,8 +737,7 @@ export function create(options: contract.Options?): contract.Simulation
             buffers.destroyColliders = grown
             buffers.destroyColliderCapacity = capacity
         end
-        @unsafe
-        do
+        @unsafe do
             buffers.destroyColliders[slot].index = (index1 - 1) as uint32
             buffers.destroyColliders[slot].generation = generation as uint32
         end
@@ -765,8 +749,7 @@ export function create(options: contract.Options?): contract.Simulation
         if slot + 1 > buffers.destroyJointCapacity then
             local capacity = grownCapacity(buffers.destroyJointCapacity, slot + 1)
             local grown = carray(TecsPhysicsHandle, capacity)
-            @unsafe
-            do
+            @unsafe do
                 for index = 0, slot - 1 do
                     grown[index] = buffers.destroyJoints[index]
                 end
@@ -774,8 +757,7 @@ export function create(options: contract.Options?): contract.Simulation
             buffers.destroyJoints = grown
             buffers.destroyJointCapacity = capacity
         end
-        @unsafe
-        do
+        @unsafe do
             buffers.destroyJoints[slot].index = (index1 - 1) as uint32
             buffers.destroyJoints[slot].generation = generation as uint32
         end
@@ -905,8 +887,7 @@ export function create(options: contract.Options?): contract.Simulation
         if order < 1 or order > buffers.createdBodyCapacity then
             return 0, 0, 0, 0
         end
-        @unsafe
-        do
+        @unsafe do
             local created = buffers.createdBodies[order - 1]
             local bodyIndex = tonumber(created.body.index) as integer
             local colliderIndex = tonumber(created.collider.index) as integer
@@ -923,8 +904,7 @@ export function create(options: contract.Options?): contract.Simulation
         if order < 1 or order > capacity then
             return 0, 0
         end
-        @unsafe
-        do
+        @unsafe do
             local index = tonumber(values[order - 1].index) as integer
             if index == NULL_INDEX then
                 return 0, 0
@@ -951,8 +931,7 @@ export function create(options: contract.Options?): contract.Simulation
         if index1 < 1 or index1 > buffers.stateCount then
             return nil
         end
-        @unsafe
-        do
+        @unsafe do
             const slot = buffers.states[index1 - 1]
             if (tonumber(slot.flags) as integer) & STATE_LIVE == 0
                 or (tonumber(slot.generation) as integer) ~= generation
@@ -973,8 +952,7 @@ export function create(options: contract.Options?): contract.Simulation
         if index == nil then
             return false
         end
-        @unsafe
-        do
+        @unsafe do
             return (tonumber(buffers.states[index].flags) as integer) & STATE_AWAKE ~= 0
         end
     end
@@ -984,8 +962,7 @@ export function create(options: contract.Options?): contract.Simulation
         if index == nil then
             return nil, 0, 0, 0
         end
-        @unsafe
-        do
+        @unsafe do
             const slot = buffers.states[index]
             if (tonumber(slot.flags) as integer) & STATE_MOVED == 0 then
                 return nil, 0, 0, 0
@@ -1001,8 +978,7 @@ export function create(options: contract.Options?): contract.Simulation
         if index == nil then
             return 0, 0, 0
         end
-        @unsafe
-        do
+        @unsafe do
             const slot = buffers.states[index]
             return tonumber(slot.vx) as number, tonumber(slot.vy) as number, tonumber(slot.omega) as number
         end
@@ -1016,8 +992,7 @@ export function create(options: contract.Options?): contract.Simulation
         if index < 1 or index > buffers.eventCount then
             return 0, 0, false, false
         end
-        @unsafe
-        do
+        @unsafe do
             local event = buffers.events[index - 1]
 
             return tonumber(
@@ -1077,8 +1052,7 @@ export function create(options: contract.Options?): contract.Simulation
         local bodies = carray(TecsPhysicsHandle, count)
         local colliders = carray(TecsPhysicsHandle, count)
         local joints = carray(TecsPhysicsHandle, count)
-        @unsafe
-        do
+        @unsafe do
             for index = 1, count do
                 requested[index - 1] = entities[index] as uint64
             end
@@ -1094,8 +1068,7 @@ export function create(options: contract.Options?): contract.Simulation
         if status ~= 0 then
             error("tecs.physics.rapier: cannot resolve entities: " .. lastError(), 2)
         end
-        @unsafe
-        do
+        @unsafe do
             for index = 1, count do
                 local bodyIndex = tonumber(bodies[index - 1].index) as integer
                 local colliderIndex = tonumber(colliders[index - 1].index) as integer

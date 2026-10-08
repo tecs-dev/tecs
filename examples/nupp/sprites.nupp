@@ -109,8 +109,7 @@ local function install(exclusive app: Application): nil
         phase = ecs.phases.Update,
         run = function(dt: number): nil
             elapsed = elapsed + dt
-            @unsafe
-            do
+            @unsafe do
                 for candidate, count in sprites:iter() do
                     const transforms: Transform2D[?] = assert(candidate:getMut(ecs.Transform2D))
                     for index = 1, count as integer do
@@ -118,8 +117,7 @@ local function install(exclusive app: Application): nil
                     end
                 end
             end
-            @unsafe
-            do
+            @unsafe do
                 for candidate, count in eyes:iter() do
                     const cameras: Camera2D[?] = assert(candidate:getMut(gfx.Camera2D))
                     for index = 1, count as integer do

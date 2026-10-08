@@ -162,32 +162,23 @@ export record Gamepad
     --- an empty string when the platform reports none.
     guid: string
 
-    @private
-    backend: gamepadbackend.Backend
+    @private backend: gamepadbackend.Backend
 
     --- Reads the shared layer stack. A layer blocks every device or none, so
     --- this answers from the owning input state rather than from the pad.
-    @private
-    gateRead: function(layer: Layer?): boolean
+    @private gateRead: function(layer: Layer?): boolean
 
     --- Reports whether queries should answer with fixed-step latched edges.
-    @private
-    gateFixed: function(): boolean
+    @private gateFixed: function(): boolean
 
-    @private
-    down: {[integer]: boolean}
-    @private
-    pressed: {[integer]: boolean}
-    @private
-    released: {[integer]: boolean}
-    @private
-    latchedPressed: {[integer]: boolean}
-    @private
-    latchedReleased: {[integer]: boolean}
+    @private down: {[integer]: boolean}
+    @private pressed: {[integer]: boolean}
+    @private released: {[integer]: boolean}
+    @private latchedPressed: {[integer]: boolean}
+    @private latchedReleased: {[integer]: boolean}
 
     --- Latest value per axis. An axis no event has mentioned reads as zero.
-    @private
-    axisValues: {[integer]: number}
+    @private axisValues: {[integer]: number}
 
     buttonDown: function(borrows self: Gamepad, button: GamepadButton | integer, layer: Layer?): boolean
     buttonPressed: function(borrows self: Gamepad, button: GamepadButton | integer, layer: Layer?): boolean
@@ -211,51 +202,30 @@ export record Input
     wheelTicksY: integer
     text: string
 
-    @private
-    keysDown: {[string]: boolean}
-    @private
-    keysPressed: {[string]: boolean}
-    @private
-    keysReleased: {[string]: boolean}
-    @private
-    keysLatchedPressed: {[string]: boolean}
-    @private
-    keysLatchedReleased: {[string]: boolean}
-    @private
-    mouseButtonsDown: {[integer]: boolean}
-    @private
-    mouseButtonsPressed: {[integer]: boolean}
-    @private
-    mouseButtonsReleased: {[integer]: boolean}
-    @private
-    mouseButtonsLatchedPressed: {[integer]: boolean}
-    @private
-    mouseButtonsLatchedReleased: {[integer]: boolean}
-    @private
-    modifierMask: integer
-    @private
-    fixed: boolean
-    @private
-    layers: {Layer}
-    @private
-    enterFixedSystem: ecs.System?
-    @private
-    exitFixedSystem: ecs.System?
-    @private
-    pollSystem: ecs.System?
-    @private
-    backend: gamepadbackend.Backend
-    @private
-    pads: {[integer]: Gamepad}
-    @private
-    padList: {Gamepad}
+    @private keysDown: {[string]: boolean}
+    @private keysPressed: {[string]: boolean}
+    @private keysReleased: {[string]: boolean}
+    @private keysLatchedPressed: {[string]: boolean}
+    @private keysLatchedReleased: {[string]: boolean}
+    @private mouseButtonsDown: {[integer]: boolean}
+    @private mouseButtonsPressed: {[integer]: boolean}
+    @private mouseButtonsReleased: {[integer]: boolean}
+    @private mouseButtonsLatchedPressed: {[integer]: boolean}
+    @private mouseButtonsLatchedReleased: {[integer]: boolean}
+    @private modifierMask: integer
+    @private fixed: boolean
+    @private layers: {Layer}
+    @private enterFixedSystem: ecs.System?
+    @private exitFixedSystem: ecs.System?
+    @private pollSystem: ecs.System?
+    @private backend: gamepadbackend.Backend
+    @private pads: {[integer]: Gamepad}
+    @private padList: {Gamepad}
 
     --- The drain buffer, allocated once because the seam is crossed per frame.
-    @private
-    padEvents: {gamepadbackend.Event}
+    @private padEvents: {gamepadbackend.Event}
 
-    @private
-    fingers: {[string]: Touch}
+    @private fingers: {[string]: Touch}
 
     beginFrame: function(exclusive self: Input): nil
     enterFixedPhase: function(exclusive self: Input): nil

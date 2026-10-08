@@ -80,8 +80,7 @@ local function make(options: Options): TileChunk
         "TileChunk requires positive cells and nonnegative spacing and margin"
     )
     const tiles = options.tiles or {}
-    @unsafe
-    do
+    @unsafe do
         for index = 1, 256 do
             const id = tiles[index] or 0
             assert(id >= 0 and id <= 4294967295 and id % 1 == 0, "TileChunk tile IDs must fit uint32")
@@ -110,8 +109,7 @@ export const TileChunkComponent: components.FFIComponent<TileChunk> = components
     end,
     save = function(value: TileChunk): any
         const tiles: {integer} = {}
-        @unsafe
-        do
+        @unsafe do
             for index = 1, 256 do
                 tiles[index] = value.tiles[index] as integer
             end
@@ -144,8 +142,7 @@ export const TileChunkComponent: components.FFIComponent<TileChunk> = components
 --- @return the number of drawable tiles
 export function count(borrows value: TileChunk): integer
     local total: integer = 0
-    @unsafe
-    do
+    @unsafe do
         for index = 1, 256 do
             if (value.tiles[index] as integer) % 536870912 ~= 0 then
                 total = total + 1
@@ -177,8 +174,7 @@ export function packed(borrows value: TileChunk): string
     }) do
         writer:writeFloat32(nupp.math.f32.narrow(number))
     end
-    @unsafe
-    do
+    @unsafe do
         for index = 1, 256 do
             writer:writeUint32(value.tiles[index])
         end

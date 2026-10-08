@@ -1398,8 +1398,7 @@ local function reconcileBodies(state: State, exclusive world: ecs.World): nil
 
     -- A body outlives its entity otherwise: the solver owns it until something
     -- says so, and nothing else knows the declaration is gone.
-    @unsafe
-    do
+    @unsafe do
         for candidate, matched in state.detachedBodies:iter() do
             local archetype: ecs.Archetype = assert(candidate)
             local length: integer = assert(matched)
@@ -1414,8 +1413,7 @@ local function reconcileBodies(state: State, exclusive world: ecs.World): nil
             end
         end
     end
-    @unsafe
-    do
+    @unsafe do
         for candidate, matched in state.detachedShapes:iter() do
             local archetype: ecs.Archetype = assert(candidate)
             local length: integer = assert(matched)
@@ -1443,8 +1441,7 @@ end
 
 local function reconcileJoints(state: State, exclusive world: ecs.World): nil
     local simulation = state.simulation
-    @unsafe
-    do
+    @unsafe do
         for candidate, matched in state.detachedJoints:iter() do
             local archetype: ecs.Archetype = assert(candidate)
             local length: integer = assert(matched)
@@ -1467,8 +1464,7 @@ end
 
 local function holdPausedBodies(state: State, exclusive world: ecs.World): nil
     local simulation = state.simulation
-    @unsafe
-    do
+    @unsafe do
         for candidate, matched in state.pausedBodies:iter() do
             local archetype: ecs.Archetype = assert(candidate)
             local length: integer = assert(matched)
@@ -1511,8 +1507,7 @@ end
 
 local function releasePausedBodies(state: State, exclusive world: ecs.World): nil
     local simulation = state.simulation
-    @unsafe
-    do
+    @unsafe do
         for candidate, matched in state.resumedBodies:iter() do
             local archetype: ecs.Archetype = assert(candidate)
             local length: integer = assert(matched)
@@ -1560,8 +1555,7 @@ end
 
 local function applyColliderChanges(state: State, borrows _world: ecs.World): nil
     local simulation = state.simulation
-    @unsafe
-    do
+    @unsafe do
         for candidate, matched in state.primaryColliders:iter() do
             local archetype: ecs.Archetype = assert(candidate)
             local length: integer = assert(matched)
@@ -1590,8 +1584,7 @@ local function applyColliderChanges(state: State, borrows _world: ecs.World): ni
             end
         end
     end
-    @unsafe
-    do
+    @unsafe do
         for candidate, matched in state.secondaryColliders:iter() do
             local archetype: ecs.Archetype = assert(candidate)
             local length: integer = assert(matched)
@@ -1622,8 +1615,7 @@ end
 
 local function applyBodyChanges(state: State, borrows _world: ecs.World): nil
     local simulation = state.simulation
-    @unsafe
-    do
+    @unsafe do
         for candidate, matched in state.declaredBodies:iter() do
             local archetype: ecs.Archetype = assert(candidate)
             local length: integer = assert(matched)
@@ -1654,8 +1646,7 @@ end
 
 local function setEnablement(state: State, exclusive world: ecs.World, from: ecs.Query, enabled: boolean): nil
     local simulation = state.simulation
-    @unsafe
-    do
+    @unsafe do
         for candidate, matched in from:iter() do
             local archetype: ecs.Archetype = assert(candidate)
             local length: integer = assert(matched)
@@ -1759,8 +1750,7 @@ end
 
 local function syncBodyTransforms(state: State, exclusive world: ecs.World): nil
     local simulation = state.simulation
-    @unsafe
-    do
+    @unsafe do
         for candidate, matched in state.simulatedBodies:iter() do
             local archetype: ecs.Archetype = assert(candidate)
             local length: integer = assert(matched)
@@ -1795,8 +1785,7 @@ end
 --- Copies live velocities into `Motion` so a snapshot carries them.
 local function captureMotion(state: State): nil
     local simulation = state.simulation
-    @unsafe
-    do
+    @unsafe do
         for candidate, matched in state.snapshotBodies:iter() do
             local archetype: ecs.Archetype = assert(candidate)
             local length: integer = assert(matched)

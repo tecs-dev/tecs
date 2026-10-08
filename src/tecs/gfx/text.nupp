@@ -558,8 +558,7 @@ end
 --- Reports whether `item` differs from what its glyphs were built from.
 local neutralTint = carray(rendercomponents.Tint, 1)
 
-@unsafe
-do
+@unsafe do
     neutralTint[0] = new rendercomponents.Tint(1, 1, 1, 1)
 end
 
@@ -744,8 +743,7 @@ local function publish(
     const needed = #missing
     if needed > 0 then
         const staged = carray(StagedGlyph, needed + 1)
-        @unsafe
-        do
+        @unsafe do
             for index = 1, needed do
                 const source = missing[index]
                 staged[index].x, staged[index].y = placedX[source], placedY[source]
@@ -767,8 +765,7 @@ local function publish(
                 const transforms = assert(candidate:getMut(rendercomponents.Transform2DComponent))
                 const sprites = assert(candidate:getMut(rendercomponents.SpriteComponent))
                 local source: integer = 1
-                @unsafe
-                do
+                @unsafe do
                     for row = first, last do
                         -- Publication preserves reservation order, but a glyph
                         -- canceled before the barrier leaves a hole in it.
@@ -786,8 +783,7 @@ local function publish(
                 end
             end
         )
-        @unsafe
-        do
+        @unsafe do
             for index = 1, needed do
                 const spawned = firstId ~= nil and firstId + index - 1 or assert(ids)[index]
                 staged[index].entity = spawned
@@ -851,8 +847,7 @@ local function run(exclusive world: ecs.World, state: Install): nil
     state.epoch = epoch
 
     local live: integer = 0
-    @unsafe
-    do
+    @unsafe do
         for candidate, count in state.texts:iter() do
             const active = candidate as archetype.Archetype
             const rows = count as integer

@@ -243,8 +243,7 @@ function suite.tileChunksRetainAndPatchIndependentlyWithinOneArchetype(): nil
     const clean = extractor:frame(640, 360, revision)
     test.equal(word(clean, 12), framepacket.FRAME_RETAINED)
     test.equal(#clean, base(clean))
-    @unsafe
-    do
+    @unsafe do
         const chunk1 = assert(world:getMut(first, gfx.TileChunk))
         chunk1.tiles[1] = 2
     end
@@ -254,8 +253,7 @@ function suite.tileChunksRetainAndPatchIndependentlyWithinOneArchetype(): nil
     test.equal(word(patch, base(patch) + 4), 1)
     test.equal(word(patch, base(patch) + 12), 80)
     -- A shared nested edit can request synchronization through the old tag.
-    @unsafe
-    do
+    @unsafe do
         const chunk2 = assert(world:get(first, gfx.TileChunk))
         chunk2.tiles[1] = 3
     end
@@ -265,8 +263,7 @@ function suite.tileChunksRetainAndPatchIndependentlyWithinOneArchetype(): nil
     test.notEqual(word(marked, 12), framepacket.FRAME_RETAINED)
     const snapshot = extractor:packet(640, 360)
     test.equal(word(snapshot, 36), 2)
-    @unsafe
-    do
+    @unsafe do
         const chunk3 = assert(world:getMut(first, gfx.TileChunk))
         chunk3.tiles[1] = 0
     end
@@ -314,8 +311,7 @@ function suite.tileChunksPreservePackedAtlasGeometryAndEveryFlip(): nil
     nupp.drop(reader)
     const saved = world:saveSnapshot()
     world:loadSnapshot(saved)
-    @unsafe
-    do
+    @unsafe do
         const restoredChunk = assert(world:get(id, gfx.TileChunk))
         test.equal(restoredChunk.tiles[8], tiles[8])
     end

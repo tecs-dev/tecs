@@ -22,22 +22,14 @@ local window = require("tecs.platform.window")
 --- Host-owned state rooted by one Nupp managed handle.
 export record Session
     app: application.Application
-    @private
-    events: {platformevents.Event}
-    @private
-    commands: {window.Command}
-    @private
-    commandIndex: integer
-    @private
-    imageCommands: {images.Command}
-    @private
-    imageCommandIndex: integer
-    @private
-    pump: framepump.Pump
-    @private
-    extractor: framepacket.Extractor
-    @private
-    views: viewpacket.Collector
+    @private events: {platformevents.Event}
+    @private commands: {window.Command}
+    @private commandIndex: integer
+    @private imageCommands: {images.Command}
+    @private imageCommandIndex: integer
+    @private pump: framepump.Pump
+    @private extractor: framepacket.Extractor
+    @private views: viewpacket.Collector
 end
 
 local function append(exclusive session: Session, event: platformevents.Event): nil

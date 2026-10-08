@@ -13,8 +13,7 @@ local EMPTY: {[integer]: boolean} = {}
 
 --- Maps relationship targets back to their source entities.
 export record InverseIndex
-    @private
-    inverse: {[integer]: {[integer]: boolean}}
+    @private inverse: {[integer]: {[integer]: boolean}}
 
     --- Runs when a target receives its first source.
     onTargetAdded: (function(integer): nil)?

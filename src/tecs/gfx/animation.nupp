@@ -379,8 +379,7 @@ end
 local function encode(query: ecs.Query, borrows world: ecs.World, clock: number, runs: {[integer]: EncodedRun}): nil
     const timestep = world:getFixedTiming()
     const changedSheets = sheet.revision()
-    @unsafe
-    do
+    @unsafe do
         for candidate, count in query:iter() do
             const active = candidate as archetype.Archetype
             local run = runs[active.id]
@@ -432,8 +431,7 @@ local function encode(query: ecs.Query, borrows world: ecs.World, clock: number,
 end
 
 local function report(exclusive world: ecs.World, query: ecs.Query, before: number, after: number): nil
-    @unsafe
-    do
+    @unsafe do
         for candidate, count in query:iter() do
             const active = candidate as archetype.Archetype
             const animations = assert(active:get(AnimationComponent))
@@ -464,8 +462,7 @@ local function report(exclusive world: ecs.World, query: ecs.Query, before: numb
 end
 
 local function rebase(query: ecs.Query, clock: number, shift: number): nil
-    @unsafe
-    do
+    @unsafe do
         for candidate, count in query:iter() do
             const active = candidate as archetype.Archetype
             const sprites = assert(active:get(SpriteComponent))
