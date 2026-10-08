@@ -48,7 +48,7 @@ jobs:
         env:
             # The ECS requires declaration witnesses, exported derive providers,
             # and the method-based Store API.
-            NUPP_REF: a6b07e283ca18bd92d51a84b3114c197d4acbc92
+            NUPP_REF: 55783258b53e21f8de94f203955cbb63d735db22
         steps:
             - uses: actions/checkout@v4
               with:
@@ -111,7 +111,7 @@ jobs:
     host:
         runs-on: macos-15
         env:
-            NUPP_REF: a6b07e283ca18bd92d51a84b3114c197d4acbc92
+            NUPP_REF: 55783258b53e21f8de94f203955cbb63d735db22
         steps:
             # Two checkouts side by side. The Nupp compiler release installed by
             # Homebrew ships no `libnupp.a`, so it cannot satisfy
@@ -194,7 +194,7 @@ jobs:
                       preset: linux-x64
         runs-on: ${{ matrix.os }}
         env:
-            NUPP_REF: a6b07e283ca18bd92d51a84b3114c197d4acbc92
+            NUPP_REF: 55783258b53e21f8de94f203955cbb63d735db22
         steps:
             - uses: actions/checkout@v4
               with:
@@ -254,7 +254,7 @@ jobs:
             pages: write
             id-token: write
         env:
-            NUPP_REF: a6b07e283ca18bd92d51a84b3114c197d4acbc92
+            NUPP_REF: 55783258b53e21f8de94f203955cbb63d735db22
         steps:
             - uses: actions/checkout@v4
               with:
