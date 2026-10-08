@@ -19,11 +19,7 @@ local function newWorld(gravityY: number?): (ecs.World, reference.Reference)
 end
 
 local function handleOf(world: ecs.World, entity: integer): physics.SolverHandle
-    -- Bound before returning so the -O1 inline-return-helper pass leaves this
-    -- helper alone: inlining it overflows the optimizer's stack (a Nupp
-    -- compiler defect). Return the call directly once that is fixed.
-    const handle = world:get(entity, physics.RigidBody)
-    return assert(handle)
+    return assert(world:get(entity, physics.RigidBody))
 end
 
 local function logged(backend: reference.Reference, prefix: string): {string}
