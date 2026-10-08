@@ -1085,7 +1085,7 @@ export function new(
         liveCount = 0,
         archetypeCount = 1,
         systemCount = 0,
-        observers = nuppevents.newObservers<integer>(),
+        observers = nuppevents.newObservers(),
         resources = util.newStore()
     )
 end
