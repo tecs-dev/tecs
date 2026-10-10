@@ -1033,7 +1033,11 @@ fn run_headless(config: Config) -> Result<()> {
         None
     };
     let mut rendered = 0_u32;
+    let mut synthetic = SyntheticPointer::from_environment()?;
     loop {
+        if let Some(synthetic) = &mut synthetic {
+            synthetic.push(&mut bridge)?;
+        }
         match bridge.iterate(if config.offscreen { 1.0 / 60.0 } else { 0.0 })? {
             FrameState::Stopped => break,
             FrameState::Parked => continue,
@@ -1084,6 +1088,48 @@ fn run_headless(config: Config) -> Result<()> {
             .with_context(|| format!("write screenshot {}", path.display()))?;
     }
     bridge.shutdown()
+}
+
+/// Pointer moves pushed before every headless frame, for measuring the input
+/// crossing without a window. `TECS_SYNTH_POINTER` names how many per frame.
+struct SyntheticPointer {
+    per_frame: u32,
+    started: Instant,
+    sequence: u64,
+}
+
+impl SyntheticPointer {
+    fn from_environment() -> Result<Option<Self>> {
+        let Some(value) = std::env::var_os("TECS_SYNTH_POINTER") else {
+            return Ok(None);
+        };
+        let per_frame = value
+            .to_str()
+            .and_then(|text| text.parse::<u32>().ok())
+            .context("TECS_SYNTH_POINTER must be a count of pointer moves per frame")?;
+        Ok((per_frame > 0).then(|| Self {
+            per_frame,
+            started: Instant::now(),
+            sequence: 0,
+        }))
+    }
+
+    fn push(&mut self, bridge: &mut Bridge) -> Result<()> {
+        for index in 0..self.per_frame {
+            self.sequence += 1;
+            let sequence = self.sequence;
+            let x = f64::from(index % 64) * 4.0;
+            bridge.push_pointer_move(
+                x,
+                x * 0.5,
+                1.0,
+                0.5,
+                self.started.elapsed().as_secs_f64(),
+                sequence,
+            )?;
+        }
+        Ok(())
+    }
 }
 
 fn content_root(executable: &std::path::Path) -> Option<PathBuf> {

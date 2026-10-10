@@ -291,9 +291,9 @@ impl HostRuntime {
             }
         }
         for component in self.components.drain(..).rev() {
-            if let Err(error) = call_status(|detail| unsafe {
-                nupp_component_release(self.raw, component, detail)
-            }) {
+            if let Err(error) =
+                call_status(|detail| unsafe { nupp_component_release(self.raw, component, detail) })
+            {
                 first.get_or_insert(error);
             }
         }

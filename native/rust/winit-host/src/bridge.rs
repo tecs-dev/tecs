@@ -172,6 +172,8 @@ struct BridgeStats {
     exports: HashMap<&'static str, ExportStats>,
     frame_calls: Vec<u32>,
     frame_nanos: Vec<u128>,
+    frame_wall: Vec<u128>,
+    last_frame: Option<Instant>,
     current_calls: u32,
     current_nanos: u128,
     packets: Vec<usize>,
@@ -189,8 +191,18 @@ fn value_bytes(values: &[ManagedValue]) -> u64 {
 }
 
 impl BridgeStats {
-    fn record(&mut self, export: ManagedHandle, arguments: &[ManagedValue], results: &[ManagedValue], nanos: u128) {
-        let name = self.names.get(&export.address()).copied().unwrap_or("entry");
+    fn record(
+        &mut self,
+        export: ManagedHandle,
+        arguments: &[ManagedValue],
+        results: &[ManagedValue],
+        nanos: u128,
+    ) {
+        let name = self
+            .names
+            .get(&export.address())
+            .copied()
+            .unwrap_or("entry");
         let entry = self.exports.entry(name).or_default();
         entry.calls += 1;
         entry.bytes_in += value_bytes(arguments);
@@ -203,6 +215,10 @@ impl BridgeStats {
             "tecs.host.renderPacket" => self.packets.push(out as usize),
             "tecs.host.nextModelUpload" if out > 0 => self.uploads.push(out as usize),
             "tecs.host.iterate" => {
+                let now = Instant::now();
+                if let Some(last) = self.last_frame.replace(now) {
+                    self.frame_wall.push(now.duration_since(last).as_nanos());
+                }
                 self.frame_calls.push(self.current_calls);
                 self.frame_nanos.push(self.current_nanos);
                 self.current_calls = 0;
@@ -233,10 +249,14 @@ impl BridgeStats {
             "exports": exports,
             "callsPerFrame": self.frame_calls,
             "boundaryMsPerFrame": self.frame_nanos.iter().map(|nanos| *nanos as f64 / 1e6).collect::<Vec<_>>(),
+            "frameMs": self.frame_wall.iter().map(|nanos| *nanos as f64 / 1e6).collect::<Vec<_>>(),
             "packetBytes": self.packets,
             "uploadBytes": self.uploads,
         });
-        let _ = std::fs::write(&self.output, serde_json::to_vec_pretty(&report).unwrap_or_default());
+        let _ = std::fs::write(
+            &self.output,
+            serde_json::to_vec_pretty(&report).unwrap_or_default(),
+        );
     }
 }
 
@@ -336,6 +356,8 @@ impl Bridge {
             exports: HashMap::new(),
             frame_calls: Vec::new(),
             frame_nanos: Vec::new(),
+            frame_wall: Vec::new(),
+            last_frame: None,
             current_calls: 0,
             current_nanos: 0,
             packets: Vec::new(),
