@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::path::Path;
+use std::time::Instant;
 
 use crate::sdk::{HostRuntime, ManagedHandle, ManagedValue};
 use anyhow::{anyhow, bail, Context, Result};
@@ -150,6 +152,100 @@ pub struct Bridge {
     runtime: HostRuntime,
     session: ManagedHandle,
     exports: Exports,
+    stats: Option<BridgeStats>,
+}
+
+#[derive(Default)]
+struct ExportStats {
+    calls: u64,
+    bytes_in: u64,
+    bytes_out: u64,
+    nanos: u128,
+}
+
+/// Every crossing of the managed boundary, recorded when `TECS_BRIDGE_STATS`
+/// names a file to write them to: per export, per frame, and the sizes of the
+/// render packets and model uploads that cross.
+struct BridgeStats {
+    output: std::path::PathBuf,
+    names: HashMap<usize, &'static str>,
+    exports: HashMap<&'static str, ExportStats>,
+    frame_calls: Vec<u32>,
+    frame_nanos: Vec<u128>,
+    current_calls: u32,
+    current_nanos: u128,
+    packets: Vec<usize>,
+    uploads: Vec<usize>,
+}
+
+fn value_bytes(values: &[ManagedValue]) -> u64 {
+    values
+        .iter()
+        .map(|value| match value {
+            ManagedValue::Bytes(bytes) => bytes.len() as u64,
+            _ => 0,
+        })
+        .sum()
+}
+
+impl BridgeStats {
+    fn record(&mut self, export: ManagedHandle, arguments: &[ManagedValue], results: &[ManagedValue], nanos: u128) {
+        let name = self.names.get(&export.address()).copied().unwrap_or("entry");
+        let entry = self.exports.entry(name).or_default();
+        entry.calls += 1;
+        entry.bytes_in += value_bytes(arguments);
+        let out = value_bytes(results);
+        entry.bytes_out += out;
+        entry.nanos += nanos;
+        self.current_calls += 1;
+        self.current_nanos += nanos;
+        match name {
+            "tecs.host.renderPacket" => self.packets.push(out as usize),
+            "tecs.host.nextModelUpload" if out > 0 => self.uploads.push(out as usize),
+            "tecs.host.iterate" => {
+                self.frame_calls.push(self.current_calls);
+                self.frame_nanos.push(self.current_nanos);
+                self.current_calls = 0;
+                self.current_nanos = 0;
+            }
+            _ => {}
+        }
+    }
+
+    fn write(&self) {
+        let exports: serde_json::Map<String, serde_json::Value> = self
+            .exports
+            .iter()
+            .map(|(name, stats)| {
+                (
+                    (*name).to_owned(),
+                    serde_json::json!({
+                        "calls": stats.calls,
+                        "bytesIn": stats.bytes_in,
+                        "bytesOut": stats.bytes_out,
+                        "ms": stats.nanos as f64 / 1e6,
+                    }),
+                )
+            })
+            .collect();
+        let report = serde_json::json!({
+            "frames": self.frame_calls.len(),
+            "exports": exports,
+            "callsPerFrame": self.frame_calls,
+            "boundaryMsPerFrame": self.frame_nanos.iter().map(|nanos| *nanos as f64 / 1e6).collect::<Vec<_>>(),
+            "packetBytes": self.packets,
+            "uploadBytes": self.uploads,
+        });
+        let _ = std::fs::write(&self.output, serde_json::to_vec_pretty(&report).unwrap_or_default());
+    }
+}
+
+impl Drop for Bridge {
+    fn drop(&mut self) {
+        if let Some(stats) = &self.stats {
+            stats.write();
+        }
+    }
 }
 
 /// Everything a managed session needs to exist.
@@ -230,11 +326,27 @@ impl Bridge {
                 format!("create the Tecs application session through {entry_export}")
             })?;
         let session = one_handle(&values, entry_export)?;
+        let stats = std::env::var_os("TECS_BRIDGE_STATS").map(|output| BridgeStats {
+            output: output.into(),
+            names: EXPORT_NAMES
+                .iter()
+                .zip(&handles)
+                .map(|(name, handle)| (handle.address(), *name))
+                .collect(),
+            exports: HashMap::new(),
+            frame_calls: Vec::new(),
+            frame_nanos: Vec::new(),
+            current_calls: 0,
+            current_nanos: 0,
+            packets: Vec::new(),
+            uploads: Vec::new(),
+        });
 
         Ok(Self {
             runtime,
             session,
             exports,
+            stats,
         })
     }
 
@@ -628,7 +740,12 @@ impl Bridge {
         let mut passed = Vec::with_capacity(arguments.len() + 1);
         passed.push(ManagedValue::Handle(self.session));
         passed.extend_from_slice(arguments);
-        self.runtime.call(export, &passed)
+        let started = Instant::now();
+        let results = self.runtime.call(export, &passed)?;
+        if let Some(stats) = &mut self.stats {
+            stats.record(export, arguments, &results, started.elapsed().as_nanos());
+        }
+        Ok(results)
     }
 }
 
