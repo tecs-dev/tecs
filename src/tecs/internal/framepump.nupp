@@ -9,6 +9,8 @@ is reported, releasing the one-shot source before another driver can poll it.
 ]]
 
 local suspension = require("nupp.suspension")
+local suspensionHost = require("nupp.suspension.host")
+local suspensionContract = require("nupp.suspension.spi")
 local hostcancellation = require("tecs.internal.hostcancellation")
 
 --- The result of starting or polling one host operation.
@@ -16,7 +18,7 @@ export type State = "parked" | "continue" | "stopped"
 
 --- A host-local scheduler for one application session.
 export record Pump
-    handler: suspension.Handler
+    handler: suspensionContract.Handler
 
     @private active: thread?
     @private result: boolean?
@@ -36,9 +38,9 @@ end
 --- Creates an idle frame pump.
 --- @return a pump whose handler permits application waits
 export function newPump(): Pump
-    local pump = new Pump(handler = nil as suspension.Handler, active = nil, result = nil, failure = nil)
-    pump.handler = new suspension.Handler(
-        park = function(_: suspension.Handler, waiting: suspension.Waiting, _: function(): nil): nil
+    local pump = new Pump(handler = nil as suspensionContract.Handler, active = nil, result = nil, failure = nil)
+    pump.handler = new suspensionContract.Handler(
+        park = function(_: suspensionContract.Handler, waiting: suspensionContract.Waiting, _: function(): nil): nil
             local task = assert(coroutine.running())
 
             local function wake(): nil
@@ -58,10 +60,10 @@ export function newPump(): Pump
                 end
             end
         end,
-        canPark = function(_: suspension.Handler): boolean
+        canPark = function(_: suspensionContract.Handler): boolean
             return true
         end,
-        shutdown = function(_: suspension.Handler): nil
+        shutdown = function(_: suspensionContract.Handler): nil
         end
     )
 
@@ -105,7 +107,7 @@ export function start(pump: Pump, body: function(): boolean): State
     pump.failure = nil
     local task = coroutine.create(function(): nil
         local succeeded, result = pcall(function(): boolean
-            with installation = suspension.install(pump.handler) do
+            with installation = suspensionHost.install(pump.handler) do
                 return body()
             end
         end)

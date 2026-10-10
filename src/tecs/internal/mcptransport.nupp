@@ -27,6 +27,8 @@ server value ordinary rather than affine out through `tecs.mcp`.
 local json = require("nupp.codec.json")
 local log = require("nupp.log")
 local suspension = require("nupp.suspension")
+local suspensionHost = require("nupp.suspension.host")
+local suspensionContract = require("nupp.suspension.spi")
 local net = require("nupp.io.net")
 local registry = require("tecs.internal.mcpregistry")
 
@@ -73,7 +75,7 @@ export record Server
     @private queued: {[thread]: boolean}
     @private pending: {Request}
     @private destroyed: boolean
-    @private handler: suspension.Handler
+    @private handler: suspensionContract.Handler
 
     setTools: function(exclusive self: Server, toolsJSON: string): nil
     pump: function(exclusive self: Server): nil
@@ -127,9 +129,13 @@ end
 
 -- The server is plain rather than `exclusive`, because the handler resumes
 -- through it on later turns and so outlives a call-scoped borrow of it.
-local function newHandler(self: Server): suspension.Handler
-    return new suspension.Handler(
-        park = function(_: suspension.Handler, waiting: suspension.Waiting, _cancel: function(): nil): nil
+local function newHandler(self: Server): suspensionContract.Handler
+    return new suspensionContract.Handler(
+        park = function(
+            _: suspensionContract.Handler,
+            waiting: suspensionContract.Waiting,
+            _cancel: function(): nil
+        ): nil
             local task = assert(coroutine.running())
 
             -- Resumed on the pass that resolved the wait rather than queued for
@@ -150,10 +156,10 @@ local function newHandler(self: Server): suspension.Handler
                 end
             end
         end,
-        canPark = function(_: suspension.Handler): boolean
+        canPark = function(_: suspensionContract.Handler): boolean
             return true
         end,
-        shutdown = function(_: suspension.Handler): nil
+        shutdown = function(_: suspensionContract.Handler): nil
         end
     )
 end
@@ -346,7 +352,7 @@ local function spawn(exclusive self: Server, takes stream: net.Stream?, takes li
         takes connection: net.Stream?,
         takes accepting: net.Listener?
     ): nil
-        with installation = suspension.install(server.handler) do
+        with installation = suspensionHost.install(server.handler) do
             if connection == nil then
                 acceptLoop(server, assert(accepting))
             else
@@ -408,7 +414,7 @@ export function listen(port: integer, toolsJSON: string): (Server?, string?)
         queued = {},
         pending = {},
         destroyed = false,
-        handler = nil as suspension.Handler
+        handler = nil as suspensionContract.Handler
     )
     self.handler = newHandler(self)
     spawn(self, nil, listener)
