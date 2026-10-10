@@ -114,7 +114,11 @@ unsafe extern "C" {
         error: *mut *mut NuppError,
     ) -> c_int;
     fn nupp_runtime_shutdown(runtime: *mut NuppRuntime, error: *mut *mut NuppError) -> c_int;
-    fn nupp_component_release(component: *mut NuppComponent);
+    fn nupp_component_release(
+        runtime: *mut NuppRuntime,
+        component: *mut NuppComponent,
+        error: *mut *mut NuppError,
+    ) -> c_int;
     fn nupp_runtime_free(runtime: *mut NuppRuntime);
     fn nupp_error_message(error: *const NuppError) -> *const c_char;
     fn nupp_error_message_length(error: *const NuppError) -> usize;
@@ -126,6 +130,13 @@ pub struct Component(*mut NuppComponent);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ManagedHandle(*mut NuppHandle);
+
+impl ManagedHandle {
+    /// The handle's identity, for keying measurements by export.
+    pub fn address(&self) -> usize {
+        self.0 as usize
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ManagedValue {
@@ -280,7 +291,11 @@ impl HostRuntime {
             }
         }
         for component in self.components.drain(..).rev() {
-            unsafe { nupp_component_release(component) };
+            if let Err(error) = call_status(|detail| unsafe {
+                nupp_component_release(self.raw, component, detail)
+            }) {
+                first.get_or_insert(error);
+            }
         }
         if let Err(error) = call_status(|detail| unsafe { nupp_runtime_shutdown(self.raw, detail) })
         {
