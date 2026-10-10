@@ -331,14 +331,15 @@ This keeps entity loops from creating a task per spawn and amortizes the
 scheduler state across frames. Startup, shutdown, and calls made outside
 `world:update` use the same direct-value API.
 
-`tecs.internal.framepump` is what makes that work across the embedding
-boundary. The call that starts or polls a host operation never yields: a wait
-parks the operation's coroutine in the pump, and a later polling turn resumes
-it when readiness is reported. Resuming during that notification releases the
-one-shot source before MCP or another driver polls it again. Deferring that
-resumption left completed network waits registered and fired them twice. So a
-parked update is one the host observes as `parked` and asks again, rather than
-a yield escaping into Rust.
+`nupp.host.pump` is what makes that work across the embedding boundary. The
+call that starts or polls a host operation never yields: a wait parks the
+operation's coroutine in the pump, and a later polling turn resumes it when
+readiness is reported. Resuming during that notification releases the one-shot
+source before MCP or another driver polls it again. Deferring that resumption
+left completed network waits registered and fired them twice. So a parked
+update is one the host observes as `parked` and asks again, rather than a yield
+escaping into Rust. Tecs carried that scheduler privately until Nupp grew the
+same one, and now uses Nupp's.
 
 Failure reporting follows the shape on the declaration rather than a wrapper
 type. An operation declared as `value, reason` returns that pair after

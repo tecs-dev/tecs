@@ -288,7 +288,6 @@ return {
                     "tecs.internal.components",
                     "tecs.internal.derived",
                     "tecs.internal.events",
-                    "tecs.internal.framepump",
                     "tecs.internal.framepacket",
                     "tecs.internal.views",
                     "tecs.internal.meshcomponents",

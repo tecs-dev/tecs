@@ -4,7 +4,7 @@ local application = require("tecs.application")
 local assets = require("tecs.assets")
 local ecs = require("tecs.ecs")
 local framepacket = require("tecs.internal.framepacket")
-local framepump = require("tecs.internal.framepump")
+local hostpump = require("nupp.host.pump")
 local gfx = require("tecs.gfx")
 local host = require("tecs.host")
 local json = require("nupp.codec.json")
@@ -73,9 +73,9 @@ end
 -- Driving host.iterate from inside tasks.gather would nest the world's scope.
 local function callOverHTTP(session: host.Session, name: string): {[string]: any}
     const port = assert(session.app.debugServer).port
-    const pump = framepump.newPump()
+    const pump = hostpump.newPump()
     local response: {[string]: any}? = nil
-    local state = framepump.start(pump, function(): boolean
+    local state = pump:start(function(): boolean
         local stream = assert(net.connect({host = "127.0.0.1", port = port}))
         const body = json.encode({
             jsonrpc = "2.0",
@@ -105,18 +105,18 @@ local function callOverHTTP(session: host.Session, name: string): {[string]: any
     end)
     const ok, reason = pcall(function(): nil
         for _ = 1, 1000 do
-            if not framepump.parked(pump) then
+            if not pump:parked() then
                 break
             end
             host.iterate(session, 0)
-            state = framepump.poll(pump)
+            state = pump:poll()
             if state == "parked" then
                 time.sleep(1)
             end
         end
         test.equal(state, "continue", "MCP did not answer within bounded host turns")
     end)
-    framepump.cancel(pump)
+    pump:cancel()
     if not ok then
         error(reason, 0)
     end

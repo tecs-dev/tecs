@@ -13,7 +13,7 @@ thread between world updates.
 A connection runs as a coroutine this module owns and schedules. Each one
 installs a `nupp.suspension` handler whose park hands control back to `poll`,
 so a read that has no bytes yet costs the frame nothing and resumes on a later
-turn. That is the same shape `tecs.internal.framepump` gives the application,
+turn. That is the same shape `nupp.host.pump` gives the application,
 written again here because a server runs several connections at once and a
 pump built for one parked operation cannot.
 

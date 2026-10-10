@@ -1,18 +1,16 @@
 module tecs.internal.hostcancellation
 
---[[A private identity used to unwind a frame parked during host shutdown.]]
+--[[
+Recognizes the cancellation that unwinds a frame parked during host shutdown.
 
---- The private cancellation raised through application guards.
-export record Cancellation
-    reason: string
-end
+`nupp.host.pump` raises it inside the parked operation when the host cancels
+the pump. Application guards rethrow it rather than recording a crash, so the
+operation unwinds through its cleanup instead of presenting a failure.
+]]
 
---- Raises a host cancellation without presenting it as an operational failure.
-export function raise(reason: string): never
-    error(new Cancellation(reason = reason), 0)
-end
+local cancellation = require("nupp.suspension.cancellation")
 
---- Reports whether a caught value is the host's private cancellation.
+--- Reports whether a caught value is a cancellation, such as the host pump's.
 export function is(value: any): boolean
-    return value is Cancellation
+    return cancellation.is(value)
 end

@@ -2,7 +2,7 @@ local files = require("nupp.io.files")
 local suspension = require("nupp.suspension")
 local test = require("nupp.test")
 local assets = require("tecs.assets")
-local framepump = require("tecs.internal.framepump")
+local hostpump = require("nupp.host.pump")
 local hostcancellation = require("tecs.internal.hostcancellation")
 local suite = {}
 
@@ -107,13 +107,13 @@ end
 --- as one inside a world update does. `turns` bounds the loop so a test that
 --- deadlocks fails rather than hangs.
 local function underPump(body: function(): boolean, turns: integer?): (boolean, integer)
-    local pump = framepump.newPump()
-    local state = framepump.start(pump, body)
+    local pump = hostpump.newPump()
+    local state = pump:start(body)
     local passes: integer = 0
     local limit = turns or 64
     while state == "parked" and passes < limit do
         passes = passes + 1
-        state = framepump.poll(pump)
+        state = pump:poll()
     end
     test.assert(state ~= "parked", "the operation never finished")
 
@@ -194,26 +194,26 @@ function suite.sharesOneAcquisitionBetweenOverlappingRequests(): nil
     local loader = assets.newAssets()
     local first: assets.Handle? = nil
     local second: assets.Handle? = nil
-    local pump = framepump.newPump()
-    local outer = framepump.start(pump, function(): boolean
+    local pump = hostpump.newPump()
+    local outer = pump:start(function(): boolean
         first = loader:request(kind.kind, "shared.png")
 
         return true
     end)
     test.equal(outer as string, "parked")
     -- A second request while the first is parked joins the same acquisition.
-    local inner = framepump.newPump()
-    framepump.start(inner, function(): boolean
+    local inner = hostpump.newPump()
+    inner:start(function(): boolean
         second = loader:request(kind.kind, "shared.png")
 
         return true
     end)
     for _ = 1, 8 do
-        if framepump.parked(pump) then
-            framepump.poll(pump)
+        if pump:parked() then
+            pump:poll()
         end
-        if framepump.parked(inner) then
-            framepump.poll(inner)
+        if inner:parked() then
+            inner:poll()
         end
     end
     test.assert(first ~= nil and second ~= nil, "a shared request never settled")
@@ -415,9 +415,9 @@ function suite.cancelsAnInFlightRequestWhenTheHostStops(): nil
     local kind = scripted("test.asset")
     local script = succeeds(kind, "slow.png", 8)
     local loader = assets.newAssets()
-    local pump = framepump.newPump()
+    local pump = hostpump.newPump()
     local unwound = false
-    local state = framepump.start(pump, function(): boolean
+    local state = pump:start(function(): boolean
         local succeeded, failure = pcall(function(): nil
             loader:request(kind.kind, "slow.png")
         end)
@@ -428,9 +428,9 @@ function suite.cancelsAnInFlightRequestWhenTheHostStops(): nil
         return true
     end)
     test.equal(state as string, "parked")
-    framepump.poll(pump)
+    pump:poll()
     test.equal(loader:pending(), 1)
-    framepump.cancel(pump)
+    pump:cancel()
     test.assert(unwound, "the parked request did not unwind through host cancellation")
     test.assert(script.cancelled, "the acquisition was left running")
     test.equal(loader:pending(), 0)
@@ -443,14 +443,14 @@ function suite.keepsASharedAcquisitionWhenOneCallerGivesUp(): nil
     local script = succeeds(kind, "shared.png", 4)
     local loader = assets.newAssets()
     local staying: assets.Handle? = nil
-    local stay = framepump.newPump()
-    framepump.start(stay, function(): boolean
+    local stay = hostpump.newPump()
+    stay:start(function(): boolean
         staying = loader:request(kind.kind, "shared.png")
 
         return true
     end)
-    local leaving = framepump.newPump()
-    framepump.start(leaving, function(): boolean
+    local leaving = hostpump.newPump()
+    leaving:start(function(): boolean
         local succeeded = pcall(function(): nil
             loader:request(kind.kind, "shared.png")
         end)
@@ -458,12 +458,12 @@ function suite.keepsASharedAcquisitionWhenOneCallerGivesUp(): nil
 
         return true
     end)
-    framepump.cancel(leaving)
+    leaving:cancel()
     test.assert(not script.cancelled, "one caller leaving stopped the shared acquisition")
     test.equal(loader:pending(), 1)
     for _ = 1, 8 do
-        if framepump.parked(stay) then
-            framepump.poll(stay)
+        if stay:parked() then
+            stay:poll()
         end
     end
     test.assert(staying ~= nil, "the remaining caller never received the asset")
@@ -475,15 +475,15 @@ function suite.freesAnAcquisitionEveryCallerAbandoned(): nil
     local kind = scripted("test.asset")
     succeeds(kind, "orphan.png", 2)
     local loader = assets.newAssets()
-    local pump = framepump.newPump()
-    framepump.start(pump, function(): boolean
+    local pump = hostpump.newPump()
+    pump:start(function(): boolean
         pcall(function(): nil
             loader:request(kind.kind, "orphan.png")
         end)
 
         return true
     end)
-    framepump.cancel(pump)
+    pump:cancel()
     test.equal(loader:pending(), 0)
     test.equal(loader:resident(), 0)
     -- Nothing settled, so nothing was allocated to free.
@@ -496,8 +496,8 @@ function suite.resumesParkedRequestsWhenTheLoaderShutsDown(): nil
     succeeds(kind, "slow.png", 8)
     local loader = assets.newAssets()
     local reason: string? = nil
-    local pump = framepump.newPump()
-    local state = framepump.start(pump, function(): boolean
+    local pump = hostpump.newPump()
+    local state = pump:start(function(): boolean
         local handle, failure = loader:request(kind.kind, "slow.png")
         test.assert(handle == nil, "a shut-down loader produced a handle")
         reason = failure
@@ -508,7 +508,7 @@ function suite.resumesParkedRequestsWhenTheLoaderShutsDown(): nil
     loader:shutdown()
     -- Shutdown resumes the call that owns the outcome rather than raising in the
     -- pump, so the reason arrives where the caller asked for the asset.
-    test.equal(framepump.poll(pump) as string, "continue")
+    test.equal(pump:poll() as string, "continue")
     test.matches(reason as string, "shut down")
 end
 
@@ -521,22 +521,22 @@ function suite.drainsEveryAcquisitionInFlight(): nil
     succeeds(kind, "one.png", 2)
     succeeds(kind, "two.png", 5)
     local loader = assets.newAssets()
-    local first = framepump.newPump()
-    local second = framepump.newPump()
-    framepump.start(first, function(): boolean
+    local first = hostpump.newPump()
+    local second = hostpump.newPump()
+    first:start(function(): boolean
         loader:request(kind.kind, "one.png")
 
         return true
     end)
-    framepump.start(second, function(): boolean
+    second:start(function(): boolean
         loader:request(kind.kind, "two.png")
 
         return true
     end)
     test.equal(loader:pending(), 2)
     local drained = false
-    local drainer = framepump.newPump()
-    local state = framepump.start(drainer, function(): boolean
+    local drainer = hostpump.newPump()
+    local state = drainer:start(function(): boolean
         drained = loader:drain()
 
         return true
@@ -544,12 +544,12 @@ function suite.drainsEveryAcquisitionInFlight(): nil
     local turns = 0
     while state == "parked" and turns < 16 do
         turns = turns + 1
-        state = framepump.poll(drainer)
-        if framepump.parked(first) then
-            framepump.poll(first)
+        state = drainer:poll()
+        if first:parked() then
+            first:poll()
         end
-        if framepump.parked(second) then
-            framepump.poll(second)
+        if second:parked() then
+            second:poll()
         end
     end
     test.assert(drained, "drain did not report a clean drain")

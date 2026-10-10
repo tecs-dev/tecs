@@ -14,7 +14,7 @@ const models = require("tecs.gfx.models")
 local application = require("tecs.application")
 local viewpacket = require("tecs.internal.viewpacket")
 local framepacket = require("tecs.internal.framepacket")
-local framepump = require("tecs.internal.framepump")
+local hostpump = require("nupp.host.pump")
 local images = require("tecs.gfx.images")
 local platformevents = require("tecs.platform.events")
 local window = require("tecs.platform.window")
@@ -27,7 +27,7 @@ export record Session
     @private commandIndex: integer
     @private imageCommands: {images.Command}
     @private imageCommandIndex: integer
-    @private pump: framepump.Pump
+    @private pump: hostpump.Pump
     @private extractor: framepacket.Extractor
     @private views: viewpacket.Collector
 end
@@ -99,7 +99,7 @@ export function newSession(config: application.Config?): Session
         commandIndex = 1,
         imageCommands = {},
         imageCommandIndex = 1,
-        pump = framepump.newPump(),
+        pump = hostpump.newPump(),
         extractor = framepacket.new(app.world),
         views = viewpacket.new(app.world)
     )
@@ -153,7 +153,7 @@ end
 --- @return true while the host may continue driving startup or diagnostics.
 export function init(exclusive session: Session): boolean
     const app = session.app
-    framepump.start(session.pump, function(): boolean
+    session.pump:start(function(): boolean
         return app:init()
     end)
 
@@ -162,16 +162,17 @@ end
 
 --- Starts one frame or polls the frame already parked on asynchronous work.
 --- @return `parked`, `continue`, or `stopped`
-export function iterate(exclusive session: Session, dt: number): framepump.State
-    session.app:poll(framepump.parked(session.pump))
-    if framepump.parked(session.pump) then
-        return framepump.poll(session.pump)
+export function iterate(exclusive session: Session, dt: number): hostpump.State
+    const pump = session.pump
+    session.app:poll(pump:parked())
+    if pump:parked() then
+        return pump:poll()
     end
     local events = session.events
     session.events = {}
     local app = session.app
 
-    return framepump.start(session.pump, function(): boolean
+    return pump:start(function(): boolean
         return app:iterate(dt, events)
     end)
 end
@@ -179,7 +180,7 @@ end
 --- Runs application shutdown once.
 export function shutdown(exclusive session: Session): boolean
     screenshot.cancelPending()
-    framepump.cancel(session.pump)
+    session.pump:cancel()
     return session.app:shutdown()
 end
 
