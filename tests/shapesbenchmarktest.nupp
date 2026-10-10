@@ -30,30 +30,30 @@ function suite.zoomsPansAndResetsWithoutChangingTheScene(): nil
     const originalX, originalY = camera.x, camera.y
     test.equal(camera.zoom, 1)
 
-    host.pushWheel(session, 0, 1, 0, 1, 400, 225, 0, 1)
+    session.input:emit(host.INPUT_ADDRESS, host.WheelInput, 0, 1, 0, 1, 400, 225, 0, 1)
     host.iterate(session, 1 / 60)
     camera = eye(session)
     test.assert(camera.zoom > 1)
-    host.pushWheel(session, 0, -1, 0, -1, 400, 225, 0, 2)
+    session.input:emit(host.INPUT_ADDRESS, host.WheelInput, 0, -1, 0, -1, 400, 225, 0, 2)
     host.iterate(session, 1 / 60)
     camera = eye(session)
     test.assert(math.abs(camera.zoom - 1) < 0.00001)
 
     -- A smooth trackpad delta uses pixels, not wheel notches.
-    host.pushWheel(session, 0, 40, 0, 0, 400, 225, 0, 3)
+    session.input:emit(host.INPUT_ADDRESS, host.WheelInput, 0, 40, 0, 0, 400, 225, 0, 3)
     host.iterate(session, 1 / 60)
     camera = eye(session)
     test.assert(camera.zoom > 1 and camera.zoom < 1.2)
 
     -- A quick tap can arrive and finish within one host frame.
-    host.pushKey(session, true, "KeyD", nil, nil, 0, false, 0, 4)
-    host.pushKey(session, false, "KeyD", nil, nil, 0, false, 0, 5)
+    session.input:emit(host.INPUT_ADDRESS, host.KeyInput, true, "KeyD", nil, nil, 0, false, 0, 4)
+    session.input:emit(host.INPUT_ADDRESS, host.KeyInput, false, "KeyD", nil, nil, 0, false, 0, 5)
     host.iterate(session, 1 / 60)
     camera = eye(session)
     test.assert(camera.x > originalX)
     test.equal(camera.y, originalY)
 
-    host.pushKey(session, true, "KeyR", nil, nil, 0, false, 0, 6)
+    session.input:emit(host.INPUT_ADDRESS, host.KeyInput, true, "KeyR", nil, nil, 0, false, 0, 6)
     host.iterate(session, 1 / 60)
     camera = eye(session)
     test.equal(camera.x, originalX)

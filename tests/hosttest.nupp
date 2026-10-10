@@ -2,7 +2,9 @@ const io2 = require("nupp.io")
 
 local ecs = require("tecs.ecs")
 local gfx = require("tecs.gfx")
+local application = require("tecs.application")
 local host = require("tecs.host")
+local platformevents = require("tecs.platform.events")
 local images = require("tecs.gfx.images")
 local test = require("nupp.test")
 local window = require("tecs.platform.window")
@@ -38,9 +40,9 @@ function suite.sealsTranslatedEventsIntoOneApplicationFrame(): nil
     local session = host.create("host test", 640, 360, true, nil)
     host.init(session)
     attach(session)
-    host.pushFocus(session, false, 1, 1)
-    host.pushResize(session, false, 800, 450, 1600, 900, 2, 1.1, 2)
-    host.pushKey(session, true, "KeyW", "w", "w", 0, false, 1.2, 3)
+    session.input:emit(host.INPUT_ADDRESS, host.FocusInput, false, 1, 1)
+    session.input:emit(host.INPUT_ADDRESS, host.ResizeInput, false, 800, 450, 1600, 900, 2, 1.1, 2)
+    session.input:emit(host.INPUT_ADDRESS, host.KeyInput, true, "KeyW", "w", "w", 0, false, 1.2, 3)
 
     test.equal(host.iterate(session, 0.25), "continue")
 
@@ -53,11 +55,46 @@ function suite.sealsTranslatedEventsIntoOneApplicationFrame(): nil
     test.assert(host.shutdown(session))
 end
 
+function suite.keepsInputInArrivalOrderAcrossKinds(): nil
+    local seen: {string} = {}
+    const session = host.newSession({
+        onEvent = function(event: platformevents.Event, exclusive _app: application.Application): nil
+            seen[#seen + 1] = event.kind .. ":" .. event.sequence
+        end,
+    })
+    host.init(session)
+    -- Routes deliver in push order, so interleaved kinds reach the frame as
+    -- the host observed them.
+    session.input:emit(host.INPUT_ADDRESS, host.KeyInput, true, "KeyA", nil, nil, 0, false, 0.1, 1)
+    session.input:emit(host.INPUT_ADDRESS, host.PointerMoveInput, 1, 2, 0, 0, 0.2, 2)
+    session.input:emit(host.INPUT_ADDRESS, host.KeyInput, false, "KeyA", nil, nil, 0, false, 0.3, 3)
+    session.input:emit(host.INPUT_ADDRESS, host.PointerMoveInput, 3, 4, 0, 0, 0.4, 4)
+
+    test.equal(host.iterate(session, 0), "continue")
+    test.equal(table.concat(seen, " "), "keyDown:1 mouseMotion:2 keyUp:3 mouseMotion:4")
+    test.assert(host.shutdown(session))
+end
+
 function suite.queuesTouchAsOneFingerTheInputStateTracks(): nil
     local session = host.create("host test", 640, 360, true, nil)
     host.init(session)
     attach(session)
-    host.pushTouch(session, "fingerDown", "screen", "9", 12, 34, 0.25, 0.5, 0.75, 0, 0, 1, 1)
+    session.input:emit(
+        host.INPUT_ADDRESS,
+        host.TouchInput,
+        "fingerDown",
+        "screen",
+        "9",
+        12,
+        34,
+        0.25,
+        0.5,
+        0.75,
+        0,
+        0,
+        1,
+        1
+    )
 
     test.equal(host.iterate(session, 0.1), "continue")
 
@@ -70,7 +107,22 @@ function suite.queuesTouchAsOneFingerTheInputStateTracks(): nil
 
     test.raises(
         function(): nil
-            host.pushTouch(session, "fingerHover", "screen", "9", 0, 0, 0, 0, 0, 0, 0, 1, 2)
+            session.input:emit(
+                host.INPUT_ADDRESS,
+                host.TouchInput,
+                "fingerHover",
+                "screen",
+                "9",
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                2
+            )
         end,
         "unknown touch phase"
     )
@@ -189,7 +241,7 @@ function suite.followsTheDrawableThroughAResize(): nil
     test.equal(before:readFloat32(), 360)
     nupp.drop(before)
 
-    host.pushResize(session, false, 800, 450, 1600, 900, 2, 1, 1)
+    session.input:emit(host.INPUT_ADDRESS, host.ResizeInput, false, 800, 450, 1600, 900, 2, 1, 1)
     test.equal(host.iterate(session, 0), "continue")
     local after = io2.newScalarReader(host.renderPacket(session))
     after:skip(40)

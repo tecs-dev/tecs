@@ -1,4 +1,4 @@
-use std::ffi::{c_char, c_int, c_void, CString};
+use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::Path;
 use std::ptr;
 
@@ -13,6 +13,15 @@ const VALUE_STRING: u32 = 3;
 const VALUE_BYTES: u32 = 4;
 const VALUE_HANDLE: u32 = 5;
 const RESULT_CAPACITY: usize = 16;
+const PUSH_CAPACITY: usize = 16;
+const RAW_NIL: NuppValue = NuppValue {
+    kind: VALUE_NIL,
+    boolean: 0,
+    number: 0.0,
+    data: ptr::null_mut(),
+    length: 0,
+    handle: ptr::null_mut(),
+};
 
 #[repr(C)]
 struct NuppRuntime {
@@ -120,6 +129,13 @@ unsafe extern "C" {
         error: *mut *mut NuppError,
     ) -> c_int;
     fn nupp_runtime_free(runtime: *mut NuppRuntime);
+    fn nupp_host_push(
+        runtime: *mut NuppRuntime,
+        kind: *const c_char,
+        values: *const NuppValue,
+        value_count: usize,
+        error: *mut *mut NuppError,
+    ) -> c_int;
     fn nupp_error_message(error: *const NuppError) -> *const c_char;
     fn nupp_error_message_length(error: *const NuppError) -> usize;
     fn nupp_error_free(error: *mut NuppError);
@@ -276,6 +292,22 @@ impl HostRuntime {
             results.push(value);
         }
         Ok(results)
+    }
+
+    /// Queues one inbound message on `kind`, delivered to the route the program
+    /// declared for it at the runtime's next poll.
+    pub fn push(&mut self, kind: &CStr, values: &[ManagedValue]) -> Result<()> {
+        self.open()?;
+        let mut raw = [const { RAW_NIL }; PUSH_CAPACITY];
+        if values.len() > raw.len() {
+            bail!("a pushed message carries at most {PUSH_CAPACITY} values");
+        }
+        for (slot, value) in raw.iter_mut().zip(values) {
+            *slot = raw_argument(value);
+        }
+        call_status(|error| unsafe {
+            nupp_host_push(self.raw, kind.as_ptr(), raw.as_ptr(), values.len(), error)
+        })
     }
 
     pub fn shutdown(&mut self) -> Result<()> {

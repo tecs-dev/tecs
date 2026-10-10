@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::path::Path;
 use std::time::Instant;
 
@@ -15,15 +16,6 @@ const EXPORT_NAMES: &[&str] = &[
     "tecs.host.attachWindow",
     "tecs.host.applyWindowState",
     "tecs.host.detachWindow",
-    "tecs.host.pushClose",
-    "tecs.host.pushResize",
-    "tecs.host.pushFocus",
-    "tecs.host.pushKey",
-    "tecs.host.pushPointerMove",
-    "tecs.host.pushPointerButton",
-    "tecs.host.pushWheel",
-    "tecs.host.pushText",
-    "tecs.host.pushTouch",
     "tecs.host.nextWindowCommand",
     "tecs.host.windowCommandFailed",
     "tecs.host.renderPacket",
@@ -129,15 +121,6 @@ struct Exports {
     attach_window: ManagedHandle,
     apply_window_state: ManagedHandle,
     detach_window: ManagedHandle,
-    push_close: ManagedHandle,
-    push_resize: ManagedHandle,
-    push_focus: ManagedHandle,
-    push_key: ManagedHandle,
-    push_pointer_move: ManagedHandle,
-    push_pointer_button: ManagedHandle,
-    push_wheel: ManagedHandle,
-    push_text: ManagedHandle,
-    push_touch: ManagedHandle,
     next_window_command: ManagedHandle,
     window_command_failed: ManagedHandle,
     render_packet: ManagedHandle,
@@ -226,6 +209,14 @@ impl BridgeStats {
             }
             _ => {}
         }
+    }
+
+    fn record_crossing(&mut self, name: &'static str, nanos: u128) {
+        let entry = self.exports.entry(name).or_default();
+        entry.calls += 1;
+        entry.nanos += nanos;
+        self.current_calls += 1;
+        self.current_nanos += nanos;
     }
 
     fn write(&self) {
@@ -435,12 +426,10 @@ impl Bridge {
     }
 
     pub fn push_close(&mut self, timestamp: f64, sequence: u64) -> Result<()> {
-        let export = self.exports.push_close;
-        self.call(
-            export,
+        self.push(
+            c"tecs.input.close",
             &[ManagedValue::Number(timestamp), unsigned(sequence)],
-        )?;
-        Ok(())
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -455,9 +444,8 @@ impl Bridge {
         timestamp: f64,
         sequence: u64,
     ) -> Result<()> {
-        let export = self.exports.push_resize;
-        self.call(
-            export,
+        self.push(
+            c"tecs.input.resize",
             &[
                 ManagedValue::Boolean(scale_changed),
                 number(width),
@@ -468,21 +456,18 @@ impl Bridge {
                 ManagedValue::Number(timestamp),
                 unsigned(sequence),
             ],
-        )?;
-        Ok(())
+        )
     }
 
     pub fn push_focus(&mut self, focused: bool, timestamp: f64, sequence: u64) -> Result<()> {
-        let export = self.exports.push_focus;
-        self.call(
-            export,
+        self.push(
+            c"tecs.input.focus",
             &[
                 ManagedValue::Boolean(focused),
                 ManagedValue::Number(timestamp),
                 unsigned(sequence),
             ],
-        )?;
-        Ok(())
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -497,9 +482,8 @@ impl Bridge {
         timestamp: f64,
         sequence: u64,
     ) -> Result<()> {
-        let export = self.exports.push_key;
-        self.call(
-            export,
+        self.push(
+            c"tecs.input.key",
             &[
                 ManagedValue::Boolean(down),
                 text(physical_key),
@@ -510,11 +494,9 @@ impl Bridge {
                 ManagedValue::Number(timestamp),
                 unsigned(sequence),
             ],
-        )?;
-        Ok(())
+        )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn push_pointer_move(
         &mut self,
         x: f64,
@@ -524,9 +506,8 @@ impl Bridge {
         timestamp: f64,
         sequence: u64,
     ) -> Result<()> {
-        let export = self.exports.push_pointer_move;
-        self.call(
-            export,
+        self.push(
+            c"tecs.input.pointer-move",
             &[
                 ManagedValue::Number(x),
                 ManagedValue::Number(y),
@@ -535,11 +516,9 @@ impl Bridge {
                 ManagedValue::Number(timestamp),
                 unsigned(sequence),
             ],
-        )?;
-        Ok(())
+        )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn push_pointer_button(
         &mut self,
         down: bool,
@@ -549,9 +528,8 @@ impl Bridge {
         timestamp: f64,
         sequence: u64,
     ) -> Result<()> {
-        let export = self.exports.push_pointer_button;
-        self.call(
-            export,
+        self.push(
+            c"tecs.input.pointer-button",
             &[
                 ManagedValue::Boolean(down),
                 number(button),
@@ -560,8 +538,7 @@ impl Bridge {
                 ManagedValue::Number(timestamp),
                 unsigned(sequence),
             ],
-        )?;
-        Ok(())
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -576,9 +553,8 @@ impl Bridge {
         timestamp: f64,
         sequence: u64,
     ) -> Result<()> {
-        let export = self.exports.push_wheel;
-        self.call(
-            export,
+        self.push(
+            c"tecs.input.wheel",
             &[
                 ManagedValue::Number(wheel_x),
                 ManagedValue::Number(wheel_y),
@@ -589,21 +565,18 @@ impl Bridge {
                 ManagedValue::Number(timestamp),
                 unsigned(sequence),
             ],
-        )?;
-        Ok(())
+        )
     }
 
     pub fn push_text(&mut self, value: &str, timestamp: f64, sequence: u64) -> Result<()> {
-        let export = self.exports.push_text;
-        self.call(
-            export,
+        self.push(
+            c"tecs.input.text",
             &[
                 text(value),
                 ManagedValue::Number(timestamp),
                 unsigned(sequence),
             ],
-        )?;
-        Ok(())
+        )
     }
 
     /// Queues one finger's transition or movement on a touch surface.
@@ -611,9 +584,8 @@ impl Bridge {
     /// The device and finger identities cross as text because both are 64-bit
     /// platform values, and a Lua number would round two fingers into one.
     pub fn push_touch(&mut self, touch: &TouchEvent<'_>) -> Result<()> {
-        let export = self.exports.push_touch;
-        self.call(
-            export,
+        self.push(
+            c"tecs.input.touch",
             &[
                 text(touch.phase),
                 text(touch.device),
@@ -628,8 +600,7 @@ impl Bridge {
                 ManagedValue::Number(touch.timestamp),
                 unsigned(touch.sequence),
             ],
-        )?;
-        Ok(())
+        )
     }
 
     pub fn next_window_command(&mut self) -> Result<Option<WindowCommand>> {
@@ -754,6 +725,23 @@ impl Bridge {
         Ok(())
     }
 
+    /// Queues one input observation on the host channel. The session routes
+    /// each `tecs.input.*` kind to the platform event the application reads,
+    /// delivered at the start of the next frame.
+    fn push(&mut self, kind: &'static CStr, values: &[ManagedValue]) -> Result<()> {
+        let started = Instant::now();
+        self.runtime
+            .push(kind, values)
+            .with_context(|| format!("push {}", kind.to_string_lossy()))?;
+        if let Some(stats) = &mut self.stats {
+            stats.record_crossing(
+                kind.to_str().unwrap_or("push"),
+                started.elapsed().as_nanos(),
+            );
+        }
+        Ok(())
+    }
+
     fn call(
         &mut self,
         export: ManagedHandle,
@@ -773,35 +761,28 @@ impl Bridge {
 
 impl Exports {
     fn from_handles(handles: &[ManagedHandle]) -> Result<Self> {
-        if handles.len() != EXPORT_NAMES.len() {
+        let [_create, init, iterate, shutdown, crashed, set_suspended, attach_window, apply_window_state, detach_window, next_window_command, window_command_failed, render_packet, next_image_command, image_command_result, next_capture, capture_result, next_model_upload] =
+            handles
+        else {
             bail!("internal export table length mismatch");
-        }
+        };
         Ok(Self {
-            init: handles[1],
-            iterate: handles[2],
-            shutdown: handles[3],
-            crashed: handles[4],
-            set_suspended: handles[5],
-            attach_window: handles[6],
-            apply_window_state: handles[7],
-            detach_window: handles[8],
-            push_close: handles[9],
-            push_resize: handles[10],
-            push_focus: handles[11],
-            push_key: handles[12],
-            push_pointer_move: handles[13],
-            push_pointer_button: handles[14],
-            push_wheel: handles[15],
-            push_text: handles[16],
-            push_touch: handles[17],
-            next_window_command: handles[18],
-            window_command_failed: handles[19],
-            render_packet: handles[20],
-            next_image_command: handles[21],
-            image_command_result: handles[22],
-            next_capture: handles[23],
-            capture_result: handles[24],
-            next_model_upload: handles[25],
+            init: *init,
+            iterate: *iterate,
+            shutdown: *shutdown,
+            crashed: *crashed,
+            set_suspended: *set_suspended,
+            attach_window: *attach_window,
+            apply_window_state: *apply_window_state,
+            detach_window: *detach_window,
+            next_window_command: *next_window_command,
+            window_command_failed: *window_command_failed,
+            render_packet: *render_packet,
+            next_image_command: *next_image_command,
+            image_command_result: *image_command_result,
+            next_capture: *next_capture,
+            capture_result: *capture_result,
+            next_model_upload: *next_model_upload,
         })
     }
 }

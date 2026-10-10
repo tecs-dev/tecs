@@ -4,12 +4,22 @@ module tecs.host
 Managed-call bridge between the Rust application host and Nupp game state.
 
 This module keeps the embedding ABI scalar. Rust holds a managed `Session`
-handle, queues translated platform values through exported functions, and asks
-for one frame at a time. Records remain inside Nupp and no Lua stack layout or
-collector address becomes part of the host contract.
+handle and asks for one frame at a time. Records remain inside Nupp and no Lua
+stack layout or collector address becomes part of the host contract.
+
+Translated platform input crosses on the `nupp.host` channel rather than
+through exports. The host pushes each observation on a `tecs.input.*` kind,
+and the session routes every kind to its `input` bus as the matching record
+below, whose fields are the pushed values in order. A route delivers at the
+start of the next frame, or while a frame is parked, and the session queues
+the platform event for the frame after it. The kinds are a compatibility
+surface between this module and the host.
 ]]
 const screenshot = require("tecs.gfx.screenshot")
 const models = require("tecs.gfx.models")
+const events = require("nupp.events")
+const nupphost = require("nupp.host")
+const suspension = require("nupp.suspension")
 
 local application = require("tecs.application")
 local viewpacket = require("tecs.internal.viewpacket")
@@ -19,9 +29,132 @@ local images = require("tecs.gfx.images")
 local platformevents = require("tecs.platform.events")
 local window = require("tecs.platform.window")
 
+--- The address every input route delivers at. The host drives one window.
+export const INPUT_ADDRESS: integer = 1
+
+--- A close request the host pushed on `tecs.input.close`.
+@derive(events.Event)
+export record CloseInput
+    timestamp: number
+    sequence: integer
+end
+
+--- A size observation the host pushed on `tecs.input.resize`.
+@derive(events.Event)
+export record ResizeInput
+    --- Read-only. Reports whether the scale factor changed rather than only the size.
+    scaleChanged: boolean
+
+    width: integer
+    height: integer
+    pixelWidth: integer
+    pixelHeight: integer
+    scaleFactor: number
+    timestamp: number
+    sequence: integer
+end
+
+--- A focus transition the host pushed on `tecs.input.focus`.
+@derive(events.Event)
+export record FocusInput
+    focused: boolean
+    timestamp: number
+    sequence: integer
+end
+
+--- A keyboard transition the host pushed on `tecs.input.key`.
+@derive(events.Event)
+export record KeyInput
+    down: boolean
+    physicalKey: string
+    logicalKey: string?
+    text: string?
+    modifiers: integer
+    repeated: boolean
+    timestamp: number
+    sequence: integer
+end
+
+--- An absolute pointer position and relative delta the host pushed on
+--- `tecs.input.pointer-move`.
+@derive(events.Event)
+export record PointerMoveInput
+    x: number
+    y: number
+    dx: number
+    dy: number
+    timestamp: number
+    sequence: integer
+end
+
+--- A pointer button transition the host pushed on `tecs.input.pointer-button`.
+@derive(events.Event)
+export record PointerButtonInput
+    down: boolean
+    button: integer
+    x: number
+    y: number
+    timestamp: number
+    sequence: integer
+end
+
+--- Normalized wheel movement the host pushed on `tecs.input.wheel`.
+@derive(events.Event)
+export record WheelInput
+    wheelX: number
+    wheelY: number
+    ticksX: integer
+    ticksY: integer
+    x: number
+    y: number
+    timestamp: number
+    sequence: integer
+end
+
+--- Committed input-method text the host pushed on `tecs.input.text`.
+@derive(events.Event)
+export record TextInput
+    text: string
+    timestamp: number
+    sequence: integer
+end
+
+--- One finger's transition or movement the host pushed on `tecs.input.touch`.
+---
+--- `x` and `y` are in the window's logical coordinates and `normalX` and
+--- `normalY` run from zero to one across the surface. `touchDevice` and
+--- `finger` are strings rather than numbers because both are 64-bit platform
+--- identities that a Lua number would round together.
+@derive(events.Event)
+export record TouchInput
+    --- Read-only. Names one of `fingerDown`, `fingerMotion`, `fingerUp` or
+    --- `fingerCanceled`.
+    phase: string
+
+    touchDevice: string
+    finger: string
+    x: number
+    y: number
+    normalX: number
+    normalY: number
+    pressure: number
+    dx: number
+    dy: number
+    timestamp: number
+    sequence: integer
+end
+
 --- Host-owned state rooted by one Nupp managed handle.
 export record Session
     app: application.Application
+
+    --- Engine-owned. Receives the host's pushed input as the records above at
+    --- `INPUT_ADDRESS`. Public so a test can emit on it in place of a host;
+    --- game code should ignore it.
+    input: events.MessageBus<integer>
+
+    @private hosted: boolean
+    @private routes: {nupphost.Route}
     @private events: {platformevents.Event}
     @private commands: {window.Command}
     @private commandIndex: integer
@@ -85,15 +218,227 @@ local function hostState(
     )
 end
 
+local function touchPhase(phase: string): "fingerDown" | "fingerUp" | "fingerMotion" | "fingerCanceled"
+    if phase == "fingerDown" or phase == "fingerUp" or phase == "fingerMotion" or phase == "fingerCanceled" then
+        return phase
+    end
+    error("host: unknown touch phase", 3)
+end
+
+-- Turns each routed input record into the platform event the application
+-- reads, queued for the next frame.
+local function observeInput(session: Session): nil
+    const bus = session.input
+    const window = session.app.window
+    bus:observe(
+        INPUT_ADDRESS,
+        CloseInput,
+        function(borrows input: CloseInput): nil
+            append(session, platformevents.closeRequested(window:id(), input.timestamp, input.sequence))
+        end,
+        "tecs.host"
+    )
+    bus:observe(
+        INPUT_ADDRESS,
+        ResizeInput,
+        function(borrows input: ResizeInput): nil
+            if input.scaleChanged then
+                append(
+                    session,
+                    platformevents.scaleChanged(
+                        input.scaleFactor,
+                        input.width,
+                        input.height,
+                        window:id(),
+                        input.timestamp,
+                        input.sequence,
+                        input.pixelWidth,
+                        input.pixelHeight
+                    )
+                )
+            else
+                append(
+                    session,
+                    platformevents.resized(
+                        input.width,
+                        input.height,
+                        window:id(),
+                        input.scaleFactor,
+                        input.timestamp,
+                        input.sequence,
+                        input.pixelWidth,
+                        input.pixelHeight
+                    )
+                )
+            end
+        end,
+        "tecs.host"
+    )
+    bus:observe(
+        INPUT_ADDRESS,
+        FocusInput,
+        function(borrows input: FocusInput): nil
+            append(session, platformevents.focused(input.focused, window:id(), input.timestamp, input.sequence))
+        end,
+        "tecs.host"
+    )
+    bus:observe(
+        INPUT_ADDRESS,
+        KeyInput,
+        function(borrows input: KeyInput): nil
+            append(
+                session,
+                platformevents.key(
+                    input.down,
+                    input.physicalKey,
+                    input.logicalKey,
+                    input.text,
+                    input.modifiers,
+                    input.repeated,
+                    window:id(),
+                    input.timestamp,
+                    input.sequence
+                )
+            )
+        end,
+        "tecs.host"
+    )
+    bus:observe(
+        INPUT_ADDRESS,
+        PointerMoveInput,
+        function(borrows input: PointerMoveInput): nil
+            append(
+                session,
+                platformevents.pointerMoved(
+                    input.x,
+                    input.y,
+                    input.dx,
+                    input.dy,
+                    window:id(),
+                    input.timestamp,
+                    input.sequence
+                )
+            )
+        end,
+        "tecs.host"
+    )
+    bus:observe(
+        INPUT_ADDRESS,
+        PointerButtonInput,
+        function(borrows input: PointerButtonInput): nil
+            append(
+                session,
+                platformevents.pointerButton(
+                    input.down,
+                    input.button,
+                    input.x,
+                    input.y,
+                    1,
+                    window:id(),
+                    input.timestamp,
+                    input.sequence
+                )
+            )
+        end,
+        "tecs.host"
+    )
+    bus:observe(
+        INPUT_ADDRESS,
+        WheelInput,
+        function(borrows input: WheelInput): nil
+            append(
+                session,
+                platformevents.wheel(
+                    input.wheelX,
+                    input.wheelY,
+                    input.ticksX,
+                    input.ticksY,
+                    input.x,
+                    input.y,
+                    window:id(),
+                    input.timestamp,
+                    input.sequence
+                )
+            )
+        end,
+        "tecs.host"
+    )
+    bus:observe(
+        INPUT_ADDRESS,
+        TextInput,
+        function(borrows input: TextInput): nil
+            append(session, platformevents.text(input.text, window:id(), input.timestamp, input.sequence))
+        end,
+        "tecs.host"
+    )
+    bus:observe(
+        INPUT_ADDRESS,
+        TouchInput,
+        function(borrows input: TouchInput): nil
+            append(
+                session,
+                platformevents.touch(
+                    touchPhase(input.phase),
+                    input.touchDevice,
+                    input.finger,
+                    input.x,
+                    input.y,
+                    input.normalX,
+                    input.normalY,
+                    input.pressure,
+                    input.dx,
+                    input.dy,
+                    window:id(),
+                    input.timestamp,
+                    input.sequence
+                )
+            )
+        end,
+        "tecs.host"
+    )
+end
+
+-- Every routed kind keeps each message, as the per-event exports it replaced
+-- did, up to a bound no frame of real input approaches.
+const INPUT_LIMIT = 1024
+
+-- The pushed kinds are a compatibility surface with the Rust host.
+local function routeInput(exclusive session: Session): nil
+    const bus = session.input
+    const routes = session.routes
+    routes[#routes + 1] = nupphost.route("tecs.input.close", CloseInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
+    routes[
+        #routes + 1
+    ] = nupphost.route("tecs.input.resize", ResizeInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
+    routes[#routes + 1] = nupphost.route("tecs.input.focus", FocusInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
+    routes[#routes + 1] = nupphost.route("tecs.input.key", KeyInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
+    routes[
+        #routes + 1
+    ] = nupphost.route("tecs.input.pointer-move", PointerMoveInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
+    routes[
+        #routes + 1
+    ] = nupphost.route("tecs.input.pointer-button", PointerButtonInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
+    routes[#routes + 1] = nupphost.route("tecs.input.wheel", WheelInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
+    routes[#routes + 1] = nupphost.route("tecs.input.text", TextInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
+    routes[#routes + 1] = nupphost.route("tecs.input.touch", TouchInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
+end
+
 --- Creates a configurable session without starting the application.
+---
+--- Under an embedding host the session routes the host's `tecs.input.*` pushes
+--- to its `input` bus. Without one, as in a test, nothing is routed and input
+--- arrives only by emitting on that bus.
 --- @param config the application settings, including world timing and optional MCP
 ---     port.
 --- @return the session a component's constructor gives the Rust host.
 --- @raises string when application configuration is invalid.
 export function newSession(config: application.Config?): Session
     const app = application.newApplication(config)
-    return new Session(
+    const session = new Session(
         app = app,
+        input = events.newMessageBus(),
+        hosted = nupphost.attached(),
+        routes = {},
         events = {},
         commands = {},
         commandIndex = 1,
@@ -103,6 +448,12 @@ export function newSession(config: application.Config?): Session
         extractor = framepacket.new(app.world),
         views = viewpacket.new(app.world)
     )
+    observeInput(session)
+    if session.hosted then
+        routeInput(session)
+    end
+
+    return session
 end
 
 --- Creates an application session around a game-owned installation callback.
@@ -168,12 +519,16 @@ export function iterate(exclusive session: Session, dt: number): hostpump.State
     if pump:parked() then
         return pump:poll()
     end
-    local events = session.events
+    if session.hosted then
+        -- Delivers what the host pushed since the last turn.
+        suspension.poll()
+    end
+    local batch = session.events
     session.events = {}
     local app = session.app
 
     return pump:start(function(): boolean
-        return app:iterate(dt, events)
+        return app:iterate(dt, batch)
     end)
 end
 
@@ -181,6 +536,11 @@ end
 export function shutdown(exclusive session: Session): boolean
     screenshot.cancelPending()
     session.pump:cancel()
+    for _, route in ipairs(session.routes) do
+        route:close()
+    end
+    session.routes = {}
+
     return session.app:shutdown()
 end
 
@@ -360,201 +720,6 @@ end
 --- Detaches the OS window after the host destroys it.
 export function detachWindow(exclusive session: Session): nil
     window.detach(session.app.window)
-end
-
---- Queues a process quit event.
-export function pushQuit(exclusive session: Session, timestamp: number, sequence: integer): nil
-    append(session, platformevents.quit(session.app.window:id(), timestamp, sequence))
-end
-
---- Queues a close request for the application window.
-export function pushClose(exclusive session: Session, timestamp: number, sequence: integer): nil
-    append(session, platformevents.closeRequested(session.app.window:id(), timestamp, sequence))
-end
-
---- Queues a logical and physical window size observation.
-export function pushResize(
-    exclusive session: Session,
-    scaleChanged: boolean,
-    width: integer,
-    height: integer,
-    pixelWidth: integer,
-    pixelHeight: integer,
-    scaleFactor: number,
-    timestamp: number,
-    sequence: integer
-): nil
-    local event: platformevents.ResizeEvent
-    if scaleChanged then
-        event = platformevents.scaleChanged(
-            scaleFactor,
-            width,
-            height,
-            session.app.window:id(),
-            timestamp,
-            sequence,
-            pixelWidth,
-            pixelHeight
-        )
-    else
-        event = platformevents.resized(
-            width,
-            height,
-            session.app.window:id(),
-            scaleFactor,
-            timestamp,
-            sequence,
-            pixelWidth,
-            pixelHeight
-        )
-    end
-    append(session, event)
-end
-
---- Queues a window focus transition.
-export function pushFocus(exclusive session: Session, focused: boolean, timestamp: number, sequence: integer): nil
-    append(session, platformevents.focused(focused, session.app.window:id(), timestamp, sequence))
-end
-
---- Queues a physical and logical keyboard transition.
-export function pushKey(
-    exclusive session: Session,
-    down: boolean,
-    physicalKey: string,
-    logicalKey: string?,
-    text: string?,
-    modifiers: integer,
-    repeated: boolean,
-    timestamp: number,
-    sequence: integer
-): nil
-    append(
-        session,
-        platformevents.key(
-            down,
-            physicalKey,
-            logicalKey,
-            text,
-            modifiers,
-            repeated,
-            session.app.window:id(),
-            timestamp,
-            sequence
-        )
-    )
-end
-
---- Queues an absolute pointer position and relative delta.
-export function pushPointerMove(
-    exclusive session: Session,
-    x: number,
-    y: number,
-    dx: number,
-    dy: number,
-    timestamp: number,
-    sequence: integer
-): nil
-    append(session, platformevents.pointerMoved(x, y, dx, dy, session.app.window:id(), timestamp, sequence))
-end
-
---- Queues a pointer button transition.
-export function pushPointerButton(
-    exclusive session: Session,
-    down: boolean,
-    button: integer,
-    x: number,
-    y: number,
-    timestamp: number,
-    sequence: integer
-): nil
-    append(session, platformevents.pointerButton(down, button, x, y, 1, session.app.window:id(), timestamp, sequence))
-end
-
---- Queues normalized wheel movement.
-export function pushWheel(
-    exclusive session: Session,
-    wheelX: number,
-    wheelY: number,
-    ticksX: integer,
-    ticksY: integer,
-    x: number,
-    y: number,
-    timestamp: number,
-    sequence: integer
-): nil
-    append(
-        session,
-        platformevents.wheel(wheelX, wheelY, ticksX, ticksY, x, y, session.app.window:id(), timestamp, sequence)
-    )
-end
-
-local function touchPhase(phase: string): "fingerDown" | "fingerUp" | "fingerMotion" | "fingerCanceled"
-    if phase == "fingerDown" or phase == "fingerUp" or phase == "fingerMotion" or phase == "fingerCanceled" then
-        return phase
-    end
-    error("host: unknown touch phase", 3)
-end
-
---- Queues one finger's transition or movement on a touch surface.
----
---- `x` and `y` are in the window's logical coordinates and `normalX` and
---- `normalY` run from zero to one across the surface. `touchDevice` and
---- `finger` are strings rather than numbers because both are 64-bit platform
---- identities that a Lua number would round together.
---- @param session the host session queuing the event
---- @param phase one of `fingerDown`, `fingerMotion`, `fingerUp` or
----     `fingerCanceled`
---- @param touchDevice the touch surface's opaque identity
---- @param finger the finger's opaque identity on that surface
---- @param x the position in logical window coordinates
---- @param y the position in logical window coordinates
---- @param normalX the position across the surface, from zero to one
---- @param normalY the position down the surface, from zero to one
---- @param pressure the reported pressure from zero to one, and zero when the
----     surface does not measure it
---- @param dx the movement since this finger's previous event
---- @param dy the movement since this finger's previous event
---- @param timestamp the host time the platform reported
---- @param sequence the host's ordering number for this batch
---- @raises string when the phase is not one of the four kinds
-export function pushTouch(
-    exclusive session: Session,
-    phase: string,
-    touchDevice: string,
-    finger: string,
-    x: number,
-    y: number,
-    normalX: number,
-    normalY: number,
-    pressure: number,
-    dx: number,
-    dy: number,
-    timestamp: number,
-    sequence: integer
-): nil
-    append(
-        session,
-        platformevents.touch(
-            touchPhase(phase),
-            touchDevice,
-            finger,
-            x,
-            y,
-            normalX,
-            normalY,
-            pressure,
-            dx,
-            dy,
-            session.app.window:id(),
-            timestamp,
-            sequence
-        )
-    )
-end
-
---- Queues committed input-method text.
-export function pushText(exclusive session: Session, text: string, timestamp: number, sequence: integer): nil
-    append(session, platformevents.text(text, session.app.window:id(), timestamp, sequence))
 end
 
 --- Returns and consumes the next pending window command.

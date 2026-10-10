@@ -137,8 +137,17 @@ function suite.switchesEveryOriginalSceneThroughPointerInput(): nil
         local pose = assert(world:get(control, ecs.Transform2D))
         local box = assert(world:get(control, ui.Layout))
         local x, y = pose.x + box.width / 2, pose.y + box.height / 2
-        host.pushPointerButton(session, true, 1, x, y, index, index * 2 as integer)
-        host.pushPointerButton(session, false, 1, x, y, index, (index * 2 + 1) as integer)
+        session.input:emit(host.INPUT_ADDRESS, host.PointerButtonInput, true, 1, x, y, index, index * 2 as integer)
+        session.input:emit(
+            host.INPUT_ADDRESS,
+            host.PointerButtonInput,
+            false,
+            1,
+            x,
+            y,
+            index,
+            (index * 2 + 1) as integer
+        )
         frame(session)
         checkSceneGeometry(world, scenes[index])
         frame(session)
@@ -153,7 +162,7 @@ function suite.switchesEveryOriginalSceneThroughPointerInput(): nil
             end
         end
     end
-    host.pushResize(session, false, 1280, 720, 2560, 1440, 2, 10, 20)
+    session.input:emit(host.INPUT_ADDRESS, host.ResizeInput, false, 1280, 720, 2560, 1440, 2, 10, 20)
     frame(session)
     local cameras = world:newQuery({include = {gfx.Camera2D, gfx.ActiveCamera}})
     for candidate, _ in cameras:iter() do
@@ -187,7 +196,18 @@ function suite.keepsTheCenteredStandalonePanel(): nil
     test.assert(#text2.glyphsOf(world, textEntity(world, "Rectangle instance")) > 0)
     checkSharedFonts(world, 1)
     for index, density in ipairs({2, 1, 2}) do
-        host.pushResize(session, false, 960, 640, 960 * density, 640 * density, density, index, index)
+        session.input:emit(
+            host.INPUT_ADDRESS,
+            host.ResizeInput,
+            false,
+            960,
+            640,
+            960 * density,
+            640 * density,
+            density,
+            index,
+            index
+        )
         frame(session)
         checkSharedFonts(world, density)
     end
