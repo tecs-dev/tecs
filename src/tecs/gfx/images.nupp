@@ -30,8 +30,9 @@ twice replaces the image behind that same id, and every sprite already pointing
 at it draws the new pixels on the next frame.
 
 Residency is observed rather than waited on. `upload` queues a command and
-answers immediately with `"pending"`; the host drains the command, reports the
-outcome, and `stateOf` then answers `"resident"` or `"failed"`. Extraction
+answers immediately with `"pending"`; at the end of the frame the session asks
+the host to apply each queued command, and once the host answers, `stateOf`
+answers `"resident"` or `"failed"`. Extraction
 draws a sprite whose image is not resident against the backend's opaque white
 fallback, so a missing asset is a visibly untextured quad rather than a
 dropped entity or a raised error.

@@ -19,17 +19,15 @@ function suite.drawsACameraAndTwoImagesThroughItsEntry(): nil
     -- One camera plus the field, and both images queued for the backend.
     test.equal(session.app.world.liveCount, 601)
     local uploads = 0
-    while true do
-        const kind, serial, image, width, height, sampler, format, pixels = host.nextImageCommand(session)
-        if kind == nil then
-            break
+    for _, command in ipairs(images.drain()) do
+        test.assert(command is images.UploadImageCommand)
+        if command is images.UploadImageCommand then
+            test.equal(command.format, "rgba8")
+            test.equal(#command.pixels, command.width * command.height * 4)
+            test.assert(command.sampler < images.SAMPLER_COUNT)
+            images.complete(command.image, command.serial, true, nil)
+            uploads = uploads + 1
         end
-        test.equal(kind, "uploadImage")
-        test.equal(format, "rgba8")
-        test.equal(#(pixels as string), (width as integer) * (height as integer) * 4)
-        test.assert((sampler as integer) < images.SAMPLER_COUNT)
-        host.imageCommandResult(session, image as integer, serial as integer, true, nil)
-        uploads = uploads + 1
     end
     test.equal(uploads, 2)
     test.equal(images.stateOf(images.id("example/sprites/checker")), "resident")

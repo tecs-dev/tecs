@@ -1,9 +1,11 @@
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::CStr;
 use std::path::Path;
+use std::rc::Rc;
 use std::time::Instant;
 
-use crate::sdk::{HostRuntime, ManagedHandle, ManagedValue};
+use crate::sdk::{HostHandler, HostRuntime, HostValue, ManagedHandle, ManagedValue};
 use anyhow::{anyhow, bail, Context, Result};
 
 const EXPORT_NAMES: &[&str] = &[
@@ -19,8 +21,6 @@ const EXPORT_NAMES: &[&str] = &[
     "tecs.host.nextWindowCommand",
     "tecs.host.windowCommandFailed",
     "tecs.host.renderPacket",
-    "tecs.host.nextImageCommand",
-    "tecs.host.imageCommandResult",
     "tecs.host.nextCapture",
     "tecs.host.captureResult",
     "tecs.host.nextModelUpload",
@@ -58,18 +58,88 @@ pub struct WindowCommand {
     pub flag: Option<bool>,
 }
 
-/// One drained image residency request. `pixels` is empty for a release.
+/// One image residency request a frame asked the host to apply.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ImageCommand {
-    pub kind: String,
-    pub serial: u64,
-    pub image: u32,
-    pub width: u32,
-    pub height: u32,
-    pub sampler: u32,
-    pub format: String,
-    pub pixels: Vec<u8>,
-    pub maps: [u32; 3],
+pub enum ImageCommand {
+    /// Makes `pixels`, eight-bit RGBA rows top to bottom, resident under `image`.
+    Upload {
+        image: u32,
+        width: u32,
+        height: u32,
+        sampler: u32,
+        format: String,
+        pixels: Vec<u8>,
+    },
+    /// Drops `image` and everything bound to it.
+    Release { image: u32 },
+    /// Associates normal, emission and ORM images with `image`; zero is none.
+    MaterialMaps { image: u32, maps: [u32; 3] },
+}
+
+/// An image command waiting for the host loop, and the request its frame is
+/// parked on until the host answers it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingImage {
+    pub request: u64,
+    pub command: ImageCommand,
+}
+
+/// A queued image request, or why its arguments did not describe a command.
+type ImageRequest = (u64, Result<ImageCommand, String>);
+
+/// The kinds a frame calls to apply image residency, which are a
+/// compatibility surface with `tecs.host`.
+const IMAGE_KINDS: [&CStr; 3] = [
+    c"tecs.image.upload",
+    c"tecs.image.release",
+    c"tecs.image.material-maps",
+];
+
+/// Queues each image call for the host loop, which answers it after applying
+/// it to the GPU. The handler runs inside the frame that made the call, where
+/// the renderer is out of reach.
+struct ImageRequests {
+    queue: Rc<RefCell<VecDeque<ImageRequest>>>,
+}
+
+impl HostHandler for ImageRequests {
+    fn request(&mut self, request: u64, kind: &str, arguments: &[HostValue<'_>]) {
+        let command = image_command(kind, arguments).map_err(|error| format!("{error:#}"));
+        self.queue.borrow_mut().push_back((request, command));
+    }
+
+    fn cancel(&mut self, request: u64) {
+        self.queue
+            .borrow_mut()
+            .retain(|(queued, _)| *queued != request);
+    }
+}
+
+fn image_command(kind: &str, arguments: &[HostValue<'_>]) -> Result<ImageCommand> {
+    let integer = |index: usize| match arguments.get(index) {
+        Some(HostValue::Number(value)) => exact_u32(*value, kind),
+        _ => bail!("{kind} argument {} is not a number", index + 1),
+    };
+    let bytes = |index: usize| match arguments.get(index) {
+        Some(HostValue::Bytes(value)) => Ok(*value),
+        _ => bail!("{kind} argument {} is not bytes", index + 1),
+    };
+    Ok(match kind {
+        "tecs.image.upload" => ImageCommand::Upload {
+            image: integer(0)?,
+            width: integer(1)?,
+            height: integer(2)?,
+            sampler: integer(3)?,
+            format: String::from_utf8_lossy(bytes(4)?).into_owned(),
+            pixels: bytes(5)?.to_vec(),
+        },
+        "tecs.image.release" => ImageCommand::Release { image: integer(0)? },
+        "tecs.image.material-maps" => ImageCommand::MaterialMaps {
+            image: integer(0)?,
+            maps: [integer(1)?, integer(2)?, integer(3)?],
+        },
+        _ => bail!("no image command is called {kind}"),
+    })
 }
 
 /// One finger crossing into Nupp.
@@ -124,8 +194,6 @@ struct Exports {
     next_window_command: ManagedHandle,
     window_command_failed: ManagedHandle,
     render_packet: ManagedHandle,
-    next_image_command: ManagedHandle,
-    image_command_result: ManagedHandle,
     next_capture: ManagedHandle,
     capture_result: ManagedHandle,
     next_model_upload: ManagedHandle,
@@ -135,6 +203,7 @@ pub struct Bridge {
     runtime: HostRuntime,
     session: ManagedHandle,
     exports: Exports,
+    images: Rc<RefCell<VecDeque<ImageRequest>>>,
     stats: Option<BridgeStats>,
 }
 
@@ -297,6 +366,15 @@ impl Bridge {
             max_frames,
         } = *options;
         let mut runtime = HostRuntime::new(executable).context("create the Nupp runtime")?;
+        let images = Rc::new(RefCell::new(VecDeque::new()));
+        runtime
+            .register_host(
+                &IMAGE_KINDS,
+                Box::new(ImageRequests {
+                    queue: Rc::clone(&images),
+                }),
+            )
+            .context("register the image residency handler")?;
         let bytes = std::fs::read(component_path)
             .with_context(|| format!("read Nupp component {}", component_path.display()))?;
         let component = runtime
@@ -359,6 +437,7 @@ impl Bridge {
             runtime,
             session,
             exports,
+            images,
             stats,
         })
     }
@@ -670,53 +749,53 @@ impl Bridge {
         Ok(())
     }
 
-    pub fn next_image_command(&mut self) -> Result<Option<ImageCommand>> {
-        let values = self.call(self.exports.next_image_command, &[])?;
-        let Some(kind) = optional_text(&values, 0, "tecs.host.nextImageCommand kind")? else {
-            return Ok(None);
-        };
-        let serial = required_number(&values, 1, "tecs.host.nextImageCommand serial")?;
-        let image = required_number(&values, 2, "tecs.host.nextImageCommand image")?;
-        let release = kind == "releaseImage";
-        Ok(Some(ImageCommand {
-            kind,
-            serial: exact_u64(serial, "image command serial")?,
-            image: exact_u32(image, "image command id")?,
-            width: optional_u32(&values, 3, "tecs.host.nextImageCommand width")?,
-            height: optional_u32(&values, 4, "tecs.host.nextImageCommand height")?,
-            sampler: optional_u32(&values, 5, "tecs.host.nextImageCommand sampler")?,
-            format: optional_text(&values, 6, "tecs.host.nextImageCommand format")?
-                .unwrap_or_default(),
-            maps: [
-                optional_u32(&values, 8, "normal map")?,
-                optional_u32(&values, 9, "emission map")?,
-                optional_u32(&values, 10, "ORM map")?,
-            ],
-            pixels: if release {
-                Vec::new()
-            } else {
-                optional_bytes(&values, 7, "tecs.host.nextImageCommand pixels")?
-            },
-        }))
+    /// Takes the next image command a parked frame is waiting on.
+    ///
+    /// A request whose arguments describe no command is failed here, which
+    /// raises in the frame that made it.
+    pub fn next_image_command(&mut self) -> Result<Option<PendingImage>> {
+        loop {
+            let Some((request, command)) = self.images.borrow_mut().pop_front() else {
+                return Ok(None);
+            };
+            match command {
+                Ok(command) => return Ok(Some(PendingImage { request, command })),
+                Err(reason) => self
+                    .runtime
+                    .fail(request, &reason)
+                    .context("fail a malformed image command")?,
+            }
+        }
     }
 
-    pub fn report_image_result(
-        &mut self,
-        image: u32,
-        serial: u64,
-        reason: Option<&str>,
-    ) -> Result<()> {
-        let export = self.exports.image_command_result;
-        self.call(
-            export,
-            &[
-                number(image),
-                unsigned(serial),
-                ManagedValue::Boolean(reason.is_none()),
-                optional_text_value(reason),
-            ],
-        )?;
+    /// Answers an image command with the backend's outcome; the parked frame
+    /// completes it in `tecs.gfx.images` when it next polls.
+    ///
+    /// A rejected image is answered rather than failing the frame, so a game
+    /// observes a failed asset and the window keeps drawing.
+    pub fn report_image_result(&mut self, request: u64, reason: Option<&str>) -> Result<()> {
+        let started = Instant::now();
+        self.runtime
+            .answer(
+                request,
+                &[
+                    ManagedValue::Boolean(reason.is_none()),
+                    optional_text_value(reason),
+                ],
+            )
+            .context("answer an image command")?;
+        if let Some(stats) = &mut self.stats {
+            stats.record_crossing("tecs.image.answer", started.elapsed().as_nanos());
+        }
         Ok(())
+    }
+
+    /// Answers an image command without applying it, which leaves the image
+    /// pending, for a host with no renderer.
+    pub fn skip_image_command(&mut self, request: u64) -> Result<()> {
+        self.runtime
+            .answer(request, &[])
+            .context("answer an image command")
     }
 
     pub fn report_window_failure(&mut self, serial: u64, reason: &str) -> Result<()> {
@@ -761,7 +840,7 @@ impl Bridge {
 
 impl Exports {
     fn from_handles(handles: &[ManagedHandle]) -> Result<Self> {
-        let [_create, init, iterate, shutdown, crashed, set_suspended, attach_window, apply_window_state, detach_window, next_window_command, window_command_failed, render_packet, next_image_command, image_command_result, next_capture, capture_result, next_model_upload] =
+        let [_create, init, iterate, shutdown, crashed, set_suspended, attach_window, apply_window_state, detach_window, next_window_command, window_command_failed, render_packet, next_capture, capture_result, next_model_upload] =
             handles
         else {
             bail!("internal export table length mismatch");
@@ -778,8 +857,6 @@ impl Exports {
             next_window_command: *next_window_command,
             window_command_failed: *window_command_failed,
             render_packet: *render_packet,
-            next_image_command: *next_image_command,
-            image_command_result: *image_command_result,
             next_capture: *next_capture,
             capture_result: *capture_result,
             next_model_upload: *next_model_upload,
@@ -914,21 +991,6 @@ fn optional_boolean(
         ManagedValue::Nil => Ok(None),
         ManagedValue::Boolean(value) => Ok(Some(*value)),
         _ => bail!("{operation} returned non-boolean result {}", index + 1),
-    }
-}
-
-fn optional_u32(values: &[ManagedValue], index: usize, operation: &str) -> Result<u32> {
-    match optional_number(values, index, operation)? {
-        None => Ok(0),
-        Some(value) => exact_u32(value, operation),
-    }
-}
-
-fn optional_bytes(values: &[ManagedValue], index: usize, operation: &str) -> Result<Vec<u8>> {
-    match value(values, index, operation)? {
-        ManagedValue::Nil => Ok(Vec::new()),
-        ManagedValue::Bytes(bytes) => Ok(bytes.clone()),
-        _ => bail!("{operation} returned a non-byte result {}", index + 1),
     }
 }
 

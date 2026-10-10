@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use bridge::{
     Bridge, FrameState, ImageCommand, SessionOptions, TouchEvent, WindowCommand, WindowState,
 };
@@ -278,21 +278,23 @@ impl App {
         Ok(())
     }
 
-    /// Drains every queued residency request and reports each outcome.
+    /// Applies every image command the parked frame asked for and answers
+    /// each, reporting whether there were any.
     ///
-    /// A rejected image is reported back rather than failing the frame, so a
-    /// game observes a failed asset and the window keeps drawing.
-    fn apply_image_commands(&mut self) -> Result<()> {
-        while let Some(command) = self.bridge.next_image_command()? {
-            let outcome = match self.graphics.as_mut() {
-                None => Err(anyhow!("the renderer is not attached")),
-                Some(graphics) => apply_image_command(graphics, &command),
+    /// A rejected image is answered rather than failing the frame, so a game
+    /// observes a failed asset and the window keeps drawing.
+    fn apply_image_commands(&mut self) -> Result<bool> {
+        let mut applied = false;
+        while let Some(pending) = self.bridge.next_image_command()? {
+            let reason = match self.graphics.as_mut() {
+                None => Some("the renderer is not attached".to_owned()),
+                Some(graphics) => apply_pending_image(graphics, &pending.command),
             };
-            let reason = outcome.err().map(|error| format!("{error:#}"));
             self.bridge
-                .report_image_result(command.image, command.serial, reason.as_deref())?;
+                .report_image_result(pending.request, reason.as_deref())?;
+            applied = true;
         }
-        Ok(())
+        Ok(applied)
     }
 
     fn apply_command(&mut self, command: &WindowCommand) -> Result<()> {
@@ -377,7 +379,13 @@ impl App {
             self.last_frame = now;
             elapsed
         };
-        match self.bridge.iterate(dt)? {
+        let mut state = self.bridge.iterate(dt)?;
+        // A frame parks on each image command it queued; answering it and
+        // polling again finishes the frame within this turn.
+        while state == FrameState::Parked && self.apply_image_commands()? {
+            state = self.bridge.iterate(0.0)?;
+        }
+        match state {
             FrameState::Parked => {
                 self.frame_parked = true;
                 return Ok(());
@@ -390,7 +398,6 @@ impl App {
             }
         }
         self.apply_commands()?;
-        self.apply_image_commands()?;
         while let Some((id, bytes)) = self.bridge.next_model_upload()? {
             if let Some(graphics) = &mut self.graphics {
                 graphics.upload_model(id, &bytes)?;
@@ -675,22 +682,30 @@ impl Drop for App {
 }
 
 fn apply_image_command(graphics: &mut Graphics, command: &ImageCommand) -> Result<()> {
-    match command.kind.as_str() {
-        "uploadImage" => {
-            if command.format != "rgba8" {
-                return Err(anyhow!("unknown image format {}", command.format));
+    match command {
+        ImageCommand::Upload {
+            image,
+            width,
+            height,
+            format,
+            pixels,
+            ..
+        } => {
+            if format != "rgba8" {
+                return Err(anyhow!("unknown image format {format}"));
             }
-            graphics.upload_image(
-                command.image,
-                command.width,
-                command.height,
-                &command.pixels,
-            )
+            graphics.upload_image(*image, *width, *height, pixels)
         }
-        "releaseImage" => graphics.release_image(command.image),
-        "setMaterialMaps" => graphics.set_material_maps(command.image, command.maps),
-        kind => Err(anyhow!("unknown image command {kind}")),
+        ImageCommand::Release { image } => graphics.release_image(*image),
+        ImageCommand::MaterialMaps { image, maps } => graphics.set_material_maps(*image, *maps),
     }
+}
+
+/// Applies one image command a frame waits on, answering why it failed.
+fn apply_pending_image(graphics: &mut Graphics, command: &ImageCommand) -> Option<String> {
+    apply_image_command(graphics, command)
+        .err()
+        .map(|error| format!("{error:#}"))
 }
 
 /// Returns a position as a fraction of one dimension, and zero for no extent.
@@ -964,7 +979,14 @@ fn run_render_benchmark(mut config: Config) -> Result<()> {
     bridge.init()?;
     loop {
         let started = Instant::now();
-        match bridge.iterate(1.0 / 60.0)? {
+        let state = bridge.iterate(1.0 / 60.0)?;
+        while let Some(pending) = bridge.next_image_command()? {
+            if let Some(reason) = apply_pending_image(&mut graphics, &pending.command) {
+                bail!("{reason}");
+            }
+            bridge.report_image_result(pending.request, None)?;
+        }
+        match state {
             FrameState::Parked => continue,
             FrameState::Stopped => break,
             FrameState::Continue => {}
@@ -975,10 +997,6 @@ fn run_render_benchmark(mut config: Config) -> Result<()> {
         let updated = Instant::now();
         while let Some((id, bytes)) = bridge.next_model_upload()? {
             graphics.upload_model(id, &bytes)?;
-        }
-        while let Some(command) = bridge.next_image_command()? {
-            apply_image_command(&mut graphics, &command)?;
-            bridge.report_image_result(command.image, command.serial, None)?;
         }
         let packet = bridge.render_packet(graphics.scene_revision())?;
         let extracted = Instant::now();
@@ -1038,7 +1056,18 @@ fn run_headless(config: Config) -> Result<()> {
         if let Some(synthetic) = &mut synthetic {
             synthetic.push(&mut bridge)?;
         }
-        match bridge.iterate(if config.offscreen { 1.0 / 60.0 } else { 0.0 })? {
+        let state = bridge.iterate(if config.offscreen { 1.0 / 60.0 } else { 0.0 })?;
+        while let Some(pending) = bridge.next_image_command()? {
+            match &mut graphics {
+                Some(graphics) => {
+                    let reason = apply_pending_image(graphics, &pending.command);
+                    bridge.report_image_result(pending.request, reason.as_deref())?;
+                }
+                // Nothing will ever apply it, so the image stays pending.
+                None => bridge.skip_image_command(pending.request)?,
+            }
+        }
+        match state {
             FrameState::Stopped => break,
             FrameState::Parked => continue,
             FrameState::Continue => {}
@@ -1046,12 +1075,6 @@ fn run_headless(config: Config) -> Result<()> {
         if let Some(graphics) = &mut graphics {
             while let Some((id, bytes)) = bridge.next_model_upload()? {
                 graphics.upload_model(id, &bytes)?;
-            }
-            while let Some(command) = bridge.next_image_command()? {
-                let reason = apply_image_command(graphics, &command)
-                    .err()
-                    .map(|e| format!("{e:#}"));
-                bridge.report_image_result(command.image, command.serial, reason.as_deref())?;
             }
             let mut captures = Vec::new();
             while let Some(id) = bridge.next_capture()? {

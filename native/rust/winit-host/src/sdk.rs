@@ -73,6 +73,17 @@ impl Default for NuppValue {
     }
 }
 
+type NuppHostHandler = unsafe extern "C" fn(
+    runtime: *mut NuppRuntime,
+    request: u64,
+    kind: *const c_char,
+    arguments: *const NuppValue,
+    argument_count: usize,
+    userdata: *mut c_void,
+);
+type NuppHostCancel =
+    unsafe extern "C" fn(runtime: *mut NuppRuntime, request: u64, userdata: *mut c_void);
+
 unsafe extern "C" {
     fn nupp_config_init(config: *mut NuppConfig);
     fn nupp_runtime_new(
@@ -129,6 +140,27 @@ unsafe extern "C" {
         error: *mut *mut NuppError,
     ) -> c_int;
     fn nupp_runtime_free(runtime: *mut NuppRuntime);
+    fn nupp_host_register(
+        runtime: *mut NuppRuntime,
+        kind: *const c_char,
+        handler: Option<NuppHostHandler>,
+        cancel: Option<NuppHostCancel>,
+        userdata: *mut c_void,
+        error: *mut *mut NuppError,
+    ) -> c_int;
+    fn nupp_host_answer(
+        runtime: *mut NuppRuntime,
+        request: u64,
+        results: *const NuppValue,
+        result_count: usize,
+        error: *mut *mut NuppError,
+    ) -> c_int;
+    fn nupp_host_fail(
+        runtime: *mut NuppRuntime,
+        request: u64,
+        message: *const c_char,
+        error: *mut *mut NuppError,
+    ) -> c_int;
     fn nupp_host_push(
         runtime: *mut NuppRuntime,
         kind: *const c_char,
@@ -163,10 +195,48 @@ pub enum ManagedValue {
     Handle(ManagedHandle),
 }
 
+/// One argument of a `nupp.host` request, borrowed for the handler's call.
+///
+/// Strings and byte spans both arrive as `Bytes`; a handler that answers later
+/// copies what it keeps.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HostValue<'a> {
+    Nil,
+    Boolean(bool),
+    Number(f64),
+    Bytes(&'a [u8]),
+}
+
+/// Answers the requests of one `nupp.host` kind.
+///
+/// It runs inside whatever call into the runtime made the request, so it must
+/// not reach the [`HostRuntime`] itself: it records the request and the host
+/// answers it through [`HostRuntime::answer`] or [`HostRuntime::fail`] once the
+/// call has returned.
+pub trait HostHandler {
+    /// Receives request `request` of `kind`.
+    fn request(&mut self, request: u64, kind: &str, arguments: &[HostValue<'_>]);
+
+    /// Learns that nothing waits for `request` any more. Advisory: the request
+    /// may still be answered.
+    fn cancel(&mut self, _request: u64) {}
+}
+
+/// A handler behind the thin pointer the runtime hands back as userdata.
+struct Registration {
+    handler: Box<dyn HostHandler>,
+}
+
 pub struct HostRuntime {
     raw: *mut NuppRuntime,
     components: Vec<*mut NuppComponent>,
     handles: Vec<*mut NuppHandle>,
+    /// Registered handlers. Each registration stays where it was boxed, so
+    /// the userdata pointer the runtime holds stays valid; they outlive the
+    /// runtime, which may cancel through them while it shuts down. The box is
+    /// what keeps that address stable as the vector grows.
+    #[allow(clippy::vec_box)]
+    handlers: Vec<Box<Registration>>,
     closed: bool,
 }
 
@@ -187,6 +257,7 @@ impl HostRuntime {
             raw,
             components: Vec::new(),
             handles: Vec::new(),
+            handlers: Vec::new(),
             closed: false,
         })
     }
@@ -294,6 +365,47 @@ impl HostRuntime {
         Ok(results)
     }
 
+    /// Registers `handler` to answer every request of each of `kinds`.
+    ///
+    /// Register before loading a component, so the program finds the host
+    /// attached when it binds its kinds.
+    pub fn register_host(&mut self, kinds: &[&CStr], handler: Box<dyn HostHandler>) -> Result<()> {
+        self.open()?;
+        let mut registration = Box::new(Registration { handler });
+        let userdata = std::ptr::from_mut::<Registration>(&mut registration).cast::<c_void>();
+        self.handlers.push(registration);
+        for kind in kinds {
+            call_status(|error| unsafe {
+                nupp_host_register(
+                    self.raw,
+                    kind.as_ptr(),
+                    Some(host_request),
+                    Some(host_cancel),
+                    userdata,
+                    error,
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Answers `request` with `results`, which the runtime copies; the waiting
+    /// task resumes at the runtime's next poll.
+    pub fn answer(&mut self, request: u64, results: &[ManagedValue]) -> Result<()> {
+        self.open()?;
+        let raw = results.iter().map(raw_argument).collect::<Vec<_>>();
+        call_status(|error| unsafe {
+            nupp_host_answer(self.raw, request, raw.as_ptr(), raw.len(), error)
+        })
+    }
+
+    /// Fails `request`; its caller raises `message`.
+    pub fn fail(&mut self, request: u64, message: &str) -> Result<()> {
+        self.open()?;
+        let message = CString::new(message.replace('\0', " "))?;
+        call_status(|error| unsafe { nupp_host_fail(self.raw, request, message.as_ptr(), error) })
+    }
+
     /// Queues one inbound message on `kind`, delivered to the route the program
     /// declared for it at the runtime's next poll.
     pub fn push(&mut self, kind: &CStr, values: &[ManagedValue]) -> Result<()> {
@@ -389,6 +501,48 @@ fn raw_argument(value: &ManagedValue) -> NuppValue {
             ..NuppValue::default()
         },
     }
+}
+
+unsafe extern "C" fn host_request(
+    _runtime: *mut NuppRuntime,
+    request: u64,
+    kind: *const c_char,
+    arguments: *const NuppValue,
+    argument_count: usize,
+    userdata: *mut c_void,
+) {
+    let handler = unsafe { &mut (*userdata.cast::<Registration>()).handler };
+    let kind = unsafe { CStr::from_ptr(kind) }.to_str().unwrap_or("");
+    let raw = if argument_count == 0 || arguments.is_null() {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(arguments, argument_count) }
+    };
+    let mut values = [HostValue::Nil; RESULT_CAPACITY];
+    let mut owned = Vec::new();
+    let borrowed: &mut [HostValue<'_>] = if raw.len() <= values.len() {
+        &mut values[..raw.len()]
+    } else {
+        owned.resize(raw.len(), HostValue::Nil);
+        &mut owned
+    };
+    for (slot, value) in borrowed.iter_mut().zip(raw) {
+        *slot = match value.kind {
+            VALUE_BOOLEAN => HostValue::Boolean(value.boolean != 0),
+            VALUE_NUMBER => HostValue::Number(value.number),
+            VALUE_STRING | VALUE_BYTES if !value.data.is_null() => {
+                HostValue::Bytes(unsafe { std::slice::from_raw_parts(value.data, value.length) })
+            }
+            VALUE_STRING | VALUE_BYTES => HostValue::Bytes(&[]),
+            _ => HostValue::Nil,
+        };
+    }
+    handler.request(request, kind, borrowed);
+}
+
+unsafe extern "C" fn host_cancel(_runtime: *mut NuppRuntime, request: u64, userdata: *mut c_void) {
+    let handler = unsafe { &mut (*userdata.cast::<Registration>()).handler };
+    handler.cancel(request);
 }
 
 fn call_status(call: impl FnOnce(*mut *mut NuppError) -> c_int) -> Result<()> {

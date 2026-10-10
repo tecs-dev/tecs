@@ -255,12 +255,11 @@ function suite.followsTheDrawableThroughAResize(): nil
     test.assert(host.shutdown(session))
 end
 
-function suite.drainsImageResidencyCommandsForTheHost(): nil
+function suite.leavesImageCommandsQueuedWithoutAHost(): nil
     local session = host.create(nil, 320, 180, false, nil)
     host.init(session)
     -- The registry is process-wide, so drop anything an earlier suite queued.
-    while host.nextImageCommand(session) ~= nil do
-    end
+    images.drain()
 
     local id = images.upload({
         name = "hosttest/checker",
@@ -270,28 +269,26 @@ function suite.drainsImageResidencyCommandsForTheHost(): nil
         filter = "linear",
         address = "repeat",
     })
-    local kind, serial, image, width, height, sampler, format, pixels = host.nextImageCommand(session)
-    test.equal(kind, "uploadImage")
-    test.equal(image, id)
-    test.equal(width, 1)
-    test.equal(height, 2)
-    test.equal(sampler, images.samplerIndex("linear", "repeat"))
-    test.equal(format, "rgba8")
-    test.equal(#(pixels as string), 8)
-    test.equal(images.stateOf(id), "pending")
-
-    host.imageCommandResult(session, image as integer, serial as integer, true, nil)
+    -- With no embedding host to ask, a frame finishes without applying the
+    -- upload, and it stays queued for whoever drives the registry.
+    test.equal(host.iterate(session, 0), "continue")
+    local commands = images.drain()
+    test.equal(#commands, 1)
+    const upload = commands[1]
+    test.assert(upload is images.UploadImageCommand)
+    if upload is images.UploadImageCommand then
+        test.equal(upload.image, id)
+        test.equal(upload.width, 1)
+        test.equal(upload.height, 2)
+        test.equal(upload.sampler, images.samplerIndex("linear", "repeat"))
+        test.equal(upload.format, "rgba8")
+        test.equal(#upload.pixels, 8)
+        test.equal(images.stateOf(id), "pending")
+        images.complete(upload.image, upload.serial, true, nil)
+    end
     test.equal(images.stateOf(id), "resident")
-
     test.assert(images.release("hosttest/checker"))
-    local releaseKind, releaseSerial, releaseImage, releaseWidth = host.nextImageCommand(session)
-    test.equal(releaseKind, "releaseImage")
-    test.equal(releaseImage, id)
-    test.equal(releaseWidth, nil)
-    host.imageCommandResult(session, releaseImage as integer, releaseSerial as integer, true, nil)
-    test.equal(images.stateOf(id), "released")
-
-    test.equal(host.nextImageCommand(session), nil)
+    images.drain()
     test.assert(host.shutdown(session))
 end
 

@@ -105,8 +105,6 @@ local hostExports = {
     "tecs.host.detachWindow",
     "tecs.host.nextWindowCommand",
     "tecs.host.windowCommandFailed",
-    "tecs.host.nextImageCommand",
-    "tecs.host.imageCommandResult",
     "tecs.host.nextCapture",
     "tecs.host.captureResult",
     "tecs.host.nextModelUpload",
