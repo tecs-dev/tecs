@@ -77,7 +77,7 @@ export const DEFAULT_SPEED: number = 1.0
 --- cycle, so it neither grows without bound nor loses precision to its own age.
 --- The cycle's duration is the sum of the durations of the frames the tag
 --- visits, which `tecs.gfx.sheet.Sheet.cycle` reports.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct Animation
     --- Caller-writable. Selects a sheet by its registration index. Zero plays
     --- nothing.

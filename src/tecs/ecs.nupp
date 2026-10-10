@@ -22,7 +22,7 @@ the query loop. A native column grows geometrically with a single memory copy;
 bulk spawns reserve the whole destination range before calling their writer.
 
 ```nupp
-@derive(tecs.ecs.Component, nupp.derive.Debug, nupp.derive.Serde)
+@derive(tecs.ecs.Component, nupp.derive.Debug)
 local struct Velocity
     x: number = 0
     y: number = 0
@@ -40,13 +40,13 @@ end
 
 Built-in transforms, tint, shape material, camera, lights, animation, sound,
 physics values and numeric UI components use this storage and derive
-`nupp.derive.Debug` and `nupp.derive.Serde`. Derived methods work on constructed
-values and borrowed rows without changing column layout. Use
-`nupp.serde.newJsonCodec():prepare(nupp.serde.of(Velocity))` for a typed JSON
-codec; Nupp's separate `nupp.derive.JSON` provider currently admits records only.
-Generic Serde encoding describes physical component fields, whereas world
-snapshots use the component's registered codecs. Asset-bearing built-ins keep
-their custom name-based codecs and never persist process-local IDs as assets.
+`nupp.derive.Debug`, whose methods work on constructed values and borrowed rows
+without changing column layout. Serialization needs no derive:
+`nupp.serde.binding(Velocity)` selects the declaration's fields for
+`nupp.serde.json.encode` and `decode`. That generic encoding describes physical
+component fields, whereas world snapshots use the component's registered codecs.
+Asset-bearing built-ins keep their custom name-based codecs and never persist
+process-local IDs as assets.
 
 `get` and `getMut` return `T[?]` for a native component, and the existing managed
 array for a table or scalar component. Native rows use the same **one-based**

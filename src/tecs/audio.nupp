@@ -248,7 +248,7 @@ end
 --- into another group is setting `group` and clearing `voice`.
 ---
 --- Disabling an entity silences its sound and re-enabling starts it again.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct Sound
     --- Caller-writable. Selects a clip by its `clipId` index. Zero plays
     --- nothing.

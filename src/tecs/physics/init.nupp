@@ -67,7 +67,7 @@ export const pixelsPerMeter: number = 32.0
 ---
 --- Write its fields through `getMut`; physics applies the change during the
 --- next fixed update.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 local struct BodyValue
     --- Caller-writable. Selects 0 for static, 1 for kinematic or 2 for
     --- dynamic.
@@ -98,7 +98,7 @@ end
 ---
 --- Write its fields through `getMut`; physics rebuilds the shape during the
 --- next fixed update.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 local struct ColliderValue
     --- Caller-writable. Selects 0 for box, 1 for circle, 2 for capsule or 3 for
     --- segment.
@@ -153,7 +153,7 @@ end
 --- Physics writes it when a body pauses, when a snapshot is saved, and when
 --- one is loaded. It is not a live mirror: between those points a body's real
 --- velocity is what `velocity` and `angularVelocity` report.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 local struct MotionValue
     --- Read-only. Holds horizontal velocity in pixels per second. Use
     --- `velocity` for live state.
@@ -172,7 +172,7 @@ end
 --- all use this shape so debug tools can read an attachment without knowing
 --- which arena it names. Ordinary game code should use `Body`, `Motion` and
 --- the functions on this module.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct SolverHandle
     --- Engine-owned. Identifies the slot, one-based, and zero when the entity
     --- has no live counterpart. Ordinary game code should ignore it.
@@ -189,7 +189,7 @@ export struct SolverHandle
 end
 
 --- Declares a joint between the two bodies its entity relates to.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 local struct JointValue
     --- Caller-writable. Selects 0 for fixed, 1 for revolute or 2 for
     --- prismatic.

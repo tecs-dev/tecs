@@ -19,7 +19,7 @@ local images = require("tecs.gfx.images")
 const sin, cos = math.sin, math.cos
 
 --- Places an entity in the two-dimensional world.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct Transform2D
     --- Caller-writable. Sets the horizontal position in world units.
     x: number
@@ -65,7 +65,7 @@ export const Transform2DComponent: components.FFIComponent<Transform2D> = compon
 
 --- Stores the pose before the current fixed step for presentation interpolation.
 --- Presence opts an entity in. Scale, depth and layer use their current values.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct PreviousTransform2D
     --- Engine-owned. Stores the previous horizontal position in world units.
     x: number
@@ -91,7 +91,7 @@ export const PreviousTransform2DComponent: components.FFIComponent<PreviousTrans
 })
 
 --- Controls a renderable entity's color and opacity.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct Tint
     --- Caller-writable. Sets the red channel from zero to one.
     r: number
@@ -128,7 +128,7 @@ export const Renderable2D: components.Component = components.newTagComponent({na
 --- image with the rectangle set to the full range. An entity carrying no
 --- `Sprite`, or one whose image is not resident, draws its tint against the
 --- backend's opaque white fallback.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct Sprite
     --- Caller-writable. Selects an image by its `tecs.gfx.images` id. Zero
     --- selects no image.
@@ -196,7 +196,7 @@ export const SpriteComponent: components.FFIComponent<Sprite> = components.newFF
 --- one camera can serve targets of different sizes. Use the same dimensions
 --- for conversion and rendering and `toWorld`, `toScreen`, and `matrix` then
 --- share one mapping, so points round-trip.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct Camera2D
     --- Caller-writable. Sets the horizontal center of the view in world units.
     x: number

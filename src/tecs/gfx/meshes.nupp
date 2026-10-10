@@ -23,7 +23,7 @@ world:spawn(tecs.gfx.View({
 
 --- Lights meshes with a directional source, optional fog and an ambient cube.
 --- A View owns these settings. Changes take effect on its next rendered frame.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export record Lighting
     --- Caller-writable. Sets the X direction in which light rays travel.
     directionX: number = -0.5

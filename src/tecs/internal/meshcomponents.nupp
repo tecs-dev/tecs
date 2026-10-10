@@ -5,7 +5,7 @@ local registry = require("tecs.internal.meshregistry")
 local rendercomponents = require("tecs.internal.rendercomponents")
 
 --- Places geometry in a right-handed world with quaternion orientation.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct Transform3D
     x: number = 0
     y: number = 0
@@ -50,7 +50,7 @@ export const Transform3DComponent: components.FFIComponent<Transform3D> = compon
         return new Transform3D()
     end,
 })
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct Bounds3D
     centerX: number = 0
     centerY: number = 0
@@ -66,7 +66,7 @@ export const Bounds3DComponent: components.FFIComponent<Bounds3D> = components.n
         return new Bounds3D()
     end,
 })
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct Mesh
     model: integer = 0
     index: integer = 0
@@ -92,7 +92,7 @@ export const MeshComponent: components.FFIComponent<Mesh> = components.newFFICom
     end,
 
 })
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct MeshMaterial
     model: integer = 0
     index: integer = 0
@@ -118,7 +118,7 @@ export const MeshMaterialComponent: components.FFIComponent<MeshMaterial> = comp
     end,
 
 })
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export record MeshSkin
     matrices: {number}
 end
@@ -131,7 +131,7 @@ export const MeshSkinComponent: components.TableComponent<MeshSkin> = components
         return new MeshSkin(matrices = {})
     end,
 })
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export record MeshMorph
     weights: {number}
 end
@@ -149,7 +149,7 @@ export const Renderable3D = components.newTagComponent({
     requires = {Transform3DComponent, Bounds3DComponent, rendercomponents.TintComponent}
 })
 
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct PointLight3D
     --- Caller-writable. Sets the positive reach in world units.
     radius: number = 10
@@ -187,7 +187,7 @@ export const PointLight3DComponent: components.FFIComponent<PointLight3D> = comp
     end,
 })
 
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct SpotLight3D
     --- Caller-writable. Sets the positive reach in world units.
     radius: number = 10

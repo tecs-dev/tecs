@@ -64,7 +64,7 @@ export type Region = {
 ---
 --- A component rather than a field on every renderable, because presence is
 --- the opt-in and absence is the common case.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct Clip
     --- Caller-writable. Selects a region set with `setRegion`, from one to
     --- `MAX - 1`. Zero, the default, means no clipping.

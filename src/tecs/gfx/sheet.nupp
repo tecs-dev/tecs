@@ -1390,7 +1390,7 @@ end
 
 --- A sprite's anchor as fractions of its frame. A bound slice follows its
 --- authored keys during GPU animation without updating the component.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct PivotValue
     --- Caller-writable horizontal anchor; one half selects the center.
     x: number

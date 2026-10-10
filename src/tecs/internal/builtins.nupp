@@ -36,7 +36,7 @@ const sin, cos = math.sin, math.cos
 --- fixed time rather than wall time. A paused or disabled entity is left out of
 --- the countdown, which is what makes pausing a state hold a projectile in place
 --- rather than expiring it while nothing is drawing it.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct TTL
     --- Caller-writable. Sets the lifetime the entity started with, in seconds,
     --- which is what `percentComplete` measures against. Raising `remaining`
@@ -111,7 +111,7 @@ export const TTLComponent: components.FFIComponent<TTL> = components.newFFICompo
 --- every consumer downstream keeps reading one transform and knows nothing about
 --- the hierarchy. An entity needs all three of `Transform2D`, `ChildOf` and this
 --- component before anything composes it.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct RelativeTransform2D
     --- Caller-writable. Sets the horizontal offset from the parent, in the
     --- parent's rotated and scaled space.

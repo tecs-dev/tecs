@@ -1,6 +1,7 @@
 const ecs = require("tecs.ecs")
 const {type Archetype} = require("tecs.ecs")
 const serde = require("nupp.serde")
+const serdejson = require("nupp.serde.json")
 const json = require("nupp.codec.json")
 const {type Component} = require("tecs.ecs")
 const gfx = require("tecs.gfx")
@@ -16,7 +17,7 @@ local archetype = require("tecs.internal.archetype")
 local ffistorage = require("tecs.internal.ffistorage")
 local suite = {}
 
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 local struct Point
     x: number
     y: number
@@ -523,14 +524,14 @@ function suite.derivesSurviveNativeStorageRelocationAndRestore(): nil
     const world = ecs.newWorld()
     const id = world:spawn(point(11, 23))
     world:commit()
-    const codec = serde.newJsonCodec():prepare(serde.of(Point))
+    const points = serde.binding(Point)
     for _ = 1, 3 do
         const value = assert(world:get(id, point))
         test.equal(value:debug(), "Point { x = 11, y = 23 }")
-        const encoded = json.decode(codec:encode(value)) as {[string]: number}
+        const encoded = json.decode(serdejson.encode(points, value)) as {[string]: number}
         test.equal(encoded.x, 11)
         test.equal(encoded.y, 23)
-        const decoded = assert(codec:decode(codec:encode(value)))
+        const decoded = serdejson.decode(points, serdejson.encode(points, value))
         test.equal(decoded:debug(), value:debug())
         world:batchSpawn(500, {point})
         world:commit()

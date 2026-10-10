@@ -112,7 +112,7 @@ const BUILTINS: {
 }
 
 --- Selects one material for a renderable entity.
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 export struct Material
     --- Caller-writable. Selects a material by an id `id` returned. Zero draws
     --- through `textured`.

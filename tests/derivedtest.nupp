@@ -14,7 +14,7 @@ local function readEdge<T is RelationshipPayload>(borrows world: World, id: inte
     return world:getFirstRelationship(id, declaration)
 end
 
-@derive(tecs.ecs.Component, nupp.derive.Debug, nupp.derive.Serde)
+@derive(tecs.ecs.Component, nupp.derive.Debug)
 local struct Velocity
     x: number = 0
     y: number = 0

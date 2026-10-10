@@ -11,7 +11,7 @@ const count = harness.count("BENCH_STORAGE_COUNT", 100000)
 const warmup = harness.optionalCount("BENCH_STORAGE_WARMUP", 120)
 const samples = harness.count("BENCH_STORAGE_SAMPLES", 301)
 
-@derive(tecs.ecs.Component, nupp.derive.Debug, nupp.derive.Serde)
+@derive(tecs.ecs.Component, nupp.derive.Debug)
 local struct NativePoint
     x: number = 0
     y: number = 1

@@ -116,7 +116,7 @@ export type StyleOptions = {
 --- Marks a retained UI node. The persisted name is UiNode.
 export const Node = ecs.newTagComponent({name = "UiNode"})
 
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 local struct LayoutValue
     --- Read-only. Reports the x value.
     x: number
@@ -238,7 +238,7 @@ export const Root: ComponentDefinition<RootValue> = ecs.newComponent(RootValue, 
     end,
 })
 
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 local struct PaintValue
     --- Caller-writable. Sets the stretch value.
     stretch: boolean
@@ -311,7 +311,7 @@ export const Intrinsic: ComponentDefinition<IntrinsicValue> = ecs.newComponent(I
     end,
 })
 
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 local struct ScrollValue
     --- Caller-writable. Sets the x value.
     x: number
@@ -375,7 +375,7 @@ export type ScrollbarOptions = {
     minLength: (number)?
 }
 
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 local struct InteractionStateValue
     --- Read-only. Reports the hovered value.
     hovered: boolean
@@ -419,7 +419,7 @@ export const InteractionState: ComponentDefinition<InteractionStateValue> = ecs.
     end,
 })
 
-@derive(nupp.derive.Debug, nupp.derive.Serde)
+@derive(nupp.derive.Debug)
 local struct InteractionValue
     --- Caller-writable. Sets the enabled value.
     enabled: boolean
