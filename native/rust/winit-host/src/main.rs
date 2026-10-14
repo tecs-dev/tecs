@@ -19,7 +19,7 @@ mod shadowtests;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use bridge::{
@@ -390,7 +390,8 @@ impl App {
                 self.frame_parked = true;
                 return Ok(());
             }
-            FrameState::Continue => self.frame_parked = false,
+            // The window keeps drawing a held world; its presentation paces it.
+            FrameState::Continue | FrameState::Held => self.frame_parked = false,
             FrameState::Stopped => {
                 self.frame_parked = false;
                 event_loop.exit();
@@ -989,7 +990,7 @@ fn run_render_benchmark(mut config: Config) -> Result<()> {
         match state {
             FrameState::Parked => continue,
             FrameState::Stopped => break,
-            FrameState::Continue => {}
+            FrameState::Continue | FrameState::Held => {}
         }
         if let Some(failure) = bridge.crashed()? {
             return Err(anyhow!("Nupp application crashed: {failure}"));
@@ -1050,18 +1051,26 @@ fn run_headless(config: Config) -> Result<()> {
     } else {
         None
     };
+    // Frames that ran and were drawn; `--frames` counts these. A held turn
+    // drawn for a screenshot is not one of them.
     let mut rendered = 0_u32;
+    let mut drawn = false;
+    // Whether a held turn went undrawn since the last draw. A debug tool can
+    // edit the world between frames, so the exit screenshot draws again then.
+    let mut stale = false;
     let mut synthetic = SyntheticPointer::from_environment()?;
     loop {
         if let Some(synthetic) = &mut synthetic {
             synthetic.push(&mut bridge)?;
         }
         let state = bridge.iterate(if config.offscreen { 1.0 / 60.0 } else { 0.0 })?;
+        let mut changed = false;
         while let Some(pending) = bridge.next_image_command()? {
             match &mut graphics {
                 Some(graphics) => {
                     let reason = apply_pending_image(graphics, &pending.command);
                     bridge.report_image_result(pending.request, reason.as_deref())?;
+                    changed = true;
                 }
                 // Nothing will ever apply it, so the image stays pending.
                 None => bridge.skip_image_command(pending.request)?,
@@ -1070,30 +1079,52 @@ fn run_headless(config: Config) -> Result<()> {
         match state {
             FrameState::Stopped => break,
             FrameState::Parked => continue,
-            FrameState::Continue => {}
+            FrameState::Continue | FrameState::Held => {}
         }
+        let held = state == FrameState::Held;
         if let Some(graphics) = &mut graphics {
             while let Some((id, bytes)) = bridge.next_model_upload()? {
                 graphics.upload_model(id, &bytes)?;
+                changed = true;
             }
             let mut captures = Vec::new();
             while let Some(id) = bridge.next_capture()? {
                 captures.push(id);
             }
-            if !captures.is_empty() {
-                graphics.request_capture();
-            }
-            let packet = bridge.render_packet(graphics.scene_revision())?;
-            graphics.render(&packet)?;
-            if !captures.is_empty() {
-                let capture = graphics.take_capture();
-                for id in captures {
-                    bridge.capture_result(id, &capture)?;
+            changed |= !captures.is_empty();
+            // A held turn left the frame the last draw showed, so drawing it
+            // again only redraws the same image. It is drawn when a screenshot
+            // asks for it or residency changed under it.
+            if held && !changed && drawn {
+                stale = true;
+            } else {
+                if !captures.is_empty() {
+                    graphics.request_capture();
                 }
+                let packet = bridge.render_packet(graphics.scene_revision())?;
+                graphics.render(&packet)?;
+                graphics.pace_frame();
+                if !captures.is_empty() {
+                    let capture = graphics.take_capture();
+                    for id in captures {
+                        bridge.capture_result(id, &capture)?;
+                    }
+                }
+                drawn = true;
+                stale = false;
             }
         }
         if let Some(failure) = bridge.crashed()? {
             return Err(anyhow!("Nupp application crashed: {failure}"));
+        }
+        if held {
+            // Nothing runs until a debug tool grants a frame, so the turn
+            // waits rather than spinning. The wait bounds how late a tool
+            // call is answered.
+            if !changed {
+                std::thread::sleep(HELD_TURN_WAIT);
+            }
+            continue;
         }
         if config.offscreen {
             rendered += 1;
@@ -1105,13 +1136,26 @@ fn run_headless(config: Config) -> Result<()> {
     if let Some(failure) = bridge.crashed()? {
         return Err(anyhow!("Nupp application crashed: {failure}"));
     }
-    if let (Some(graphics), Some(path)) = (&graphics, &config.screenshot) {
+    if let (Some(graphics), Some(path)) = (&mut graphics, &config.screenshot) {
+        if stale {
+            let packet = bridge.render_packet(graphics.scene_revision())?;
+            graphics.render(&packet)?;
+        }
         let capture = graphics.capture_offscreen()?;
         std::fs::write(path, capture.png)
             .with_context(|| format!("write screenshot {}", path.display()))?;
     }
     bridge.shutdown()
 }
+
+/// How long the headless loop waits after a held turn that had nothing to do.
+///
+/// A tool call takes a few turns to be read, answered and flushed, so each one
+/// waits this out several times while the clock is paused. Measured on a
+/// paused colonize host: 1 ms took a `clock_info` round trip from 2.5 ms (the
+/// old loop, drawing every turn) to 3.1 ms at 4% of a core idle; 250 us brings
+/// it to 1.2 ms at 9%; 100 us gains little more for 16%.
+const HELD_TURN_WAIT: Duration = Duration::from_micros(250);
 
 /// Pointer moves pushed before every headless frame, for measuring the input
 /// crossing without a window. `TECS_SYNTH_POINTER` names how many per frame.

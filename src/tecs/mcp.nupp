@@ -64,9 +64,11 @@ create a security boundary.
 `send_event` queues its event for the next frame that runs, behind the host's
 own input for that frame, so a key it sends is pressed on exactly that frame.
 `clock_pause` holds the simulation: host turns run no system and fold no input,
-and `frame` and `elapsed` stand still, while the host keeps rendering the held
-world. `clock_step` grants frames to a paused clock, one per host turn, each
-with a fixed `dt` (1/60 s by default) instead of the measured one, and
+and `frame` and `elapsed` stand still. An `--offscreen` host renders a held
+turn only for a pending screenshot and otherwise waits a quarter of a
+millisecond before the next one, so a paused host stays nearly idle.
+`clock_step` grants frames to a paused clock, one per host turn, each with a
+fixed `dt` (1/60 s by default) instead of the measured one, and
 `clock_resume` returns to the host's delta. `clock_info` reports `settled` once
 a paused clock has run every granted frame and no frame is parked mid-flight,
 which is when the world is safe to read.

@@ -366,7 +366,26 @@ host's batch on the next frame that runs. Pausing is the application's rather
 than the host's for the same reason: a held iteration keeps its events for the
 frame that runs and a stepped frame takes a fixed delta, so a paused game
 advances by exactly the frames granted, on any host, while the host keeps
-rendering and serving screenshots of the held world.
+serving screenshots of the held world.
+
+A held turn is reported to the host as its own `held` state rather than as
+`continue`. The offscreen host used to draw every turn, held or not, with no
+pacing, so a paused test host spun a core and redrew an unchanged frame as fast
+as the GPU would take it; several side by side then slowed each other down. It
+now draws a held turn only when a screenshot, an image command or a model upload
+is waiting, and otherwise sleeps a quarter of a millisecond, which keeps a
+tool call's round trip faster than the old loop's. Comparing the frame counter in
+`tecs.host` was chosen over a new application field because every frame that
+runs advances it and a held turn is exactly one that does not.
+
+Skipping held turns was not enough on its own. Nothing else held the offscreen
+loop back either, so the frames that do run were submitted as fast as they were
+extracted, and a GPU shared with other hosts accumulated them along with the
+staging memory each holds: hosts grew to about 1 GB and side by side they still
+slowed each other down. The loop now keeps at most two frames in flight, waiting
+for the frame before last after each submit. One frame in flight bounds memory
+as well but serializes extraction behind the GPU, which cost a lone host about
+40 percent; two keeps that overlap.
 
 ### Application lifecycle and presentation timing
 

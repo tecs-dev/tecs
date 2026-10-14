@@ -29,8 +29,10 @@ host's batch for that turn exactly as a platform event is, so per-frame edges
 such as `keyPressed` survive the frame's `beginFrame`. `pause` holds the
 simulation: an iteration that has no granted frame runs no system, folds no
 input, leaves `frame` and `elapsed` unchanged, and keeps the host's events for
-the frame that eventually runs, honoring only a quit. The host keeps rendering
-the held world, so a screenshot requested while paused shows it. `step` grants
+the frame that eventually runs, honoring only a quit. A held turn has nothing
+new to draw, so the offscreen host stops rendering and waits between turns
+instead, but it still renders the held world for a screenshot requested while
+paused, which therefore shows it. `step` grants
 frames that run while paused, each with the fixed delta it names rather than
 the host's measured one, so a paused application advances by exactly the
 granted frames and simulated time.
@@ -144,9 +146,10 @@ export record Application is mcpbindings.Application
     --- A held iteration runs no system and folds no input, and leaves `frame`
     --- and `elapsed` unchanged. Host events wait for the next frame that runs,
     --- up to the latest 1024, except that a quit or close request still stops
-    --- the application. The
-    --- host keeps rendering the held world. Pausing again does nothing, and
-    --- frames already granted by `step` are kept.
+    --- the application. `tecs.host` reports a held iteration as `held`, and the
+    --- offscreen host then renders the held world only for a pending
+    --- screenshot. Pausing again does nothing, and frames already granted by
+    --- `step` are kept.
     --- @param self the application to hold
     pause: function(exclusive self: Application): nil
 

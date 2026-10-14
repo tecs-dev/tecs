@@ -351,4 +351,27 @@ function suite.shutdownUnwindsAParkedUpdateWithoutReportingACrash(): nil
     test.equal(host.crashed(session), nil)
 end
 
+function suite.reportsAHeldTurnApartFromAFrameThatRan(): nil
+    local session = host.create(nil, nil, nil, false, nil)
+    host.init(session)
+    test.equal(host.iterate(session, 0.25), "continue")
+    session.app:pause()
+
+    -- A held turn runs no frame, which is what lets a host skip drawing it.
+    test.equal(host.iterate(session, 0.25), "held")
+    test.equal(host.iterate(session, 0.25), "held")
+    test.equal(session.app.frame, 1)
+    session.app:step(1, 0.5)
+    test.equal(host.iterate(session, 0.25), "continue")
+    test.equal(session.app.frame, 2)
+    test.equal(session.app.elapsed, 0.75)
+    test.equal(host.iterate(session, 0.25), "held")
+
+    -- A quit is still honored on a held turn, and stops rather than holds.
+    session.app:queueEvent(platformevents.quit())
+    test.equal(host.iterate(session, 0.25), "stopped")
+    test.equal(session.app.frame, 2)
+    test.assert(host.shutdown(session))
+end
+
 return suite

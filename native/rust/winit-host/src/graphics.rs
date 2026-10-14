@@ -482,6 +482,9 @@ pub struct Graphics {
     offscreen: Option<wgpu::Texture>,
     capture_requested: bool,
     captured: Option<Result<Capture>>,
+    /// The submission that ended the previous paced frame, which the next one
+    /// waits for. See `pace_frame`.
+    paced: Option<wgpu::SubmissionIndex>,
     device: Device,
     queue: Queue,
     config: SurfaceConfiguration,
@@ -943,6 +946,7 @@ impl Graphics {
             offscreen,
             capture_requested: false,
             captured: None,
+            paced: None,
             tile_chunks,
             frame_table,
             particle_pool: None,
@@ -1576,6 +1580,28 @@ impl Graphics {
             bail!("wgpu reported an error while drawing: {reason}");
         }
         Ok(())
+    }
+
+    /// Keeps at most two frames in flight: waits until the GPU has finished the
+    /// frame before the one just submitted.
+    ///
+    /// Nothing else holds an offscreen loop back, so without this it submits as
+    /// fast as the CPU extracts. A GPU that is slower, or shared with other
+    /// hosts, then accumulates submitted frames and the staging memory each one
+    /// holds, and the hosts sharing it slow each other down. Waiting for the
+    /// frame before last rather than the last keeps extraction overlapping the
+    /// GPU's work on the previous frame.
+    pub fn pace_frame(&mut self) {
+        // An empty submission marks everything submitted so far.
+        let latest = self.queue.submit(std::iter::empty());
+        if let Some(previous) = self.paced.replace(latest) {
+            // A lost device fails the wait; the next render reports and
+            // recovers from it, so the wait has nothing to add.
+            let _ = self.device.poll(wgpu::PollType::Wait {
+                submission_index: Some(previous),
+                timeout: None,
+            });
+        }
     }
 
     /// The generation a new frame may reference; zero requests a complete upload.

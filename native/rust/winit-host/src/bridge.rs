@@ -179,6 +179,9 @@ pub struct TouchEvent<'a> {
 pub enum FrameState {
     Parked,
     Continue,
+    /// The paused application held the turn: no frame ran, so the world is
+    /// what the last frame left apart from debug-tool edits between frames.
+    Held,
     Stopped,
 }
 
@@ -452,6 +455,7 @@ impl Bridge {
         match one_text(&values, "tecs.host.iterate")?.as_str() {
             "parked" => Ok(FrameState::Parked),
             "continue" => Ok(FrameState::Continue),
+            "held" => Ok(FrameState::Held),
             "stopped" => Ok(FrameState::Stopped),
             state => bail!("tecs.host.iterate returned unknown frame state {state:?}"),
         }

@@ -37,6 +37,12 @@ local images = require("tecs.gfx.images")
 local platformevents = require("tecs.platform.events")
 local window = require("tecs.platform.window")
 
+--- What one host turn did, as `iterate` reports it to the host.
+---
+--- `held` is a turn the paused application held, which ran no frame. The
+--- states are a compatibility surface between this module and the host.
+export type FrameState = hostpump.State | "held"
+
 --- The address every input route delivers at. The host drives one window.
 export const INPUT_ADDRESS: integer = 1
 
@@ -567,8 +573,13 @@ export function init(exclusive session: Session): boolean
 end
 
 --- Starts one frame or polls the frame already parked on asynchronous work.
---- @return `parked`, `continue`, or `stopped`
-export function iterate(exclusive session: Session, dt: number): hostpump.State
+---
+--- A turn the paused application held ran no frame and left the world as the
+--- last one did, apart from what a debug tool changed between frames, so a
+--- host has nothing new to draw and may wait before its next turn.
+--- @return `parked`, `continue` after a frame ran, `held` after a held turn, or
+---     `stopped`
+export function iterate(exclusive session: Session, dt: number): FrameState
     const pump = session.pump
     session.app:poll(pump:parked())
     if pump:parked() then
@@ -582,8 +593,10 @@ export function iterate(exclusive session: Session, dt: number): hostpump.State
     local batch = session.events
     session.events = {}
     local app = session.app
-
-    return pump:start(function(): boolean
+    -- Every iteration that runs a frame advances `frame`, so a turn that
+    -- finished with it unchanged is one `pause` held.
+    const frame = app.frame
+    const state = pump:start(function(): boolean
         if not app:iterate(dt, batch) then
             return false
         end
@@ -593,6 +606,11 @@ export function iterate(exclusive session: Session, dt: number): hostpump.State
 
         return true
     end)
+    if state == "continue" and app.frame == frame then
+        return "held"
+    end
+
+    return state
 end
 
 --- Runs application shutdown once.
