@@ -1,0 +1,692 @@
+module tecs.audio.music.fm
+
+--[[
+Register logs of FM chips, loaded as assets and played on emulated chips.
+
+```nupp
+local log <const> = assert(app.assets:request(tecs.audio.music.fm.kind, "assets/music/stage1.vgz"))
+local player <const> = assert(tecs.audio.music.fm.play(mixer, log, {group = "music"}))
+log:release()
+```
+
+A register log is a song recorded as what a sound driver wrote to its chips,
+with the time of every write. `kind` loads one as a
+[`RegisterLog`](tecs.audio.music.fm.RegisterLog), and `parse` reads bytes a
+game already holds. `play` makes one [`tecs.audio.fm`](tecs.audio.fm) chip
+for each chip the log names, on the clock the log gives, loads the memory
+images the log carries, and replays the writes on time.
+
+## VGM and VGZ
+
+A VGM file is read up to version 1.72, and a VGZ file is a gzip-compressed VGM
+file, inflated through `nupp.compression`. The format is told by the file's
+first bytes rather than its name.
+
+Every Yamaha chip VGM names is played: the YM2413 (and the VRC7 its clock's
+top bit selects), the YM2612 (or the YM3438), the YM2151 (or the YM2164), the
+YM2203, the YM2608, the YM2610 (or the YM2610B), the YM3812, the YM3526, the
+Y8950, the YMF262 and the YMF278B, and the AY-3-8910 family as a YM2149, two
+of each where the header's second-chip bit says so. Their ROM and RAM data
+blocks become the chips' memory images. The YM2612's DAC data is played
+through the `0x8n` commands and the DAC streams, both turned into register
+writes at their times when the file is read; compressed data blocks are
+decompressed first.
+
+Every other chip, the SN76489 beside most YM2612s among them, is skipped, and
+`skipped` says why for each. A file that names nothing this module can play is
+refused. The AY8930 is skipped too: its expanded mode is not the YM2149's.
+
+## DRO
+
+A DOSBox Raw OPL capture is read in version 1, from DOSBox 0.61, and version 2,
+from 0.73 on: one OPL2, one OPL3, or two OPL2s, which a Sound Blaster Pro wired
+one to each speaker and which play the same way here.
+
+## Errors
+
+A file that is neither format, a header that does not fit, a command cut short
+by the end of the file and a command VGM does not define are refused with the
+byte offset where reading stopped. A file is at most 64 MiB, inflated.
+]]
+
+local assets = require("tecs.assets")
+local audio = require("tecs.audio")
+local chipfm = require("tecs.audio.fm")
+local compression = require("nupp.compression")
+local dro = require("tecs.internal.dro")
+local music = require("tecs.audio.music")
+local registerlog = require("tecs.internal.registerlog")
+local vgm = require("tecs.internal.vgm")
+
+const byte = string.byte
+
+--- The largest file `parse` reads, in bytes, after inflating.
+local MAX_BYTES: integer = 64 * 1024 * 1024
+
+--- Commands one readiness-pump pass reads before it lets the frame go on.
+local PARSE_BUDGET: integer = 65536
+
+--- Seconds a chip keeps sounding after the last write of a finished log.
+local TAIL: number = 1
+
+--- The most writes one batch carries: the chip's queue bound.
+local BATCH: integer = 4096
+
+--- The format a log was read from.
+export type Format = "vgm" | "dro"
+
+--- One chip a log writes to.
+export record LogChip
+    --- Read-only. Names the chip as `tecs.audio.fm.new` takes it.
+    chip: chipfm.Chip
+
+    --- Read-only. Reports the chip's input clock in hertz.
+    clock: integer
+
+    --- Read-only. Reports whether this is the second chip of its kind in the
+    --- file.
+    second: boolean
+
+    --- Read-only. Reports the chip's gain on the left side, one for a chip in
+    --- the middle.
+    left: number
+
+    --- Read-only. Reports the chip's gain on the right side.
+    right: number
+
+    --- Read-only. Holds the memory images the log's data blocks give the
+    --- chip, by class.
+    memory: {[string]: string}
+end
+
+--- The tags a VGM file's GD3 block carries. Each is the empty string when the
+--- file leaves it out.
+export record Tags
+    --- Read-only. Reports the track's name.
+    title: string
+
+    --- Read-only. Reports the track's name in Japanese.
+    titleJapanese: string
+
+    --- Read-only. Reports the game's name.
+    game: string
+
+    --- Read-only. Reports the game's name in Japanese.
+    gameJapanese: string
+
+    --- Read-only. Reports the system's name.
+    system: string
+
+    --- Read-only. Reports the system's name in Japanese.
+    systemJapanese: string
+
+    --- Read-only. Reports the composer.
+    author: string
+
+    --- Read-only. Reports the composer in Japanese.
+    authorJapanese: string
+
+    --- Read-only. Reports the release date.
+    date: string
+
+    --- Read-only. Reports who made the file.
+    converter: string
+
+    --- Read-only. Holds the file's notes.
+    notes: string
+end
+
+--- A song as the writes a driver made to its chips.
+export record RegisterLog
+    --- Read-only. Reports the format it was read from.
+    format: Format
+
+    --- Read-only. Reports the format's version: a VGM version as its BCD
+    --- number, 0x171 for 1.71, and 1 or 2 for DRO.
+    version: integer
+
+    --- Read-only. Reports the ticks a second its times count in: 44100 for
+    --- VGM and 1000 for DRO.
+    rate: integer
+
+    --- Read-only. Reports the log's length in ticks.
+    length: integer
+
+    --- Read-only. Reports the log's length in seconds.
+    duration: number
+
+    --- Read-only. Reports where the log loops back to, in seconds, or nil.
+    loopStart: number?
+
+    --- Read-only. Lists the chips the log plays, in the order its writes
+    --- number them from zero.
+    chips: {LogChip}
+
+    --- Read-only. Reports how many writes the log holds.
+    count: integer
+
+    --- Read-only. Holds the VGM file's GD3 tags, or nil.
+    tags: Tags?
+
+    --- Read-only. Lists what the file holds that is not played, one reason
+    --- each: a chip other than a Yamaha FM chip, or memory for one.
+    skipped: {string}
+
+    @private ticks: {integer}
+    @private ops: {integer}
+    @private loopIndex: integer
+
+    entry: function(borrows self: RegisterLog, index: integer): (integer, integer, integer, integer)
+end
+
+--- Returns one write of the log.
+---
+--- @param self the log to read
+--- @param index from one to `count`
+--- @return the write's tick, its chip numbered from zero, its register and its
+---     value
+--- @raises string when the index is outside the log
+function RegisterLog.entry(borrows self: RegisterLog, index: integer): (integer, integer, integer, integer)
+    if index < 1 or index > self.count then
+        error(
+            "tecs.audio.music.fm.RegisterLog.entry: the index must be from 1 to " .. tostring(
+                self.count
+            ) .. ", got " .. tostring(index),
+            2
+        )
+    end
+    local op = self.ops[index]
+    local chip = op // registerlog.CHIP_SHIFT
+    local rest = op % registerlog.CHIP_SHIFT
+
+    return self.ticks[index], chip, rest // registerlog.REGISTER_SHIFT, rest % registerlog.REGISTER_SHIFT
+end
+
+--- Turns a finished builder into a log, or refuses one with nothing to play.
+local function finish(builder: registerlog.Builder, name: string): (RegisterLog?, string?)
+    if builder.count == 0 then
+        local reason = name .. ": nothing in the file is for a chip tecs.audio.fm emulates"
+        if #builder.skipped > 0 then
+            reason = reason .. " (" .. table.concat(builder.skipped, "; ") .. ")"
+        end
+
+        return nil, reason
+    end
+    local chips: {LogChip} = {}
+    for index, chip in ipairs(builder.chips) do
+        local memory: {[string]: string} = {}
+        for class, pieces in pairs(chip.pieces) do
+            memory[class] = registerlog.image(pieces)
+        end
+        chips[
+            index
+        ] = new LogChip(
+            chip = chip.model as chipfm.Chip,
+            clock = chip.clock,
+            second = chip.second,
+            left = chip.left,
+            right = chip.right,
+            memory = memory
+        )
+    end
+    local tags: Tags? = nil
+    local fields = builder.tags
+    if fields ~= nil then
+        tags = new Tags(
+            title = fields[1] or "",
+            titleJapanese = fields[2] or "",
+            game = fields[3] or "",
+            gameJapanese = fields[4] or "",
+            system = fields[5] or "",
+            systemJapanese = fields[6] or "",
+            author = fields[7] or "",
+            authorJapanese = fields[8] or "",
+            date = fields[9] or "",
+            converter = fields[10] or "",
+            notes = fields[11] or ""
+        )
+    end
+    local rate = builder.rate
+    local loopTick = builder.loopTick
+    local length = math.max(builder.length, builder.ticks[builder.count])
+
+    return new RegisterLog(
+        format = builder.format as Format,
+        version = builder.version,
+        rate = rate,
+        length = length,
+        duration = length / rate,
+        loopStart = loopTick ~= nil and loopTick / rate or nil,
+        chips = chips,
+        count = builder.count,
+        tags = tags,
+        skipped = builder.skipped,
+        ticks = builder.ticks,
+        ops = builder.ops,
+        loopIndex = builder.loopIndex or 1
+    )
+end
+
+--- Inflates a VGZ file, or passes anything else through.
+local function inflate(bytes: string, name: string): (string?, string?)
+    if byte(bytes, 1) ~= 0x1F or byte(bytes, 2) ~= 0x8B then
+        if #bytes > MAX_BYTES then
+            return nil, name .. ": a register log is at most 64 MiB, and this one is " .. tostring(#bytes) .. " bytes"
+        end
+
+        return bytes
+    end
+    local ok, result = pcall(function(): string
+        return compression.format("gzip"):decompress(bytes, {maxOutputBytes = MAX_BYTES})
+    end)
+    if not ok then
+        return nil, name .. ": the gzip stream cannot be inflated: " .. tostring(result)
+    end
+
+    return result as string
+end
+
+--- Begins reading a log, inflating it first, or returns why it is refused.
+local function begin(bytes: string, name: string): (registerlog.Parser?, string?)
+    local plain, reason = inflate(bytes, name)
+    if plain == nil then
+        return nil, reason
+    end
+    local text = assert(plain)
+    if string.sub(text, 1, 4) == "Vgm " then
+        return vgm.parser(text, name)
+    elseif string.sub(text, 1, 8) == "DBRAWOPL" then
+        return dro.parser(text, name)
+    end
+
+    return nil, name .. ": neither a VGM, a VGZ nor a DRO file"
+end
+
+--- Parses the bytes of a whole VGM, VGZ or DRO file.
+---
+--- @param bytes the file, which is not retained once the log is built
+--- @param name what a refusal names the file as, and defaults to
+---     `"register log"`
+--- @return the log, or nil when the bytes are refused
+--- @return the reason, naming the byte where reading stopped
+export function parse(bytes: string, name: string?): (RegisterLog?, string?)
+    local label = name or "register log"
+    local parser, reason = begin(bytes, label)
+    if parser == nil then
+        return nil, reason
+    end
+    local running = assert(parser)
+    while true do
+        local status, builder, failure = running.step(PARSE_BUDGET)
+        local outcome: string = status
+        if outcome == "ready" then
+            return finish(assert(builder), label)
+        elseif outcome == "failed" then
+            return nil, failure
+        end
+    end
+end
+
+--- Loads a VGM, VGZ or DRO file as a
+--- [`RegisterLog`](tecs.audio.music.fm.RegisterLog).
+---
+--- The file is read, inflated and parsed on the loader's readiness pump, up to
+--- 65 536 commands a pass, so `handle:value() as
+--- tecs.audio.music.fm.RegisterLog` is the cast its caller writes. The
+--- collector owns the log.
+export const kind: assets.Kind = new assets.Kind(
+    name = assets.MUSIC_FM,
+    open = function(path: string): (assets.Job?, string?)
+        local read, reason = assets.readJob(path)
+        if read == nil then
+            return nil, reason
+        end
+        local parser: registerlog.Parser? = nil
+
+        return new assets.Job(
+            poll = function(): (assets.Status, any?, string?)
+                local current = parser
+                if current == nil then
+                    local status, bytes, failure = read.poll()
+                    local reading: string = status
+                    if reading ~= "ready" then
+                        return status, nil, failure
+                    end
+                    local begun, refused = begin(bytes as string, path)
+                    if begun == nil then
+                        return "failed", nil, refused
+                    end
+                    parser = begun
+
+                    return "pending"
+                end
+                local status, builder, failure = current.step(PARSE_BUDGET)
+                local parsed: string = status
+                if parsed ~= "ready" then
+                    return status, nil, failure
+                end
+                local log, refused = finish(assert(builder), path)
+                if log == nil then
+                    return "failed", nil, refused
+                end
+
+                return "ready", log
+            end,
+            cancel = function(): nil
+                read.cancel()
+                parser = nil
+            end
+        )
+    end,
+    release = nil
+)
+
+--- Makes one chip for each chip a log names, or destroys what it made and
+--- returns why it could not.
+local function makeChips(mixer: audio.Audio, log: RegisterLog, options: music.PlayOptions?): ({chipfm.Fm}?, string?)
+    local made: {chipfm.Fm} = {}
+    for index, entry in ipairs(log.chips) do
+        local chip, reason = chipfm.new(mixer, {
+            chip = entry.chip,
+            clock = math.max(100000, math.min(entry.clock, 100000000)),
+            group = options and options.group,
+            gain = options and options.gain,
+        })
+        if chip == nil then
+            for _, other in ipairs(made) do
+                other:destroy()
+            end
+
+            return nil, reason
+        end
+        local fm = assert(chip)
+        if entry.left ~= 1 or entry.right ~= 1 then
+            fm:setStereo(entry.left, entry.right)
+        end
+        for class, image in pairs(entry.memory) do
+            if #image > 0 then
+                fm:setMemory(class as chipfm.Memory, image)
+            end
+        end
+        made[index] = fm
+    end
+
+    return made
+end
+
+--- Reports whether two logs name the same chips on the same clocks.
+local function sameChips(left: RegisterLog, right: RegisterLog): boolean
+    if #left.chips ~= #right.chips then
+        return false
+    end
+    for index, chip in ipairs(left.chips) do
+        local other = right.chips[index]
+        if chip.chip ~= other.chip or chip.clock ~= other.clock then
+            return false
+        end
+    end
+
+    return true
+end
+
+--- Returns the index of the first write at or after `tick`.
+local function locate(log: RegisterLog, tick: number): integer
+    local ticks = log.ticks
+    local low: integer, high: integer = 1, log.count + 1
+    while low < high do
+        local middle = (low + high) // 2
+        if ticks[middle] < tick then
+            low = middle + 1
+        else
+            high = middle
+        end
+    end
+
+    return low
+end
+
+--- Builds the driver that plays a log on its chips.
+local function driver(
+    mixer: audio.Audio,
+    first: RegisterLog,
+    made: {chipfm.Fm},
+    options: music.PlayOptions?
+): music.Driver
+    local log = first
+    local chips = made
+    local index: integer = 1
+    local gain = (options and options.gain) or 1
+    local muted: {[integer]: boolean} = {}
+    local scratch: {integer} = {}
+    local filled: integer = 0
+    local result: music.Driver
+
+    --- Sends the writes `from` to `to` of one chip, all at `at`.
+    local function send(chip: integer, from: integer, to: integer, at: number): boolean
+        local count: integer = 0
+        for position = from, to do
+            local op = log.ops[position] % registerlog.CHIP_SHIFT
+            scratch[count * 2 + 1] = op // registerlog.REGISTER_SHIFT
+            scratch[count * 2 + 2] = op % registerlog.REGISTER_SHIFT
+            count = count + 1
+        end
+        for position = count * 2 + 1, filled do
+            scratch[position] = nil
+        end
+        filled = count * 2
+
+        return chips[chip + 1]:writes(scratch, at)
+    end
+
+    local function seconds(tick: integer): number
+        return tick / log.rate
+    end
+
+    result = new music.Driver(
+        duration = log.duration,
+        loopStart = log.loopStart,
+        loopEnd = nil,
+        tail = TAIL,
+        now = function(): number
+            return chips[1]:now()
+        end,
+        schedule = function(to: number, song: number, clock: number, tempo: number): number
+            local ticks = log.ticks
+            local ops = log.ops
+            local count = log.count
+            local limit = to * log.rate
+            while index <= count do
+                local tick = ticks[index]
+                if tick >= limit then
+                    return to
+                end
+                local chip = ops[index] // registerlog.CHIP_SHIFT
+                -- The run of writes at this tick to this chip, as one batch.
+                local last = index
+                while last < count
+                and last - index + 1 < BATCH
+                and ticks[last + 1] == tick
+                and ops[last + 1] // registerlog.CHIP_SHIFT == chip do
+                    last = last + 1
+                end
+                local at = clock + (seconds(tick) - song) / tempo
+                if not send(chip, index, last, at) then
+                    return seconds(tick)
+                end
+                index = last + 1
+            end
+
+            return to
+        end,
+        pending = function(): number?
+            if index > log.count then
+                return nil
+            end
+
+            return seconds(log.ticks[index])
+        end,
+        jump = function(target: number, _at: number): nil
+            if log.loopStart ~= nil and target == log.loopStart then
+                index = log.loopIndex
+            else
+                index = locate(log, target * log.rate)
+            end
+        end,
+        seek = function(target: number, at: number): nil
+            local stop = locate(log, target * log.rate)
+            local shadows: {{[integer]: integer}} = {}
+            for chip = 1, #chips do
+                shadows[chip] = {}
+                chips[chip]:reset(at)
+            end
+            for position = 1, stop - 1 do
+                local op = log.ops[position]
+                local chip = op // registerlog.CHIP_SHIFT
+                local rest = op % registerlog.CHIP_SHIFT
+                shadows[chip + 1][rest // registerlog.REGISTER_SHIFT] = rest % registerlog.REGISTER_SHIFT
+            end
+            -- Every register's last value, ascending, as one batch a chip:
+            -- at most 0x300 writes, which is under the queue's bound.
+            for chip = 1, #chips do
+                local shadow = shadows[chip]
+                local batch: {integer} = {}
+                for register = 0, chips[chip].lastRegister do
+                    local value = shadow[register]
+                    if value ~= nil then
+                        batch[#batch + 1] = register
+                        batch[#batch + 1] = value
+                    end
+                end
+                chips[chip]:writes(batch, at)
+            end
+            index = stop
+        end,
+        reload = function(payload: any): (boolean, string?)
+            local incoming = payload as RegisterLog
+            if not sameChips(log, incoming) then
+                local fresh, reason = makeChips(mixer, incoming, options)
+                if fresh == nil then
+                    return false, reason
+                end
+                for _, chip in ipairs(chips) do
+                    chip:destroy()
+                end
+                chips = assert(fresh)
+                for chip, mute in pairs(muted) do
+                    if mute and chips[chip + 1] ~= nil then
+                        chips[chip + 1]:setGain(0)
+                    end
+                end
+            else
+                for position, entry in ipairs(incoming.chips) do
+                    for class, image in pairs(entry.memory) do
+                        if #image > 0 then
+                            chips[position]:setMemory(class as chipfm.Memory, image)
+                        end
+                    end
+                end
+            end
+            log = incoming
+            result.duration = log.duration
+            result.loopStart = log.loopStart
+            index = 1
+
+            return true
+        end,
+        pause = function(): nil
+            for _, chip in ipairs(chips) do
+                chip:pause()
+            end
+        end,
+        resume = function(): nil
+            for _, chip in ipairs(chips) do
+                chip:resume()
+            end
+        end,
+        setGain = function(value: number): nil
+            gain = value
+            for position, chip in ipairs(chips) do
+                if not muted[position - 1] then
+                    chip:setGain(gain)
+                end
+            end
+        end,
+        setMuted = function(chip: integer, mute: boolean): nil
+            local target = chips[chip + 1]
+            if target == nil then
+                error(
+                    "tecs.audio.music.Player.setMuted: the log has chips 0 to " .. tostring(
+                        #chips - 1
+                    ) .. ", got " .. tostring(chip),
+                    3
+                )
+            end
+            if mute then
+                muted[chip] = true
+            else
+                muted[chip] = nil
+            end
+            target:setGain(mute and 0 or gain)
+        end,
+        stop = function(fadeOut: number?): nil
+            for _, chip in ipairs(chips) do
+                chip:destroy(fadeOut)
+            end
+        end
+    )
+
+    return result
+end
+
+--- Plays a parsed log on chips of its own.
+---
+--- @param mixer the mixer the chips play on
+--- @param log the log, which the player reads and does not change
+--- @param options the group, gain, loop, tempo, lookahead and start, or nil
+---     for the defaults
+--- @return the player, or nil when a chip could not start
+--- @return the reason, when the first return is nil
+--- @raises string when an option is out of range
+export function playLog(mixer: audio.Audio, log: RegisterLog, options: music.PlayOptions?): (music.Player?, string?)
+    music.checkOptions("fm.playLog", options)
+    local chips, reason = makeChips(mixer, log, options)
+    if chips == nil then
+        return nil, reason
+    end
+
+    return music.newPlayer(mixer, driver(mixer, log, assert(chips), options), nil, options)
+end
+
+--- Plays a loaded log on chips of its own: one for each chip it names, on the
+--- clock it gives, with its memory images loaded.
+---
+--- The player retains the handle until it stops and follows a reload of it,
+--- so the caller releases its own hold once this returns. Every chip takes a
+--- voice, so a log of two chips needs two free voices.
+---
+--- @param mixer the mixer the chips play on
+--- @param handle a handle `kind` loaded
+--- @param options the group, gain, loop, tempo, lookahead and start, or nil
+---     for the defaults
+--- @return the player, or nil when a chip could not start
+--- @return the reason, when the first return is nil
+--- @raises string when the handle was not loaded as a register log or has
+---     been released
+--- @raises string when an option is out of range
+export function play(mixer: audio.Audio, handle: assets.Handle, options: music.PlayOptions?): (music.Player?, string?)
+    if handle.kind ~= assets.MUSIC_FM then
+        error("tecs.audio.music.fm.play: the handle was loaded as " .. handle.kind .. ", not as a register log", 2)
+    end
+    local payload = handle:value()
+    if payload == nil then
+        error("tecs.audio.music.fm.play: the handle has been released", 2)
+    end
+    music.checkOptions("fm.play", options)
+    local log = payload as RegisterLog
+    local chips, reason = makeChips(mixer, log, options)
+    if chips == nil then
+        return nil, reason
+    end
+
+    return music.newPlayer(mixer, driver(mixer, log, assert(chips), options), handle, options)
+end

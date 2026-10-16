@@ -948,6 +948,9 @@ function suite.contentKindNames(): nil
     -- New with the rewrite: the SDL tree noted no font or shader content.
     test.equal(assets.FONT, "font")
     test.equal(assets.SHADER, "shader")
+    -- New with the music kinds.
+    test.equal(assets.MUSIC_MIDI, "music.midi")
+    test.equal(assets.MUSIC_FM, "music.fm")
 end
 
 -------------------------------------------------------------------------------

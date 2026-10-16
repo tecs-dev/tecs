@@ -11,4 +11,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 cpal.workspace = true
+rustysynth.workspace = true
 symphonia.workspace = true
+ymfm-oxide.workspace = true

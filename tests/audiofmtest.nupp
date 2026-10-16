@@ -1,0 +1,493 @@
+local audio = require("tecs.audio")
+local audiobackend = require("tecs.platform.audiobackend")
+local fm = require("tecs.audio.fm")
+local test = require("nupp.test")
+
+local suite = {}
+
+--- One call a test port received, as the port saw it.
+local record Sent
+    kind: string
+    pairs: {integer}
+    at: number
+end
+
+--- A backend with an FM chip that logs every write instead of rendering.
+local record Harness
+    backend: audiobackend.Backend
+    commands: {audiobackend.Command}
+    sent: {Sent}
+    opened: {integer}
+    chips: {string}
+    clocks: {integer}
+    images: {string}
+    closed: {integer}
+    full: {boolean}
+end
+
+local function newHarness(available: boolean, withFm: boolean): Harness
+    local commands: {audiobackend.Command} = {}
+    local sent: {Sent} = {}
+    local opened: {integer} = {}
+    local chips: {string} = {}
+    local clocks: {integer} = {}
+    local images: {string} = {}
+    local closed: {integer} = {0}
+    local full = {false}
+
+    local function record(kind: string, pairs: {integer}, at: number): boolean
+        if full[1] then
+            return false
+        end
+        sent[#sent + 1] = new Sent(kind = kind, pairs = pairs, at = at)
+
+        return true
+    end
+
+    local backend = audiobackend.silent()
+    backend.available = available
+    backend.submit = function(pending: {audiobackend.Command}, count: integer): nil
+        for index = 1, count do
+            local source = pending[index]
+            local copy = audiobackend.newCommand()
+            copy.kind = source.kind
+            copy.handle = source.handle
+            copy.flags = source.flags
+            copy.gain = source.gain
+            commands[#commands + 1] = copy
+        end
+    end
+    if withFm then
+        backend.openFm = function(
+            handle: integer,
+            chip: audiobackend.FmChip,
+            clock: integer
+        ): (audiobackend.FmPort?, string?)
+            opened[#opened + 1] = handle
+            chips[#chips + 1] = chip
+            clocks[#clocks + 1] = clock
+
+            --- The list is the caller's, so the log keeps a copy.
+            local function copied(pairs: {integer}, count: integer): {integer}
+                local copy: {integer} = {}
+                for index = 1, 2 * count do
+                    copy[index] = pairs[index]
+                end
+
+                return copy
+            end
+
+            return new audiobackend.FmPort(
+                rate = 12345,
+                write = function(register: integer, value: integer, at: number): boolean
+                    return record("write", {register, value}, at)
+                end,
+                writes = function(pairs: {integer}, count: integer, at: number): boolean
+                    return record("writes", copied(pairs, count), at)
+                end,
+                writePort = function(offset: integer, data: integer, at: number): boolean
+                    return record("writePort", {offset, data}, at)
+                end,
+                writePorts = function(pairs: {integer}, count: integer, at: number): boolean
+                    return record("writePorts", copied(pairs, count), at)
+                end,
+                setMemory = function(class: audiobackend.FmMemory, image: string): boolean
+                    images[#images + 1] = class .. ":" .. image
+
+                    return record("setMemory", {#image}, 0)
+                end,
+                reset = function(at: number): boolean
+                    return record("reset", {}, at)
+                end,
+                now = function(): number
+                    return 2.5
+                end,
+                close = function(): nil
+                    closed[1] = closed[1] + 1
+                end
+            )
+        end
+    end
+
+    return new Harness(
+        backend = backend,
+        commands = commands,
+        sent = sent,
+        opened = opened,
+        chips = chips,
+        clocks = clocks,
+        images = images,
+        closed = closed,
+        full = full
+    )
+end
+
+local function lastCommand(harness: Harness, kind: integer): audiobackend.Command?
+    for index = #harness.commands, 1, -1 do
+        if harness.commands[index].kind == kind then
+            return harness.commands[index]
+        end
+    end
+
+    return nil
+end
+
+local function made(harness: Harness, options: fm.Options?): (audio.Audio, fm.Fm)
+    local mixer = audio.newAudio({backend = harness.backend, maxVoices = 2})
+
+    return mixer, assert(fm.new(mixer, options))
+end
+
+function suite.startsTheChipAsOneVoiceOfTheMixer(): nil
+    local harness = newHarness(true, true)
+    local mixer, chip = made(harness, {chip = "opl3", group = "music", gain = 0.5})
+    test.equal(chip.rate, 12345, "the rate is the port's")
+    test.equal(chip.chip, "opl3")
+    test.equal(chip.clock, 14318180)
+    test.equal(chip.lastRegister, 0x1FF)
+    test.equal(chip.lastPort, 3)
+    test.equal(harness.chips[1], "opl3")
+    test.equal(harness.clocks[1], 14318180)
+    test.equal(mixer:sounding(), 1)
+    mixer:update()
+    local play = assert(lastCommand(harness, audiobackend.PLAY))
+    test.equal(play.flags, audiobackend.SYNTH)
+    test.equal(play.gain, 0.5)
+    -- The chip was opened for the voice that started, before the start
+    -- crossed, which is what hands it to the mixer.
+    test.equal(harness.opened[1], play.handle)
+
+    mixer:setGroupGain("music", 0.5)
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.SET_GAIN)).gain, 0.25)
+    mixer:setGroupMuted("music", true)
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.SET_GAIN)).gain, 0)
+    mixer:setGroupMuted("music", false)
+    chip:setGain(1)
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.SET_GAIN)).gain, 0.5)
+    mixer:pauseGroup("music")
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.PAUSE)).handle, play.handle)
+
+    chip:destroy()
+    chip:destroy()
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.STOP)).handle, play.handle)
+    test.equal(harness.closed[1], 1)
+    test.equal(mixer:sounding(), 0)
+end
+
+function suite.makesAnOpl2WhenNoChipIsNamed(): nil
+    local harness = newHarness(true, true)
+    local _mixer, chip = made(harness)
+    test.equal(chip.chip, "opl2")
+    test.equal(harness.chips[1], "opl2")
+end
+
+function suite.countsAgainstTheVoiceCeiling(): nil
+    local harness = newHarness(true, true)
+    local mixer = audio.newAudio({backend = harness.backend, maxVoices = 1})
+    local first = assert(fm.new(mixer))
+    local second, reason = fm.new(mixer)
+    test.equal(second, nil)
+    test.matches(assert(reason), "every voice is busy")
+    first:destroy()
+    test.assert(fm.new(mixer) ~= nil)
+end
+
+function suite.carriesWritesBatchesAndResetsToThePortWithTheirTimes(): nil
+    local harness = newHarness(true, true)
+    local _mixer, chip = made(harness, {chip = "opl3"})
+    test.assert(chip:write(0x105, 0x01))
+    test.assert(chip:write(0x1B0, 0x32, 0.25))
+    test.assert(chip:writes({0xA0, 0x41, 0xB0, 0x32}, 1.5))
+    test.assert(chip:writes({}))
+    test.assert(chip:reset())
+    test.assert(chip:reset(3))
+    test.equal(#harness.sent, 5, "an empty batch reaches nothing")
+    test.equal(harness.sent[1].kind, "write")
+    test.equal(harness.sent[1].pairs[1], 0x105)
+    test.equal(harness.sent[1].at, 0)
+    test.equal(harness.sent[2].pairs[1], 0x1B0)
+    test.equal(harness.sent[2].pairs[2], 0x32)
+    test.equal(harness.sent[2].at, 0.25)
+    test.equal(harness.sent[3].kind, "writes")
+    test.equal(#harness.sent[3].pairs, 4)
+    test.equal(harness.sent[3].pairs[3], 0xB0)
+    test.equal(harness.sent[3].at, 1.5)
+    test.equal(harness.sent[4].kind, "reset")
+    test.equal(harness.sent[4].at, 0)
+    test.equal(harness.sent[5].at, 3)
+    test.equal(chip:now(), 2.5)
+end
+
+function suite.reportsAFullQueueAsAnUnqueuedWrite(): nil
+    local harness = newHarness(true, true)
+    local _mixer, chip = made(harness)
+    harness.full[1] = true
+    test.assert(not chip:write(0xB0, 0x20))
+    test.assert(not chip:writes({0xB0, 0x20}))
+    test.assert(not chip:reset())
+    harness.full[1] = false
+
+    -- A batch past the queue could never be taken, so it is refused here.
+    local huge: {integer} = {}
+    for index = 1, 4097 do
+        huge[2 * index - 1] = 0xA0
+        huge[2 * index] = index % 256
+    end
+    test.assert(not chip:writes(huge))
+    huge[8193] = nil
+    huge[8194] = nil
+    test.assert(chip:writes(huge))
+    test.equal(#harness.sent, 1)
+
+    chip:destroy()
+    test.assert(not chip:write(0xB0, 0x20), "a destroyed chip queues nothing")
+    test.assert(not chip:writes({0xB0, 0x20}))
+    test.assert(not chip:reset())
+    test.equal(chip:now(), 0)
+end
+
+function suite.raisesForARegisterOrValueOutsideItsRange(): nil
+    local harness = newHarness(true, true)
+    local mixer, opl2 = made(harness)
+    local opl3 = assert(fm.new(mixer, {chip = "opl3"}))
+    test.raises(
+        function(): nil
+            opl2:write(0x100, 0)
+        end,
+        "opl2 register must be from 0x00 to 0xFF, got 0x100"
+    )
+    test.raises(
+        function(): nil
+            opl3:write(0x200, 0)
+        end,
+        "0x1FF"
+    )
+    test.raises(
+        function(): nil
+            opl2:write(-1, 0)
+        end,
+        "register"
+    )
+    test.raises(
+        function(): nil
+            opl2:write(0xB0, 256)
+        end,
+        "value must be from 0 to 255"
+    )
+    test.raises(
+        function(): nil
+            opl2:writes({0xB0})
+        end,
+        "alternate register and value"
+    )
+    -- One bad pair refuses the whole batch before any of it is sent.
+    test.raises(
+        function(): nil
+            opl3:writes({0xA0, 0x41, 0x1B0, 0x300})
+        end,
+        "value"
+    )
+    test.equal(#harness.sent, 0)
+    test.assert(opl3:write(0x1FF, 0xFF))
+    test.raises(
+        function(): nil
+            fm.new(mixer, {chip = "opl4" as fm.Chip})
+        end,
+        "chip must be"
+    )
+end
+
+function suite.acceptsEverythingSilentlyWithoutAnOutput(): nil
+    -- A mixer with no output takes no voice, and its chip still answers
+    -- every call, on a clock that never moves because nothing renders.
+    local mixer = audio.newAudio({backend = audiobackend.silent()})
+    local chip = assert(fm.new(mixer, {chip = "opl3"}))
+    test.equal(mixer:sounding(), 0)
+    test.assert(chip:write(0xB0, 0x20, 0.5))
+    test.assert(chip:writes({0xA0, 0x41}))
+    test.assert(chip:reset())
+    test.equal(chip:now(), 0)
+    chip:destroy()
+end
+
+function suite.takesAVoiceButRendersNothingOnABackendWithNoFm(): nil
+    local harness = newHarness(true, false)
+    local mixer, chip = made(harness)
+    test.equal(mixer:sounding(), 1)
+    test.assert(chip:write(0xB0, 0x20))
+    test.equal(#harness.sent, 0)
+    test.equal(chip:now(), 0)
+end
+
+function suite.makesAnyChipByNameOnItsOwnClockOrAGivenOne(): nil
+    local harness = newHarness(true, true)
+    local mixer = audio.newAudio({backend = harness.backend, maxVoices = 4})
+    local genesis = assert(fm.new(mixer, {chip = "ym2612"}))
+    test.equal(genesis.clock, 7670453)
+    test.equal(genesis.lastRegister, 0x1FF)
+    test.equal(harness.chips[1], "ym2612")
+    test.equal(harness.clocks[1], 7670453)
+    local opl4 = assert(fm.new(mixer, {chip = "ymf278b", clock = 33868800}))
+    test.equal(opl4.lastRegister, 0x2FF)
+    test.equal(opl4.lastPort, 5)
+    local opq = assert(fm.new(mixer, {chip = "ym3806"}))
+    test.equal(opq.lastRegister, 0x11F)
+    test.assert(opq:write(0x11F, 1))
+    local ssg = assert(fm.new(mixer, {chip = "ym2149", clock = 2000000}))
+    test.equal(ssg.lastPort, 3)
+    test.equal(harness.clocks[4], 2000000)
+    test.raises(
+        function(): nil
+            fm.new(mixer, {chip = "ym2151", clock = 99999})
+        end,
+        "clock must be a whole number of hertz"
+    )
+    test.raises(
+        function(): nil
+            fm.new(mixer, {chip = "sn76489" as fm.Chip})
+        end,
+        "fm.chips"
+    )
+end
+
+function suite.namesEveryChipWithItsClockRateAndMemory(): nil
+    local names = fm.chips()
+    test.equal(#names, 26)
+    test.equal(names[1], "ym3526")
+    test.equal(names[26], "opl3")
+    test.equal(fm.rate("opl2"), 49715)
+    test.equal(fm.rate("opl3"), 49715)
+    test.equal(fm.rate("ym2612"), 53267)
+    -- Rendered at three times its FM rate, then averaged three to a frame.
+    test.equal(fm.rate("ym2203"), 55466)
+    test.equal(fm.rate("ymf288"), 55466)
+    test.equal(fm.rate("ym2151", 4000000), 62500)
+    test.equal(fm.defaultClock("ym2149"), 1789772)
+    test.equal(#fm.memoryClasses("ym2612"), 0)
+    test.equal(fm.memoryClasses("ym2610")[1], "adpcmA")
+    test.equal(fm.memoryClasses("ym2610")[2], "adpcmB")
+    test.equal(fm.memoryClasses("y8950")[1], "adpcmB")
+    test.equal(fm.memoryClasses("ymf278b")[1], "pcm")
+end
+
+function suite.writesPortsAndChecksTheirRange(): nil
+    local harness = newHarness(true, true)
+    local _mixer, chip = made(harness, {chip = "ym2612"})
+    test.assert(chip:writePort(2, 0x2A, 0.5))
+    test.assert(chip:writePorts({0, 0x28, 1, 0xF0}, 1))
+    test.assert(chip:writePorts({}))
+    test.equal(#harness.sent, 2)
+    test.equal(harness.sent[1].kind, "writePort")
+    test.equal(harness.sent[1].pairs[1], 2)
+    test.equal(harness.sent[1].at, 0.5)
+    test.equal(harness.sent[2].kind, "writePorts")
+    test.equal(harness.sent[2].pairs[4], 0xF0)
+    test.raises(
+        function(): nil
+            chip:writePort(4, 0)
+        end,
+        "ym2612 port must be from 0x00 to 0x3, got 0x4"
+    )
+    test.raises(
+        function(): nil
+            chip:writePorts({0, 1, 2})
+        end,
+        "alternate port and value"
+    )
+end
+
+function suite.loadsMemoryOnlyOfAClassTheChipReads(): nil
+    local harness = newHarness(true, true)
+    local _mixer, chip = made(harness, {chip = "ym2610"})
+    test.assert(chip:setMemory("adpcmA", "\1\2\3"))
+    test.equal(harness.images[1], "adpcmA:\1\2\3")
+    test.raises(
+        function(): nil
+            chip:setMemory("pcm", "x")
+        end,
+        "the ym2610 reads no pcm memory"
+    )
+    chip:destroy()
+    test.assert(not chip:setMemory("adpcmB", "x"), "a destroyed chip loads nothing")
+end
+
+function suite.pausesPlacesAndFadesTheVoice(): nil
+    local harness = newHarness(true, true)
+    local mixer, chip = made(harness)
+    mixer:update()
+    local handle = assert(lastCommand(harness, audiobackend.PLAY)).handle
+    chip:pause()
+    test.assert(chip:paused())
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.PAUSE)).handle, handle)
+    chip:resume()
+    test.assert(not chip:paused())
+    chip:setStereo(1, 0)
+    mixer:update()
+    test.assert(lastCommand(harness, audiobackend.RESUME) ~= nil)
+    chip:destroy(0.25)
+    mixer:update()
+    local stop = assert(lastCommand(harness, audiobackend.STOP))
+    test.equal(stop.handle, handle)
+    test.equal(harness.closed[1], 1)
+end
+
+--- Returns the native binding, or skips when `libtecsaudio` is not staged.
+local function binding(): {[string]: any}
+    local ok, loaded = pcall(require, "tecs.platform.audionative")
+    if not ok then
+        test.skip("libtecsaudio is not on the loader path: " .. tostring(loaded))
+    end
+
+    return loaded as {[string]: any}
+end
+
+function suite.crossesIntoTheNativeChipThroughTheBackend(): nil
+    local backend = binding().openOffline(48000, 2, 8) as audiobackend.Backend?
+    if backend == nil then
+        test.skip("libtecsaudio did not open")
+    end
+    -- The offline backend reports no output, so a mixer would give the chip
+    -- no voice; the port is opened directly to reach the library.
+    local openFm = assert(assert(backend).openFm)
+    for _, chip in ipairs(fm.chips()) do
+        local clock = fm.defaultClock(chip)
+        local port = assert(openFm(1, chip, clock))
+        -- The rate this module works out without the library is the one the
+        -- library reports, for every chip, at its own clock and at another.
+        test.equal(port.rate, fm.rate(chip), chip)
+        port.close()
+        local other = assert(openFm(1, chip, 4000000))
+        test.equal(other.rate, fm.rate(chip, 4000000), chip)
+        other.close()
+    end
+    for _, chip in ipairs({"opl2", "opl3"} as {audiobackend.FmChip}) do
+        local port = assert(openFm(1, chip, fm.defaultClock(chip)))
+        test.equal(port.rate, 49715)
+        test.assert(port.write(0xB0, 0x32, 0))
+        test.assert(port.writes({0xA0, 0x41, 0xB0, 0x32}, 2, 0.1))
+        test.assert(port.writePort(0, 0x20, 0))
+        test.assert(port.writePorts({0, 0x20, 1, 0x01}, 2, 0.1))
+        test.assert(not port.setMemory("pcm", "x"), "an OPL reads no memory")
+        test.assert(port.reset(0.2))
+        test.equal(port.now(), 0)
+        port.close()
+        port.close()
+        test.assert(not port.write(0xB0, 0x32, 0), "a closed port queues nothing")
+    end
+    local ym2610 = assert(openFm(1, "ym2610", 8000000))
+    test.assert(ym2610.setMemory("adpcmA", string.rep("\x12", 512)))
+    test.assert(ym2610.setMemory("adpcmB", ""))
+    ym2610.close()
+    local refused, reason = openFm(1, "sn76489" as audiobackend.FmChip, 4000000)
+    test.equal(refused, nil)
+    test.matches(assert(reason), "sn76489")
+    assert(backend).close()
+end
+
+return suite

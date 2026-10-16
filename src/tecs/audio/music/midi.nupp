@@ -1,0 +1,933 @@
+module tecs.audio.music.midi
+
+--[[
+Standard MIDI Files, loaded as assets and played on the General MIDI synth.
+
+```nupp
+local font <const> = assert(tecs.audio.synth.loadSoundFont(mixer, "assets/music/FluidR3_GM.sf2"))
+local song <const> = assert(app.assets:request(tecs.audio.music.midi.kind, "assets/music/theme.mid"))
+local player <const> = assert(tecs.audio.music.midi.play(mixer, font, song, {group = "music"}))
+song:release()
+```
+
+`kind` loads a `.mid` file as a [`Song`](tecs.audio.music.midi.Song): its
+header, its tracks merged into one list of timed events, its tempo map and its
+loop points. `parse` does the same for bytes a game already holds. `play`
+plays a loaded song on a synthesizer of its own, made on a SoundFont the game
+loaded, and `playSong` plays a parsed one.
+
+## What is read
+
+Formats 0 and 1 are read as one song, every track at once. Format 2 holds
+independent patterns rather than one song, and they are played one after
+another, each starting where the previous one ended. Delta times, running
+status, every channel message, system exclusive messages and meta events are
+read; a chunk that is not a track is skipped, as the format asks. Time comes
+from the tempo map, the tempo events of every track together, starting at 120
+beats a minute, or from the SMPTE frame rate of a file that counts in frames.
+
+System exclusive messages are kept in the song but not sent, because the synth
+takes short messages only: a General MIDI, GS or XG reset at the start of a
+file does nothing a fresh synth needs. Meta events are kept too and nothing is
+done with them beyond the tempo map and the loop points.
+
+## Loop points
+
+A song loops where it says it does, in the two conventions a MIDI file has for
+it. A marker meta event reading `loopStart`, and one reading `loopEnd`, case
+and spaces aside, bracket the loop; controller 111 on any channel, the RPG
+Maker convention, marks the start when there is no marker. A song with a start
+and no end loops at its last event. A song with neither plays once.
+
+## Errors
+
+A file that is not a Standard MIDI File, one cut short inside a chunk, a
+running-status byte with no status before it, a data byte with its top bit set
+and a delta time longer than four bytes are refused with the byte offset where
+the reading stopped. A file is at most 16 MiB.
+]]
+
+local assets = require("tecs.assets")
+local audio = require("tecs.audio")
+local music = require("tecs.audio.music")
+local synth = require("tecs.audio.synth")
+
+const byte = string.byte
+
+--- The largest file `parse` reads, in bytes.
+local MAX_BYTES: integer = 16 * 1024 * 1024
+
+--- Events one readiness-pump pass parses before it lets the frame go on.
+local PARSE_BUDGET: integer = 65536
+
+--- Microseconds a quarter note lasts before the first tempo event: 120 beats
+--- a minute, as the format defines.
+local DEFAULT_TEMPO: integer = 500000
+
+--- Seconds a synth keeps sounding after the last event of a finished song,
+--- for releases and reverb.
+local TAIL: number = 2
+
+--- The controller RPG Maker marks a loop's start with.
+local LOOP_CONTROLLER: integer = 111
+
+--- The meta event type of a marker.
+local META_MARKER: integer = 0x06
+
+--- The meta event type of a track name.
+local META_NAME: integer = 0x03
+
+--- The meta event type of a tempo.
+local META_TEMPO: integer = 0x51
+
+--- The meta event type of a track's end.
+local META_END: integer = 0x2F
+
+--- One event of a song.
+export record Event
+    --- Read-only. Reports the event's time in ticks from the song's start.
+    tick: integer
+
+    --- Read-only. Reports the event's time in seconds from the song's start,
+    --- through the tempo map.
+    time: number
+
+    --- Read-only. Reports the track the event came from, numbered from one.
+    track: integer
+
+    --- Read-only. Reports the status byte: 0x80 to 0xEF for a channel
+    --- message, with the channel in its low four bits, 0xF0 or 0xF7 for a
+    --- system exclusive message, and 0xFF for a meta event.
+    status: integer
+
+    --- Read-only. Reports the first data byte of a channel message, and zero
+    --- for anything else.
+    data1: integer
+
+    --- Read-only. Reports the second data byte of a channel message, and zero
+    --- for one that carries a single byte and for anything else.
+    data2: integer
+
+    --- Read-only. Reports the type of a meta event, and nil for anything
+    --- else.
+    meta: integer?
+
+    --- Read-only. Holds the bytes of a meta event or of a system exclusive
+    --- message, and nil for a channel message.
+    data: string?
+end
+
+--- One tempo in force from a point of the song.
+export record Tempo
+    --- Read-only. Reports where it takes effect, in ticks.
+    tick: integer
+
+    --- Read-only. Reports where it takes effect, in seconds.
+    time: number
+
+    --- Read-only. Reports the microseconds a quarter note lasts.
+    microsecondsPerQuarter: integer
+end
+
+--- One track as the file had it.
+export record Track
+    --- Read-only. Reports the track's name meta event, or nil.
+    name: string?
+
+    --- Read-only. Reports how many events the track holds, its end aside.
+    events: integer
+
+    --- Read-only. Reports where the track ends, in ticks of the song, which
+    --- for format 2 includes the patterns before it.
+    endTick: integer
+end
+
+--- A parsed Standard MIDI File.
+export record Song
+    --- Read-only. Reports the file's format: 0, 1 or 2.
+    format: integer
+
+    --- Read-only. Reports the ticks in a quarter note, or nil for a file
+    --- that counts in SMPTE frames.
+    ppq: integer?
+
+    --- Read-only. Reports the SMPTE frames a second, 24, 25, 29.97 or 30,
+    --- for a file that counts in frames, and nil otherwise.
+    framesPerSecond: number?
+
+    --- Read-only. Reports the ticks in an SMPTE frame, or nil.
+    ticksPerFrame: integer?
+
+    --- Read-only. Lists the tracks in file order.
+    tracks: {Track}
+
+    --- Read-only. Lists every event of every track, end-of-track events
+    --- aside, in time order, and in track order among events at one tick.
+    events: {Event}
+
+    --- Read-only. Lists the tempo map in time order, starting with the tempo
+    --- at tick zero.
+    tempos: {Tempo}
+
+    --- Read-only. Reports the song's length in seconds: the end of its
+    --- longest track.
+    duration: number
+
+    --- Read-only. Reports where the song loops back to, in seconds, or nil.
+    loopStart: number?
+
+    --- Read-only. Reports where its loop ends, in seconds, or nil for the end
+    --- of the song.
+    loopEnd: number?
+
+    --- Read-only. Reports the first track's name, which is where a song's
+    --- title is kept, or nil.
+    title: string?
+end
+
+--- One track being read.
+local record Reading
+    track: integer
+    position: integer
+    finish: integer
+    tick: integer
+    offset: integer
+    running: integer
+    name: string?
+    count: integer
+end
+
+--- A file being read a slice at a time.
+local record Parser
+    bytes: string
+    name: string
+    format: integer
+    tracks: integer
+    division: integer
+    position: integer
+    reading: Reading?
+    events: {Event}
+    order: {integer}
+    infos: {Track}
+    patternEnd: integer
+    done: boolean
+end
+
+local function u16(bytes: string, at: integer): integer
+    const high, low = byte(bytes, at, at + 1)
+
+    return (high as integer) * 256 + (low as integer)
+end
+
+local function u32(bytes: string, at: integer): integer
+    const a, b, c, d = byte(bytes, at, at + 3)
+
+    return (((a as integer) * 256 + (b as integer)) * 256 + (c as integer)) * 256 + (d as integer)
+end
+
+--- Returns `text` lowered with everything but letters and digits removed,
+--- which is how a loop marker is compared.
+local function squeezed(text: string): string
+    return (string.gsub(string.lower(text), "[^%w]", ""))
+end
+
+--- Begins reading a file, or returns the reason its header is refused.
+local function begin(bytes: string, name: string): (Parser?, string?)
+    if #bytes > MAX_BYTES then
+        return nil, name .. ": a MIDI file is at most 16 MiB, and this one is " .. tostring(#bytes) .. " bytes"
+    end
+    if #bytes < 14 or string.sub(bytes, 1, 4) ~= "MThd" then
+        return nil, name .. ": not a Standard MIDI File: it does not begin with an MThd chunk"
+    end
+    local length = u32(bytes, 5)
+    if length < 6 then
+        return nil, name .. ": the MThd chunk is " .. tostring(length) .. " bytes, and a MIDI header needs 6"
+    end
+    local format = u16(bytes, 9)
+    if format > 2 then
+        return nil, name .. ": format " .. tostring(
+            format
+        ) .. " is not a Standard MIDI File format, which are 0, 1 and 2"
+    end
+    local tracks = u16(bytes, 11)
+    if tracks == 0 then
+        return nil, name .. ": the header declares no tracks"
+    end
+    local division = u16(bytes, 13)
+    if division == 0 then
+        return nil, name .. ": the header's division is zero ticks"
+    end
+    if division >= 0x8000 then
+        local frames = 256 - division // 256
+        if frames ~= 24 and frames ~= 25 and frames ~= 29 and frames ~= 30 then
+            return nil, name .. ": an SMPTE division of " .. tostring(
+                frames
+            ) .. " frames a second is not 24, 25, 29 or 30"
+        end
+        if division % 256 == 0 then
+            return nil, name .. ": an SMPTE division of zero ticks a frame"
+        end
+    end
+
+    return new Parser(
+        bytes = bytes,
+        name = name,
+        format = format,
+        tracks = tracks,
+        division = division,
+        position = 9 + length,
+        reading = nil,
+        events = {},
+        order = {},
+        infos = {},
+        patternEnd = 0,
+        done = false
+    )
+end
+
+--- Reads a variable-length quantity at `at`, and returns it and the position
+--- after it, or nil when it runs past `finish` or past four bytes.
+local function quantity(bytes: string, at: integer, finish: integer): (integer?, integer)
+    local value: integer = 0
+    for count = 0, 3 do
+        local position = at + count
+        if position > finish then
+            return nil, position
+        end
+        local next = byte(bytes, position) as integer
+        value = value * 128 + next % 128
+        if next < 128 then
+            return value, position + 1
+        end
+    end
+
+    return nil, -1
+end
+
+--- Moves to the next track chunk, skipping chunks that are not tracks, and
+--- returns false when there is none.
+local function nextTrack(exclusive self: Parser): boolean
+    local bytes = self.bytes
+    while self.position + 7 <= #bytes do
+        local id = string.sub(bytes, self.position, self.position + 3)
+        local length = u32(bytes, self.position + 4)
+        local start = self.position + 8
+        self.position = start + length
+        if id == "MTrk" then
+            local finish = math.min(start + length - 1, #bytes)
+            local track = #self.infos + 1
+            local offset = self.format == 2 and self.patternEnd or 0
+            self.reading = new Reading(
+                track = track,
+                position = start,
+                finish = finish,
+                tick = offset,
+                offset = offset,
+                running = 0,
+                name = nil,
+                count = 0
+            )
+
+            return true
+        end
+    end
+
+    return false
+end
+
+--- Ends the track being read at `tick`.
+local function endTrack(exclusive self: Parser, reading: Reading): nil
+    self.infos[#self.infos + 1] = new Track(name = reading.name, events = reading.count, endTick = reading.tick)
+    if reading.tick > self.patternEnd then
+        self.patternEnd = reading.tick
+    end
+    self.reading = nil
+end
+
+local function add(exclusive self: Parser, reading: Reading, event: Event): nil
+    local index = #self.events + 1
+    self.events[index] = event
+    self.order[index] = index
+    reading.count = reading.count + 1
+end
+
+--- Reads up to `budget` events, and returns the reason the file is refused
+--- if it is.
+local function readEvents(exclusive self: Parser, budget: integer): string?
+    local bytes = self.bytes
+    local name = self.name
+    for _ = 1, budget do
+        local reading = self.reading
+        if reading == nil then
+            if not nextTrack(self) then
+                self.done = true
+
+                return nil
+            end
+            reading = assert(self.reading)
+        end
+        local at = reading.position
+        local finish = reading.finish
+        const track = reading.track
+        local where = function(position: integer): string
+            return name .. ": track " .. tostring(track) .. " at byte " .. tostring(position - 1)
+        end
+        if at > finish then
+            -- A track without its end-of-track event ends where its chunk does.
+            endTrack(self, reading)
+        else
+            local delta, after = quantity(bytes, at, finish)
+            if delta == nil then
+                if after < 0 then
+                    return where(at) .. ": a delta time longer than four bytes"
+                end
+
+                return where(at) .. ": the track is cut short inside a delta time"
+            end
+            reading.tick = reading.tick + delta
+            at = after
+            if at > finish then
+                return where(at) .. ": the track is cut short after a delta time"
+            end
+            local status = byte(bytes, at) as integer
+            if status == 0xFF then
+                if at + 1 > finish then
+                    return where(at) .. ": the track is cut short inside a meta event"
+                end
+                local meta = byte(bytes, at + 1) as integer
+                local length, start = quantity(bytes, at + 2, finish)
+                if length == nil or start + length - 1 > finish then
+                    return where(at) .. ": the track is cut short inside a meta event"
+                end
+                local data = string.sub(bytes, start, start + length - 1)
+                reading.position = start + length
+                if meta == META_END then
+                    endTrack(self, reading)
+                else
+                    if meta == META_NAME and reading.name == nil then
+                        reading.name = data
+                    end
+                    add(
+                        self,
+                        reading,
+                        new Event(
+                            tick = reading.tick,
+                            time = 0,
+                            track = reading.track,
+                            status = 0xFF,
+                            data1 = 0,
+                            data2 = 0,
+                            meta = meta,
+                            data = data
+                        )
+                    )
+                end
+            elseif status == 0xF0 or status == 0xF7 then
+                local length, start = quantity(bytes, at + 1, finish)
+                if length == nil or start + length - 1 > finish then
+                    return where(at) .. ": the track is cut short inside a system exclusive message"
+                end
+                reading.position = start + length
+                -- A system message cancels running status.
+                reading.running = 0
+                add(
+                    self,
+                    reading,
+                    new Event(
+                        tick = reading.tick,
+                        time = 0,
+                        track = reading.track,
+                        status = status,
+                        data1 = 0,
+                        data2 = 0,
+                        meta = nil,
+                        data = string.sub(bytes, start, start + length - 1)
+                    )
+                )
+            elseif status >= 0xF1 then
+                return where(at) .. ": status " .. string.format("0x%02X", status) .. " is not allowed in a MIDI file"
+            else
+                local first = at
+                if status >= 0x80 then
+                    reading.running = status
+                    first = at + 1
+                elseif reading.running == 0 then
+                    return where(at) .. ": a data byte with no status before it"
+                else
+                    status = reading.running
+                end
+                local nibble = status // 16
+                local size = (nibble == 0xC or nibble == 0xD) and 1 or 2
+                if first + size - 1 > finish then
+                    return where(at) .. ": the track is cut short inside a channel message"
+                end
+                local data1 = byte(bytes, first) as integer
+                local data2 = size == 2 and byte(bytes, first + 1) as integer or 0
+                if data1 >= 0x80 or data2 >= 0x80 then
+                    return where(first) .. ": a data byte with its top bit set"
+                end
+                reading.position = first + size
+                add(
+                    self,
+                    reading,
+                    new Event(
+                        tick = reading.tick,
+                        time = 0,
+                        track = reading.track,
+                        status = status,
+                        data1 = data1,
+                        data2 = data2,
+                        meta = nil,
+                        data = nil
+                    )
+                )
+            end
+        end
+    end
+
+    return nil
+end
+
+--- Converts ticks to seconds through a tempo map, or through the SMPTE rate.
+local function seconds(song: Song, tick: integer): number
+    local frames = song.framesPerSecond
+    if frames ~= nil then
+        return tick / (frames * assert(song.ticksPerFrame))
+    end
+    local ppq = assert(song.ppq)
+    local tempos = song.tempos
+    local low: integer, high: integer = 1, #tempos
+    while low < high do
+        local middle = (low + high + 1) // 2
+        if tempos[middle].tick <= tick then
+            low = middle
+        else
+            high = middle - 1
+        end
+    end
+    local tempo = tempos[low]
+
+    return tempo.time + (tick - tempo.tick) * tempo.microsecondsPerQuarter / (1000000 * ppq)
+end
+
+--- Merges the tracks, times every event and finds the loop.
+local function finish(exclusive self: Parser): Song
+    local events = self.events
+    local order = self.order
+    -- Stable by construction: events at one tick keep the order they were
+    -- read in, which is track order and then file order within a track.
+    table.sort(order, function(a: integer, b: integer): boolean
+        local left, right = events[a], events[b]
+        if left.tick ~= right.tick then
+            return left.tick < right.tick
+        end
+
+        return a < b
+    end)
+    local merged: {Event} = {}
+    for index = 1, #order do
+        merged[index] = events[order[index]]
+    end
+    local ppq: integer? = nil
+    local framesPerSecond: number? = nil
+    local ticksPerFrame: integer? = nil
+    if self.division >= 0x8000 then
+        local frames = 256 - self.division // 256
+        framesPerSecond = frames == 29 and 29.97 or frames
+        ticksPerFrame = self.division % 256
+    else
+        ppq = self.division
+    end
+    local tempos: {Tempo} = {new Tempo(tick = 0, time = 0, microsecondsPerQuarter = DEFAULT_TEMPO)}
+    local song = new Song(
+        format = self.format,
+        ppq = ppq,
+        framesPerSecond = framesPerSecond,
+        ticksPerFrame = ticksPerFrame,
+        tracks = self.infos,
+        events = merged,
+        tempos = tempos,
+        duration = 0,
+        loopStart = nil,
+        loopEnd = nil,
+        title = self.infos[1] ~= nil and self.infos[1].name or nil
+    )
+    local loopStart: number? = nil
+    local loopEnd: number? = nil
+    local controllerStart: number? = nil
+    for index = 1, #merged do
+        local event = merged[index]
+        event.time = seconds(song, event.tick)
+        if event.status == 0xFF then
+            local data = event.data or ""
+            if event.meta == META_TEMPO and #data == 3 and ppq ~= nil then
+                local micro = (
+                    byte(data, 1) as integer
+                ) * 65536 + (byte(data, 2) as integer) * 256 + (byte(data, 3) as integer)
+                if micro > 0 then
+                    local last = tempos[#tempos]
+                    if last.tick == event.tick then
+                        last.microsecondsPerQuarter = micro
+                    else
+                        tempos[
+                            #tempos + 1
+                        ] = new Tempo(tick = event.tick, time = event.time, microsecondsPerQuarter = micro)
+                    end
+                end
+            elseif event.meta == META_MARKER then
+                local marker = squeezed(data)
+                if marker == "loopstart" and loopStart == nil then
+                    loopStart = event.time
+                elseif marker == "loopend" and loopEnd == nil then
+                    loopEnd = event.time
+                end
+            end
+        elseif event.status // 16 == 0xB and event.data1 == LOOP_CONTROLLER and controllerStart == nil then
+            controllerStart = event.time
+        end
+    end
+    local endTick: integer = 0
+    for _, track in ipairs(self.infos) do
+        if track.endTick > endTick then
+            endTick = track.endTick
+        end
+    end
+    song.duration = seconds(song, endTick)
+    song.loopStart = loopStart or controllerStart
+    if song.loopStart ~= nil and loopEnd ~= nil and loopEnd > assert(song.loopStart) then
+        song.loopEnd = loopEnd
+    end
+
+    return song
+end
+
+--- Advances a parse by up to `budget` events.
+local function step(exclusive self: Parser, budget: integer): (assets.Status, Song?, string?)
+    local reason = readEvents(self, budget)
+    if reason ~= nil then
+        return "failed", nil, reason
+    end
+    if not self.done then
+        return "pending"
+    end
+    if #self.infos == 0 then
+        return "failed", nil, self.name .. ": the file holds no MTrk chunk"
+    end
+
+    return "ready", finish(self)
+end
+
+--- Parses the bytes of a whole Standard MIDI File.
+---
+--- @param bytes the file, which is not retained once the song is built
+--- @param name what a refusal names the file as, and defaults to `"MIDI file"`
+--- @return the song, or nil when the bytes are refused
+--- @return the reason, naming the byte where reading stopped
+export function parse(bytes: string, name: string?): (Song?, string?)
+    local parser, reason = begin(bytes, name or "MIDI file")
+    if parser == nil then
+        return nil, reason
+    end
+    while true do
+        local status, song, failure = step(parser, PARSE_BUDGET)
+        local outcome: string = status
+        if outcome == "ready" then
+            return song
+        elseif outcome == "failed" then
+            return nil, failure
+        end
+    end
+end
+
+--- Loads a `.mid` file as a [`Song`](tecs.audio.music.midi.Song).
+---
+--- The file is read and parsed on the loader's readiness pump, up to 65 536
+--- events a pass, so `handle:value() as tecs.audio.music.midi.Song` is the
+--- cast its caller writes. The collector owns the song.
+export const kind: assets.Kind = new assets.Kind(
+    name = assets.MUSIC_MIDI,
+    open = function(path: string): (assets.Job?, string?)
+        local read, reason = assets.readJob(path)
+        if read == nil then
+            return nil, reason
+        end
+        local parser: Parser? = nil
+
+        return new assets.Job(
+            poll = function(): (assets.Status, any?, string?)
+                local current = parser
+                if current == nil then
+                    local status, bytes, failure = read.poll()
+                    local reading: string = status
+                    if reading ~= "ready" then
+                        return status, nil, failure
+                    end
+                    local begun, refused = begin(bytes as string, path)
+                    if begun == nil then
+                        return "failed", nil, refused
+                    end
+                    parser = begun
+
+                    return "pending"
+                end
+
+                return step(current, PARSE_BUDGET)
+            end,
+            cancel = function(): nil
+                read.cancel()
+                parser = nil
+            end
+        )
+    end,
+    release = nil
+)
+
+--- Returns the index of the first event at or after `time`.
+local function locate(events: {Event}, time: number): integer
+    local low: integer, high: integer = 1, #events + 1
+    while low < high do
+        local middle = (low + high) // 2
+        if events[middle].time < time then
+            low = middle + 1
+        else
+            high = middle
+        end
+    end
+
+    return low
+end
+
+--- Builds the driver that plays a song on a synth.
+local function driver(voice: synth.Synth, first: Song): music.Driver
+    local song = first
+    local index: integer = 1
+    local held: {[integer]: boolean} = {}
+    local muted: {[integer]: boolean} = {}
+    local gain: number = 1
+    local result: music.Driver
+
+    local function release(at: number, channel: integer?): nil
+        for note in pairs(held) do
+            local owner = note // 128
+            if channel == nil or owner == channel then
+                voice:noteOff(owner, note % 128, at)
+                held[note] = nil
+            end
+        end
+    end
+
+    result = new music.Driver(
+        duration = song.duration,
+        loopStart = song.loopStart,
+        loopEnd = song.loopEnd,
+        tail = TAIL,
+        now = function(): number
+            return voice:now()
+        end,
+        schedule = function(to: number, start: number, clock: number, tempo: number): number
+            local events = song.events
+            while index <= #events do
+                local event = events[index]
+                if event.time >= to then
+                    return to
+                end
+                local status = event.status
+                if status < 0xF0 then
+                    local channel = status % 16
+                    local nibble = status // 16
+                    local on = nibble == 0x9 and event.data2 > 0
+                    if not (on and muted[channel]) then
+                        local at = clock + (event.time - start) / tempo
+                        if not voice:send(status, event.data1, event.data2, at) then
+                            return event.time
+                        end
+                        local note = channel * 128 + event.data1
+                        if on then
+                            held[note] = true
+                        elseif nibble == 0x8 or nibble == 0x9 then
+                            held[note] = nil
+                        end
+                    end
+                end
+                index = index + 1
+            end
+
+            return to
+        end,
+        pending = function(): number?
+            local events = song.events
+            while index <= #events do
+                local event = events[index]
+                if event.status < 0xF0 then
+                    return event.time
+                end
+                index = index + 1
+            end
+
+            return nil
+        end,
+        jump = function(target: number, at: number): nil
+            release(at, nil)
+            index = locate(song.events, target)
+        end,
+        seek = function(target: number, at: number): nil
+            voice:reset()
+            held = {}
+            local programs: {[integer]: integer} = {}
+            local controllers: {[integer]: {[integer]: integer}} = {}
+            local bends: {[integer]: integer} = {}
+            local pressures: {[integer]: integer} = {}
+            local events = song.events
+            local stop = locate(events, target)
+            for position = 1, stop - 1 do
+                local event = events[position]
+                local nibble = event.status // 16
+                local channel = event.status % 16
+                if nibble == 0xB and event.data1 < 120 then
+                    local values = controllers[channel]
+                    if values == nil then
+                        values = {}
+                        controllers[channel] = values
+                    end
+                    values[event.data1] = event.data2
+                elseif nibble == 0xC then
+                    programs[channel] = event.data1
+                elseif nibble == 0xD then
+                    pressures[channel] = event.data1
+                elseif nibble == 0xE then
+                    bends[channel] = event.data1 + event.data2 * 128
+                end
+            end
+            for channel = 0, 15 do
+                local values = controllers[channel]
+                if values ~= nil then
+                    for controller = 0, 119 do
+                        local value = values[controller]
+                        if value ~= nil then
+                            voice:controlChange(channel, controller, value, at)
+                        end
+                    end
+                end
+                local program = programs[channel]
+                if program ~= nil then
+                    voice:programChange(channel, program, at)
+                end
+                local bend = bends[channel]
+                if bend ~= nil then
+                    voice:pitchBend(channel, bend, at)
+                end
+                local pressure = pressures[channel]
+                if pressure ~= nil then
+                    voice:send(0xD0 + channel, pressure, 0, at)
+                end
+            end
+            index = stop
+        end,
+        reload = function(payload: any): (boolean, string?)
+            song = payload as Song
+            result.duration = song.duration
+            result.loopStart = song.loopStart
+            result.loopEnd = song.loopEnd
+            index = 1
+
+            return true
+        end,
+        pause = function(): nil
+            voice:pause()
+        end,
+        resume = function(): nil
+            voice:resume()
+        end,
+        setGain = function(value: number): nil
+            gain = value
+            voice:setGain(gain)
+        end,
+        setMuted = function(channel: integer, mute: boolean): nil
+            if channel < 0 or channel > 15 then
+                error(
+                    "tecs.audio.music.Player.setMuted: a MIDI channel must be from 0 to 15, got " .. tostring(channel),
+                    3
+                )
+            end
+            if mute then
+                muted[channel] = true
+            else
+                muted[channel] = nil
+            end
+            if mute then
+                release(0, channel)
+                voice:allNotesOff(channel)
+            end
+        end,
+        stop = function(fadeOut: number?): nil
+            voice:destroy(fadeOut)
+        end
+    )
+
+    return result
+end
+
+--- Plays a parsed song on a synthesizer of its own.
+---
+--- @param mixer the mixer the synth plays on
+--- @param font the SoundFont the synth plays, loaded into that mixer
+--- @param song the song, which the player reads and does not change
+--- @param options the group, gain, loop, tempo, lookahead and start, or nil
+---     for the defaults
+--- @return the player, or nil when the synth could not start
+--- @return the reason, when the first return is nil
+--- @raises string when an option is out of range, or the SoundFont belongs
+---     to another mixer
+export function playSong(
+    mixer: audio.Audio,
+    font: synth.SoundFont,
+    song: Song,
+    options: music.PlayOptions?
+): (music.Player?, string?)
+    music.checkOptions("midi.playSong", options)
+    local voice, reason = synth.new(mixer, font, {group = options and options.group, gain = options and options.gain})
+    if voice == nil then
+        return nil, reason
+    end
+    local made = assert(voice)
+
+    return music.newPlayer(mixer, driver(made, song), nil, options)
+end
+
+--- Plays a loaded song on a synthesizer of its own.
+---
+--- The player retains the handle until it stops and follows a reload of it,
+--- so the caller releases its own hold once this returns.
+---
+--- @param mixer the mixer the synth plays on
+--- @param font the SoundFont the synth plays, loaded into that mixer
+--- @param handle a handle `kind` loaded
+--- @param options the group, gain, loop, tempo, lookahead and start, or nil
+---     for the defaults
+--- @return the player, or nil when the synth could not start
+--- @return the reason, when the first return is nil
+--- @raises string when the handle was not loaded as a MIDI song or has been
+---     released
+--- @raises string when an option is out of range
+export function play(
+    mixer: audio.Audio,
+    font: synth.SoundFont,
+    handle: assets.Handle,
+    options: music.PlayOptions?
+): (music.Player?, string?)
+    if handle.kind ~= assets.MUSIC_MIDI then
+        error("tecs.audio.music.midi.play: the handle was loaded as " .. handle.kind .. ", not as a MIDI song", 2)
+    end
+    local song = handle:value()
+    if song == nil then
+        error("tecs.audio.music.midi.play: the handle has been released", 2)
+    end
+    music.checkOptions("midi.play", options)
+    local voice, reason = synth.new(mixer, font, {group = options and options.group, gain = options and options.gain})
+    if voice == nil then
+        return nil, reason
+    end
+    local made = assert(voice)
+
+    return music.newPlayer(mixer, driver(made, song as Song), handle, options)
+end

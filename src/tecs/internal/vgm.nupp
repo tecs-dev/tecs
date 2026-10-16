@@ -1,0 +1,906 @@
+module tecs.internal.vgm
+
+--[[
+Reads a VGM file into a register log, a slice at a time.
+
+What it keeps is what `tecs.audio.fm` can play: the writes to every Yamaha FM
+chip and to the YM2149 family, the memory images their data blocks carry, the
+YM2612's DAC writes from the PCM data bank (the `0x8n` commands and the DAC
+streams of commands `0x90` to `0x95`, both turned into ordinary register
+writes at their times), the loop point and the GD3 tags. Every other chip's
+writes are skipped, each with one reason, and a file with nothing left to play
+is refused by the caller.
+
+The format is the VGM specification up to version 1.72: a header whose fields
+past the data offset read as zero, a stream of commands at 44100 ticks a
+second, and data blocks, compressed ones included.
+]]
+
+local registerlog = require("tecs.internal.registerlog")
+
+const byte = string.byte
+const floor = math.floor
+
+--- Ticks a second, which every VGM file counts in.
+local RATE: integer = 44100
+
+--- Two to the power of thirty and of thirty-one, the two flag bits of a clock.
+local BIT30: integer = 1073741824
+
+local BIT31: integer = 2147483648
+
+--- One chip the format numbers, and where its clock sits in the header.
+local record Family
+    id: integer
+    name: string
+    clockAt: integer
+    model: string?
+    alternate: string?
+    reason: string?
+end
+
+local function family(id: integer, name: string, clockAt: integer, model: string?, alternate: string?): Family
+    return new Family(id = id, name = name, clockAt = clockAt, model = model, alternate = alternate, reason = nil)
+end
+
+local function foreign(id: integer, name: string, clockAt: integer, reason: string?): Family
+    return new Family(
+        id = id,
+        name = name,
+        clockAt = clockAt,
+        model = nil,
+        alternate = nil,
+        reason = reason or (name .. ": not a Yamaha FM chip, which is what tecs.audio.fm emulates")
+    )
+end
+
+--- Every chip VGM numbers, by its number, with the model `tecs.audio.fm`
+--- plays it as, or the reason it does not.
+local FAMILIES: {[integer]: Family} = {}
+
+for _, entry in ipairs({
+    foreign(0x00, "SN76489", 0x0C),
+    family(0x01, "YM2413", 0x10, "ym2413", "ds1001"),
+    family(0x02, "YM2612", 0x2C, "ym2612", "ym3438"),
+    family(0x03, "YM2151", 0x30, "ym2151", "ym2164"),
+    foreign(0x04, "Sega PCM", 0x38),
+    foreign(0x05, "RF5C68", 0x40),
+    family(0x06, "YM2203", 0x44, "ym2203", nil),
+    family(0x07, "YM2608", 0x48, "ym2608", nil),
+    family(0x08, "YM2610", 0x4C, "ym2610", "ym2610b"),
+    family(0x09, "YM3812", 0x50, "ym3812", nil),
+    family(0x0A, "YM3526", 0x54, "ym3526", nil),
+    family(0x0B, "Y8950", 0x58, "y8950", nil),
+    family(0x0C, "YMF262", 0x5C, "ymf262", nil),
+    family(0x0D, "YMF278B", 0x60, "ymf278b", nil),
+    foreign(
+        0x0E,
+        "YMF271",
+        0x64,
+        "YMF271: ymfm has no implementation of the OPX, so tecs.audio.fm does not emulate it"
+    ),
+    foreign(0x0F, "YMZ280B", 0x68, "YMZ280B: a PCM chip, not an FM one, which is what tecs.audio.fm emulates"),
+    foreign(0x10, "RF5C164", 0x6C),
+    foreign(0x11, "PWM", 0x70),
+    family(0x12, "AY8910", 0x74, "ym2149", nil),
+    foreign(0x13, "Game Boy DMG", 0x80),
+    foreign(0x14, "NES APU", 0x84),
+    foreign(0x15, "MultiPCM", 0x88),
+    foreign(0x16, "uPD7759", 0x8C),
+    foreign(0x17, "OKIM6258", 0x90),
+    foreign(0x18, "OKIM6295", 0x98),
+    foreign(0x19, "K051649", 0x9C),
+    foreign(0x1A, "K054539", 0xA0),
+    foreign(0x1B, "HuC6280", 0xA4),
+    foreign(0x1C, "C140", 0xA8),
+    foreign(0x1D, "K053260", 0xAC),
+    foreign(0x1E, "Pokey", 0xB0),
+    foreign(0x1F, "QSound", 0xB4),
+    foreign(0x20, "SCSP", 0xB8),
+    foreign(0x21, "WonderSwan", 0xC0),
+    foreign(0x22, "Virtual Boy VSU", 0xC4),
+    foreign(0x23, "SAA1099", 0xC8),
+    foreign(0x24, "ES5503", 0xCC),
+    foreign(0x25, "ES5506", 0xD0),
+    foreign(0x26, "X1-010", 0xD8),
+    foreign(0x27, "C352", 0xDC),
+    foreign(0x28, "GA20", 0xE0),
+    foreign(0x29, "Mikey", 0xE4),
+}) do
+    FAMILIES[entry.id] = entry
+end
+
+--- The chip a register-write command from 0x51 to 0x5F writes, by command,
+--- and the bank its register goes to. 0xA1 to 0xAF are the same commands for
+--- the second chip.
+local WRITES: {
+    [integer]: {integer}
+} = {
+    [0x51] = {0x01, 0},
+    [0x52] = {0x02, 0},
+    [0x53] = {0x02, 1},
+    [0x54] = {0x03, 0},
+    [0x55] = {0x06, 0},
+    [0x56] = {0x07, 0},
+    [0x57] = {0x07, 1},
+    [0x58] = {0x08, 0},
+    [0x59] = {0x08, 1},
+    [0x5A] = {0x09, 0},
+    [0x5B] = {0x0A, 0},
+    [0x5C] = {0x0B, 0},
+    [0x5D] = {0x0F, 0},
+    [0x5E] = {0x0C, 0},
+    [0x5F] = {0x0C, 1},
+}
+
+--- The chip and memory class each ROM or RAM data block type loads.
+local IMAGES: {
+    [integer]: {any}
+} = {
+    [0x81] = {0x07, "adpcmB"},
+    [0x82] = {0x08, "adpcmA"},
+    [0x83] = {0x08, "adpcmB"},
+    [0x84] = {0x0D, "pcm"},
+    [0x87] = {0x0D, "pcm"},
+    [0x88] = {0x0B, "adpcmB"},
+}
+
+local function u16(bytes: string, at: integer): integer
+    const low, high = byte(bytes, at, at + 1)
+
+    return (low as integer) + (high as integer) * 256
+end
+
+local function u32(bytes: string, at: integer): integer
+    const a, b, c, d = byte(bytes, at, at + 3)
+
+    return (a as integer) + (b as integer) * 256 + (c as integer) * 65536 + (d as integer) * 16777216
+end
+
+--- One block of PCM data in a bank.
+local record Block
+    start: integer
+    length: integer
+end
+
+--- The PCM data blocks of one type, joined.
+local record Bank
+    parts: {string}
+    blocks: {Block}
+    size: integer
+    joined: string?
+end
+
+--- One DAC stream.
+local record Stream
+    chipType: integer
+    port: integer
+    command: integer
+    bank: integer
+    stepSize: integer
+    stepBase: integer
+    frequency: number
+    active: boolean
+    position: integer
+    remaining: integer
+    loop: boolean
+    reverse: boolean
+    first: integer
+    length: integer
+    next: number
+end
+
+--- A decompression table a compressed data block names.
+local record Table
+    subtype: integer
+    bitsOut: integer
+    bitsIn: integer
+    values: {integer}
+end
+
+--- The state of one parse.
+local record State
+    bytes: string
+    name: string
+    builder: registerlog.Builder
+    position: integer
+    finish: integer
+    tick: integer
+    loopAt: integer
+    gd3At: integer
+    total: integer
+    clocks: {[integer]: integer}
+    flags: {[integer]: integer}
+    slots: {[integer]: integer}
+    banks: {[integer]: Bank}
+    streams: {[integer]: Stream}
+    tables: {[integer]: Table}
+    pcm: integer
+    done: boolean
+end
+
+--- Returns the joined data of a PCM bank, or the empty string.
+local function bankData(borrows state: State, kind: integer): string
+    local bank = state.banks[kind]
+    if bank == nil then
+        return ""
+    end
+    local joined = bank.joined
+    if joined == nil then
+        joined = table.concat(bank.parts)
+        bank.parts = {joined}
+        bank.joined = joined
+    end
+
+    return joined
+end
+
+--- Returns the log's index for chip `id`, first or second, making it on first
+--- use, or nil when the file cannot play it.
+local function chipFor(exclusive state: State, id: integer, second: boolean): integer?
+    local slot = id * 2 + (second and 1 or 0)
+    local existing = state.slots[slot]
+    if existing ~= nil then
+        return existing >= 0 and existing or nil
+    end
+    local entry = FAMILIES[id]
+    local builder = state.builder
+
+    local function refuse(key: string, reason: string): nil
+        state.slots[slot] = -1
+        registerlog.skip(builder, key, reason)
+    end
+
+    if entry == nil then
+        refuse("chip " .. tostring(id), "chip " .. string.format("0x%02X", id) .. ": not a chip this VGM reader knows")
+
+        return nil
+    end
+    local model = entry.model
+    if model == nil then
+        refuse(entry.name, entry.reason or entry.name)
+
+        return nil
+    end
+    local raw = state.clocks[id] or 0
+    local clock = raw % BIT30
+    if clock == 0 then
+        refuse(
+            entry.name .. " clock",
+            entry.name .. ": written to, but the header gives it no clock, so it is not played"
+        )
+
+        return nil
+    end
+    if second and raw % BIT31 < BIT30 then
+        refuse(entry.name .. " second", entry.name .. ": a second chip is written to that the header does not declare")
+
+        return nil
+    end
+    if raw >= BIT31 and entry.alternate ~= nil then
+        model = assert(entry.alternate)
+    end
+    if id == 0x12 then
+        local kind = state.flags[0x78] or 0
+        if kind == 0x03 then
+            refuse("AY8930", "AY8930: its expanded mode is not the YM2149's, which is what tecs.audio.fm emulates")
+
+            return nil
+        end
+        -- Pin 26 low on a YM2149 halves its clock.
+        if (state.flags[0x79] or 0) // 16 % 2 == 1 then
+            clock = clock // 2
+        end
+    end
+    local index = registerlog.addChip(builder, model, clock, second, 1, 1)
+    state.slots[slot] = index
+
+    return index
+end
+
+--- Writes `value` to `register` of chip `id`, when the file can play it.
+local function put(exclusive state: State, id: integer, second: boolean, register: integer, value: integer): nil
+    local chip = chipFor(state, id, second)
+    if chip ~= nil then
+        registerlog.write(state.builder, state.tick, chip, register, value)
+    end
+end
+
+--- Emits every active stream's writes due before `until`, in time order.
+local function runStreams(exclusive state: State, horizon: integer): nil
+    while true do
+        local earliest: Stream? = nil
+        for _, stream in pairs(state.streams) do
+            if stream.active and stream.frequency > 0 and stream.next < horizon then
+                if earliest == nil or stream.next < assert(earliest).next then
+                    earliest = stream
+                end
+            end
+        end
+        if earliest == nil then
+            return
+        end
+        local stream = assert(earliest)
+        local data = bankData(state, stream.bank)
+        if stream.position < 0 or stream.position >= #data then
+            if stream.loop and stream.length ~= 0 then
+                stream.position = stream.first
+                stream.remaining = stream.length
+            else
+                stream.active = false
+            end
+        else
+            local tick = floor(stream.next)
+            local value = byte(data, stream.position + 1) as integer
+            local chip = chipFor(state, stream.chipType % 128, stream.chipType >= 128)
+            if chip ~= nil then
+                registerlog.write(state.builder, tick, chip, stream.port * 256 + stream.command, value)
+            end
+            local step = stream.stepSize
+            stream.position = stream.position + (stream.reverse and -step or step)
+            stream.next = stream.next + RATE / stream.frequency
+            if stream.remaining > 0 then
+                stream.remaining = stream.remaining - 1
+                if stream.remaining == 0 then
+                    if stream.loop then
+                        stream.position = stream.first
+                        stream.remaining = stream.length
+                    else
+                        stream.active = false
+                    end
+                end
+            end
+        end
+    end
+end
+
+--- Advances time by `ticks`, running the streams up to the new time.
+local function wait(exclusive state: State, ticks: integer): nil
+    if ticks <= 0 then
+        return
+    end
+    runStreams(state, state.tick + ticks)
+    state.tick = state.tick + ticks
+end
+
+local function streamOf(exclusive state: State, id: integer): Stream
+    local stream = state.streams[id]
+    if stream == nil then
+        stream = new Stream(
+            chipType = 0x02,
+            port = 0,
+            command = 0x2A,
+            bank = 0,
+            stepSize = 1,
+            stepBase = 0,
+            frequency = 0,
+            active = false,
+            position = 0,
+            remaining = 0,
+            loop = false,
+            reverse = false,
+            first = 0,
+            length = 0,
+            next = 0
+        )
+        state.streams[id] = stream
+    end
+
+    return stream
+end
+
+--- Starts a stream at `position` for `remaining` commands, minus for until
+--- its data ends.
+local function start(
+    exclusive state: State,
+    stream: Stream,
+    position: integer,
+    remaining: integer,
+    loop: boolean,
+    reverse: boolean
+): nil
+    stream.position = position
+    stream.first = position
+    stream.remaining = remaining
+    stream.length = remaining
+    stream.loop = loop
+    stream.reverse = reverse
+    stream.active = true
+    stream.next = state.tick
+end
+
+--- The powers of two up to two to the sixteenth, by exponent plus one.
+local POWERS: {integer} = {}
+
+do
+    local power: integer = 1
+    for index = 1, 17 do
+        POWERS[index] = power
+        power = power * 2
+    end
+end
+
+--- Returns two to the power of `exponent`, from 0 to 16.
+local function power(exponent: integer): integer
+    return POWERS[exponent + 1] or 1
+end
+
+--- Reads `count` bits from `bytes` from bit `at`, counted from the top of the
+--- first byte.
+local function bits(bytes: string, at: integer, count: integer): integer
+    local value: integer = 0
+    for index = 0, count - 1 do
+        local bit = at + index
+        local octet = byte(bytes, bit // 8 + 1) as integer? or 0
+        value = value * 2 + (octet // power(7 - bit % 8)) % 2
+    end
+
+    return value
+end
+
+--- Decompresses a compressed data block, or returns the reason it cannot.
+local function decompress(borrows state: State, data: string): (string?, string?)
+    if #data < 10 then
+        return nil, "a compressed data block is cut short"
+    end
+    local kind = byte(data, 1) as integer
+    local size = u32(data, 2)
+    local bitsOut = byte(data, 6) as integer
+    local bitsIn = byte(data, 7) as integer
+    local subtype = byte(data, 8) as integer
+    local base = u16(data, 9)
+    if bitsIn == 0 or bitsIn > 16 or bitsOut == 0 or bitsOut > 16 then
+        return nil, "a compressed data block packs " .. tostring(bitsIn) .. " bits into " .. tostring(bitsOut)
+    end
+    local width = (bitsOut + 7) // 8
+    local count = size // width
+    local payload = string.sub(data, 11)
+    local tableFor = state.tables[kind]
+    local out: {string} = {}
+    local value = base
+    for index = 0, count - 1 do
+        local packed = bits(payload, index * bitsIn, bitsIn)
+        local result: integer
+        if kind == 0x00 then
+            if subtype == 0x00 then
+                result = packed + base
+            elseif subtype == 0x01 then
+                result = packed * power(bitsOut - bitsIn) + base
+            else
+                if tableFor == nil then
+                    return nil, "a compressed data block uses a table the file never gives"
+                end
+                result = (tableFor.values[packed + 1] or 0) + base
+            end
+        elseif kind == 0x01 then
+            if tableFor == nil then
+                return nil, "a DPCM data block uses a table the file never gives"
+            end
+            value = (value + (tableFor.values[packed + 1] or 0)) % power(bitsOut)
+            result = value
+        else
+            return nil, "compression type " .. tostring(kind) .. " is not one VGM defines"
+        end
+        result = result % 65536
+        if width == 1 then
+            out[#out + 1] = string.char(result % 256)
+        else
+            out[#out + 1] = string.char(result % 256, result // 256)
+        end
+    end
+
+    return table.concat(out)
+end
+
+--- Reads one data block, whose type is `kind` and whose bytes are `data`.
+local function dataBlock(exclusive state: State, kind: integer, data: string, flagged: boolean): string?
+    if kind >= 0x40 and kind < 0x7F then
+        local decoded, reason = decompress(state, data)
+        if decoded == nil then
+            return reason
+        end
+        data = assert(decoded)
+        kind = kind - 0x40
+    end
+    if kind < 0x40 then
+        local bank = state.banks[kind]
+        if bank == nil then
+            bank = new Bank(parts = {}, blocks = {}, size = 0, joined = nil)
+            state.banks[kind] = bank
+        end
+        bank.parts[#bank.parts + 1] = data
+        bank.blocks[#bank.blocks + 1] = new Block(start = bank.size, length = #data)
+        bank.size = bank.size + #data
+        bank.joined = nil
+    elseif kind == 0x7F then
+        if #data < 6 then
+            return "a decompression table is cut short"
+        end
+        local compression = byte(data, 1) as integer
+        local bitsOut = byte(data, 3) as integer
+        local count = u16(data, 5)
+        local width = (bitsOut + 7) // 8
+        local values: {integer} = {}
+        for index = 0, count - 1 do
+            local at = 7 + index * width
+            values[index + 1] = width == 1 and (byte(data, at) as integer? or 0) or u16(data, at)
+        end
+        state.tables[
+            compression
+        ] = new Table(
+            subtype = byte(data, 2) as integer,
+            bitsOut = bitsOut,
+            bitsIn = byte(data, 4) as integer,
+            values = values
+        )
+    elseif kind < 0xC0 then
+        local target = IMAGES[kind]
+        if target == nil then
+            registerlog.skip(
+                state.builder,
+                "block " .. tostring(kind),
+                "data block " .. string.format("0x%02X", kind) .. ": memory for a chip tecs.audio.fm does not emulate"
+            )
+
+            return nil
+        end
+        if #data < 8 then
+            return "a ROM data block is cut short"
+        end
+        local chip = chipFor(state, target[1] as integer, flagged)
+        if chip ~= nil then
+            registerlog.addMemory(state.builder, chip, target[2] as string, u32(data, 5), string.sub(data, 9))
+        end
+    end
+
+    return nil
+end
+
+--- Converts UTF-16LE to UTF-8.
+local function utf8(bytes: string, at: integer, finish: integer): (string, integer)
+    local out: {string} = {}
+    local position = at
+    while position + 1 <= finish do
+        local unit = u16(bytes, position)
+        position = position + 2
+        if unit == 0 then
+            break
+        end
+        local code = unit
+        if unit >= 0xD800 and unit < 0xDC00 and position + 1 <= finish then
+            local low = u16(bytes, position)
+            if low >= 0xDC00 and low < 0xE000 then
+                code = 0x10000 + (unit - 0xD800) * 1024 + (low - 0xDC00)
+                position = position + 2
+            end
+        end
+        if code < 0x80 then
+            out[#out + 1] = string.char(code)
+        elseif code < 0x800 then
+            out[#out + 1] = string.char(0xC0 + code // 64, 0x80 + code % 64)
+        elseif code < 0x10000 then
+            out[#out + 1] = string.char(0xE0 + code // 4096, 0x80 + code // 64 % 64, 0x80 + code % 64)
+        else
+            out[
+                #out + 1
+            ] = string.char(0xF0 + code // 262144, 0x80 + code // 4096 % 64, 0x80 + code // 64 % 64, 0x80 + code % 64)
+        end
+    end
+
+    return table.concat(out), position
+end
+
+--- Reads the GD3 tags, when the file has them.
+local function tags(exclusive state: State): nil
+    local bytes = state.bytes
+    local at = state.gd3At
+    if at <= 0 or at + 11 > #bytes or string.sub(bytes, at, at + 3) ~= "Gd3 " then
+        return
+    end
+    local finish = math.min(#bytes, at + 11 + u32(bytes, at + 8))
+    local position = at + 12
+    local fields: {string} = {}
+    for index = 1, 11 do
+        local text, after = utf8(bytes, position, finish)
+        fields[index] = text
+        position = after
+    end
+    state.builder.tags = fields
+end
+
+--- Reads up to `budget` commands, and returns the reason the file is refused
+--- if it is.
+local function run(exclusive state: State, budget: integer): string?
+    local bytes = state.bytes
+    local builder = state.builder
+
+    local function cut(at: integer, what: string): string
+        return state.name .. ": byte " .. string.format("0x%X", at - 1) .. ": " .. what
+    end
+
+    for _ = 1, budget do
+        local at = state.position
+        if at > state.finish then
+            state.done = true
+
+            return nil
+        end
+        if at == state.loopAt then
+            builder.loopTick = state.tick
+            builder.loopIndex = builder.count + 1
+        end
+        local command = byte(bytes, at) as integer
+
+        local function need(count: integer): boolean
+            return at + count - 1 <= state.finish
+        end
+
+        if command == 0x66 then
+            state.done = true
+
+            return nil
+        elseif command == 0x61 then
+            if not need(3) then
+                return cut(at, "a wait is cut short")
+            end
+            wait(state, u16(bytes, at + 1))
+            state.position = at + 3
+        elseif command == 0x62 then
+            wait(state, 735)
+            state.position = at + 1
+        elseif command == 0x63 then
+            wait(state, 882)
+            state.position = at + 1
+        elseif command >= 0x70 and command <= 0x7F then
+            wait(state, command - 0x6F)
+            state.position = at + 1
+        elseif command >= 0x80 and command <= 0x8F then
+            local data = bankData(state, 0)
+            if state.pcm < #data then
+                put(state, 0x02, false, 0x2A, byte(data, state.pcm + 1) as integer)
+            end
+            state.pcm = state.pcm + 1
+            wait(state, command - 0x80)
+            state.position = at + 1
+        elseif command == 0x67 then
+            if not need(7) then
+                return cut(at, "a data block is cut short")
+            end
+            local kind = byte(bytes, at + 2) as integer
+            local size = u32(bytes, at + 3)
+            local flagged = size >= BIT31
+            size = size % BIT31
+            if not need(7 + size) then
+                return cut(at, "a data block of " .. tostring(size) .. " bytes runs past the end of the file")
+            end
+            local reason = dataBlock(state, kind, string.sub(bytes, at + 7, at + 6 + size), flagged)
+            if reason ~= nil then
+                return cut(at, reason)
+            end
+            state.position = at + 7 + size
+        elseif command == 0x68 then
+            state.position = at + 12
+        elseif (command >= 0x51 and command <= 0x5F) or (command >= 0xA1 and command <= 0xAF) then
+            if not need(3) then
+                return cut(at, "a register write is cut short")
+            end
+            local second = command >= 0xA1
+            local write = assert(WRITES[second and command - 0x50 or command])
+            put(
+                state,
+                write[1],
+                second,
+                write[2] * 256 + (byte(bytes, at + 1) as integer),
+                byte(bytes, at + 2) as integer
+            )
+            state.position = at + 3
+        elseif command == 0xA0 then
+            if not need(3) then
+                return cut(at, "a register write is cut short")
+            end
+            local register = byte(bytes, at + 1) as integer
+            put(state, 0x12, register >= 0x80, register % 128, byte(bytes, at + 2) as integer)
+            state.position = at + 3
+        elseif command == 0xD0 then
+            if not need(4) then
+                return cut(at, "a register write is cut short")
+            end
+            local port = byte(bytes, at + 1) as integer
+            put(
+                state,
+                0x0D,
+                port >= 0x80,
+                port % 128 * 256 + (byte(bytes, at + 2) as integer),
+                byte(bytes, at + 3) as integer
+            )
+            state.position = at + 4
+        elseif command == 0xE0 then
+            if not need(5) then
+                return cut(at, "a PCM seek is cut short")
+            end
+            state.pcm = u32(bytes, at + 1)
+            state.position = at + 5
+        elseif command == 0x90 then
+            if not need(5) then
+                return cut(at, "a stream setup is cut short")
+            end
+            local stream = streamOf(state, byte(bytes, at + 1) as integer)
+            stream.chipType = byte(bytes, at + 2) as integer
+            stream.port = byte(bytes, at + 3) as integer
+            stream.command = byte(bytes, at + 4) as integer
+            state.position = at + 5
+        elseif command == 0x91 then
+            if not need(5) then
+                return cut(at, "a stream setup is cut short")
+            end
+            local stream = streamOf(state, byte(bytes, at + 1) as integer)
+            stream.bank = byte(bytes, at + 2) as integer
+            stream.stepSize = math.max(1, byte(bytes, at + 3) as integer)
+            stream.stepBase = byte(bytes, at + 4) as integer
+            state.position = at + 5
+        elseif command == 0x92 then
+            if not need(6) then
+                return cut(at, "a stream frequency is cut short")
+            end
+            local stream = streamOf(state, byte(bytes, at + 1) as integer)
+            stream.frequency = u32(bytes, at + 2)
+            state.position = at + 6
+        elseif command == 0x93 then
+            if not need(11) then
+                return cut(at, "a stream start is cut short")
+            end
+            local stream = streamOf(state, byte(bytes, at + 1) as integer)
+            local offset = u32(bytes, at + 2)
+            local mode = byte(bytes, at + 6) as integer
+            local length = u32(bytes, at + 7)
+            local position = offset == 0xFFFFFFFF and stream.position or offset + stream.stepBase
+            local kind = mode % 16
+            local loop = mode >= 0x80
+            local reverse = mode // 16 % 2 == 1
+            if kind == 0 then
+                stream.position = position
+            elseif kind == 1 then
+                start(state, stream, position, length, loop, reverse)
+            elseif kind == 2 then
+                start(state, stream, position, math.max(1, math.ceil(length * stream.frequency / 1000)), loop, reverse)
+            else
+                start(state, stream, position, -1, loop, reverse)
+            end
+            state.position = at + 11
+        elseif command == 0x94 then
+            if not need(2) then
+                return cut(at, "a stream stop is cut short")
+            end
+            local id = byte(bytes, at + 1) as integer
+            for key, stream in pairs(state.streams) do
+                if id == 0xFF or key == id then
+                    stream.active = false
+                end
+            end
+            state.position = at + 2
+        elseif command == 0x95 then
+            if not need(5) then
+                return cut(at, "a stream start is cut short")
+            end
+            local stream = streamOf(state, byte(bytes, at + 1) as integer)
+            local block = u16(bytes, at + 2)
+            local flags = byte(bytes, at + 4) as integer
+            local bank = state.banks[stream.bank]
+            local entry = bank ~= nil and bank.blocks[block + 1] or nil
+            if entry ~= nil then
+                local reverse = flags // 16 % 2 == 1
+                local first = reverse and entry.start + entry.length - 1 or entry.start + stream.stepBase
+                start(state, stream, first, math.max(1, entry.length // stream.stepSize), flags % 2 == 1, reverse)
+            end
+            state.position = at + 5
+        elseif command == 0x4F or command == 0x50 or (command >= 0x30 and command <= 0x3F) then
+            registerlog.skip(builder, "SN76489", "SN76489: not a Yamaha FM chip, which is what tecs.audio.fm emulates")
+            state.position = at + 2
+        elseif command >= 0x40 and command <= 0x4E then
+            state.position = at + 3
+        elseif command >= 0xB0 and command <= 0xBF then
+            state.position = at + 3
+        elseif command >= 0xC0 and command <= 0xDF then
+            state.position = at + 4
+        elseif command >= 0xE1 then
+            state.position = at + 5
+        else
+            return cut(at, "command " .. string.format("0x%02X", command) .. " is not a VGM command")
+        end
+    end
+
+    return nil
+end
+
+--- Begins reading a VGM file, or returns why its header is refused.
+---
+--- @param bytes the whole file, decompressed
+--- @param name what a refusal names the file as
+--- @return the parse, or nil and a reason
+export function parser(bytes: string, name: string): (registerlog.Parser?, string?)
+    if #bytes < 0x40 or string.sub(bytes, 1, 4) ~= "Vgm " then
+        return nil, name .. ": not a VGM file: it does not begin with \"Vgm \""
+    end
+    local version = u32(bytes, 0x09)
+    local dataStart: integer = 0x40
+    if version >= 0x150 then
+        local offset = u32(bytes, 0x35)
+        if offset ~= 0 then
+            dataStart = 0x34 + offset
+        end
+    end
+    if dataStart > #bytes then
+        return nil, name .. ": the data offset points past the end of the file"
+    end
+
+    local function field(offset: integer, width: integer): integer
+        if offset + width > dataStart or offset + width > #bytes then
+            return 0
+        end
+
+        return width == 4 and u32(bytes, offset + 1) or (byte(bytes, offset + 1) as integer)
+    end
+
+    local eof = field(0x04, 4)
+    local finish = eof ~= 0 and math.min(#bytes, 0x04 + eof) or #bytes
+    local builder = registerlog.newBuilder("vgm", version, RATE)
+    local clocks: {[integer]: integer} = {}
+    for id, entry in pairs(FAMILIES) do
+        local clock = field(entry.clockAt, 4)
+        if clock ~= 0 then
+            clocks[id] = clock
+            if entry.model == nil then
+                registerlog.skip(builder, entry.name, entry.reason or entry.name)
+            end
+        end
+    end
+    if version < 0x110 then
+        -- Before 1.10 the YM2413's clock stood for the YM2612's and the
+        -- YM2151's too.
+        local shared = clocks[0x01]
+        if shared ~= nil then
+            clocks[0x02] = clocks[0x02] or shared
+            clocks[0x03] = clocks[0x03] or shared
+        end
+    end
+    local loop = field(0x1C, 4)
+    local gd3 = field(0x14, 4)
+    local state = new State(
+        bytes = bytes,
+        name = name,
+        builder = builder,
+        position = dataStart + 1,
+        finish = finish,
+        tick = 0,
+        loopAt = loop ~= 0 and 0x1C + loop + 1 or -1,
+        gd3At = gd3 ~= 0 and 0x14 + gd3 + 1 or 0,
+        total = field(0x18, 4),
+        clocks = clocks,
+        flags = {[0x78] = field(0x78, 1), [0x79] = field(0x79, 1)},
+        slots = {},
+        banks = {},
+        streams = {},
+        tables = {},
+        pcm = 0,
+        done = false
+    )
+
+    return new registerlog.Parser(step = function(budget: integer): (registerlog.Status, registerlog.Builder?, string?)
+        local reason = run(state, budget)
+        if reason ~= nil then
+            return "failed", nil, reason
+        end
+        if not state.done then
+            return "pending"
+        end
+        tags(state)
+        builder.length = math.max(state.tick, state.total)
+        if builder.loopIndex ~= nil and assert(builder.loopIndex) > builder.count then
+            -- A loop with nothing after it has nothing to repeat.
+            builder.loopTick = nil
+            builder.loopIndex = nil
+        end
+
+        return "ready", builder
+    end)
+end

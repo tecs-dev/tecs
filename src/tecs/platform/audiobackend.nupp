@@ -48,7 +48,8 @@ export record Command
     --- `tecs.audio.clipId` assigned.
     clip: integer
 
-    --- Caller-writable. Carries the `LOOP`, `SPATIAL` and `STEREO` bits.
+    --- Caller-writable. Carries the `LOOP`, `SPATIAL`, `STEREO`, `STREAM` and
+    --- `SYNTH` bits.
     flags: integer
 
     --- Caller-writable. Sets linear amplitude for `PLAY`, `SET_GAIN` and
@@ -89,6 +90,121 @@ export record ClipInfo
     --- Read-only. Reports whether decoded samples stay in memory and are
     --- shared by every voice reading the clip.
     resident: boolean
+end
+
+--- Sends General MIDI to one synthesizer a backend renders as a voice.
+---
+--- Pushed rather than called back: each function queues or reads on the frame
+--- thread and returns, and the backend's audio thread takes the events from a
+--- bounded queue it never waits on. Every field is a plain function, so a test
+--- that wants to see what a game sent is a record of closures that logs.
+export record SynthPort
+    --- Read-only. Queues a short MIDI message for `at` seconds on this port's
+    --- clock, where zero or less means as soon as possible, and reports
+    --- whether the queue had room.
+    send: function(status: integer, data1: integer, data2: integer, at: number): boolean
+
+    --- Read-only. Queues a release of every note on `channel`, or on every
+    --- channel when `channel` is negative, cutting them without their release
+    --- when `immediate` is set. Reports whether the queue had room.
+    notesOff: function(channel: integer, immediate: boolean): boolean
+
+    --- Read-only. Queues a return to General MIDI defaults that discards every
+    --- event sent before it and not yet applied, and reports whether the queue
+    --- had room.
+    reset: function(): boolean
+
+    --- Read-only. Reports the port's clock in seconds: the frames the
+    --- synthesizer has rendered over the output rate. Zero until it renders.
+    now: function(): number
+
+    --- Read-only. Frees the port. Calling it twice is harmless, and nothing
+    --- sent afterwards reaches anything.
+    close: function(): nil
+end
+
+--- Names the FM chip an [`FmPort`](tecs.platform.audiobackend.FmPort) drives:
+--- a Yamaha part number in lower case, or `"opl2"` and `"opl3"` for the YM3812
+--- and the YMF262.
+export type FmChip = "opl2"
+    | "opl3"
+    | "ym3526"
+    | "y8950"
+    | "ym3812"
+    | "ymf262"
+    | "ymf289b"
+    | "ymf278b"
+    | "ym2413"
+    | "ym2423"
+    | "ymf281"
+    | "ds1001"
+    | "ym2151"
+    | "ym2164"
+    | "ym2203"
+    | "ym2608"
+    | "ymf288"
+    | "ym2610"
+    | "ym2610b"
+    | "ym2612"
+    | "ym3438"
+    | "ymf276"
+    | "ym2414"
+    | "ym3806"
+    | "ym3533"
+    | "ym2149"
+
+--- Names a class of external memory an FM chip reads: ADPCM-A sample ROM,
+--- ADPCM-B sample ROM or RAM, or the OPL4's PCM wavetable.
+export type FmMemory = "adpcmA" | "adpcmB" | "pcm"
+
+--- Sends register writes to one emulated FM chip a backend renders as a voice.
+---
+--- Pushed rather than called back, as a
+--- [`SynthPort`](tecs.platform.audiobackend.SynthPort) is: each function queues or
+--- reads on the frame thread and returns, and the backend's audio thread takes the
+--- writes from a bounded queue it never waits on. Every field is a plain function, so a
+--- test that wants to see what a game sent is a record of closures that logs. Arguments
+--- arrive checked: a register or port in the chip's range and a value from 0
+--- to 255.
+export record FmPort
+    --- Read-only. Reports the rate of the port's clock in frames a second,
+    --- which is the unit `at` is resolved to.
+    rate: integer
+
+    --- Read-only. Queues one register write for `at` seconds on this port's
+    --- clock, where zero or less means the next frame, and reports whether
+    --- the queue had room.
+    write: function(register: integer, value: integer, at: number): boolean
+
+    --- Read-only. Queues the first `count` register and value pairs of
+    --- `pairs`, a flat list alternating register and value, for `at`, all or
+    --- none, and reports whether the queue took them. `count` is at most 4096.
+    writes: function(pairs: {integer}, count: integer, at: number): boolean
+
+    --- Read-only. Queues one write of `data` to the chip's port at `offset`
+    --- for `at`, and reports whether the queue had room.
+    writePort: function(offset: integer, data: integer, at: number): boolean
+
+    --- Read-only. Queues the first `count` offset and data pairs of `pairs`
+    --- as port writes for `at`, all or none, as `writes` does registers.
+    writePorts: function(pairs: {integer}, count: integer, at: number): boolean
+
+    --- Read-only. Replaces the chip's memory image of `class` with a copy of
+    --- `image` from its next frame, and reports whether it was queued.
+    setMemory: function(class: FmMemory, image: string): boolean
+
+    --- Read-only. Queues a return to the chip's power-on state for `at` that
+    --- discards every write sent before it and due at or after it, and
+    --- reports whether the queue had room.
+    reset: function(at: number): boolean
+
+    --- Read-only. Reports the port's clock in seconds: the samples the chip
+    --- has rendered over its own rate. Zero until it renders.
+    now: function(): number
+
+    --- Read-only. Frees the port. Calling it twice is harmless, and nothing
+    --- sent afterwards reaches anything.
+    close: function(): nil
 end
 
 --- Selects residency for a load.
@@ -158,6 +274,31 @@ export record Backend
     --- Read-only. Reports the decoder names this build linked, in the
     --- backend's own order.
     decoders: function(): {string}
+
+    --- Read-only. Reads a SoundFont 2 file and returns the id `openSynth`
+    --- names it by, or nil and a reason. Omitted by a backend with no
+    --- synthesizer, which `tecs.audio.synth` answers with a SoundFont that
+    --- holds nothing.
+    loadSoundFont: (function(path: string): (integer?, string?))?
+
+    --- Read-only. Drops a SoundFont. Synthesizers already opened on it play on.
+    releaseSoundFont: (function(font: integer): nil)?
+
+    --- Read-only. Opens a synthesizer on a loaded SoundFont for the voice
+    --- `handle` names, which starts sounding when a `PLAY` carrying that
+    --- handle and the `SYNTH` flag is submitted. `polyphony` is the notes it
+    --- sounds at once and `effects` turns its reverb and chorus on. Returns
+    --- the port, or nil and a reason. Omitted by a backend with no
+    --- synthesizer, which `tecs.audio.synth` answers with `silentSynth`.
+    openSynth: (function(font: integer, handle: integer, polyphony: integer, effects: boolean): (SynthPort?, string?))?
+
+    --- Read-only. Opens an emulated FM chip at `clock` hertz for the voice
+    --- `handle` names, which starts sounding when a `PLAY` carrying that
+    --- handle and the `SYNTH` flag is submitted. Returns the port, or nil and
+    --- a reason.
+    --- Omitted by a backend with no FM emulator, which `tecs.audio.fm`
+    --- answers with `silentFm`.
+    openFm: (function(handle: integer, chip: FmChip, clock: integer): (FmPort?, string?))?
 
     --- Read-only. Stops everything and closes the output. Calling it twice is
     --- harmless.
@@ -322,6 +463,10 @@ export const STEREO: integer = 4
 --- samples.
 export const STREAM: integer = 8
 
+--- Marks a `PLAY` whose input is the synthesizer `openSynth` or the chip
+--- `openFm` opened for the command's handle, rather than a clip.
+export const SYNTH: integer = 16
+
 --- Creates one zeroed command, for a caller filling a reusable buffer.
 --- @return a command whose every field is at rest
 export function newCommand(): Command
@@ -379,6 +524,70 @@ export function silent(): Backend
         end,
         decoders = function(): {string}
             return {}
+        end,
+        close = function(): nil
+        end
+    )
+end
+
+--- Creates a synthesizer port that accepts everything and renders nothing.
+---
+--- What a synthesizer gets on a mixer with no output, and on a backend that
+--- has no synthesizer of its own. Every event is taken and dropped, and the
+--- clock stays at zero because no frame is ever rendered.
+---
+--- @return a port whose sends all succeed and whose clock reads zero
+export function silentSynth(): SynthPort
+    return new SynthPort(
+        send = function(_status: integer, _data1: integer, _data2: integer, _at: number): boolean
+            return true
+        end,
+        notesOff = function(_channel: integer, _immediate: boolean): boolean
+            return true
+        end,
+        reset = function(): boolean
+            return true
+        end,
+        now = function(): number
+            return 0
+        end,
+        close = function(): nil
+        end
+    )
+end
+
+--- Creates an FM port that accepts everything and renders nothing.
+---
+--- What a chip gets on a mixer with no output, and on a backend that has no FM
+--- emulator of its own. Every write is taken and dropped, and the clock stays
+--- at zero because no frame is ever rendered.
+---
+--- @param rate the rate the port reports, which is the one the chip would
+---     have run at
+--- @return a port whose writes all succeed and whose clock reads zero
+export function silentFm(rate: integer): FmPort
+    return new FmPort(
+        rate = rate,
+        write = function(_register: integer, _value: integer, _at: number): boolean
+            return true
+        end,
+        writes = function(_pairs: {integer}, _count: integer, _at: number): boolean
+            return true
+        end,
+        writePort = function(_offset: integer, _data: integer, _at: number): boolean
+            return true
+        end,
+        writePorts = function(_pairs: {integer}, _count: integer, _at: number): boolean
+            return true
+        end,
+        setMemory = function(_class: FmMemory, _image: string): boolean
+            return true
+        end,
+        reset = function(_at: number): boolean
+            return true
+        end,
+        now = function(): number
+            return 0
         end,
         close = function(): nil
         end

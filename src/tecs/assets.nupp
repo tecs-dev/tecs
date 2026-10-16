@@ -143,6 +143,14 @@ export const SHADER = "shader"
 --- Read-only. Names the content kind of a decoded model scene.
 export const MODEL = "model"
 
+--- Read-only. Names the content kind of a Standard MIDI File parsed as a song,
+--- which `tecs.audio.music.midi.kind` loads.
+export const MUSIC_MIDI = "music.midi"
+
+--- Read-only. Names the content kind of a VGM, VGZ or DRO file parsed as a
+--- register log, which `tecs.audio.music.fm.kind` loads.
+export const MUSIC_FM = "music.fm"
+
 --- A caller's hold on one acquired asset.
 ---
 --- Handles are shared: every caller whose request joined one acquisition gets

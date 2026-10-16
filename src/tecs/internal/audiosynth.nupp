@@ -1,0 +1,35 @@
+module tecs.internal.audiosynth
+
+--[[
+What `tecs.audio` lends `tecs.audio.synth`, `tecs.audio.fm` and the music
+players.
+
+A synthesizer, General MIDI or FM, is a voice of the mixer, so it needs a slot
+taken the way `Audio.play` takes one and the backend it opens on. Both live in
+fields `tecs.audio` keeps private, and a child module cannot reach them. This
+module is the seam between them: `tecs.audio` fills `lent` for each mixer it
+makes, and the two synthesizer modules read it. Nothing else should. The music
+players register in `updates`, which `Audio.update` runs.
+]]
+
+local audiobackend = require("tecs.platform.audiobackend")
+
+--- The two operations lent for one mixer, as closures over it, because this
+--- module sits below `tecs.audio` and cannot name its record.
+export record Lender
+    --- Read-only. Returns the backend the mixer drives.
+    backend: function(): audiobackend.Backend
+
+    --- Read-only. Takes a voice slot for a synthesizer at `gain` in `group`, and
+    --- returns its handle, or zero when the mixer has no output or no free slot.
+    start: function(gain: number, group: string?): integer
+end
+
+--- Holds the lender each mixer registers when it is made, keyed weakly by the
+--- mixer so one that has gone takes its entry with it.
+export const lent: {[any]: Lender} = setmetatable({}, {__mode = "k"})
+
+--- Holds what each mixer's `update` advances besides its voices: the music
+--- players made on it, each a function that returns false once it is done
+--- and should be dropped. Keyed weakly by the mixer, as `lent` is.
+export const updates: {[any]: {function(): boolean}} = setmetatable({}, {__mode = "k"})

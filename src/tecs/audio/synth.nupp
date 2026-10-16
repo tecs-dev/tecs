@@ -1,0 +1,515 @@
+module tecs.audio.synth
+
+--[[
+General MIDI from a SoundFont, rendered in-process as one voice of the mixer.
+
+A [`SoundFont`](tecs.audio.synth.SoundFont) is loaded once per mixer and
+shared by every [`Synth`](tecs.audio.synth.Synth) made on it. A synth takes one
+voice slot the way `Audio.play` takes one, so it counts against `maxVoices`,
+joins a group, and follows group gain, group mute, group pause, master gain and
+master mute like any other voice. What it adds is a channel for MIDI: sixteen
+General MIDI channels driven by short messages a game sends from the frame
+thread.
+
+```nupp
+local mixer <const> = tecs.audio.newAudio()
+local font <const> = assert(tecs.audio.synth.loadSoundFont(mixer, "assets/music/FluidR3_GM.sf2"))
+local music <const> = assert(tecs.audio.synth.new(mixer, font, {group = "music"}))
+
+-- A C major scale, scheduled ahead on the synthesizer clock.
+local start <const> = music:now() + 0.1
+music:programChange(0, 0)
+for step, key in ipairs({60, 62, 64, 65, 67, 69, 71, 72}) do
+    local at <const> = start + (step - 1) * 0.25
+    music:noteOn(0, key, 100, at)
+    music:noteOff(0, key, at + 0.22)
+end
+```
+
+Values are MIDI's own. Channels count from zero to fifteen, as on the wire, so
+the General MIDI percussion channel is 9. Keys, velocities, controllers,
+controller values and programs run from zero to 127, and a pitch bend from zero
+to 16383 with 8192 at the centre. A value outside its range raises: it is a
+mistake in the call, and a byte silently masked into range plays a wrong note
+rather than failing.
+
+## The clock and `at`
+
+Every sending method takes an optional `at`, in seconds on the synthesizer's
+own clock, which `now` reads. The clock is the frames the synthesizer has
+rendered divided by the output rate, so it is the audio clock rather than the
+frame clock: it does not drift against what is heard, it never runs backwards,
+and it stands still while nothing renders the synth, which is the case before
+the first output buffer, while its group is paused, and for good on a mixer
+with no output.
+
+An event lands on the first point of the render grid at or after `at`. The
+synthesizer applies MIDI between internal blocks of eight frames, so an event
+is never early and at most seven frames late, which is 0.15 milliseconds at
+48 kHz, and where it lands depends only on `at`. That last property is the one
+to build on: the same schedule renders the same samples on every run and every
+machine, whatever the frame rate did.
+
+An omitted `at`, and one already in the past, means the next block, and events
+landing on the same block apply in the order they were sent. Sending each event
+as it falls due therefore works, but it puts every note on whichever block the
+next output buffer starts with, so its timing follows the frame rate. A
+sequencer sends a little ahead instead, against `now`: a lookahead of one or
+two frames' worth, say 50 milliseconds, absorbs an ordinary hitch and keeps the
+timing exact.
+
+## The queue
+
+Events cross to the audio thread through a bounded queue the output callback
+never waits on, and that thread holds as many again in its schedule for events
+sent ahead of their time. Either is 4096 events. A send that finds no room is
+refused rather than waiting or growing anything: the method returns false and
+the event is gone. A game streaming a song with a short lookahead never comes
+near the bound. One that sends a whole song up front can, so schedule a window
+at a time rather than everything at once.
+
+## Without an output
+
+A mixer with no output device, or one made with a test backend, still makes a
+synth whose every call succeeds. On a mixer with no output nothing renders, so
+nothing is heard and `now` stays at zero. A test backend that supplies
+`openSynth` receives every event the game sends through the
+[`SynthPort`](tecs.platform.audiobackend.SynthPort) it returns, which is how a
+harness logs them; one that does not gets the silent port, which accepts and
+drops them. A backend without `loadSoundFont` loads nothing, and its SoundFont
+is a name.
+
+## Hardware MIDI output
+
+Rendering in-process is the only output for now. A hardware output, through
+CoreMIDI, WinMM or ALSA, would be a second implementation of `SynthPort` with
+the same `send` and `at` contract, chosen when the synth is made. Nothing above
+the port would change.
+]]
+
+local audio = require("tecs.audio")
+local audiobackend = require("tecs.platform.audiobackend")
+local audiosynth = require("tecs.internal.audiosynth")
+
+--- Notes a synthesizer sounds at once unless asked otherwise.
+local DEFAULT_POLYPHONY: integer = 64
+
+--- The range the synthesizer accepts for its polyphony.
+local MIN_POLYPHONY: integer = 8
+
+local MAX_POLYPHONY: integer = 256
+
+--- The channel `notesOff` reads as every channel.
+local ALL_CHANNELS: integer = -1
+
+--- A loaded SoundFont, shared by every synth made on it.
+export record SoundFont
+    --- Read-only. Reports the path the SoundFont was loaded from, exactly as
+    --- given. It is the SoundFont's identity within its mixer, so loading the
+    --- same path again returns this record.
+    path: string
+
+    @private mixer: audio.Audio
+
+    --- The backend's id for it, and zero for a backend that holds none.
+    @private id: integer
+end
+
+--- Configures `new`.
+---
+--- Read once, when the synth is made. Nothing here is retained.
+export type Options = {
+    --- Caller-writable. Selects the group the synth's voice joins, so the
+    --- group's gain, mute and pause apply to it. Defaults to none.
+    group: string?,
+
+    --- Caller-writable. Sets the voice's linear gain before group and master
+    --- gain, and defaults to one.
+    gain: number?,
+
+    --- Caller-writable. Sets how many notes sound at once, from 8 to 256, and
+    --- defaults to 64. Past it the synthesizer takes the oldest note for a new
+    --- one.
+    polyphony: integer?,
+
+    --- Caller-writable. Turns the synthesizer's reverb and chorus on, and
+    --- defaults to true. Off, a released note stops at the end of its own
+    --- release rather than ringing on in the reverb.
+    effects: boolean?
+}
+
+--- One General MIDI synthesizer, playing as one voice of a mixer.
+---
+--- Every sending method returns whether the event was queued, which is false
+--- only when the bounded queue is full or the synth has been destroyed. None of
+--- them raises for either, because a note that cannot be queued is not a
+--- reason for a frame to stop. Nothing here is thread safe: call it from the
+--- thread that owns the mixer.
+export record Synth
+    @private mixer: audio.Audio
+    @private port: audiobackend.SynthPort
+    @private voice: integer
+    @private destroyed: boolean
+
+    send: function(exclusive self: Synth, status: integer, data1: integer, data2: integer, at: number?): boolean
+    noteOn: function(exclusive self: Synth, channel: integer, key: integer, velocity: integer, at: number?): boolean
+    noteOff: function(exclusive self: Synth, channel: integer, key: integer, at: number?): boolean
+    controlChange: function(
+        exclusive self: Synth,
+        channel: integer,
+        controller: integer,
+        value: integer,
+        at: number?
+    ): boolean
+    programChange: function(exclusive self: Synth, channel: integer, program: integer, at: number?): boolean
+    pitchBend: function(exclusive self: Synth, channel: integer, value: integer, at: number?): boolean
+    allNotesOff: function(exclusive self: Synth, channel: integer?, immediate: boolean?): boolean
+    reset: function(exclusive self: Synth): boolean
+    now: function(borrows self: Synth): number
+    setGain: function(exclusive self: Synth, gain: number): nil
+    pause: function(exclusive self: Synth): nil
+    resume: function(exclusive self: Synth): nil
+    paused: function(borrows self: Synth): boolean
+    destroy: function(exclusive self: Synth, fadeOut: number?): nil
+end
+
+--- The SoundFonts each mixer has loaded, by path, keyed weakly so a mixer that
+--- has gone takes its fonts with it.
+local loaded: {[audio.Audio]: {[string]: SoundFont}} = setmetatable({}, {__mode = "k"})
+
+--- Returns what `tecs.audio` lent this module for one mixer.
+local function lender(mixer: audio.Audio): audiosynth.Lender
+    return assert(audiosynth.lent[mixer], "tecs.audio registered no synthesizer seam for this mixer")
+end
+
+--- Raises unless `value` is from `low` to `high`.
+--- @raises string when the value is outside the range
+local function check(name: string, what: string, value: integer, low: integer, high: integer): nil
+    if value < low or value > high then
+        error(
+            "tecs.audio.synth." .. name .. ": " .. what .. " must be from " .. tostring(
+                low
+            ) .. " to " .. tostring(high) .. ", got " .. tostring(value),
+            3
+        )
+    end
+end
+
+--- Loads a SoundFont 2 file into a mixer and returns it.
+---
+--- Loading the same path into the same mixer again returns the same record, so
+--- every synth on it shares one copy of its samples. A General MIDI set is
+--- large, FluidR3 GM is 140 megabytes, and the load reads all of it before it
+--- returns, so do it while loading rather than while playing.
+---
+--- Only load a SoundFont the game ships. The reader checks the file is a
+--- SoundFont 2, but it is not hardened against a crafted one.
+---
+--- @param mixer the mixer whose synths will use it
+--- @param path the file, which is also the SoundFont's identity in this mixer
+--- @return the SoundFont, or nil when the file could not be read
+--- @return the reason, when the first return is nil
+--- @raises string when the path is empty
+export function loadSoundFont(mixer: audio.Audio, path: string): (SoundFont?, string?)
+    if path == "" then
+        error("tecs.audio.synth.loadSoundFont: a SoundFont path cannot be empty", 2)
+    end
+    local fonts = loaded[mixer]
+    if fonts == nil then
+        fonts = {}
+        loaded[mixer] = fonts
+    end
+    local existing = fonts[path]
+    if existing ~= nil then
+        return existing
+    end
+
+    local load = lender(mixer).backend().loadSoundFont
+    local id: integer = 0
+    if load ~= nil then
+        local font, reason = load(path)
+        if font == nil then
+            return nil, reason or ("cannot load " .. path)
+        end
+        id = font
+    end
+    local font = new SoundFont(path = path, mixer = mixer, id = id)
+    fonts[path] = font
+
+    return font
+end
+
+--- Makes a synthesizer on a SoundFont and starts its voice.
+---
+--- The voice starts sounding with the mixer's next flush, which `update` makes
+--- once per frame, and events sent before then wait for it. It sounds until
+--- `destroy`, and a voice `stopAll` or `stopGroup` ended does not come back:
+--- make another synth instead.
+---
+--- @param mixer the mixer the voice plays on, which must be the one the
+---     SoundFont was loaded into
+--- @param font the SoundFont to play
+--- @param options the group, gain, polyphony and effects, or nil for the
+---     defaults
+--- @return the synth, or nil when its voice could not start. A mixer with no
+---     output is not such a case: it returns a synth that renders nothing.
+--- @return the reason, when the first return is nil: every voice is busy, or
+---     the backend refused the synthesizer
+--- @raises string when the SoundFont belongs to another mixer
+--- @raises string when `polyphony` is outside 8 to 256
+export function new(mixer: audio.Audio, font: SoundFont, options: Options?): (Synth?, string?)
+    if font.mixer ~= mixer then
+        error("tecs.audio.synth.new: the SoundFont was loaded into another mixer", 2)
+    end
+    local polyphony = (options and options.polyphony) or DEFAULT_POLYPHONY
+    if polyphony < MIN_POLYPHONY or polyphony > MAX_POLYPHONY then
+        error("tecs.audio.synth.new: polyphony must be from 8 to 256, got " .. tostring(polyphony), 2)
+    end
+    local effects = not (options ~= nil and options.effects == false)
+
+    local seam = lender(mixer)
+    local voice = seam.start((options and options.gain) or 1, options and options.group)
+    if voice == 0 then
+        if mixer.available then
+            return nil, "every voice is busy, so the synthesizer has none to play through"
+        end
+
+        return new Synth(mixer = mixer, port = audiobackend.silentSynth(), voice = 0, destroyed = false)
+    end
+
+    local open = seam.backend().openSynth
+    if open == nil or font.id == 0 then
+        return new Synth(mixer = mixer, port = audiobackend.silentSynth(), voice = voice, destroyed = false)
+    end
+    -- Opened before the voice's start is flushed, because the start is what
+    -- hands the synthesizer to the mixer.
+    local port, reason = open(font.id, voice, polyphony, effects)
+    if port == nil then
+        mixer:stop(voice)
+
+        return nil, reason or "the backend opened no synthesizer"
+    end
+
+    return new Synth(mixer = mixer, port = port, voice = voice, destroyed = false)
+end
+
+--- Queues any short MIDI message.
+---
+--- @param self the synth to send to
+--- @param status the status byte, from 0x80 to 0xFF. A channel message
+---     carries its channel in the low four bits. System messages, 0xF0 and up,
+---     are accepted and have no effect on this synthesizer.
+--- @param data1 the first data byte, from 0 to 127
+--- @param data2 the second data byte, from 0 to 127, and 0 for a message that
+---     carries one
+--- @param at seconds on the synthesizer clock, where nil or a time already
+---     passed means the next block
+--- @return whether the event was queued, false when the queue is full or the
+---     synth is destroyed
+--- @raises string when a byte is outside its range
+function Synth.send(exclusive self: Synth, status: integer, data1: integer, data2: integer, at: number?): boolean
+    check("send", "status", status, 0x80, 0xFF)
+    check("send", "data1", data1, 0, 127)
+    check("send", "data2", data2, 0, 127)
+    if self.destroyed then
+        return false
+    end
+
+    return self.port.send(status, data1, data2, at or 0)
+end
+
+--- Queues a note on.
+---
+--- @param self the synth to send to
+--- @param channel from 0 to 15, where 9 is General MIDI percussion
+--- @param key from 0 to 127, where 60 is middle C
+--- @param velocity from 0 to 127. Zero is a note off, as MIDI defines it.
+--- @param at seconds on the synthesizer clock, read as `send` reads it
+--- @return whether the event was queued
+--- @raises string when a value is outside its range
+function Synth.noteOn(exclusive self: Synth, channel: integer, key: integer, velocity: integer, at: number?): boolean
+    check("noteOn", "channel", channel, 0, 15)
+    check("noteOn", "key", key, 0, 127)
+    check("noteOn", "velocity", velocity, 0, 127)
+
+    return self:send(0x90 + channel, key, velocity, at)
+end
+
+--- Queues a note off, which lets the note play its release.
+---
+--- @param self the synth to send to
+--- @param channel from 0 to 15
+--- @param key from 0 to 127
+--- @param at seconds on the synthesizer clock, read as `send` reads it
+--- @return whether the event was queued
+--- @raises string when a value is outside its range
+function Synth.noteOff(exclusive self: Synth, channel: integer, key: integer, at: number?): boolean
+    check("noteOff", "channel", channel, 0, 15)
+    check("noteOff", "key", key, 0, 127)
+
+    return self:send(0x80 + channel, key, 0, at)
+end
+
+--- Queues a control change.
+---
+--- @param self the synth to send to
+--- @param channel from 0 to 15
+--- @param controller from 0 to 127, such as 7 for channel volume, 10 for pan,
+---     64 for the sustain pedal and 0 for bank select
+--- @param value from 0 to 127
+--- @param at seconds on the synthesizer clock, read as `send` reads it
+--- @return whether the event was queued
+--- @raises string when a value is outside its range
+function Synth.controlChange(
+    exclusive self: Synth,
+    channel: integer,
+    controller: integer,
+    value: integer,
+    at: number?
+): boolean
+    check("controlChange", "channel", channel, 0, 15)
+    check("controlChange", "controller", controller, 0, 127)
+    check("controlChange", "value", value, 0, 127)
+
+    return self:send(0xB0 + channel, controller, value, at)
+end
+
+--- Queues a program change, selecting an instrument for later notes.
+---
+--- @param self the synth to send to
+--- @param channel from 0 to 15
+--- @param program from 0 to 127, the General MIDI instrument numbered from
+---     zero, so 0 is the acoustic grand piano
+--- @param at seconds on the synthesizer clock, read as `send` reads it
+--- @return whether the event was queued
+--- @raises string when a value is outside its range
+function Synth.programChange(exclusive self: Synth, channel: integer, program: integer, at: number?): boolean
+    check("programChange", "channel", channel, 0, 15)
+    check("programChange", "program", program, 0, 127)
+
+    return self:send(0xC0 + channel, program, 0, at)
+end
+
+--- Queues a pitch bend.
+---
+--- @param self the synth to send to
+--- @param channel from 0 to 15
+--- @param value the 14-bit bend from 0 to 16383, where 8192 is no bend. The
+---     range it spans is the channel's, two semitones each way by default.
+--- @param at seconds on the synthesizer clock, read as `send` reads it
+--- @return whether the event was queued
+--- @raises string when a value is outside its range
+function Synth.pitchBend(exclusive self: Synth, channel: integer, value: integer, at: number?): boolean
+    check("pitchBend", "channel", channel, 0, 15)
+    check("pitchBend", "value", value, 0, 16383)
+
+    return self:send(0xE0 + channel, value % 128, value // 128, at)
+end
+
+--- Releases every sounding note, for the next block.
+---
+--- Takes no `at`: it is what a game sends to stop, now. Notes scheduled for
+--- later still play when their time comes; `reset` is the call that discards
+--- them too.
+---
+--- @param self the synth to send to
+--- @param channel from 0 to 15, or nil for every channel
+--- @param immediate true cuts the notes without their release, and nil or
+---     false lets each one fade as a note off would
+--- @return whether the event was queued
+--- @raises string when the channel is outside its range
+function Synth.allNotesOff(exclusive self: Synth, channel: integer?, immediate: boolean?): boolean
+    if channel ~= nil then
+        check("allNotesOff", "channel", channel, 0, 15)
+    end
+    if self.destroyed then
+        return false
+    end
+
+    return self.port.notesOff(channel or ALL_CHANNELS, immediate == true)
+end
+
+--- Returns every channel to its General MIDI defaults, for the next block.
+---
+--- Cuts every note, puts every channel back on program zero with its
+--- controllers at rest, and discards every event sent before this call that
+--- has not been applied, scheduled ones included. Events sent after it apply
+--- as usual.
+---
+--- @param self the synth to reset
+--- @return whether the reset was queued
+function Synth.reset(exclusive self: Synth): boolean
+    if self.destroyed then
+        return false
+    end
+
+    return self.port.reset()
+end
+
+--- Returns the synthesizer clock, for computing `at`.
+---
+--- @param self the synth to read
+--- @return seconds of audio the synthesizer has rendered: monotonic, zero
+---     before its first block, still while its group is paused, and zero for
+---     good on a mixer with no output. It leads what is heard by the output's
+---     own latency, and leads the mix by at most one block.
+function Synth.now(borrows self: Synth): number
+    if self.destroyed then
+        return 0
+    end
+
+    return self.port.now()
+end
+
+--- Sets the synth's gain, before its group's and the master's.
+---
+--- @param self the synth to scale
+--- @param gain linear amplitude rather than decibels, applied from the next
+---     output buffer rather than ramped
+function Synth.setGain(exclusive self: Synth, gain: number): nil
+    self.mixer:setGain(self.voice, gain)
+end
+
+--- Pauses the synth's voice, which stops its clock with it.
+---
+--- Nothing is lost: every note holds where it stood, events already scheduled
+--- wait on the stopped clock, and `resume` carries on exactly where it left
+--- off.
+---
+--- @param self the synth to pause
+function Synth.pause(exclusive self: Synth): nil
+    self.mixer:pause(self.voice)
+end
+
+--- Resumes a paused synth.
+---
+--- @param self the synth to resume
+function Synth.resume(exclusive self: Synth): nil
+    self.mixer:resume(self.voice)
+end
+
+--- Reports whether the synth's own voice is paused, leaving its group aside.
+---
+--- @param self the synth to inspect
+--- @return true between `pause` and `resume`
+function Synth.paused(borrows self: Synth): boolean
+    return self.mixer:paused(self.voice)
+end
+
+--- Stops the synth's voice and frees its synthesizer. Safe more than once.
+---
+--- Without a fade the voice stops at once, so a note still sounding is cut;
+--- send `allNotesOff` a little before for a softer ending. With one it fades
+--- over `fadeOut` seconds, the synthesizer rendering on and taking no more
+--- events, and goes when the fade ends.
+---
+--- @param self the synth to destroy
+--- @param fadeOut seconds to fade over, or nil to stop at once
+function Synth.destroy(exclusive self: Synth, fadeOut: number?): nil
+    if self.destroyed then
+        return
+    end
+    self.destroyed = true
+    self.mixer:stop(self.voice, fadeOut)
+    self.port.close()
+end

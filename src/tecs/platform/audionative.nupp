@@ -68,6 +68,24 @@ cdef struct tecsAudioClipInfo
     resident: int32
 end
 
+--- The id a SoundFont load writes back.
+---
+--- A one-field struct for the reason `tecsAudioSample` is one: the library
+--- writes through a `uint32_t *`, and a struct holding one `uint32` has that
+--- integer's size and alignment under every ABI this tree targets.
+cdef struct tecsAudioFontId
+    value: uint32
+end
+
+--- One register write in a batch for `tecs_audio_fm_writes`.
+---
+--- The value is sixteen bits rather than eight so the struct has no padding
+--- for the two sides to disagree about; `layoutMismatch` checks its size.
+cdef struct tecsAudioFmWrite
+    address: uint16
+    value: uint16
+end
+
 --- One captured sample, so a block of them can be a `carray`.
 ---
 --- `carray` takes a struct type, and the captured samples are bare floats, so
@@ -138,6 +156,71 @@ cdef function tecs_audio_decoders(borrows device: voidptr?): cstring?
 cdef function tecs_audio_last_error(borrows device: voidptr?): cstring?
 
 cdef function tecs_audio_layout(kind: uint32): uint32
+
+-- The synthesizer. A port is a handle of its own rather than a field of the
+-- device: it outlives `tecs_audio_close` safely, and the binding frees it with
+-- `tecs_audio_synth_close`. Nothing here crosses as a struct, so these add
+-- nothing for `layoutMismatch` to compare.
+
+cdef function tecs_audio_load_soundfont(borrows device: voidptr?, path: cstring, borrows font: tecsAudioFontId*): int32
+
+cdef function tecs_audio_release_soundfont(borrows device: voidptr?, font: uint32)
+
+cdef function tecs_audio_synth_open(
+    borrows device: voidptr?,
+    font: uint32,
+    handle: uint32,
+    polyphony: uint32,
+    effects: int32
+): voidptr?
+
+cdef function tecs_audio_synth_send(
+    borrows synth: voidptr?,
+    status: uint32,
+    data1: uint32,
+    data2: uint32,
+    at: number
+): int32
+
+cdef function tecs_audio_synth_notes_off(borrows synth: voidptr?, channel: int32, immediate: int32): int32
+
+cdef function tecs_audio_synth_reset(borrows synth: voidptr?): int32
+
+cdef function tecs_audio_synth_now(borrows synth: voidptr?): number
+
+cdef function tecs_audio_synth_close(borrows synth: voidptr?)
+
+-- The FM chip. A port is a handle of its own, as a synthesizer's is, and the
+-- batch of writes crosses as a `carray` of `tecsAudioFmWrite`.
+
+cdef function tecs_audio_fm_open(
+    borrows device: voidptr?,
+    handle: uint32,
+    borrows name: cstring,
+    clock: uint32
+): voidptr?
+
+cdef function tecs_audio_fm_rate(borrows fm: voidptr?): uint32
+
+cdef function tecs_audio_fm_write(borrows fm: voidptr?, register: uint32, value: uint32, at: number): int32
+
+cdef function tecs_audio_fm_write_port(borrows fm: voidptr?, offset: uint32, data: uint32, at: number): int32
+
+cdef function tecs_audio_fm_writes(
+    borrows fm: voidptr?,
+    borrows writes: tecsAudioFmWrite*,
+    count: uint32,
+    at: number,
+    ports: int32
+): int32
+
+cdef function tecs_audio_fm_memory(borrows fm: voidptr?, class: uint32, borrows bytes: cstring, length: uint64): int32
+
+cdef function tecs_audio_fm_reset(borrows fm: voidptr?, at: number): int32
+
+cdef function tecs_audio_fm_now(borrows fm: voidptr?): number
+
+cdef function tecs_audio_fm_close(borrows fm: voidptr?)
 
 -- Device listing and recording. Neither a listing nor a capture crosses as a
 -- struct: a device name has no fixed width worth choosing, and a capture is a
@@ -234,6 +317,14 @@ local LAYOUT_EVENT: integer = 1
 --- Selects the clip-info struct in `tecs_audio_layout`.
 local LAYOUT_CLIP_INFO: integer = 2
 
+--- Selects the FM register-write struct in `tecs_audio_layout`.
+local LAYOUT_FM_WRITE: integer = 3
+
+--- The writes one FM batch may carry, which is the chip's whole queue: a
+--- larger batch could never be taken, so the binding refuses it before the
+--- crossing and needs no larger buffer.
+local FM_BATCH: integer = 4096
+
 --- Reports where LuaJIT and the library disagree about a struct size.
 ---
 --- Two descriptions of one memory layout can drift, and the failure a drift
@@ -242,11 +333,16 @@ local LAYOUT_CLIP_INFO: integer = 2
 ---
 --- @return the reason, or nil when every struct agrees
 local function layoutMismatch(): string?
-    local names: {string} = {"tecsAudioCommand", "tecsAudioEvent", "tecsAudioClipInfo"}
-    local kinds: {integer} = {LAYOUT_COMMAND, LAYOUT_EVENT, LAYOUT_CLIP_INFO}
+    local names: {string} = {"tecsAudioCommand", "tecsAudioEvent", "tecsAudioClipInfo", "tecsAudioFmWrite"}
+    local kinds: {integer} = {LAYOUT_COMMAND, LAYOUT_EVENT, LAYOUT_CLIP_INFO, LAYOUT_FM_WRITE}
     local sizes: {
         integer
-    } = {ffi.sizeof<tecsAudioCommand>(), ffi.sizeof<tecsAudioEvent>(), ffi.sizeof<tecsAudioClipInfo>(),}
+    } = {
+        ffi.sizeof<tecsAudioCommand>(),
+        ffi.sizeof<tecsAudioEvent>(),
+        ffi.sizeof<tecsAudioClipInfo>(),
+        ffi.sizeof<tecsAudioFmWrite>(),
+    }
     for index = 1, #kinds do
         local reported = tecs_audio_layout(kinds[index] as uint32) as integer
         if reported ~= sizes[index] then
@@ -388,6 +484,186 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
         return new audiobackend.ClipInfo(duration = info.duration as number, resident = info.resident ~= 0)
     end
 
+    local fontId = ffi.new<tecsAudioFontId>()
+
+    local function loadSoundFont(path: string): (integer?, string?)
+        if closed[1] then
+            return nil, "the audio output is closed"
+        end
+        if tecs_audio_load_soundfont(device, path, fontId) ~= 0 then
+            return nil, reason("tecsaudio could not read '" .. path .. "'")
+        end
+
+        return fontId.value as integer
+    end
+
+    --- Opens one port with the thunk and wraps it in closures that refuse once
+    --- it is closed, because a freed port reached again is not a diagnosable
+    --- failure. The thunk opens it here for the reason `wrap` takes one: the
+    --- closures outlive any frame a pointer could be handed in from.
+    local function wrapSynth(openPort: function(): voidptr?): (audiobackend.SynthPort?, string?)
+        local synth = openPort()
+        if synth == nil then
+            return nil, reason("tecsaudio opened no synthesizer")
+        end
+        local released = {false}
+
+        return new audiobackend.SynthPort(
+            send = function(status: integer, data1: integer, data2: integer, at: number): boolean
+                if released[1] then
+                    return false
+                end
+
+                return tecs_audio_synth_send(synth, status as uint32, data1 as uint32, data2 as uint32, at) ~= 0
+            end,
+            notesOff = function(channel: integer, immediate: boolean): boolean
+                if released[1] then
+                    return false
+                end
+
+                return tecs_audio_synth_notes_off(synth, channel as int32, (immediate and 1 or 0) as int32) ~= 0
+            end,
+            reset = function(): boolean
+                if released[1] then
+                    return false
+                end
+
+                return tecs_audio_synth_reset(synth) ~= 0
+            end,
+            now = function(): number
+                if released[1] then
+                    return 0
+                end
+
+                return tecs_audio_synth_now(synth)
+            end,
+            close = function(): nil
+                if released[1] then
+                    return
+                end
+                released[1] = true
+                tecs_audio_synth_close(synth)
+            end
+        )
+    end
+
+    local function openSynth(
+        font: integer,
+        handle: integer,
+        polyphony: integer,
+        effects: boolean
+    ): (audiobackend.SynthPort?, string?)
+        if closed[1] then
+            return nil, "the audio output is closed"
+        end
+
+        return wrapSynth(function(): voidptr?
+            return tecs_audio_synth_open(
+                device,
+                font as uint32,
+                handle as uint32,
+                polyphony as uint32,
+                (effects and 1 or 0) as int32
+            )
+        end)
+    end
+
+    --- The batch buffer every FM port on this device fills. One is enough:
+    --- the ports are only ever written from the frame thread, and each batch
+    --- crosses before the next is filled.
+    local batch = carray(tecsAudioFmWrite, FM_BATCH)
+
+    --- Fills the shared batch with the first `count` pairs of `pairs`, a
+    --- count every caller has already held to `FM_BATCH`.
+    local function fill(pairs: {integer}, count: integer): nil
+        for index = 0, count - 1 do
+            -- The index stays below `FM_BATCH` because every caller checks
+            -- `count` first, which the checker cannot read off a `carray`.
+            @unsafe do
+                local target = batch[index]
+                target.address = pairs[2 * index + 1] as uint32
+                target.value = pairs[2 * index + 2] as uint32
+            end
+        end
+    end
+
+    --- The wire number of each memory class, as `tecs_audio_fm_memory`
+    --- takes it.
+    local MEMORY_CLASSES: {[string]: integer} = {adpcmA = 0, adpcmB = 1, pcm = 2}
+
+    local function openFm(handle: integer, chip: audiobackend.FmChip, clock: integer): (audiobackend.FmPort?, string?)
+        if closed[1] then
+            return nil, "the audio output is closed"
+        end
+        local fm = tecs_audio_fm_open(device, handle as uint32, chip, clock as uint32)
+        if fm == nil then
+            return nil, reason("tecsaudio opened no FM chip")
+        end
+        local released = {false}
+
+        return new audiobackend.FmPort(
+            rate = tecs_audio_fm_rate(fm) as integer,
+            write = function(register: integer, value: integer, at: number): boolean
+                if released[1] then
+                    return false
+                end
+
+                return tecs_audio_fm_write(fm, register as uint32, value as uint32, at) ~= 0
+            end,
+            writes = function(pairs: {integer}, count: integer, at: number): boolean
+                if released[1] or count > FM_BATCH then
+                    return false
+                end
+                fill(pairs, count)
+
+                return tecs_audio_fm_writes(fm, batch, count as uint32, at, 0) ~= 0
+            end,
+            writePort = function(offset: integer, data: integer, at: number): boolean
+                if released[1] then
+                    return false
+                end
+
+                return tecs_audio_fm_write_port(fm, offset as uint32, data as uint32, at) ~= 0
+            end,
+            writePorts = function(pairs: {integer}, count: integer, at: number): boolean
+                if released[1] or count > FM_BATCH then
+                    return false
+                end
+                fill(pairs, count)
+
+                return tecs_audio_fm_writes(fm, batch, count as uint32, at, 1) ~= 0
+            end,
+            setMemory = function(class: audiobackend.FmMemory, image: string): boolean
+                if released[1] then
+                    return false
+                end
+
+                return tecs_audio_fm_memory(fm, MEMORY_CLASSES[class] as uint32, image, #image as uint64) ~= 0
+            end,
+            reset = function(at: number): boolean
+                if released[1] then
+                    return false
+                end
+
+                return tecs_audio_fm_reset(fm, at) ~= 0
+            end,
+            now = function(): number
+                if released[1] then
+                    return 0
+                end
+
+                return tecs_audio_fm_now(fm)
+            end,
+            close = function(): nil
+                if released[1] then
+                    return
+                end
+                released[1] = true
+                tecs_audio_fm_close(fm)
+            end
+        )
+    end
+
     return new audiobackend.Backend(
         failure = function(): string?
             if not closed[1] and tecs_audio_failed(device) ~= 0 then
@@ -428,6 +704,14 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
 
             return names
         end,
+        loadSoundFont = loadSoundFont,
+        releaseSoundFont = function(font: integer): nil
+            if not closed[1] then
+                tecs_audio_release_soundfont(device, font as uint32)
+            end
+        end,
+        openSynth = openSynth,
+        openFm = openFm,
         close = function(): nil
             if closed[1] then
                 return

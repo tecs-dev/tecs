@@ -123,6 +123,7 @@ depend on notifications.
 ]]
 
 local audiobackend = require("tecs.platform.audiobackend")
+local audiosynth = require("tecs.internal.audiosynth")
 local ecs = require("tecs.ecs")
 local log = require("nupp.log")
 local random = require("nupp.random")
@@ -1065,12 +1066,19 @@ local function admits(borrows self: Audio, key: string): boolean
     return true
 end
 
---- Starts a clip on a free slot and returns its handle, or zero.
-local function start(exclusive self: Audio, clip: Clip?, options: PlayOptions, owned: boolean): integer
+--- Takes a free slot for one voice reading `clip`, queues its start, and
+--- returns its handle, or zero when nothing started.
+---
+--- `flags` carries what the input adds to the command: `STREAM` for a clip read
+--- from its file, `SYNTH` for a synthesizer, which reads no clip at all.
+local function claim(
+    exclusive self: Audio,
+    clip: integer,
+    flags: integer,
+    options: PlayOptions,
+    owned: boolean
+): integer
     if not self.available then
-        return 0
-    end
-    if clip == nil or clip.status ~= "ready" then
         return 0
     end
     local key = options.key
@@ -1089,7 +1097,7 @@ local function start(exclusive self: Audio, clip: Clip?, options: PlayOptions, o
     if voice.generation > MAX_GENERATION then
         voice.generation = 1
     end
-    voice.clip = clip.id
+    voice.clip = clip
     voice.gain = options.gain or 1
     voice.applied = -1
     voice.group = options.group
@@ -1112,15 +1120,14 @@ local function start(exclusive self: Audio, clip: Clip?, options: PlayOptions, o
 
     local handle = handleOf(self, slot)
     local command = queue(self, audiobackend.PLAY, handle)
-    command.clip = clip.id
+    command.clip = clip
     command.gain = composedGain(self, voice)
     command.pitch = pitch
     command.start = options.start or 0
     command.fade = options.fadeIn or 0
     command.loopStart = options.loopStart or 0
-    local flags = voice.loop and audiobackend.LOOP or 0
-    if not clip.resident then
-        flags = flags + audiobackend.STREAM
+    if voice.loop then
+        flags = flags + audiobackend.LOOP
     end
 
     -- The two placements are exclusive, and a position wins when a caller asks
@@ -1167,6 +1174,15 @@ local function start(exclusive self: Audio, clip: Clip?, options: PlayOptions, o
     self.live = self.live + 1
 
     return handle
+end
+
+--- Starts a clip on a free slot and returns its handle, or zero.
+local function start(exclusive self: Audio, clip: Clip?, options: PlayOptions, owned: boolean): integer
+    if clip == nil or clip.status ~= "ready" then
+        return 0
+    end
+
+    return claim(self, clip.id, clip.resident and 0 or audiobackend.STREAM, options, owned)
 end
 
 --- Creates the mixer a game plays sound through.
@@ -1266,6 +1282,20 @@ export function newAudio(config: Config?): Audio
     if not self.available then
         LOGGER:info("no audio output; sound is silent for this run")
     end
+
+    -- What `tecs.audio.synth` borrows: the backend a SoundFont loads into, and
+    -- a voice slot taken the way `play` takes one, so the voice ceiling, the
+    -- group and the gain composition apply to a synthesizer unchanged. Lent
+    -- through an internal module because both reach fields this record keeps
+    -- private.
+    audiosynth.lent[self] = new audiosynth.Lender(
+        backend = function(): audiobackend.Backend
+            return self.backend
+        end,
+        start = function(gain: number, group: string?): integer
+            return claim(self, 0, audiobackend.SYNTH, {gain = gain, group = group}, false)
+        end
+    )
 
     return self
 end
@@ -2199,7 +2229,8 @@ end
 --- Call once per frame with the frame's step. The step advances cooldowns, and
 --- nothing else here needs time: a fade is the backend's to run, and a voice is
 --- over when the backend says so rather than when a clock here says it should
---- be.
+--- be. It also advances every [`Player`](tecs.audio.music.Player) made on this
+--- mixer, which schedules on its voices' own clock rather than on the step.
 ---
 --- Not a world system, and `install` deliberately does not add one: reaping has
 --- to continue during a world pause, so an application drives this from the
@@ -2213,6 +2244,22 @@ end
 function Audio.update(exclusive self: Audio, dt: number?): integer
     if self.closed then
         return 0
+    end
+    -- Music players first, so what they schedule this frame rides the same
+    -- flush as the voices they start.
+    local updates = audiosynth.updates[self]
+    if updates ~= nil then
+        local kept: integer = 0
+        for index = 1, #updates do
+            local advance = updates[index]
+            if advance() then
+                kept = kept + 1
+                updates[kept] = advance
+            end
+        end
+        for index = #updates, kept + 1, -1 do
+            updates[index] = nil
+        end
     end
     local observe = self.backend.failure
     if self.failureReason == nil and observe ~= nil then

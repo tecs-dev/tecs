@@ -1,0 +1,250 @@
+module tecs.internal.dro
+
+--[[
+Reads a DOSBox Raw OPL capture into a register log, a slice at a time.
+
+Version 1, from DOSBox 0.61, and version 2, from 0.73 on, are read. Both
+count in milliseconds. Version 1 escapes its delays and its bank switches into
+the register stream; version 2 names its delay codes in the header and maps
+the rest through a codemap, the top bit of a code selecting the second chip or
+bank. The hardware is one OPL2, one OPL3, or two OPL2s, which a Sound Blaster
+Pro wired one to each speaker and this log places the same way.
+]]
+
+local registerlog = require("tecs.internal.registerlog")
+
+const byte = string.byte
+
+--- Ticks a second: DRO counts milliseconds.
+local RATE: integer = 1000
+
+local function u16(bytes: string, at: integer): integer
+    const low, high = byte(bytes, at, at + 1)
+
+    return (low as integer) + (high as integer) * 256
+end
+
+local function u32(bytes: string, at: integer): integer
+    const a, b, c, d = byte(bytes, at, at + 3)
+
+    return (a as integer) + (b as integer) * 256 + (c as integer) * 65536 + (d as integer) * 16777216
+end
+
+--- The hardware a capture was made from.
+local type Hardware = "opl2" | "opl3" | "dual"
+
+--- The state of one parse.
+local record State
+    bytes: string
+    name: string
+    builder: registerlog.Builder
+    version: integer
+    hardware: Hardware
+    position: integer
+    finish: integer
+    tick: integer
+    high: boolean
+    shortDelay: integer
+    longDelay: integer
+    codemap: {integer}
+    total: integer
+    done: boolean
+end
+
+--- Adds the chips the hardware had.
+local function chips(exclusive builder: registerlog.Builder, hardware: Hardware): nil
+    if hardware == "opl3" then
+        registerlog.addChip(builder, "ymf262", 14318180, false, 1, 1)
+    elseif hardware == "dual" then
+        registerlog.addChip(builder, "ym3812", 3579545, false, 1, 0)
+        registerlog.addChip(builder, "ym3812", 3579545, true, 0, 1)
+    else
+        registerlog.addChip(builder, "ym3812", 3579545, false, 1, 1)
+    end
+end
+
+--- Writes a register to the low or high chip or bank.
+local function put(exclusive state: State, high: boolean, register: integer, value: integer): nil
+    local hardware = state.hardware
+    if hardware == "opl3" then
+        registerlog.write(state.builder, state.tick, 0, (high and 0x100 or 0) + register, value)
+    elseif hardware == "dual" then
+        registerlog.write(state.builder, state.tick, high and 1 or 0, register, value)
+    elseif not high then
+        registerlog.write(state.builder, state.tick, 0, register, value)
+    end
+end
+
+--- Reads up to `budget` commands, and returns the reason the file is refused
+--- if it is.
+local function run(exclusive state: State, budget: integer): string?
+    local bytes = state.bytes
+
+    local function cut(at: integer, what: string): string
+        return state.name .. ": byte " .. string.format("0x%X", at - 1) .. ": " .. what
+    end
+
+    for _ = 1, budget do
+        local at = state.position
+        if at > state.finish then
+            state.done = true
+
+            return nil
+        end
+        local code = byte(bytes, at) as integer
+        if state.version == 1 then
+            if code == 0x00 then
+                if at + 1 > state.finish then
+                    return cut(at, "a delay is cut short")
+                end
+                state.tick = state.tick + (byte(bytes, at + 1) as integer) + 1
+                state.position = at + 2
+            elseif code == 0x01 then
+                if at + 2 > state.finish then
+                    return cut(at, "a delay is cut short")
+                end
+                state.tick = state.tick + u16(bytes, at + 1) + 1
+                state.position = at + 3
+            elseif code == 0x02 or code == 0x03 then
+                state.high = code == 0x03
+                state.position = at + 1
+            elseif code == 0x04 then
+                if at + 2 > state.finish then
+                    return cut(at, "an escaped register write is cut short")
+                end
+                put(state, state.high, byte(bytes, at + 1) as integer, byte(bytes, at + 2) as integer)
+                state.position = at + 3
+            else
+                if at + 1 > state.finish then
+                    return cut(at, "a register write is cut short")
+                end
+                put(state, state.high, code, byte(bytes, at + 1) as integer)
+                state.position = at + 2
+            end
+        else
+            if at + 1 > state.finish then
+                return cut(at, "a register write is cut short")
+            end
+            local value = byte(bytes, at + 1) as integer
+            if code == state.shortDelay then
+                state.tick = state.tick + value + 1
+            elseif code == state.longDelay then
+                state.tick = state.tick + (value + 1) * 256
+            else
+                local register = state.codemap[code % 128 + 1]
+                if register == nil then
+                    return cut(at, "code " .. tostring(code % 128) .. " is past the codemap")
+                end
+                put(state, code >= 128, register, value)
+            end
+            state.position = at + 2
+        end
+    end
+
+    return nil
+end
+
+--- Begins reading a DRO file, or returns why its header is refused.
+---
+--- @param bytes the whole file
+--- @param name what a refusal names the file as
+--- @return the parse, or nil and a reason
+export function parser(bytes: string, name: string): (registerlog.Parser?, string?)
+    if #bytes < 0x15 or string.sub(bytes, 1, 8) ~= "DBRAWOPL" then
+        return nil, name .. ": not a DOSBox Raw OPL file: it does not begin with \"DBRAWOPL\""
+    end
+    local major = u16(bytes, 0x09)
+    local minor = u16(bytes, 0x0B)
+    local state: State
+    if major == 2 and minor == 0 then
+        if #bytes < 0x1A then
+            return nil, name .. ": the version 2 header is cut short"
+        end
+        local kind = byte(bytes, 0x15) as integer
+        local hardware: Hardware = kind == 1 and "dual" or kind == 2 and "opl3" or "opl2"
+        if kind > 2 then
+            return nil, name .. ": hardware type " .. tostring(kind) .. " is not an OPL2, a dual OPL2 or an OPL3"
+        end
+        if (byte(bytes, 0x16) as integer) ~= 0 then
+            return nil, name .. ": only the interleaved data format is defined, and this file uses another"
+        end
+        if (byte(bytes, 0x17) as integer) ~= 0 then
+            return nil, name .. ": the data is compressed, which DOSBox never wrote"
+        end
+        local size = byte(bytes, 0x1A) as integer
+        if size > 128 or 0x1A + size > #bytes then
+            return nil, name .. ": a codemap of " .. tostring(size) .. " entries does not fit"
+        end
+        local codemap: {integer} = {}
+        for index = 1, size do
+            codemap[index] = byte(bytes, 0x1A + index) as integer
+        end
+        local start = 0x1B + size
+        local count = u32(bytes, 0x0D)
+        local builder = registerlog.newBuilder("dro", 2, RATE)
+        chips(builder, hardware)
+        state = new State(
+            bytes = bytes,
+            name = name,
+            builder = builder,
+            version = 2,
+            hardware = hardware,
+            position = start,
+            finish = (math.min(#bytes, start + count * 2 - 1)) as integer,
+            tick = 0,
+            high = false,
+            shortDelay = byte(bytes, 0x18) as integer,
+            longDelay = byte(bytes, 0x19) as integer,
+            codemap = codemap,
+            total = u32(bytes, 0x11),
+            done = false
+        )
+    elseif major == 0 and minor == 1 then
+        local kind = byte(bytes, 0x15) as integer
+        if kind > 2 then
+            return nil, name .. ": hardware type " .. tostring(kind) .. " is not an OPL2, an OPL3 or a dual OPL2"
+        end
+        local hardware: Hardware = kind == 1 and "opl3" or kind == 2 and "dual" or "opl2"
+        -- The hardware type was one byte in the first captures and four in
+        -- later ones, with no change of version: three zero bytes after it
+        -- are the wider field.
+        local start: integer = 0x16
+        if #bytes >= 0x18 and string.sub(bytes, 0x16, 0x18) == "\0\0\0" then
+            start = 0x19
+        end
+        local length = u32(bytes, 0x11)
+        local builder = registerlog.newBuilder("dro", 1, RATE)
+        chips(builder, hardware)
+        state = new State(
+            bytes = bytes,
+            name = name,
+            builder = builder,
+            version = 1,
+            hardware = hardware,
+            position = start,
+            finish = (math.min(#bytes, start + length - 1)) as integer,
+            tick = 0,
+            high = false,
+            shortDelay = -1,
+            longDelay = -1,
+            codemap = {},
+            total = u32(bytes, 0x0D),
+            done = false
+        )
+    else
+        return nil, name .. ": DRO version " .. tostring(major) .. "." .. tostring(minor) .. " is neither 0.1 nor 2.0"
+    end
+
+    return new registerlog.Parser(step = function(budget: integer): (registerlog.Status, registerlog.Builder?, string?)
+        local reason = run(state, budget)
+        if reason ~= nil then
+            return "failed", nil, reason
+        end
+        if not state.done then
+            return "pending"
+        end
+        state.builder.length = math.max(state.tick, state.total)
+
+        return "ready", state.builder
+    end)
+end

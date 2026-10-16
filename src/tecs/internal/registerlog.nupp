@@ -1,0 +1,182 @@
+module tecs.internal.registerlog
+
+--[[
+The register log a VGM or DRO file is read into, before
+`tecs.audio.music.fm` turns it into its public record.
+
+A parser fills a [`Builder`] one write at a time: the chips the file names, a
+tick and a packed write for each register write, the memory images its data
+blocks carry, and the chips it could not keep with the reason why. Writes are
+packed into one integer each, the chip in the bits above 18, the register in
+the ten above 8 and the value in the low eight, so a long log costs two numbers
+a write rather than a record.
+]]
+
+--- What a step of a parse answers, as `tecs.assets.Status` spells it.
+export type Status = "pending" | "ready" | "failed"
+
+--- The multiplier that packs a chip index above the register.
+export const CHIP_SHIFT: integer = 262144
+
+--- The multiplier that packs a register above the value.
+export const REGISTER_SHIFT: integer = 256
+
+--- The highest register `tecs.audio.fm` takes for each chip a log can name.
+export const LAST_REGISTER: {
+    [string]: integer
+} = {
+    ym3526 = 0xFF,
+    y8950 = 0xFF,
+    ym3812 = 0xFF,
+    ymf262 = 0x1FF,
+    ymf278b = 0x2FF,
+    ym2413 = 0xFF,
+    ds1001 = 0xFF,
+    ym2151 = 0xFF,
+    ym2164 = 0xFF,
+    ym2203 = 0xFF,
+    ym2608 = 0x1FF,
+    ym2610 = 0x1FF,
+    ym2610b = 0x1FF,
+    ym2612 = 0x1FF,
+    ym3438 = 0x1FF,
+    ym2149 = 0xFF,
+}
+
+--- The largest memory image a chip takes, which `tecs.audio.fm` enforces.
+export const MAX_IMAGE: integer = 16 * 1024 * 1024
+
+--- One piece of a memory image, as a data block gave it.
+export record Piece
+    offset: integer
+    data: string
+end
+
+--- One chip the log writes to.
+export record Chip
+    model: string
+    clock: integer
+    second: boolean
+    left: number
+    right: number
+    pieces: {[string]: {Piece}}
+end
+
+--- A log being built.
+export record Builder
+    format: string
+    version: integer
+    rate: integer
+    ticks: {integer}
+    ops: {integer}
+    count: integer
+    chips: {Chip}
+    length: integer
+    loopTick: integer?
+    loopIndex: integer?
+    skipped: {string}
+    seen: {[string]: boolean}
+    tags: {string}?
+end
+
+--- One parse in progress, advanced a slice at a time.
+export record Parser
+    --- Advances the parse by up to `budget` commands, and answers as a job's
+    --- `poll` does: `"pending"`, `"ready"` and the builder, or `"failed"` and
+    --- a reason.
+    step: function(budget: integer): (Status, Builder?, string?)
+end
+
+--- Creates an empty log.
+export function newBuilder(format: string, version: integer, rate: integer): Builder
+    return new Builder(
+        format = format,
+        version = version,
+        rate = rate,
+        ticks = {},
+        ops = {},
+        count = 0,
+        chips = {},
+        length = 0,
+        loopTick = nil,
+        loopIndex = nil,
+        skipped = {},
+        seen = {},
+        tags = nil
+    )
+end
+
+--- Adds a chip and returns its index, counted from zero.
+export function addChip(
+    exclusive builder: Builder,
+    model: string,
+    clock: integer,
+    second: boolean,
+    left: number,
+    right: number
+): integer
+    local index = #builder.chips
+    builder.chips[
+        index + 1
+    ] = new Chip(model = model, clock = clock, second = second, left = left, right = right, pieces = {})
+
+    return index
+end
+
+--- Appends one register write at `tick`.
+---
+--- A register past the chip's range is dropped rather than kept, because a
+--- player would have to refuse it: it is what a damaged or a hand-made file
+--- holds, not anything a chip decodes.
+export function write(exclusive builder: Builder, tick: integer, chip: integer, register: integer, value: integer): nil
+    local last = LAST_REGISTER[builder.chips[chip + 1].model] or 0xFF
+    if register < 0 or register > last or value < 0 or value > 0xFF then
+        return
+    end
+    local count = builder.count + 1
+    builder.count = count
+    builder.ticks[count] = tick
+    builder.ops[count] = chip * CHIP_SHIFT + register * REGISTER_SHIFT + value
+end
+
+--- Records once that something in the file is not played, and why.
+export function skip(exclusive builder: Builder, key: string, reason: string): nil
+    if builder.seen[key] then
+        return
+    end
+    builder.seen[key] = true
+    builder.skipped[#builder.skipped + 1] = reason
+end
+
+--- Adds a piece of a chip's memory image of `class`.
+export function addMemory(exclusive builder: Builder, chip: integer, class: string, offset: integer, data: string): nil
+    local entry = builder.chips[chip + 1]
+    local pieces = entry.pieces[class]
+    if pieces == nil then
+        pieces = {}
+        entry.pieces[class] = pieces
+    end
+    pieces[#pieces + 1] = new Piece(offset = offset, data = data)
+end
+
+--- Assembles the pieces of one image into the bytes a chip reads: each at its
+--- offset, later pieces over earlier ones, zeroes between, as long as the
+--- furthest piece reaches and no longer than `MAX_IMAGE`.
+export function image(pieces: {Piece}): string
+    local result = ""
+    for _, piece in ipairs(pieces) do
+        local offset = piece.offset
+        local data = piece.data
+        if offset < MAX_IMAGE then
+            if offset + #data > MAX_IMAGE then
+                data = string.sub(data, 1, MAX_IMAGE - offset)
+            end
+            if #result < offset then
+                result = result .. string.rep("\0", offset - #result)
+            end
+            result = string.sub(result, 1, offset) .. data .. string.sub(result, offset + #data + 1)
+        end
+    end
+
+    return result
+end

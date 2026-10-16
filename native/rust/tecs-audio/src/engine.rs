@@ -13,9 +13,11 @@ use std::sync::{Arc, Mutex, RwLock};
 use crate::command::{self, Command, Event};
 use crate::decode::{self, Streamer};
 use crate::device::{self, Output};
+use crate::fm::{self, FmPort, Kind};
 use crate::mixer::Mixer;
 use crate::source::{ResidentSource, Source, MAX_CHANNELS};
 use crate::stream::Feeder;
+use crate::synth::{self, Port, Settings};
 
 /// Measures a clip's duration against the streaming threshold.
 pub const MODE_AUTO: u32 = 0;
@@ -52,6 +54,13 @@ pub struct Loaded {
 pub struct Engine {
     mixer: Arc<Mutex<Mixer>>,
     clips: RwLock<HashMap<u32, Clip>>,
+    /// SoundFonts by the id `load_sound_font` handed out, shared by every
+    /// synthesizer opened on one.
+    fonts: RwLock<HashMap<u32, Arc<rustysynth::SoundFont>>>,
+    next_font: Mutex<u32>,
+    /// Synthesizers opened and not yet started, General MIDI and FM alike, by
+    /// the voice handle whose `PLAY` will take them.
+    synths: Mutex<HashMap<u32, Box<dyn Source>>>,
     feeder: Feeder,
     output: Option<Output>,
     /// The reason the most recent failing call gave, kept so the binding can
@@ -115,6 +124,9 @@ impl Engine {
             failed,
             mixer,
             clips: RwLock::new(HashMap::new()),
+            fonts: RwLock::new(HashMap::new()),
+            next_font: Mutex::new(0),
+            synths: Mutex::new(HashMap::new()),
             feeder: Feeder::start(),
             output,
             last_error: Mutex::new(reason),
@@ -169,7 +181,7 @@ impl Engine {
     }
 
     /// Records the reason a call is about to report.
-    fn fail(&self, reason: String) -> String {
+    pub(crate) fn fail(&self, reason: String) -> String {
         if let Ok(mut slot) = self.last_error.lock() {
             *slot = reason.clone();
         }
@@ -291,8 +303,86 @@ impl Engine {
         }
     }
 
+    /// Reads a SoundFont and returns the id synthesizers name it by.
+    ///
+    /// @return the id, from one up, or the reason nothing was loaded
+    pub fn load_sound_font(&self, path: &str) -> Result<u32, String> {
+        let font = synth::load_sound_font(path).map_err(|reason| self.fail(reason))?;
+        let id = match self.next_font.lock() {
+            Err(_) => return Err(self.fail("the SoundFont counter is poisoned".to_string())),
+            Ok(mut next) => {
+                *next += 1;
+                *next
+            }
+        };
+        match self.fonts.write() {
+            Err(_) => Err(self.fail("the SoundFont table is poisoned".to_string())),
+            Ok(mut fonts) => {
+                fonts.insert(id, font);
+                Ok(id)
+            }
+        }
+    }
+
+    /// Drops a SoundFont. Synthesizers already opened on it keep their own
+    /// reference and play on.
+    pub fn release_sound_font(&self, font: u32) {
+        if let Ok(mut fonts) = self.fonts.write() {
+            fonts.remove(&font);
+        }
+    }
+
+    /// Creates a synthesizer on a loaded SoundFont and parks its source for the
+    /// `PLAY` carrying `handle` and `FLAG_SYNTH`.
+    ///
+    /// Everything that allocates happens here, on the caller's thread: the
+    /// synthesizer, its voices, its queue and its scratch buffers. The output
+    /// callback only ever renders it.
+    ///
+    /// @return the port events are sent through, or the reason nothing opened
+    pub fn open_synth(&self, font: u32, handle: u32, settings: &Settings) -> Result<Port, String> {
+        let shared = match self.fonts.read() {
+            Err(_) => return Err(self.fail("the SoundFont table is poisoned".to_string())),
+            Ok(fonts) => match fonts.get(&font) {
+                None => return Err(self.fail(format!("no SoundFont is loaded under {font}"))),
+                Some(value) => Arc::clone(value),
+            },
+        };
+        let (port, source) =
+            synth::open(&shared, self.sample_rate, settings).map_err(|reason| self.fail(reason))?;
+        match self.synths.lock() {
+            Err(_) => Err(self.fail("the synthesizer table is poisoned".to_string())),
+            Ok(mut synths) => {
+                synths.insert(handle, Box::new(source));
+                Ok(port)
+            }
+        }
+    }
+
+    /// Creates an emulated FM chip at `clock` hertz and parks its source for
+    /// the `PLAY` carrying `handle` and `FLAG_SYNTH`, as `open_synth` does.
+    ///
+    /// The chip renders at its own rate, `kind.rate(clock)`, and the voice
+    /// resamples it to the output.
+    ///
+    /// @return the port register writes are sent through, or the reason
+    ///     nothing opened
+    pub fn open_fm(&self, handle: u32, kind: Kind, clock: u32) -> Result<FmPort, String> {
+        let (port, source) = fm::open(kind, clock);
+        match self.synths.lock() {
+            Err(_) => Err(self.fail("the synthesizer table is poisoned".to_string())),
+            Ok(mut synths) => {
+                synths.insert(handle, Box::new(source));
+                Ok(port)
+            }
+        }
+    }
+
     /// Builds the source a `PLAY` needs, outside the mixer lock.
     fn prepare(&self, command: &Command) -> Option<Box<dyn Source>> {
+        if command.has(command::FLAG_SYNTH) {
+            return self.synths.lock().ok()?.remove(&command.handle);
+        }
         let clips = self.clips.read().ok()?;
         match clips.get(&command.clip)? {
             Clip::Resident {
@@ -404,6 +494,12 @@ impl Engine {
         self.available = false;
         if let Ok(mut clips) = self.clips.write() {
             clips.clear();
+        }
+        if let Ok(mut fonts) = self.fonts.write() {
+            fonts.clear();
+        }
+        if let Ok(mut synths) = self.synths.lock() {
+            synths.clear();
         }
     }
 }
@@ -583,6 +679,49 @@ mod tests {
         assert!(engine.last_error().contains("junk.ogg"));
         engine.submit(&[play(65_537, 4)]);
         assert_eq!(engine.voice_count(), 0);
+    }
+
+    #[test]
+    fn an_fm_chip_started_by_its_play_renders_and_keeps_its_clock() {
+        let engine = Engine::open_offline(48_000, 2, 8);
+        let mut port = engine
+            .open_fm(257, Kind::Ymf262, fm::OPL3_CLOCK)
+            .expect("an OPL3 opens");
+        assert!(port.reset(0.0));
+        // A held note on channel 0, OPL3 mode and both outputs on.
+        for (register, value) in [
+            (0x105, 0x01),
+            (0x20, 0x01),
+            (0x23, 0x01),
+            (0x40, 0x3f),
+            (0x43, 0x00),
+            (0x63, 0xf0),
+            (0x83, 0x0f),
+            (0xc0, 0x30),
+            (0xa0, 0x41),
+            (0xb0, 0x32),
+        ] {
+            assert!(port.write(register, value, 0.0));
+        }
+        let mut start = play(257, 0);
+        start.flags = command::FLAG_SYNTH;
+        engine.submit(&[start]);
+        assert_eq!(engine.voice_count(), 1);
+        let mut out = vec![0.0f32; 2 * 512];
+        let mut heard = false;
+        for block in 1..=200u64 {
+            engine.render(&mut out);
+            heard |= out.iter().any(|value| *value != 0.0);
+            // The chip's clock follows the output's, block after block.
+            let expected = block as f64 * 512.0 / 48_000.0;
+            assert!(
+                (port.now() - expected).abs() < 2.0 / 48_000.0,
+                "block {block}: {}",
+                port.now()
+            );
+        }
+        assert!(heard, "the note is rendered");
+        assert_eq!(engine.voice_count(), 1);
     }
 
     #[test]

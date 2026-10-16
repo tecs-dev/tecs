@@ -27,9 +27,11 @@ pub mod decode;
 pub mod device;
 pub mod engine;
 pub mod enumerate;
+pub mod fm;
 pub mod mixer;
 pub mod source;
 pub mod stream;
+pub mod synth;
 
 use std::ffi::{c_char, CStr, CString};
 use std::sync::Mutex;
@@ -38,6 +40,8 @@ use capture::Capture;
 use command::{Command, Event};
 use engine::Engine;
 use enumerate::DeviceList;
+use fm::{FmPort, Kind, RegisterWrite};
+use synth::{Port, Settings};
 
 /// What a call answers when it worked.
 const STATUS_OK: i32 = 0;
@@ -405,6 +409,430 @@ pub unsafe extern "C" fn tecs_audio_render(device: *mut Engine, out: *mut f32, f
     value.render(span) as u32
 }
 
+/// Reads a SoundFont 2 file into the device and writes the id it is held under.
+///
+/// # Safety
+///
+/// `path` must be a NUL-terminated string, `font` must be writable, and the
+/// device must be live.
+///
+/// @return zero when the SoundFont loaded, and one with the reason left for
+///     `tecs_audio_last_error` when it did not
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_load_soundfont(
+    device: *mut Engine,
+    path: *const c_char,
+    font: *mut u32,
+) -> i32 {
+    let value = match unsafe { engine(device) } {
+        None => return STATUS_FAILED,
+        Some(value) => value,
+    };
+    if path.is_null() || font.is_null() {
+        return STATUS_FAILED;
+    }
+    let Ok(text) = unsafe { CStr::from_ptr(path) }.to_str() else {
+        return STATUS_FAILED;
+    };
+    match value.load_sound_font(text) {
+        Err(_) => STATUS_FAILED,
+        Ok(id) => {
+            unsafe { *font = id };
+            STATUS_OK
+        }
+    }
+}
+
+/// Drops a SoundFont. Synthesizers already opened on it play on.
+///
+/// # Safety
+///
+/// The pointer must name a live device.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_release_soundfont(device: *mut Engine, font: u32) {
+    if let Some(value) = unsafe { engine(device) } {
+        value.release_sound_font(font);
+    }
+}
+
+/// Opens a synthesizer on a loaded SoundFont for the voice `handle` names.
+///
+/// The synthesizer starts sounding when a `PLAY` carrying the same handle and
+/// the synth flag reaches `tecs_audio_submit`. Until then events sent to it
+/// wait in its queue and its clock stands at zero.
+///
+/// # Safety
+///
+/// The pointer must name a live device. The returned port is owned by the
+/// caller, outlives the device safely, and is freed by `tecs_audio_synth_close`.
+///
+/// @return the port, or null with the reason left for `tecs_audio_last_error`
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_synth_open(
+    device: *mut Engine,
+    font: u32,
+    handle: u32,
+    polyphony: u32,
+    effects: i32,
+) -> *mut Port {
+    let value = match unsafe { engine(device) } {
+        None => return std::ptr::null_mut(),
+        Some(value) => value,
+    };
+    let settings = Settings {
+        polyphony: polyphony as usize,
+        effects: effects != 0,
+    };
+    match value.open_synth(font, handle, &settings) {
+        Err(_) => std::ptr::null_mut(),
+        Ok(port) => Box::into_raw(Box::new(port)),
+    }
+}
+
+/// Borrows the port a synthesizer pointer names.
+///
+/// # Safety
+///
+/// The pointer must be one `tecs_audio_synth_open` returned and
+/// `tecs_audio_synth_close` has not yet been given.
+unsafe fn port<'a>(synth: *mut Port) -> Option<&'a mut Port> {
+    if synth.is_null() {
+        None
+    } else {
+        Some(unsafe { &mut *synth })
+    }
+}
+
+/// Queues a short MIDI message for `at` seconds on the synthesizer clock.
+///
+/// A time of zero or less, or one already rendered, means the next block.
+///
+/// # Safety
+///
+/// The pointer must name a live port.
+///
+/// @return nonzero when the queue took the event, and zero when it was full
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_synth_send(
+    synth: *mut Port,
+    status: u32,
+    data1: u32,
+    data2: u32,
+    at: f64,
+) -> i32 {
+    match unsafe { port(synth) } {
+        None => 0,
+        Some(value) => i32::from(value.send(status as u8, data1 as u8, data2 as u8, at)),
+    }
+}
+
+/// Queues a release of every note on `channel`, or on every channel when it is
+/// negative, for the next block.
+///
+/// # Safety
+///
+/// The pointer must name a live port.
+///
+/// @return nonzero when the queue took the event
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_synth_notes_off(
+    synth: *mut Port,
+    channel: i32,
+    immediate: i32,
+) -> i32 {
+    match unsafe { port(synth) } {
+        None => 0,
+        Some(value) => {
+            let named = u8::try_from(channel).ok();
+            i32::from(value.notes_off(named, immediate != 0))
+        }
+    }
+}
+
+/// Queues a reset to General MIDI defaults for the next block, discarding
+/// every event sent before it that has not been applied.
+///
+/// # Safety
+///
+/// The pointer must name a live port.
+///
+/// @return nonzero when the queue took the event
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_synth_reset(synth: *mut Port) -> i32 {
+    match unsafe { port(synth) } {
+        None => 0,
+        Some(value) => i32::from(value.reset()),
+    }
+}
+
+/// Reports the synthesizer clock: the frames it has rendered over the rate.
+///
+/// # Safety
+///
+/// The pointer must name a live port.
+///
+/// @return seconds, and zero for a null port
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_synth_now(synth: *mut Port) -> f64 {
+    match unsafe { port(synth) } {
+        None => 0.0,
+        Some(value) => value.now(),
+    }
+}
+
+/// Frees a port. The voice it fed is the mixer's to stop, through `STOP`.
+///
+/// # Safety
+///
+/// The pointer must come from `tecs_audio_synth_open` and must not be used
+/// again.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_synth_close(synth: *mut Port) {
+    if !synth.is_null() {
+        drop(unsafe { Box::from_raw(synth) });
+    }
+}
+
+/// Opens the emulated FM chip `name` selects at `clock` hertz, for the voice
+/// `handle` names.
+///
+/// `name` is a part number in lower case, such as `ym2612`, or `opl2` and
+/// `opl3`. A clock of zero means the chip's own; any other is clamped to the
+/// range `fm::MIN_CLOCK` to `fm::MAX_CLOCK`. The chip starts sounding when a
+/// `PLAY` carrying the same handle and the synth flag reaches
+/// `tecs_audio_submit`, as a General MIDI synthesizer does. Until then writes
+/// wait in its queue and its clock stands at zero.
+///
+/// # Safety
+///
+/// The pointer must name a live device and `name` a NUL-terminated string.
+/// The returned port is owned by the caller, outlives the device safely, and
+/// is freed by `tecs_audio_fm_close`.
+///
+/// @return the port, or null with the reason left for `tecs_audio_last_error`
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_fm_open(
+    device: *mut Engine,
+    handle: u32,
+    name: *const c_char,
+    clock: u32,
+) -> *mut FmPort {
+    let value = match unsafe { engine(device) } {
+        None => return std::ptr::null_mut(),
+        Some(value) => value,
+    };
+    if name.is_null() {
+        value.fail("an FM chip needs a name".to_string());
+        return std::ptr::null_mut();
+    }
+    let name = unsafe { CStr::from_ptr(name) }.to_string_lossy();
+    let Some(kind) = Kind::from_name(&name) else {
+        value.fail(format!("tecsaudio emulates no FM chip named {name}"));
+        return std::ptr::null_mut();
+    };
+    let clock = if clock == 0 {
+        kind.default_clock()
+    } else {
+        clock
+    };
+    match value.open_fm(handle, kind, clock) {
+        Err(_) => std::ptr::null_mut(),
+        Ok(port) => Box::into_raw(Box::new(port)),
+    }
+}
+
+/// Reports the rate of a chip's clock, in frames a second.
+///
+/// # Safety
+///
+/// The pointer must name a live port, or be null.
+///
+/// @return the rate, and zero for a null port
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_fm_rate(fm: *mut FmPort) -> u32 {
+    match unsafe { fm_port(fm) } {
+        None => 0,
+        Some(port) => port.rate(),
+    }
+}
+
+/// Borrows the port a chip pointer names.
+///
+/// # Safety
+///
+/// The pointer must be one `tecs_audio_fm_open` returned and
+/// `tecs_audio_fm_close` has not yet been given.
+unsafe fn fm_port<'a>(fm: *mut FmPort) -> Option<&'a mut FmPort> {
+    if fm.is_null() {
+        None
+    } else {
+        Some(unsafe { &mut *fm })
+    }
+}
+
+/// Queues one register write for `at` seconds on the chip clock.
+///
+/// A time of zero or less, or one already rendered, means the next sample.
+///
+/// # Safety
+///
+/// The pointer must name a live port.
+///
+/// @return nonzero when the queue took the write, and zero when it was full
+///     or the register or value is out of the chip's range
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_fm_write(
+    fm: *mut FmPort,
+    register: u32,
+    value: u32,
+    at: f64,
+) -> i32 {
+    match unsafe { fm_port(fm) } {
+        None => 0,
+        Some(port) => {
+            let (Ok(register), Ok(value)) = (u16::try_from(register), u8::try_from(value)) else {
+                return 0;
+            };
+            i32::from(port.write(register, value, at))
+        }
+    }
+}
+
+/// Queues one write of `data` to the port at `offset`, for `at` seconds on
+/// the chip clock.
+///
+/// # Safety
+///
+/// The pointer must name a live port.
+///
+/// @return nonzero when the queue took the write, and zero when it was full
+///     or the offset or data is out of the chip's range
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_fm_write_port(
+    fm: *mut FmPort,
+    offset: u32,
+    data: u32,
+    at: f64,
+) -> i32 {
+    match unsafe { fm_port(fm) } {
+        None => 0,
+        Some(port) => {
+            let (Ok(offset), Ok(data)) = (u16::try_from(offset), u8::try_from(data)) else {
+                return 0;
+            };
+            i32::from(port.write_port(offset, data, at))
+        }
+    }
+}
+
+/// Queues `count` writes for `at`, all or none: register writes, or port
+/// writes when `ports` is nonzero.
+///
+/// # Safety
+///
+/// The pointer must name a live port, and `writes` must point at `count`
+/// readable structs, or may be null when `count` is zero.
+///
+/// @return nonzero when the queue took every write, and zero when it took
+///     none: it could not hold them all, or one was out of range
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_fm_writes(
+    fm: *mut FmPort,
+    writes: *const RegisterWrite,
+    count: u32,
+    at: f64,
+    ports: i32,
+) -> i32 {
+    let Some(port) = (unsafe { fm_port(fm) }) else {
+        return 0;
+    };
+    if count == 0 {
+        return 1;
+    }
+    if writes.is_null() {
+        return 0;
+    }
+    let batch = unsafe { std::slice::from_raw_parts(writes, count as usize) };
+    i32::from(port.writes(batch, at, ports != 0))
+}
+
+/// Queues a return to the chip's power-on state for `at` seconds on the chip
+/// clock, discarding every write sent before it that falls at or after it.
+///
+/// # Safety
+///
+/// The pointer must name a live port.
+///
+/// @return nonzero when the queue took the reset
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_fm_reset(fm: *mut FmPort, at: f64) -> i32 {
+    match unsafe { fm_port(fm) } {
+        None => 0,
+        Some(port) => i32::from(port.reset(at)),
+    }
+}
+
+/// Replaces one memory image of a chip, from its next frame, with a copy of
+/// the `length` bytes at `bytes`. `class` is 0 for ADPCM-A, 1 for ADPCM-B and
+/// 2 for PCM.
+///
+/// # Safety
+///
+/// The pointer must name a live port, and `bytes` must point at `length`
+/// readable bytes, or may be null when `length` is zero.
+///
+/// @return nonzero when the image was queued, and zero when the chip reads no
+///     memory of that class, the image is too large, or the queue is full
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_fm_memory(
+    fm: *mut FmPort,
+    class: u32,
+    bytes: *const u8,
+    length: usize,
+) -> i32 {
+    let Some(port) = (unsafe { fm_port(fm) }) else {
+        return 0;
+    };
+    let Some(class) = fm::MemoryClass::from_index(class) else {
+        return 0;
+    };
+    let image: &[u8] = if length == 0 {
+        &[]
+    } else if bytes.is_null() {
+        return 0;
+    } else {
+        unsafe { std::slice::from_raw_parts(bytes, length) }
+    };
+    i32::from(port.set_memory(class, image))
+}
+
+/// Reports the chip clock: the samples it has rendered over its own rate.
+///
+/// # Safety
+///
+/// The pointer must name a live port.
+///
+/// @return seconds, and zero for a null port
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_fm_now(fm: *mut FmPort) -> f64 {
+    match unsafe { fm_port(fm) } {
+        None => 0.0,
+        Some(port) => port.now(),
+    }
+}
+
+/// Frees a port. The voice it fed is the mixer's to stop, through `STOP`.
+///
+/// # Safety
+///
+/// The pointer must come from `tecs_audio_fm_open` and must not be used again.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_fm_close(fm: *mut FmPort) {
+    if !fm.is_null() {
+        drop(unsafe { Box::from_raw(fm) });
+    }
+}
+
 /// Selects the command struct in `tecs_audio_layout`.
 pub const LAYOUT_COMMAND: u32 = 0;
 
@@ -413,6 +841,9 @@ pub const LAYOUT_EVENT: u32 = 1;
 
 /// Selects the clip-info struct in `tecs_audio_layout`.
 pub const LAYOUT_CLIP_INFO: u32 = 2;
+
+/// Selects the FM register-write struct in `tecs_audio_layout`.
+pub const LAYOUT_FM_WRITE: u32 = 3;
 
 /// Reports the size in bytes of one struct crossing the seam.
 ///
@@ -429,6 +860,7 @@ pub extern "C" fn tecs_audio_layout(kind: u32) -> u32 {
         LAYOUT_COMMAND => std::mem::size_of::<Command>(),
         LAYOUT_EVENT => std::mem::size_of::<Event>(),
         LAYOUT_CLIP_INFO => std::mem::size_of::<ClipInfo>(),
+        LAYOUT_FM_WRITE => std::mem::size_of::<RegisterWrite>(),
         _ => 0,
     };
     size as u32
@@ -1019,10 +1451,98 @@ mod tests {
     }
 
     #[test]
+    fn tolerates_a_null_port_and_refuses_a_synth_on_no_soundfont() {
+        let null: *mut Port = std::ptr::null_mut();
+        unsafe {
+            assert_eq!(tecs_audio_synth_send(null, 0x90, 60, 100, 0.0), 0);
+            assert_eq!(tecs_audio_synth_notes_off(null, -1, 1), 0);
+            assert_eq!(tecs_audio_synth_reset(null), 0);
+            assert_eq!(tecs_audio_synth_now(null), 0.0);
+            tecs_audio_synth_close(null);
+
+            let device = tecs_audio_open_offline(48_000, 2, 8);
+            let port = tecs_audio_synth_open(device, 1, 65_537, 64, 1);
+            assert!(port.is_null(), "no SoundFont is loaded under id 1");
+            assert!(!tecs_audio_last_error(device).is_null());
+
+            let path = CString::new("no/such/font.sf2").expect("the literal has no NUL");
+            let mut font = 0u32;
+            assert_eq!(
+                tecs_audio_load_soundfont(device, path.as_ptr(), &mut font),
+                STATUS_FAILED
+            );
+            assert_eq!(font, 0);
+            tecs_audio_release_soundfont(device, 1);
+            tecs_audio_close(device);
+        }
+    }
+
+    #[test]
+    fn tolerates_a_null_fm_port_and_refuses_what_is_out_of_range() {
+        let null: *mut FmPort = std::ptr::null_mut();
+        unsafe {
+            assert_eq!(tecs_audio_fm_write(null, 0xb0, 0x20, 0.0), 0);
+            assert_eq!(tecs_audio_fm_write_port(null, 0, 0x20, 0.0), 0);
+            assert_eq!(tecs_audio_fm_writes(null, std::ptr::null(), 0, 0.0, 0), 0);
+            assert_eq!(tecs_audio_fm_memory(null, 0, std::ptr::null(), 0), 0);
+            assert_eq!(tecs_audio_fm_reset(null, 0.0), 0);
+            assert_eq!(tecs_audio_fm_now(null), 0.0);
+            assert_eq!(tecs_audio_fm_rate(null), 0);
+            tecs_audio_fm_close(null);
+
+            let device = tecs_audio_open_offline(48_000, 2, 8);
+            let name = |text: &str| CString::new(text).expect("a name");
+            let opl2 = tecs_audio_fm_open(device, 65_537, name("opl2").as_ptr(), 0);
+            assert!(!opl2.is_null());
+            assert_eq!(tecs_audio_fm_rate(opl2), fm::RATE);
+            assert_eq!(tecs_audio_fm_write(opl2, 0xb0, 0x20, 0.0), 1);
+            assert_eq!(tecs_audio_fm_write(opl2, 0x100, 0x20, 0.0), 0);
+            assert_eq!(tecs_audio_fm_write(opl2, 0xb0, 0x100, 0.0), 0);
+            assert_eq!(tecs_audio_fm_write_port(opl2, 1, 0x20, 0.0), 1);
+            assert_eq!(tecs_audio_fm_write_port(opl2, 2, 0x20, 0.0), 0);
+            let batch = [
+                RegisterWrite {
+                    register: 0xa0,
+                    value: 0x41,
+                },
+                RegisterWrite {
+                    register: 0xb0,
+                    value: 0x32,
+                },
+            ];
+            assert_eq!(tecs_audio_fm_writes(opl2, batch.as_ptr(), 2, 0.0, 0), 1);
+            assert_eq!(tecs_audio_fm_writes(opl2, batch.as_ptr(), 2, 0.0, 1), 0);
+            assert_eq!(tecs_audio_fm_writes(opl2, std::ptr::null(), 0, 0.0, 0), 1);
+            assert_eq!(tecs_audio_fm_writes(opl2, std::ptr::null(), 2, 0.0, 0), 0);
+            assert_eq!(tecs_audio_fm_memory(opl2, 0, [1u8].as_ptr(), 1), 0);
+            assert_eq!(tecs_audio_fm_reset(opl2, 0.0), 1);
+            assert_eq!(tecs_audio_fm_now(opl2), 0.0);
+            let opl3 = tecs_audio_fm_open(device, 65_538, name("opl3").as_ptr(), 0);
+            assert_eq!(tecs_audio_fm_write(opl3, 0x1b0, 0x20, 0.0), 1);
+            let ym2610 = tecs_audio_fm_open(device, 65_539, name("ym2610").as_ptr(), 8_000_000);
+            assert_eq!(tecs_audio_fm_rate(ym2610), 55_555);
+            assert_eq!(tecs_audio_fm_memory(ym2610, 1, [1u8, 2].as_ptr(), 2), 1);
+            assert_eq!(tecs_audio_fm_memory(ym2610, 2, [1u8, 2].as_ptr(), 2), 0);
+            assert_eq!(tecs_audio_fm_memory(ym2610, 3, [1u8, 2].as_ptr(), 2), 0);
+            assert!(tecs_audio_fm_open(device, 65_540, name("sn76489").as_ptr(), 0).is_null());
+            let reason = CStr::from_ptr(tecs_audio_last_error(device)).to_string_lossy();
+            assert!(reason.contains("sn76489"), "{reason}");
+            assert!(tecs_audio_fm_open(device, 65_540, std::ptr::null(), 0).is_null());
+            tecs_audio_close(device);
+            // A port outlives its device.
+            assert_eq!(tecs_audio_fm_write(opl2, 0xb0, 0x00, 0.0), 1);
+            tecs_audio_fm_close(opl2);
+            tecs_audio_fm_close(opl3);
+            tecs_audio_fm_close(ym2610);
+        }
+    }
+
+    #[test]
     fn reports_the_size_of_every_struct_crossing_the_seam() {
         assert_eq!(tecs_audio_layout(LAYOUT_COMMAND), 48);
         assert_eq!(tecs_audio_layout(LAYOUT_EVENT), 8);
         assert_eq!(tecs_audio_layout(LAYOUT_CLIP_INFO), 8);
+        assert_eq!(tecs_audio_layout(LAYOUT_FM_WRITE), 4);
         assert_eq!(tecs_audio_layout(99), 0);
     }
 

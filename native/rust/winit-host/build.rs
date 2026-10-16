@@ -87,7 +87,7 @@ fn target_os() -> String {
 // one set of files, and `native-net` arrives with the I/O module extraction
 // builds its packet through. A host staged without them refuses to load the
 // component rather than failing later.
-const HOST_FEATURES: &str = "base,native-files,native-net";
+const HOST_FEATURES: &str = "base,native-files,native-net,native-compression";
 
 /// Names the run path a packaged link records instead of the staged SDK's
 /// absolute one.

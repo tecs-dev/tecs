@@ -51,6 +51,10 @@ pub const FLAG_STEREO: u32 = 4;
 /// Marks a `PLAY` reading its input from the file rather than held samples.
 pub const FLAG_STREAM: u32 = 8;
 
+/// Marks a `PLAY` whose input is the synthesizer `tecs_audio_synth_open` or
+/// `tecs_audio_fm_open` parked under the command's handle, rather than a clip.
+pub const FLAG_SYNTH: u32 = 16;
+
 /// Requests one operation.
 ///
 /// One struct covers every operation, because the array crossing the seam has

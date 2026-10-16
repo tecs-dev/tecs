@@ -50,8 +50,10 @@ test suite reach the same world without starting a graphics stack.
 - Camera, layers with positioning modes, images, clips, sprite sheets with
   animation, and distance-field text.
 - Input across keyboard, pointer, gamepad and touch; audio playback, recording
-  and device enumeration; physics over Rapier; sequencing with tweening; asset
-  orchestration; file watching; and an MCP debug server.
+  and device enumeration; General MIDI from a SoundFont; emulated Yamaha FM
+  chips, from the OPL2 and OPL3 to the YM2612 and the OPL4; MIDI, VGM, VGZ and
+  DRO music played on them; physics over Rapier; sequencing with tweening;
+  asset orchestration; file watching; and an MCP debug server.
 
 - [Tiled TMX maps and TSX tilesets](docs/tiled/index.md), animated tile and image
   layers, object factories, runtime tile edits and authored collision outlines.
@@ -541,6 +543,244 @@ The capture buffer is bounded rather than growing without limit as the SDL
 stream did. It holds one second by default, drops the oldest, and reports the
 loss through `Microphone.overruns`. An unbounded allocation driven by a
 realtime callback was not worth carrying across.
+
+## General MIDI is synthesized in-process
+
+`tecs.audio.synth` renders General MIDI from a SoundFont with `rustysynth`
+(MIT, pure Rust, no dependencies) as one voice of the mixer, rather than
+sending MIDI to whatever synthesizer the operating system offers. On a desktop
+the system synthesizer is software too: Apple's DLS synth on macOS, the
+Microsoft GS Wavetable synth on Windows, and on Linux nothing at all unless the
+player installed and started FluidSynth or TiMidity. Sending to it buys no
+quality and gives up three things a game needs. The music sounds the same on
+every machine, because the SoundFont ships with the game instead of being
+whatever bank the platform has. It goes through the mixer, so group gain, mute,
+pause and master gain apply to it like any other sound, and a system synth
+offers none of them. And it is deterministic: events carry a time on the
+synthesizer's own clock, the callback splits its render at those times, and the
+same schedule renders the same samples on every run, which a test can pin and
+a recording can reproduce. An external synth answers on its own clock and its
+own latency, and the mix of the two cannot be captured offline.
+
+Timing is exact to `rustysynth`'s internal block, which is where it applies
+MIDI and runs its envelopes. Tecs sets that block to eight frames, the smallest
+the library takes: every event lands on the first eight-frame boundary at or
+after its time, 0.17 milliseconds at worst at 48 kHz. Measured on FluidR3 GM
+with 48 notes held and the effects on, that costs 3.3 percent of one core
+against 1.9 at the library's default of 64 frames.
+
+Events cross to the output callback through a bounded single-producer,
+single-consumer ring, 4096 events, with as many again held in a preallocated
+schedule for events sent ahead of their time. The callback never waits and
+never allocates; a send that finds no room returns false and the event is
+dropped, because the alternatives are blocking the frame thread or growing a
+buffer the callback reads. A game streaming a song with a lookahead of a frame
+or two never comes near it.
+
+A hardware MIDI output is the extension this leaves room for and does not
+build. The seam is `tecs.platform.audiobackend.SynthPort`: `send` with a time,
+`notesOff`, `reset` and a clock. A second implementation over `midir`
+(CoreMIDI, WinMM, ALSA) would put a sender thread in Rust that holds the
+schedule and writes each message when its time comes, with `now` on the host's
+monotonic clock instead of rendered frames, chosen when the synth is made.
+Nothing above the port changes. It is deferred because nothing needs it yet,
+and what it costs is the determinism above: a hardware synth cannot be rendered
+offline.
+
+## FM synthesis is a register-level chip, emulated by a Rust crate
+
+`tecs.audio.fm` is a Yamaha OPL2 (YM3812) or OPL3 (YMF262) a game drives by
+writing its registers, played as one voice of the mixer on the same scheduler
+as the General MIDI synth. It is for the music and effects of the DOS era,
+which were written as streams of register writes to an AdLib or a Sound
+Blaster, and a port of such a game wants to replay what its driver wrote, not
+an approximation of it.
+
+The interface is registers only: `write`, `writes` for a tick's batch, `reset`
+and a clock. A note-and-instrument layer was the alternative, and it lost
+because it is the part that differs between games. Every driver had its own
+instrument format, its own channel allocation and its own idea of a note, and
+an engine layer would have had to pick one or grow into a superset of all of
+them. The chip is the one contract they all shared. A game that wants notes
+writes a driver for its own format above this, in Nupp, and gets exactly the
+sound that format made. Status and timer reads are left out for the same
+reason they are left out of the scheduler: a driver that paced itself on the
+chip's timers paces itself on `now` instead, and a read would need an answer
+from the audio thread inside the call.
+
+Writes land on the first chip sample at or after their time, a grid of one
+rather than the synth's eight, because a register write takes effect on the
+next sample the chip computes and a driver's timing is part of its sound: a
+key-off and key-on a sample apart is a retrigger, and moving it eight samples
+changes the attack. The scheduler names its grid per target to allow that,
+eight frames for the synth and one for the chip, and the ring, the schedule
+and the source are otherwise the synth's, so the queue bound and the clock
+behave the same way. Writes due on one sample all apply before that sample is
+generated, in sending order, so a key-off and a key-on there count as no
+change: a driver that re-strikes a note spaces the two writes one sample apart,
+which is what the hardware's write timing did anyway. `writes` is all or
+nothing, because a tick applied in part plays a note with half its instrument.
+
+A reset carries a time like a write. Writes sent before it and due before it
+still apply; those due at or after it are discarded, so nothing scheduled
+earlier plays over the silence it makes, and writes sent after it apply as
+usual, at its own sample included. The synth's reset, which lands at its next
+block, keeps its old meaning; the chip's needed a time because a driver
+restarting a song schedules the restart rather than taking it whenever the
+next buffer begins.
+
+The chip renders at its own rate and the mixer voice resamples it as it would
+a clip, so the clock counts chip samples and the output rate does not leak
+into a driver's timing. The rate is the input clock over 72 on the OPL2,
+3.579545 MHz, and over 288 on the OPL3, four times that: 49 715.9 Hz, which
+the emulator truncates to 49715. Rounding it to 49716 instead, as an earlier
+draft did, would be closer by under twenty parts per million, which is a
+thirtieth of a cent of pitch and under a tenth of a second an hour of tempo,
+below anything heard; the clock simply has to agree with the emulator, and a test
+holds `rate` to what the emulator reports for both chips.
+
+The emulator is ymfm-oxide (<https://github.com/albanmgicquel/ymfm-oxide>), a
+pure-Rust, `no_std`, dependency-free port of ymfm, Aaron Giles's BSD-3-Clause
+emulator of the Yamaha FM family, used for its YM3812 and YMF262: OPL3
+4-operator pairs, all eight waveforms, the NEW bit, stereo and rhythm mode.
+Linking ymfm's C++ was the alternative, and it lost to the build: every other
+native service here is Cargo only, and a C++ toolchain on every platform,
+Windows included, for one module was not a cost worth carrying. ymfm was the
+source because it is permissively licensed and written to be read, which is
+what makes a port checkable. The candidates under the LGPL or the GPL,
+Nuked-OPL3 and DOSBox's among them, are excluded by the licence rule in
+`THIRD_PARTY_NOTICES.md`, and so is anything developed from them.
+
+The port lives in its own crate rather than in this tree, and it was first
+written here. Kept here, Tecs carried a few thousand lines of BSD-3-Clause
+source with its own notices, its golden renders and a C++ oracle, none of it
+about the engine; as a crate it is one dependency with one notice, its check
+lives with its code, and the other chips ymfm models come with it for whoever
+wants them. The crate holds itself to ymfm sample for sample with golden
+renders of synthetic register logs, made by ymfm through an oracle program,
+and a randomized differential test against it. It is a git dependency pinned
+to a full commit, and `Cargo.lock` records that commit, so a build cannot pick
+up a different emulator without a change here. `tecs-audio` drives it through
+the chips' own ports: a register below 0x100 through the address port at
+offset 0 and the data port at 1, one from 0x100 up through the OPL3's
+second-bank address port at 2 and the data port at 3, which is how the chip
+itself folds a second-bank write back to the first until the NEW bit is set.
+The OPL3's left and right are its outputs A and B; the OPL2 is mono and plays
+its one output on both sides.
+
+## Every chip the emulator models is one voice, named by its part number
+
+`tecs.audio.fm` began as the OPL2 and OPL3 and now makes any of the 24 chips
+ymfm-oxide models, because the register logs a game ships or a player loads
+are not all DOS ones: a Mega Drive log is a YM2612, an arcade one a YM2151 or
+a YM2610, an MSX one a YM2413 beside a Y8950. The alternative was a module per
+family, and it lost because the families differ only in data a table holds:
+where the registers sit among the ports, what the input clock usually was, how
+the outputs reach two speakers and what memory the chip reads. The contract a
+game writes against, registers, a clock and `at`, is the same for all of them,
+so the chip is a name and a clock and nothing else changes. Names are Yamaha
+part numbers in lower case rather than family names, because a family name
+does not say which chip: an OPN is any of eight. `"opl2"` and `"opl3"` stay as
+aliases, so the first callers never notice.
+
+The register convenience stays the primary interface, since every log and every
+driver's source names registers, and it maps a register's high byte to the
+bank's address and data ports: one bank at offsets 0 and 1, the second at 2 and
+3, the OPL4's PCM registers as a third at 4 and 5, and the YM2149's data port
+at 2. The OPQ has no address port and is written by register. Port writes are
+offered beside it for the driver that wrote the bus itself, and a test holds the
+two to the same render.
+
+The chip renders at the emulator's own rate for its clock, which the voice
+resamples. Two consequences needed decisions. The OPN chips with an SSG default
+in ymfm to their highest fidelity, a megahertz for the YM2203, and run here at
+their lowest, which keeps every FM sample and averages the SSG's; and where the
+emulator still renders faster than 64 kHz, as the YM2203, the YM2608 and the
+YMF288 do, consecutive samples are averaged into one frame of the chip's clock.
+That keeps the mixer's linear resampler away from ratios where it aliases, and
+it puts a ceiling on `rate`, the unit of `at`. Outputs fold to stereo by a
+fixed table: a mono chip on both sides, the OPL3's A and B, the OPL4's mixed
+pair, the SSG at two thirds of its channels' sum, which is ymfm's own mix.
+The SSG's square waves swing between zero and a positive level, which a real
+board's output capacitor took out, so a chip with one has a 5 Hz high-pass
+filter on its output; without it a song would start and end with a click and
+carry an offset into the mix.
+
+External memory is images a game hands over, whole: `setMemory` replaces the
+ADPCM-A, ADPCM-B or PCM image from the next frame, and a reset keeps it. The
+images belong to the audio thread's half of the chip. ymfm reaches memory
+through the chip's interface, which the chip owns and not every chip lends
+back, so the interface holds a pointer to images the target owns, read and
+swapped only between samples on the one thread that renders; a lock around
+them was the alternative and lost, being a lock on the audio thread taken on
+every ADPCM fetch to protect nothing a second thread touches. An image crosses
+on a bounded channel of its own, paired with an event in the write queue that
+says when to take it, and the image it displaces goes back to the game thread
+to be freed there. Timers, busy time and the IRQ line are not offered: a log is
+already timed and a driver paces on `now`, and an answer from the emulator
+inside a call would need the audio thread to reply. What that leaves out is
+the OPN's CSM key-on and the ADPCM end-of-sample flags, which only a timer or a
+status read can drive.
+
+An idle chip at its usual clock costs between a fifth of a percent and one
+percent of a core in a release build, measured over a second of rendering; the
+YMF288 is the dearest and the YM2149 the cheapest.
+
+## Music is two asset kinds and a player that owns its voices
+
+`tecs.audio.music` plays songs on the synthesizer voices: Standard MIDI Files on
+the General MIDI synth, and VGM, VGZ and DRO register logs on emulated FM chips.
+Each format is a `tecs.assets.Kind`, `"music.midi"` and `"music.fm"`,
+which are content kind names and so a compatibility surface, and a
+`tecs.audio.music.Player` plays what one loaded.
+
+The files are parsed in Nupp, on the loader's readiness pump, up to 65 536
+commands a pass, so a large log loads across frames instead of stalling one.
+A worker lane was the alternative and lost: it needs the `workers` host
+feature and a sendable parser, and its result, tens of thousands of events,
+would be copied back across the lane only to be read on the frame thread
+anyway. Parsing in Rust lost for the same reason, with a structured payload to
+carry over the C ABI besides. A log is kept as two integer arrays, a tick and
+a packed chip, register and value a write, rather than a record per write,
+because a long VGM holds hundreds of thousands of them. VGZ inflates through
+`nupp.compression`, which is Nupp's and so is what Tecs uses: the host now
+stages the `native-compression` feature beside `native-files` and
+`native-net`, in the three places that list them. `flate2`, already in the
+Cargo graph through `tecs-assets`, would have worked too, and is exactly the
+wrapper around a Nupp facility the project does not keep.
+
+A player owns its voices, a synth for a MIDI song and one chip for each chip a
+log names, and the handle it plays, which it retains and watches for a reload.
+The mixer's `update` advances every player made on it, because a game already
+calls that every frame and keeps calling it while its world is paused; a
+`Music` component was the alternative, and it lost because a song is a handle
+and a set of voices, neither of which is data a snapshot could carry or a row
+could own. The player schedules ahead on the voices' own clock, `lookahead`
+seconds at a time, so timing follows the audio rather than the frame rate. When
+a stall makes an event late, that event plays at once and the rest keep their
+distance from it: the song slips by the stall instead of rushing what it
+missed, and a stall over a rest changes nothing. A loop ends before the
+events at its end, which belong to the next pass, and held notes are released
+there; the song's own end takes everything, so its closing note offs are sent.
+A song loops forever when it has a loop point and plays once when it has none.
+
+Seeking resets the voices and rebuilds their state rather than replaying the
+song up to the point: a MIDI song sends the programs, controllers and bends in
+force there, and a log writes the last value of every register. The second is
+exact for everything a register holds and approximate for what a chip holds
+besides, envelopes in flight and the OPN's shared key-on register among them,
+so a note held across the point comes back at its next key-on. System
+exclusive messages are kept in a song but not sent, because the synth takes
+short messages; the resets they carry are what a fresh synth already is.
+
+A VGM file is a log of every chip in a machine, and a Mega Drive's has an
+SN76489 beside its YM2612. Refusing such a file because one of its chips is
+not a Yamaha one would make the YM2612 useless, so each chip Tecs cannot
+emulate is skipped with a reason in `skipped`, and only a file left with
+nothing is refused. The YM2612's DAC writes from a data bank, the `0x8n`
+commands and the DAC streams, are turned into ordinary register writes at
+their times when the file is read, so the player knows nothing of them, and a
+format 2 MIDI file's patterns play one after another.
 
 ## Device vocabularies follow the library that reports them
 

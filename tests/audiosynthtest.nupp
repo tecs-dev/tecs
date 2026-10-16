@@ -1,0 +1,387 @@
+local audio = require("tecs.audio")
+local audiobackend = require("tecs.platform.audiobackend")
+local synth = require("tecs.audio.synth")
+local test = require("nupp.test")
+
+local suite = {}
+
+--- One event a test port received, as the port saw it.
+local record Sent
+    kind: string
+    status: integer
+    data1: integer
+    data2: integer
+    at: number
+end
+
+--- A backend with a synthesizer that logs every event instead of rendering.
+local record Harness
+    backend: audiobackend.Backend
+    commands: {audiobackend.Command}
+    sent: {Sent}
+    fonts: {string}
+    opened: {integer}
+    closed: {integer}
+    full: {boolean}
+end
+
+local function newHarness(available: boolean, withSynth: boolean): Harness
+    local commands: {audiobackend.Command} = {}
+    local sent: {Sent} = {}
+    local fonts: {string} = {}
+    local opened: {integer} = {}
+    local closed: {integer} = {0}
+    local full = {false}
+
+    local function record(kind: string, status: integer, data1: integer, data2: integer, at: number): boolean
+        if full[1] then
+            return false
+        end
+        sent[#sent + 1] = new Sent(kind = kind, status = status, data1 = data1, data2 = data2, at = at)
+
+        return true
+    end
+
+    local backend = audiobackend.silent()
+    backend.available = available
+    backend.submit = function(pending: {audiobackend.Command}, count: integer): nil
+        for index = 1, count do
+            local source = pending[index]
+            local copy = audiobackend.newCommand()
+            copy.kind = source.kind
+            copy.handle = source.handle
+            copy.clip = source.clip
+            copy.flags = source.flags
+            copy.gain = source.gain
+            copy.fade = source.fade
+            commands[#commands + 1] = copy
+        end
+    end
+    if withSynth then
+        backend.loadSoundFont = function(path: string): (integer?, string?)
+            if path == "missing.sf2" then
+                return nil, "cannot open 'missing.sf2'"
+            end
+            fonts[#fonts + 1] = path
+
+            return #fonts
+        end
+        backend.openSynth = function(
+            _font: integer,
+            handle: integer,
+            _polyphony: integer,
+            _effects: boolean
+        ): (audiobackend.SynthPort?, string?)
+            opened[#opened + 1] = handle
+
+            return new audiobackend.SynthPort(
+                send = function(status: integer, data1: integer, data2: integer, at: number): boolean
+                    return record("message", status, data1, data2, at)
+                end,
+                notesOff = function(channel: integer, immediate: boolean): boolean
+                    return record("notesOff", channel, immediate and 1 or 0, 0, 0)
+                end,
+                reset = function(): boolean
+                    return record("reset", 0, 0, 0, 0)
+                end,
+                now = function(): number
+                    return 1.5
+                end,
+                close = function(): nil
+                    closed[1] = closed[1] + 1
+                end
+            )
+        end
+    end
+
+    return new Harness(
+        backend = backend,
+        commands = commands,
+        sent = sent,
+        fonts = fonts,
+        opened = opened,
+        closed = closed,
+        full = full
+    )
+end
+
+local function lastCommand(harness: Harness, kind: integer): audiobackend.Command?
+    for index = #harness.commands, 1, -1 do
+        if harness.commands[index].kind == kind then
+            return harness.commands[index]
+        end
+    end
+
+    return nil
+end
+
+local function made(harness: Harness, options: synth.Options?): (audio.Audio, synth.Synth)
+    local mixer = audio.newAudio({backend = harness.backend, maxVoices = 2})
+    local font = assert(synth.loadSoundFont(mixer, "gm.sf2"))
+
+    return mixer, assert(synth.new(mixer, font, options))
+end
+
+function suite.loadsOneSoundFontPerPathAndReportsAFailure(): nil
+    local harness = newHarness(true, true)
+    local mixer = audio.newAudio({backend = harness.backend})
+    local first = assert(synth.loadSoundFont(mixer, "gm.sf2"))
+    test.equal(first.path, "gm.sf2")
+    test.equal(synth.loadSoundFont(mixer, "gm.sf2"), first)
+    test.equal(#harness.fonts, 1)
+
+    local missing, reason = synth.loadSoundFont(mixer, "missing.sf2")
+    test.equal(missing, nil)
+    test.matches(assert(reason), "missing")
+    test.raises(
+        function(): nil
+            synth.loadSoundFont(mixer, "")
+        end,
+        "cannot be empty"
+    )
+end
+
+function suite.startsTheSynthAsOneVoiceOfTheMixer(): nil
+    local harness = newHarness(true, true)
+    local mixer, music = made(harness, {group = "music", gain = 0.5})
+    test.equal(mixer:sounding(), 1)
+    mixer:update()
+    local play = assert(lastCommand(harness, audiobackend.PLAY))
+    test.equal(play.flags, audiobackend.SYNTH)
+    test.equal(play.gain, 0.5)
+    -- The synthesizer was opened for the voice that started, before the
+    -- start crossed, which is what hands it to the mixer.
+    test.equal(harness.opened[1], play.handle)
+
+    mixer:setGroupGain("music", 0.5)
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.SET_GAIN)).gain, 0.25)
+    mixer:setGroupMuted("music", true)
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.SET_GAIN)).gain, 0)
+    mixer:setGroupMuted("music", false)
+    music:setGain(1)
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.SET_GAIN)).gain, 0.5)
+    mixer:pauseGroup("music")
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.PAUSE)).handle, play.handle)
+
+    music:destroy()
+    music:destroy()
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.STOP)).handle, play.handle)
+    test.equal(harness.closed[1], 1)
+    test.equal(mixer:sounding(), 0)
+end
+
+function suite.pausesTheVoiceAndFadesItOut(): nil
+    local harness = newHarness(true, true)
+    local mixer, music = made(harness)
+    mixer:update()
+    local handle = assert(lastCommand(harness, audiobackend.PLAY)).handle
+    music:pause()
+    test.assert(music:paused())
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.PAUSE)).handle, handle)
+    music:resume()
+    test.assert(not music:paused())
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.RESUME)).handle, handle)
+    music:destroy(0.75)
+    mixer:update()
+    local stop = assert(lastCommand(harness, audiobackend.STOP))
+    test.equal(stop.handle, handle)
+    test.equal(stop.fade, 0.75)
+    test.equal(harness.closed[1], 1)
+end
+
+function suite.countsAgainstTheVoiceCeiling(): nil
+    local harness = newHarness(true, true)
+    local mixer = audio.newAudio({backend = harness.backend, maxVoices = 1})
+    local font = assert(synth.loadSoundFont(mixer, "gm.sf2"))
+    local first = assert(synth.new(mixer, font))
+    local second, reason = synth.new(mixer, font)
+    test.equal(second, nil)
+    test.matches(assert(reason), "every voice is busy")
+    first:destroy()
+    test.assert(synth.new(mixer, font) ~= nil)
+end
+
+function suite.sendsEveryHelperAsTheShortMessageItNames(): nil
+    local harness = newHarness(true, true)
+    local _mixer, music = made(harness)
+    test.assert(music:noteOn(2, 60, 100, 0.25))
+    test.assert(music:noteOff(2, 60))
+    test.assert(music:controlChange(9, 7, 90, 1))
+    test.assert(music:programChange(15, 40))
+    test.assert(music:pitchBend(0, 8192))
+    test.assert(music:pitchBend(0, 16383))
+    test.assert(music:send(0xF8, 0, 0))
+    local expected: {
+        {number}
+    } = {
+        {0x92, 60, 100, 0.25},
+        {0x82, 60, 0, 0},
+        {0xB9, 7, 90, 1},
+        {0xCF, 40, 0, 0},
+        {0xE0, 0, 64, 0},
+        {0xE0, 127, 127, 0},
+        {0xF8, 0, 0, 0},
+    }
+    test.equal(#harness.sent, #expected)
+    for index = 1, #expected do
+        local event = harness.sent[index]
+        test.equal(event.kind, "message")
+        test.equal(event.status, expected[index][1])
+        test.equal(event.data1, expected[index][2])
+        test.equal(event.data2, expected[index][3])
+        test.equal(event.at, expected[index][4])
+    end
+    test.equal(music:now(), 1.5)
+end
+
+function suite.carriesNotesOffAndResetToThePort(): nil
+    local harness = newHarness(true, true)
+    local _mixer, music = made(harness)
+    test.assert(music:allNotesOff())
+    test.assert(music:allNotesOff(3, true))
+    test.assert(music:reset())
+    test.equal(harness.sent[1].kind, "notesOff")
+    test.equal(harness.sent[1].status, -1)
+    test.equal(harness.sent[1].data1, 0)
+    test.equal(harness.sent[2].status, 3)
+    test.equal(harness.sent[2].data1, 1)
+    test.equal(harness.sent[3].kind, "reset")
+end
+
+function suite.reportsAFullQueueAsAnUnqueuedEvent(): nil
+    local harness = newHarness(true, true)
+    local _mixer, music = made(harness)
+    harness.full[1] = true
+    test.assert(not music:noteOn(0, 60, 100))
+    test.assert(not music:reset())
+    music:destroy()
+    harness.full[1] = false
+    test.assert(not music:noteOn(0, 60, 100), "a destroyed synth queues nothing")
+    test.equal(music:now(), 0)
+end
+
+function suite.raisesForAValueOutsideItsRange(): nil
+    local harness = newHarness(true, true)
+    local mixer, music = made(harness)
+    test.raises(
+        function(): nil
+            music:noteOn(16, 60, 100)
+        end,
+        "channel must be from 0 to 15"
+    )
+    test.raises(
+        function(): nil
+            music:noteOn(0, 128, 100)
+        end,
+        "key"
+    )
+    test.raises(
+        function(): nil
+            music:send(0x7F, 0, 0)
+        end,
+        "status"
+    )
+    test.raises(
+        function(): nil
+            music:pitchBend(0, 16384)
+        end,
+        "value"
+    )
+    test.raises(
+        function(): nil
+            music:allNotesOff(-1)
+        end,
+        "channel"
+    )
+    local font = assert(synth.loadSoundFont(mixer, "gm.sf2"))
+    test.raises(
+        function(): nil
+            synth.new(mixer, font, {polyphony = 4})
+        end,
+        "polyphony"
+    )
+    local other = audio.newAudio({backend = newHarness(true, true).backend})
+    test.raises(
+        function(): nil
+            synth.new(other, font)
+        end,
+        "another mixer"
+    )
+    test.equal(#harness.sent, 0)
+end
+
+function suite.acceptsEverythingSilentlyWithoutAnOutput(): nil
+    -- A mixer with no output takes no voice, and its synth still answers
+    -- every call, on a clock that never moves because nothing renders.
+    local mixer = audio.newAudio({backend = audiobackend.silent()})
+    local font = assert(synth.loadSoundFont(mixer, "gm.sf2"))
+    local music = assert(synth.new(mixer, font))
+    test.equal(mixer:sounding(), 0)
+    test.assert(music:noteOn(0, 60, 100, 0.5))
+    test.assert(music:allNotesOff())
+    test.equal(music:now(), 0)
+    music:destroy()
+end
+
+function suite.takesAVoiceButRendersNothingOnABackendWithNoSynthesizer(): nil
+    local harness = newHarness(true, false)
+    local mixer, music = made(harness)
+    test.equal(mixer:sounding(), 1)
+    test.assert(music:noteOn(0, 60, 100))
+    test.equal(#harness.sent, 0)
+    test.equal(music:now(), 0)
+end
+
+--- Returns the native binding, or skips when `libtecsaudio` is not staged.
+local function binding(): {[string]: any}
+    local ok, loaded = pcall(require, "tecs.platform.audionative")
+    if not ok then
+        test.skip("libtecsaudio is not on the loader path: " .. tostring(loaded))
+    end
+
+    return loaded as {[string]: any}
+end
+
+function suite.refusesAMissingSoundFontThroughTheNativeBackend(): nil
+    local backend = binding().openOffline(48000, 2, 8) as audiobackend.Backend?
+    if backend == nil then
+        test.skip("libtecsaudio did not open")
+    end
+    local mixer = audio.newAudio({backend = backend})
+    local font, reason = synth.loadSoundFont(mixer, "tests/audio/no-such-font.sf2")
+    test.equal(font, nil)
+    test.matches(assert(reason), "cannot open")
+    mixer:destroy()
+end
+
+function suite.loadsARealSoundFontThroughTheNativeBackend(): nil
+    -- No SoundFont ships in the tree, and the verify gate counts a skip as a
+    -- failure, so a run without one passes here having proved nothing more
+    -- than the missing-file case above does.
+    local path = os.getenv("TECS_TEST_SOUNDFONT")
+    if path == nil or path == "" then
+        return
+    end
+    local backend = binding().openOffline(48000, 2, 8) as audiobackend.Backend?
+    if backend == nil then
+        test.skip("libtecsaudio did not open")
+    end
+    local mixer = audio.newAudio({backend = backend})
+    local font = assert(synth.loadSoundFont(mixer, assert(path)))
+    -- The offline backend reports no output, so the synth plays through no
+    -- voice and renders nothing; the load is what crossed into Rust.
+    local music = assert(synth.new(mixer, font))
+    test.assert(music:noteOn(0, 60, 100))
+    test.equal(music:now(), 0)
+    music:destroy()
+    mixer:destroy()
+end
+
+return suite

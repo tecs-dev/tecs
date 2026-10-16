@@ -1,0 +1,661 @@
+module tecs.audio.music
+
+--[[
+Songs played on the mixer's synthesizer voices: Standard MIDI Files on the
+General MIDI synth, and register logs on emulated FM chips.
+
+Two asset kinds load them through [`Assets`](tecs.assets.Assets), and a
+[`Player`](tecs.audio.music.Player) plays a loaded song:
+
+```nupp
+local mixer <const> = tecs.audio.newAudio()
+local font <const> = assert(tecs.audio.synth.loadSoundFont(mixer, "assets/music/FluidR3_GM.sf2"))
+local song <const> = assert(app.assets:request(tecs.audio.music.midi.kind, "assets/music/theme.mid"))
+local player <const> = assert(tecs.audio.music.midi.play(mixer, font, song, {group = "music"}))
+song:release() -- the player holds the song for as long as it plays
+
+local log <const> = assert(app.assets:request(tecs.audio.music.fm.kind, "assets/music/stage1.vgz"))
+local chiptune <const> = assert(tecs.audio.music.fm.play(mixer, log, {group = "music"}))
+log:release()
+```
+
+[`tecs.audio.music.midi`](tecs.audio.music.midi) reads `.mid` files, format
+0, 1 and 2. [`tecs.audio.music.fm`](tecs.audio.music.fm) reads VGM, its
+gzip-compressed form VGZ, and the DOSBox Raw OPL captures `.dro`, versions 1
+and 2. Both parse in Nupp on the loader's readiness pump, a slice at a time, so
+a large file loads across frames rather than stalling one.
+
+## Playing
+
+A player owns the voices it plays through, a synth for a MIDI song and one
+chip for each chip a register log names, and frees them when it stops. It
+holds the song handle it was given until then, so the caller releases its own
+hold as soon as `play` returns. Every mixer `update` advances every player
+made on that mixer, so a game that already drives its mixer drives its music
+too, and keeps doing so while its world is paused.
+
+The player schedules ahead on the voices' own clock: each update sends what
+falls due within `lookahead` seconds of `now`, stamped with the time it is due
+at, so the music keeps its timing whatever the frame rate does. After a stall
+longer than the lookahead, the song slips rather than rushing to catch up: the
+first event the stall made late plays at once, and everything after it keeps
+its distance from it, rather than everything missed playing together. A stall
+over a rest in the music changes nothing. A send the voice's bounded queue
+refuses is retried on the next update.
+
+## Looping, tempo and position
+
+A song with a loop point loops forever unless `loop` says otherwise: a MIDI
+file through a `loopStart` and `loopEnd` marker or controller 111, a VGM file
+through its loop offset. A song without one plays once and then reports
+`finished`. `setTempo` scales the speed: two plays twice as fast. On a MIDI
+song that is the tempo; on a register log it is the rate the writes arrive at,
+so notes keep their pitch but envelopes run at the chip's own speed.
+
+`seek` moves to a time in the song. A MIDI player resets the synth and sends
+the programs, controllers and pitch bends in force at that point; a register
+log resets each chip and writes the last value of every register before it. A
+note held across the point comes back on a MIDI song's next note on, and on a
+chip with the envelope restarted.
+
+## Reload
+
+A song handle reloaded through `Assets.reload` advances its revision, and a
+player watching it rebuilds itself on the new song at the position it had
+reached. A register log whose chips changed makes new chips.
+
+## Other formats
+
+A player is driven through a [`Driver`](tecs.audio.music.Driver), which is all
+a format module supplies. A game that has a format of its own can write one
+and play it with `newPlayer`.
+]]
+
+local assets = require("tecs.assets")
+local audio = require("tecs.audio")
+local audiosynth = require("tecs.internal.audiosynth")
+
+--- Seconds of song a player keeps scheduled ahead of the voice clock unless
+--- asked otherwise: two or three frames' worth, which absorbs an ordinary
+--- hitch.
+local DEFAULT_LOOKAHEAD: number = 0.05
+
+--- The range `lookahead` may take, in seconds.
+local MIN_LOOKAHEAD: number = 0.005
+
+local MAX_LOOKAHEAD: number = 2
+
+--- Seconds after `now` a start, a seek or a slip lands at, so its first
+--- events are scheduled rather than late.
+local LEAD: number = 0.01
+
+--- The shortest loop a player repeats, in seconds of song. A loop point that
+--- leaves less than this is ignored, because repeating it would spin.
+local MIN_LOOP: number = 0.001
+
+--- The range `setTempo` takes.
+local MIN_TEMPO: number = 0.01
+
+local MAX_TEMPO: number = 100
+
+--- Where a player stands.
+export type State = "playing" | "paused" | "finished" | "stopped"
+
+--- What a format module supplies to a [`Player`](tecs.audio.music.Player):
+--- the voices a song plays on and the song's events, behind the operations a
+--- player needs.
+---
+--- Song time is seconds from the start of the song at a tempo of one. Clock
+--- time is seconds on the voices' own clock, which `now` reads. A player maps
+--- one to the other with an anchor: song time `song` is clock time `clock`,
+--- and `tempo` song seconds pass for each clock second.
+export record Driver
+    --- Read-only. Reports the song's length in seconds.
+    duration: number
+
+    --- Read-only. Reports where the song loops back to, in seconds, or nil for
+    --- a song without a loop.
+    loopStart: number?
+
+    --- Read-only. Reports where a loop ends and the song goes back to
+    --- `loopStart`, in seconds, or nil for the end of the song.
+    loopEnd: number?
+
+    --- Read-only. Reports the seconds a voice keeps sounding after the last
+    --- event, for releases and reverb, before a finished song frees it.
+    tail: number
+
+    --- Read-only. Reports the voices' clock in seconds.
+    now: function(): number
+
+    --- Read-only. Sends every event due at or after the driver's cursor and
+    --- before song time `to`, each at clock time
+    --- `clock + (time - song) / tempo`, and returns the song time it reached:
+    --- `to`, or the time of the first event a voice refused, which the next
+    --- call starts from.
+    schedule: function(to: number, song: number, clock: number, tempo: number): number
+
+    --- Read-only. Reports the song time of the first event the cursor has not
+    --- sent, or nil when every event has gone.
+    pending: function(): number?
+
+    --- Read-only. Moves the cursor back to song time `target` for a loop,
+    --- after ending what still sounds at clock time `at`.
+    jump: function(target: number, at: number): nil
+
+    --- Read-only. Moves the cursor to song time `target` from anywhere,
+    --- putting the voices in the state the song had there, at clock time `at`.
+    seek: function(target: number, at: number): nil
+
+    --- Read-only. Replaces the song with the payload of a reloaded handle,
+    --- and returns false and a reason when it cannot.
+    reload: function(payload: any): (boolean, string?)
+
+    --- Read-only. Pauses every voice, which stops its clock.
+    pause: function(): nil
+
+    --- Read-only. Resumes every voice.
+    resume: function(): nil
+
+    --- Read-only. Sets the gain of every voice.
+    setGain: function(gain: number): nil
+
+    --- Read-only. Mutes or unmutes one part of the song: a MIDI channel or a
+    --- chip, numbered from zero.
+    setMuted: function(index: integer, muted: boolean): nil
+
+    --- Read-only. Stops and frees every voice, over `fadeOut` seconds when
+    --- that is given.
+    stop: function(fadeOut: number?): nil
+end
+
+--- Configures a player. The format modules' `play` functions take it too.
+export type PlayOptions = {
+    --- Caller-writable. Selects the group the player's voices join, so the
+    --- group's gain, mute and pause apply to them. Defaults to none.
+    group: string?,
+
+    --- Caller-writable. Sets the linear gain of the player's voices, before
+    --- group and master gain, and defaults to one.
+    gain: number?,
+
+    --- Caller-writable. Repeats the song from its loop point. Defaults to true
+    --- when the song has one, and is ignored when it has none.
+    loop: boolean?,
+
+    --- Caller-writable. Scales the speed, from 0.01 to 100, and defaults to
+    --- one.
+    tempo: number?,
+
+    --- Caller-writable. Sets the seconds the player schedules ahead, from
+    --- 0.005 to 2, and defaults to 0.05.
+    lookahead: number?,
+
+    --- Caller-writable. Sets where in the song playback starts, in seconds,
+    --- and defaults to zero.
+    start: number?
+}
+
+--- A song playing on voices of its own.
+---
+--- Made by `tecs.audio.music.midi.play`, `tecs.audio.music.fm.play` or
+--- `newPlayer`, advanced by the mixer's `update`, and finished with `stop`.
+--- Nothing here raises for a player that has stopped: every call on one
+--- does nothing.
+export record Player
+    @private driver: Driver
+    @private handle: assets.Handle?
+    @private revision: integer
+    @private state: State
+    @private loop: boolean
+    @private tempoScale: number
+    @private lookahead: number
+    @private cursor: number
+    @private anchorSong: number
+    @private anchorClock: number
+    @private previousSong: number
+    @private previousClock: number
+    @private finishClock: number
+    @private loopCount: integer
+    @private completed: boolean
+    @private failure: string?
+
+    stop: function(exclusive self: Player, fadeOut: number?): nil
+    pause: function(exclusive self: Player): nil
+    resume: function(exclusive self: Player): nil
+    status: function(borrows self: Player): State
+    playing: function(borrows self: Player): boolean
+    paused: function(borrows self: Player): boolean
+    finished: function(borrows self: Player): boolean
+    position: function(borrows self: Player): number
+    duration: function(borrows self: Player): number
+    seek: function(exclusive self: Player, seconds: number): nil
+    setLoop: function(exclusive self: Player, loop: boolean): nil
+    looping: function(borrows self: Player): boolean
+    loops: function(borrows self: Player): integer
+    setTempo: function(exclusive self: Player, scale: number): nil
+    tempo: function(borrows self: Player): number
+    setGain: function(exclusive self: Player, gain: number): nil
+    setMuted: function(exclusive self: Player, index: integer, muted: boolean): nil
+    reloadFailure: function(borrows self: Player): string?
+    update: function(exclusive self: Player): boolean
+end
+
+--- Reports whether a player stands in `state`, as an expression the checker
+--- does not read as a match over every state.
+local function standing(borrows self: Player, state: State): boolean
+    return self.state == state
+end
+
+--- Returns the song's loop as a start and an end, or nil when it has none
+--- worth repeating.
+local function loopOf(driver: Driver): (number?, number)
+    local start = driver.loopStart
+    local finish = driver.loopEnd or driver.duration
+    if start == nil or finish - start < MIN_LOOP then
+        return nil, driver.duration
+    end
+
+    return start, finish
+end
+
+--- Returns the clock time song time `song` is scheduled at.
+local function clockOf(borrows self: Player, song: number): number
+    return self.anchorClock + (song - self.anchorSong) / self.tempoScale
+end
+
+--- Moves the anchor, keeping the one it replaces for `position` while the
+--- clock has not reached the new one.
+local function anchor(exclusive self: Player, song: number, clock: number): nil
+    self.previousSong = self.anchorSong
+    self.previousClock = self.anchorClock
+    self.anchorSong = song
+    self.anchorClock = clock
+end
+
+--- Checks an options value against a range.
+--- @raises string when the value is outside the range
+local function within(name: string, what: string, value: number, low: number, high: number): nil
+    if value ~= value or value < low or value > high then
+        error(
+            "tecs.audio.music." .. name .. ": " .. what .. " must be from " .. tostring(
+                low
+            ) .. " to " .. tostring(high) .. ", got " .. tostring(value),
+            3
+        )
+    end
+end
+
+--- Raises unless play options are in range.
+--- @raises string when `tempo`, `lookahead` or `start` is out of range
+export function checkOptions(name: string, options: PlayOptions?): nil
+    if options == nil then
+        return
+    end
+    if options.tempo ~= nil then
+        within(name, "tempo", options.tempo, MIN_TEMPO, MAX_TEMPO)
+    end
+    if options.lookahead ~= nil then
+        within(name, "lookahead", options.lookahead, MIN_LOOKAHEAD, MAX_LOOKAHEAD)
+    end
+    if options.start ~= nil and (options.start ~= options.start or options.start < 0) then
+        error("tecs.audio.music." .. name .. ": start must not be negative, got " .. tostring(options.start), 2)
+    end
+end
+
+--- Starts a player on a driver and registers it with the mixer's update.
+---
+--- What the format modules' `play` functions end in, and what a game with a
+--- format of its own calls with a driver it wrote.
+---
+--- @param mixer the mixer whose `update` advances the player
+--- @param driver the song and its voices, which the player now owns
+--- @param handle the song's handle, which the player retains until it stops
+---     and watches for a reload, or nil for a song held some other way
+--- @param options the loop, tempo, lookahead and start, or nil for the
+---     defaults. `group` and `gain` are the driver's to apply.
+--- @return the playing player
+--- @raises string when an option is out of range
+export function newPlayer(mixer: audio.Audio, driver: Driver, handle: assets.Handle?, options: PlayOptions?): Player
+    checkOptions("newPlayer", options)
+    local start = math.min((options and options.start) or 0, driver.duration)
+    local clock = driver.now() + LEAD
+    local player = new Player(
+        driver = driver,
+        handle = handle,
+        revision = handle ~= nil and handle:revision() or 0,
+        state = "playing",
+        loop = not (options ~= nil and options.loop == false),
+        tempoScale = (options and options.tempo) or 1,
+        lookahead = (options and options.lookahead) or DEFAULT_LOOKAHEAD,
+        cursor = start,
+        anchorSong = start,
+        anchorClock = clock,
+        previousSong = start,
+        previousClock = clock,
+        finishClock = 0,
+        loopCount = 0,
+        completed = false,
+        failure = nil
+    )
+    if handle ~= nil then
+        handle:retain()
+    end
+    if start > 0 then
+        driver.seek(start, clock)
+    end
+    local updates = audiosynth.updates[mixer]
+    if updates == nil then
+        updates = {}
+        audiosynth.updates[mixer] = updates
+    end
+    updates[#updates + 1] = function(): boolean
+        return player:update()
+    end
+    player:update()
+
+    return player
+end
+
+--- Stops the song and frees its voices. Safe more than once.
+---
+--- @param self the player to stop
+--- @param fadeOut seconds to fade the voices out over, or nil to cut them
+function Player.stop(exclusive self: Player, fadeOut: number?): nil
+    if standing(self, "stopped") then
+        return
+    end
+    self.state = "stopped"
+    self.driver.stop(fadeOut)
+    local handle = self.handle
+    if handle ~= nil then
+        self.handle = nil
+        handle:release()
+    end
+end
+
+--- Pauses the song where it stands, notes held.
+---
+--- The voices pause, which stops their clock, so what was scheduled waits and
+--- `resume` carries on exactly where the song was.
+---
+--- @param self the player to pause
+function Player.pause(exclusive self: Player): nil
+    if not standing(self, "playing") then
+        return
+    end
+    self.state = "paused"
+    self.driver.pause()
+end
+
+--- Resumes a paused song.
+---
+--- @param self the player to resume
+function Player.resume(exclusive self: Player): nil
+    if not standing(self, "paused") then
+        return
+    end
+    self.state = "playing"
+    self.driver.resume()
+end
+
+--- Reports where the player stands.
+---
+--- @param self the player to inspect
+--- @return `"playing"`, `"paused"`, `"finished"` while a song that does not
+---     loop rings out after its last event, or `"stopped"` once it has, or
+---     once `stop` ran
+function Player.status(borrows self: Player): State
+    return self.state
+end
+
+--- Reports whether the song is playing.
+---
+--- @param self the player to inspect
+--- @return true while playing, false paused, finished or stopped
+function Player.playing(borrows self: Player): boolean
+    return self.state == "playing"
+end
+
+--- Reports whether the song is paused.
+---
+--- @param self the player to inspect
+--- @return true between `pause` and `resume`
+function Player.paused(borrows self: Player): boolean
+    return self.state == "paused"
+end
+
+--- Reports whether a song that does not loop has played to its end.
+---
+--- The voices keep sounding for the song's release tail, while `status` reads
+--- `"finished"` and a `seek` can still play the song again, and then the
+--- player stops itself and frees them. This stays true through that.
+---
+--- @param self the player to inspect
+--- @return true once the last event has played, until a `seek` plays on
+function Player.finished(borrows self: Player): boolean
+    return self.completed
+end
+
+--- Returns how far into the song the voices are.
+---
+--- @param self the player to inspect
+--- @return seconds of song at a tempo of one, from zero to the duration
+function Player.position(borrows self: Player): number
+    local now = self.driver.now()
+    local song: number
+    if now >= self.anchorClock then
+        song = self.anchorSong + (now - self.anchorClock) * self.tempoScale
+    else
+        song = self.previousSong + (now - self.previousClock) * self.tempoScale
+    end
+    if song < 0 then
+        return 0
+    end
+
+    return math.min(song, self.driver.duration)
+end
+
+--- Returns the song's length.
+---
+--- @param self the player to inspect
+--- @return seconds at a tempo of one
+function Player.duration(borrows self: Player): number
+    return self.driver.duration
+end
+
+--- Moves playback to a time in the song.
+---
+--- A finished song plays again from there.
+---
+--- @param self the player to move
+--- @param seconds the song time, clamped to the song
+function Player.seek(exclusive self: Player, seconds: number): nil
+    if standing(self, "stopped") then
+        return
+    end
+    local target = math.max(0, math.min(seconds, self.driver.duration))
+    local at = self.driver.now() + LEAD
+    self.driver.seek(target, at)
+    anchor(self, target, at)
+    self.previousSong = target
+    self.previousClock = at
+    self.cursor = target
+    if self.state == "finished" then
+        self.state = "playing"
+    end
+    self.completed = false
+end
+
+--- Sets whether the song repeats from its loop point.
+---
+--- @param self the player to change
+--- @param loop true to repeat, false to play on to the end
+function Player.setLoop(exclusive self: Player, loop: boolean): nil
+    self.loop = loop
+end
+
+--- Reports whether the song will repeat.
+---
+--- @param self the player to inspect
+--- @return true when looping is on and the song has a loop point
+function Player.looping(borrows self: Player): boolean
+    local start = loopOf(self.driver)
+
+    return self.loop and start ~= nil
+end
+
+--- Returns how many times the song has gone back to its loop point.
+---
+--- @param self the player to inspect
+--- @return the count of loops scheduled so far
+function Player.loops(borrows self: Player): integer
+    return self.loopCount
+end
+
+--- Scales the playback speed from the point already scheduled.
+---
+--- @param self the player to change
+--- @param scale from 0.01 to 100, where one is the song's own speed
+--- @raises string when the scale is outside its range
+function Player.setTempo(exclusive self: Player, scale: number): nil
+    within("setTempo", "tempo", scale, MIN_TEMPO, MAX_TEMPO)
+    anchor(self, self.cursor, clockOf(self, self.cursor))
+    self.tempoScale = scale
+end
+
+--- Returns the speed scale.
+---
+--- @param self the player to inspect
+--- @return the scale, one by default
+function Player.tempo(borrows self: Player): number
+    return self.tempoScale
+end
+
+--- Sets the gain of the player's voices, before group and master gain.
+---
+--- @param self the player to change
+--- @param gain linear amplitude
+function Player.setGain(exclusive self: Player, gain: number): nil
+    if standing(self, "stopped") then
+        return
+    end
+    self.driver.setGain(gain)
+end
+
+--- Mutes or unmutes one part of the song.
+---
+--- @param self the player to change
+--- @param index a MIDI channel from 0 to 15, or a register log's chip from 0
+--- @param muted true to silence it
+function Player.setMuted(exclusive self: Player, index: integer, muted: boolean): nil
+    if standing(self, "stopped") then
+        return
+    end
+    self.driver.setMuted(index, muted)
+end
+
+--- Returns why the last reload of the song could not be played, if one
+--- could not.
+---
+--- A reload the driver cannot take leaves the player on the song it had.
+---
+--- @param self the player to inspect
+--- @return the reason, or nil
+function Player.reloadFailure(borrows self: Player): string?
+    return self.failure
+end
+
+--- Advances the player: what the mixer's `update` calls.
+---
+--- Ordinary game code does not call it. A test driving a player without a
+--- mixer update does.
+---
+--- @param self the player to advance
+--- @return false once the player has stopped, which drops it from the update
+function Player.update(exclusive self: Player): boolean
+    if standing(self, "stopped") then
+        return false
+    end
+    local handle = self.handle
+    if handle ~= nil and handle:revision() ~= self.revision then
+        self.revision = handle:revision()
+        local payload = handle:value()
+        if payload ~= nil then
+            local position = self:position()
+            local reloaded, reason = self.driver.reload(payload)
+            if reloaded then
+                self.failure = nil
+                self:seek(position)
+            else
+                self.failure = reason or "the reloaded song could not be played"
+            end
+        end
+    end
+    if standing(self, "paused") then
+        return true
+    end
+    local driver = self.driver
+    local now = driver.now()
+    if standing(self, "finished") then
+        if now >= self.finishClock + driver.tail then
+            self:stop()
+
+            return false
+        end
+
+        return true
+    end
+    local next = driver.pending()
+    if next ~= nil and clockOf(self, next) < now then
+        -- A stall outran the lookahead and an event is already late: play it
+        -- now, and what follows it at its own distance, rather than rushing
+        -- everything that was missed.
+        anchor(self, next, now + LEAD)
+        self.cursor = math.max(self.cursor, next)
+    end
+    local horizon = now + self.lookahead
+    -- Bounded, so a loop shorter than one update's window cannot spin.
+    for _ = 1, 64 do
+        local loopStart, loopEnd = loopOf(driver)
+        local looping = self.loop and loopStart ~= nil
+        local finish = looping and loopEnd or driver.duration
+        local target = self.anchorSong + (horizon - self.anchorClock) * self.tempoScale
+        if target < finish then
+            self.cursor = driver.schedule(target, self.anchorSong, self.anchorClock, self.tempoScale)
+
+            return true
+        end
+        -- A loop ends before the events at its end, which belong to the next
+        -- pass; the song's own end takes everything left, the note offs at
+        -- its last tick included.
+        local limit = looping and finish or math.huge
+        local reached = driver.schedule(limit, self.anchorSong, self.anchorClock, self.tempoScale)
+        if reached < limit then
+            self.cursor = reached
+
+            return true
+        end
+        self.cursor = finish
+        local at = clockOf(self, finish)
+        if looping and loopStart ~= nil then
+            driver.jump(loopStart, at)
+            anchor(self, loopStart, at)
+            self.cursor = loopStart
+            self.loopCount = self.loopCount + 1
+        else
+            self.state = "finished"
+            self.completed = true
+            self.finishClock = at
+            if now >= at + driver.tail then
+                self:stop()
+
+                return false
+            end
+
+            return true
+        end
+    end
+
+    return true
+end

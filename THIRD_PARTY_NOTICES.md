@@ -81,6 +81,60 @@ Open Font License 1.1. The tests and retained UI example read it. Packages ship 
 `share/tecs/assets/fonts` with `JetBrainsMono-OFL.txt` and the versioned
 `JetBrainsMono-NOTICE.md`.
 
+## SoundFonts
+
+Tecs ships no SoundFont. `tecs.audio.synth` reads one a game supplies, and a
+General MIDI set is game content under its own licence, so a game that ships
+one ships that licence beside it. FluidR3 GM, for example, is MIT.
+
+## Linked BSD-licensed code
+
+### ymfm-oxide
+
+`tecs.audio.fm` emulates every chip it offers with ymfm-oxide
+(<https://github.com/albanmgicquel/ymfm-oxide>), a pure-Rust port by Alban
+Gicquel of ymfm, Aaron Giles's emulator of the Yamaha FM chips
+(<https://github.com/aaronsgiles/ymfm>). It is a Cargo dependency pinned to one
+commit, compiled into `tecsaudio`, so every package carries it and
+`cargo-licenses.txt` records it as BSD-3-Clause. The licence asks for its
+notice to travel with a binary, which is this one; Tecs keeps none of its
+source. The OPLL family plays ymfm's own copyright-free stand-ins for the
+instrument ROMs, made by David Viens and Hubert Lamontagne and carried in the
+crate; no Yamaha ROM ships with Tecs.
+
+```text
+BSD 3-Clause License
+
+Copyright (c) 2021, Aaron Giles
+Copyright (c) 2026, Alban Gicquel
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
 ## Scope of the checks
 
 The generated inventory and source manifest make shipped dependency names,
