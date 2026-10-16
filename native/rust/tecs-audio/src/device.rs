@@ -107,6 +107,21 @@ fn accepts(device: &cpal::Device, wanted: &cpal::StreamConfig, format: cpal::Sam
     })
 }
 
+/// Reports whether a stream error leaves the output dead.
+///
+/// `cpal` reports more than failures through the error callback. A buffer
+/// that missed its deadline (`Xrun`: CoreAudio's processor-overload
+/// notification, which a slow first callback or a busy machine raises), a
+/// default output followed to a new device (`DeviceChanged`) and a refused
+/// realtime promotion (`RealtimeDenied`) all leave the stream playing. Taking
+/// them as terminal silenced the whole mixer for good on one late buffer.
+pub(crate) fn ends_the_stream(kind: cpal::ErrorKind) -> bool {
+    !matches!(
+        kind,
+        cpal::ErrorKind::Xrun | cpal::ErrorKind::DeviceChanged | cpal::ErrorKind::RealtimeDenied
+    )
+}
+
 /// Builds the output stream for one sample format.
 fn build<T>(
     device: &cpal::Device,
@@ -149,12 +164,35 @@ where
                     *target = T::from_sample(*source);
                 }
             },
-            move |_error| {
+            move |error: cpal::Error| {
                 // A sticky observation, polled on the frame thread. No callback
                 // enters Nupp, allocates a message or attempts to reopen a device.
-                failure_callback.store(true, Ordering::Release);
+                if ends_the_stream(error.kind()) {
+                    failure_callback.store(true, Ordering::Release);
+                }
             },
             None,
         )
         .map_err(|error| format!("the output stream did not open: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ends_the_stream;
+    use cpal::ErrorKind;
+
+    #[test]
+    fn a_late_buffer_or_a_reroute_does_not_end_the_stream() {
+        assert!(!ends_the_stream(ErrorKind::Xrun));
+        assert!(!ends_the_stream(ErrorKind::DeviceChanged));
+        assert!(!ends_the_stream(ErrorKind::RealtimeDenied));
+    }
+
+    #[test]
+    fn a_lost_device_or_an_invalidated_stream_does() {
+        assert!(ends_the_stream(ErrorKind::DeviceNotAvailable));
+        assert!(ends_the_stream(ErrorKind::HostUnavailable));
+        assert!(ends_the_stream(ErrorKind::StreamInvalidated));
+        assert!(ends_the_stream(ErrorKind::BackendError));
+    }
 }

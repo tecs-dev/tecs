@@ -550,8 +550,11 @@ where
                     Ok(mut guard) => converter.feed(span, &mut guard),
                 }
             },
-            move |_error| {
-                failure_callback.store(true, Ordering::Release);
+            move |error: cpal::Error| {
+                // An overrun or a reroute leaves the stream recording.
+                if crate::device::ends_the_stream(error.kind()) {
+                    failure_callback.store(true, Ordering::Release);
+                }
             },
             None,
         )
