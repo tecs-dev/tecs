@@ -131,6 +131,20 @@ function suite.decodesAClipFromBytesThroughTheLibrary(): nil
     mixer:destroy()
 end
 
+function suite.reportsAnOfflineOutputThatNeverDroppedOrReopened(): nil
+    local backend = opened()
+    test.equal(assert(backend.outputChanges)(), 0)
+    local status = assert(backend.output)()
+    test.equal(status.state, "offline")
+    test.equal(status.drops, 0)
+    test.equal(status.reopens, 0)
+    test.equal(status.reason, nil)
+    test.equal(status.frequency, 0)
+    test.equal(status.channels, 0)
+    backend.close()
+    test.equal(assert(backend.output)().state, "offline")
+end
+
 function suite.namesTheDecodersTheLibraryLinked(): nil
     local backend = opened()
     test.assert(#backend.decoders() > 0)

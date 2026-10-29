@@ -105,11 +105,23 @@ no mixer, so a game that only wants to name devices pays for nothing else.
 Reaping voices has to continue while a world is paused, so an application
 drives it from the iteration instead.
 
-A native stream error permanently fails that output. The callback publishes a
-flag; the next `update` sets `available` false, records `failureReason`, discards
+An output device that drops is reopened rather than lost. A Bluetooth headset
+turning its microphone on changes the device from stereo at 48000 Hz to mono at
+16000 or 24000 under a running game; a headset leaves, or comes back. The
+backend notices (the stream's own error, a stream that stops asking for audio,
+or a device whose format moved), opens the default output again at whatever
+format it has now, and keeps the mix at its own rate and channels throughout,
+resampling and folding to the device inside its callback. While no device is
+open the mix keeps time without being heard, so voices that would have ended
+in the gap report finished and nothing a game scheduled shifts. `available`
+and `failureReason` do not move for any of this; `output` reports it, and
+`update` logs each drop and each reopen under `tecs.audio`.
+
+Only an output that can no longer reopen fails. The backend publishes a flag;
+the next `update` sets `available` false, records `failureReason`, discards
 queued starts and releases every active voice without replay. Destroy the mixer
-and create a new one to reopen an output. Starting without an output remains a
-separate silent fallback, not a device-loss event.
+and create a new one to open an output again. Starting without an output
+remains a separate silent fallback, not a device-loss event.
 
 A failed microphone keeps already buffered frames. Once drained, `read` returns
 nil and the failure reason, while the value-only `readInto` raises that reason.
@@ -131,11 +143,11 @@ local random = require("nupp.random")
 --- level filter, so it does not move when its module does.
 local LOGGER = log.named("tecs.audio")
 
---- Frames per second the output runs at, unless configured otherwise.
+--- Frames per second the mix runs at, unless configured otherwise.
 local DEFAULT_FREQUENCY: integer = 48000
 
---- Output channels. Two, because that is what a stereo mix needs and mono
---- hardware is the platform's problem rather than this one's.
+--- Mix channels. Two, because that is what a stereo mix needs; a mono device
+--- hears the backend's fold of the pair.
 local DEFAULT_CHANNELS: integer = 2
 
 --- Voices that may sound at once. Past this, `play` declines rather than
@@ -461,12 +473,13 @@ end
 
 --- Configures `newAudio`.
 export type Config = {
-    --- Caller-writable. Sets the sample frequency in frames per second, and
-    --- defaults to 48000.
+    --- Caller-writable. Sets the frequency the mix runs at in frames per
+    --- second, and defaults to 48000. It holds for the mixer's life whatever
+    --- the device runs at; the backend resamples to the device.
     frequency: integer?,
 
-    --- Caller-writable. Sets the number of output channels, and defaults to
-    --- two.
+    --- Caller-writable. Sets the number of channels the mix carries, and
+    --- defaults to two. A device with another count is folded or spread to.
     channels: integer?,
 
     --- Caller-writable. Sets how many voices may sound at once, and defaults
@@ -787,8 +800,9 @@ end
 --- Nupp only by leaving finished handles where `update` collects them.
 export record Audio
     --- Read-only. Reports terminal output loss observed by `update`. Nil until
-    --- a device fails. Loss clears voices, prevents playback and requires a new
-    --- mixer; there is no automatic reopen or replay on the default device.
+    --- the output can no longer reopen a device. Loss clears voices, prevents
+    --- playback and requires a new mixer. A device that drops and is reopened
+    --- is not a loss and leaves this nil; `output` reports it.
     failureReason: string?
 
     @private closed: boolean
@@ -816,10 +830,14 @@ export record Audio
     @private pendingCount: integer
     @private finished: {integer}
     @private playSystem: ecs.System?
+    @private outputChanges: integer
+    @private outputDrops: integer
+    @private outputReopens: integer
 
     flush: function(exclusive self: Audio): nil
     destroy: function(exclusive self: Audio): nil
     decoders: function(borrows self: Audio): {string}
+    output: function(borrows self: Audio): audiobackend.OutputStatus
     load: function(exclusive self: Audio, path: string, options: LoadOptions?): (Clip?, string?)
     loadBytes: function(exclusive self: Audio, name: string, bytes: string, options: LoadOptions?): (Clip?, string?)
     clip: function(borrows self: Audio, id: integer): Clip?
@@ -1261,7 +1279,10 @@ export function newAudio(config: Config?): Audio
         pending = {},
         pendingCount = 0,
         finished = finished,
-        playSystem = nil
+        playSystem = nil,
+        outputChanges = 0,
+        outputDrops = 0,
+        outputReopens = 0
     )
     if not self.available then
         LOGGER:info("no audio output; sound is silent for this run")
@@ -1339,6 +1360,44 @@ end
 ---     when no output opened. A fresh table each call.
 function Audio.decoders(borrows self: Audio): {string}
     return self.backend.decoders()
+end
+
+--- Reports what became of the output device.
+---
+--- `available` and `failureReason` describe the mixer, and a device that drops
+--- moves neither: the backend reopens the default output at whatever format it
+--- has now, the mix keeps running at its own, and every voice carries on. This
+--- is where such a drop shows, and `update` logs each drop and each reopen
+--- under `tecs.audio`.
+---
+--- @param self the mixer to ask
+--- @return the backend's report. A backend with nothing to report on answers
+---     `"playing"` at the mix's own format while `available`, `"failed"` after
+---     `failureReason`, and `"offline"` otherwise. A fresh record each call.
+function Audio.output(borrows self: Audio): audiobackend.OutputStatus
+    local report = self.backend.output
+    if report ~= nil and not self.closed then
+        return report()
+    end
+    local state: "offline" | "playing" | "reopening" | "failed" = "offline"
+    local frequency: integer = 0
+    local channels: integer = 0
+    if self.failureReason ~= nil then
+        state = "failed"
+    elseif self.available then
+        state = "playing"
+        frequency = self.backend.frequency
+        channels = self.backend.channels
+    end
+
+    return new audiobackend.OutputStatus(
+        state = state,
+        drops = 0,
+        reopens = 0,
+        reason = nil,
+        frequency = frequency,
+        channels = channels
+    )
 end
 
 --- Loads a sound and returns its cached clip.
@@ -2194,6 +2253,28 @@ function Audio.voiceList(borrows self: Audio): {VoiceInfo}
     return list
 end
 
+--- Logs what the output device did since the last report.
+---
+--- Warnings rather than information, because a game that went quiet is
+--- diagnosed from these two lines and the default level is `"warn"`.
+local function reportOutput(exclusive self: Audio): nil
+    local status = self:output()
+    if status.drops > self.outputDrops then
+        LOGGER:warn("audio output dropped (%s); reopening it", status.reason or "no reason given")
+    end
+    if status.reopens > self.outputReopens then
+        LOGGER:warn(
+            "audio output reopened at %d Hz, %d channels; the mix stays at %d Hz, %d channels",
+            status.frequency,
+            status.channels,
+            self.backend.frequency,
+            self.backend.channels
+        )
+    end
+    self.outputDrops = status.drops
+    self.outputReopens = status.reopens
+end
+
 --- Sends queued commands and reaps the voices the backend has finished with.
 ---
 --- Call once per frame with the frame's step. The step advances cooldowns, and
@@ -2205,6 +2286,9 @@ end
 --- to continue during a world pause, so an application drives this from the
 --- iteration instead.
 ---
+--- It also notices a dropped or reopened output device, logging each under
+--- `tecs.audio`, and a terminal failure, after which `failureReason` is set.
+---
 --- @param self the mixer to advance
 --- @param dt seconds since the last call. Omitting it advances nothing, which
 ---     is what a test stepping voices without time wants.
@@ -2213,6 +2297,14 @@ end
 function Audio.update(exclusive self: Audio, dt: number?): integer
     if self.closed then
         return 0
+    end
+    local changes = self.backend.outputChanges
+    if changes ~= nil then
+        local count = changes()
+        if count ~= self.outputChanges then
+            self.outputChanges = count
+            reportOutput(self)
+        end
     end
     local observe = self.backend.failure
     if self.failureReason == nil and observe ~= nil then

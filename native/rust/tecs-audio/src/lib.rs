@@ -23,11 +23,13 @@
 
 pub mod capture;
 pub mod command;
+pub mod conform;
 pub mod decode;
 pub mod device;
 pub mod engine;
 pub mod enumerate;
 pub mod mixer;
+pub mod output;
 pub mod source;
 pub mod stream;
 
@@ -150,6 +152,7 @@ pub unsafe extern "C" fn tecs_audio_available(device: *mut Engine) -> i32 {
 }
 
 /// Reports terminal output loss, separately from an intentionally offline engine.
+/// A device that drops and is reopened is not terminal and does not set this.
 /// # Safety
 /// The pointer must be null or name a live engine.
 #[no_mangle]
@@ -171,7 +174,8 @@ pub unsafe extern "C" fn tecs_audio_microphone_failed(microphone: *mut Capture) 
     }
 }
 
-/// Reports the frames per second the output runs at.
+/// Reports the frames per second the mix runs at: the rate the device was
+/// opened for, whatever the device itself runs at.
 ///
 /// # Safety
 ///
@@ -184,7 +188,7 @@ pub unsafe extern "C" fn tecs_audio_frequency(device: *mut Engine) -> u32 {
     }
 }
 
-/// Reports the channels the output runs with.
+/// Reports the channels the mix runs with.
 ///
 /// # Safety
 ///
@@ -194,6 +198,90 @@ pub unsafe extern "C" fn tecs_audio_channels(device: *mut Engine) -> u32 {
     match unsafe { engine(device) } {
         None => 0,
         Some(value) => u32::from(value.channels()),
+    }
+}
+
+/// Reports the output's state: zero for none ever opened, one for playing,
+/// two while a dropped device is being reopened, and three for an output that
+/// can no longer reopen, which `tecs_audio_failed` also reports.
+///
+/// # Safety
+///
+/// The pointer must be null or name a live device.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_output_state(device: *mut Engine) -> u32 {
+    match unsafe { engine(device) } {
+        None => output::STATE_OFFLINE,
+        Some(value) => value.output_state(),
+    }
+}
+
+/// Reports how many times the output has dropped.
+///
+/// # Safety
+///
+/// The pointer must be null or name a live device.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_output_drops(device: *mut Engine) -> u32 {
+    match unsafe { engine(device) } {
+        None => 0,
+        Some(value) => value.output_drops(),
+    }
+}
+
+/// Reports how many times the output has opened again after a drop.
+///
+/// # Safety
+///
+/// The pointer must be null or name a live device.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_output_reopens(device: *mut Engine) -> u32 {
+    match unsafe { engine(device) } {
+        None => 0,
+        Some(value) => value.output_reopens(),
+    }
+}
+
+/// Returns why the output last dropped, and an empty string until it has.
+///
+/// # Safety
+///
+/// The pointer must be null or name a live device. The string is borrowed
+/// from the device and replaced by the next call here, so read it first.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_output_reason(device: *mut Engine) -> *const c_char {
+    match unsafe { engine(device) } {
+        None => std::ptr::null(),
+        Some(value) => value.output_reason_cstr(),
+    }
+}
+
+/// Reports the frames per second the open stream runs at, which a device
+/// can change under a running engine, and zero while no stream is open.
+///
+/// # Safety
+///
+/// The pointer must be null or name a live device.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_output_frequency(device: *mut Engine) -> u32 {
+    match unsafe { engine(device) } {
+        None => 0,
+        Some(value) => value.output_format().map_or(0, |format| format.sample_rate),
+    }
+}
+
+/// Reports the channels the open stream runs with, and zero while none is.
+///
+/// # Safety
+///
+/// The pointer must be null or name a live device.
+#[no_mangle]
+pub unsafe extern "C" fn tecs_audio_output_channels(device: *mut Engine) -> u32 {
+    match unsafe { engine(device) } {
+        None => 0,
+        Some(value) => value
+            .output_format()
+            .map_or(0, |format| u32::from(format.channels)),
     }
 }
 

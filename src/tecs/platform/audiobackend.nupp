@@ -91,6 +91,39 @@ export record ClipInfo
     resident: boolean
 end
 
+--- Reports what became of a backend's output device.
+---
+--- The mix runs at the backend's `frequency` and `channels` throughout. The
+--- device under it is whatever the default output is at the moment, and it can
+--- drop, change format (a Bluetooth headset turning its microphone on goes
+--- from stereo at 48000 Hz to mono at 16000 or 24000) or go away and come back.
+--- The backend reopens it each time and reports here what it did; none of that
+--- is a `failure`.
+export record OutputStatus
+    --- Read-only. Reports `"offline"` when no output ever opened, `"playing"`
+    --- while a stream plays, `"reopening"` while a dropped device is being
+    --- replaced (the mix keeps time, and nothing is heard), and `"failed"` once
+    --- the backend can no longer reopen, which `failure` reports too.
+    state: "offline" | "playing" | "reopening" | "failed"
+
+    --- Read-only. Reports how many times the output has dropped.
+    drops: integer
+
+    --- Read-only. Reports how many times it has opened again after a drop.
+    reopens: integer
+
+    --- Read-only. Reports why the output last dropped, and nil until it has.
+    reason: string?
+
+    --- Read-only. Reports the frames per second the device runs at now, and
+    --- zero while no stream is open.
+    frequency: integer
+
+    --- Read-only. Reports the channels the device runs with now, and zero
+    --- while no stream is open.
+    channels: integer
+end
+
 --- Selects residency for a load.
 ---
 --- `"auto"` measures the clip's duration against the configured streaming
@@ -105,16 +138,28 @@ export type LoadMode = "auto" | "resident" | "stream"
 export record Backend
     --- Read-only. Reports terminal stream failure, or nil while healthy. Omitted
     --- by backends without a device. The frame thread polls; no callback enters Nupp.
+    --- A device that drops and is reopened is not a failure; `output` reports it.
     failure: (function(): string?)?
+
+    --- Read-only. Reports how many times the output has dropped or reopened, one
+    --- number cheap enough to poll every frame and ask `output` only when it
+    --- moves. Omitted by backends without a device.
+    outputChanges: (function(): integer)?
+
+    --- Read-only. Reports what became of the output device. Omitted by backends
+    --- without a device.
+    output: (function(): OutputStatus)?
 
     --- Read-only. Reports whether a real output opened. A false here still
     --- takes every command and answers every query; nothing is heard.
     available: boolean
 
-    --- Read-only. Reports the output frequency in frames per second.
+    --- Read-only. Reports the frequency the mix runs at, in frames per second.
+    --- It is fixed for the backend's life; a device at another rate is met by
+    --- resampling, and `output` reports the device's own.
     frequency: integer
 
-    --- Read-only. Reports the number of output channels.
+    --- Read-only. Reports the channels the mix runs with, fixed in the same way.
     channels: integer
 
     --- Read-only. Applies the first `count` commands of `commands` in order.

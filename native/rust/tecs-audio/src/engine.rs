@@ -11,9 +11,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::command::{self, Command, Event};
+use crate::conform::Format;
 use crate::decode::{self, Streamer};
-use crate::device::{self, Output};
+use crate::device::CpalHost;
 use crate::mixer::Mixer;
+use crate::output::{self, Host, Output, Timing};
 use crate::source::{ResidentSource, Source, MAX_CHANNELS};
 use crate::stream::Feeder;
 
@@ -25,6 +27,12 @@ pub const MODE_RESIDENT: u32 = 1;
 
 /// Reads a clip from its file for each voice.
 pub const MODE_STREAM: u32 = 2;
+
+/// The rate an engine asked for zero frames per second runs at.
+const DEFAULT_RATE: u32 = 48_000;
+
+/// The channels an engine asked for none runs with.
+const DEFAULT_CHANNELS: u16 = 2;
 
 /// A loaded clip, in whichever of the two forms it settled on.
 enum Clip {
@@ -62,6 +70,8 @@ pub struct Engine {
     /// rather than added to, which is why a caller has to read it before its
     /// next call on this device.
     reported: Mutex<CString>,
+    /// Why the output last dropped, as a C string, on the same terms.
+    dropped: Mutex<CString>,
     sample_rate: u32,
     channels: u16,
     available: bool,
@@ -74,17 +84,68 @@ impl Engine {
     /// A machine with no sound still gets an engine. It reports `available` as
     /// false, takes every command, and mixes nothing, because a game that has
     /// to branch on whether audio exists is a game that gets the branch wrong.
+    ///
+    /// The mix runs at `sample_rate` and `channels` for the life of the
+    /// engine, whatever the device runs at, now or after it changes.
     pub fn open(sample_rate: u32, channels: u16, max_voices: usize) -> Engine {
-        match device::open(sample_rate, channels, max_voices) {
-            Ok((output, mixer)) => {
-                let rate = output.sample_rate;
-                let opened = output.channels;
-                Engine::assemble(mixer, Some(output), rate, opened, true, String::new())
-            }
-            Err(reason) => {
-                let mixer = Arc::new(Mutex::new(Mixer::new(sample_rate, channels, max_voices)));
-                Engine::assemble(mixer, None, sample_rate, channels, false, reason)
-            }
+        Engine::open_with(
+            CpalHost::new,
+            Timing::default(),
+            sample_rate,
+            channels,
+            max_voices,
+        )
+    }
+
+    /// Opens an output through any host, which is how a test stands a fake
+    /// device in for the platform's.
+    ///
+    /// `make` runs on the output's own thread, which the host then lives on.
+    pub fn open_with<H, F>(
+        make: F,
+        timing: Timing,
+        sample_rate: u32,
+        channels: u16,
+        max_voices: usize,
+    ) -> Engine
+    where
+        H: Host + 'static,
+        F: FnOnce() -> Result<H, String> + Send + 'static,
+    {
+        let format = Format {
+            sample_rate: if sample_rate == 0 {
+                DEFAULT_RATE
+            } else {
+                sample_rate
+            },
+            channels: if channels == 0 {
+                DEFAULT_CHANNELS
+            } else {
+                channels
+            },
+        };
+        let mixer = Arc::new(Mutex::new(Mixer::new(
+            format.sample_rate,
+            format.channels,
+            max_voices,
+        )));
+        match Output::start(make, Arc::clone(&mixer), format, timing) {
+            Ok(output) => Engine::assemble(
+                mixer,
+                Some(output),
+                format.sample_rate,
+                format.channels,
+                true,
+                String::new(),
+            ),
+            Err(reason) => Engine::assemble(
+                mixer,
+                None,
+                format.sample_rate,
+                format.channels,
+                false,
+                reason,
+            ),
         }
     }
 
@@ -109,7 +170,7 @@ impl Engine {
     ) -> Engine {
         let failed = output
             .as_ref()
-            .map(|output| Arc::clone(&output.failed))
+            .map(Output::failed)
             .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
         Engine {
             failed,
@@ -119,6 +180,7 @@ impl Engine {
             output,
             last_error: Mutex::new(reason),
             reported: Mutex::new(CString::default()),
+            dropped: Mutex::new(CString::default()),
             sample_rate,
             channels,
             available,
@@ -131,18 +193,74 @@ impl Engine {
     }
 
     /// Reports a terminal output-stream error, distinct from an offline engine.
+    ///
+    /// A device that drops is not one: the output reopens it, and only an
+    /// output that can no longer do that reports failed.
     pub fn failed(&self) -> bool {
         self.failed.load(Ordering::Acquire)
     }
 
-    /// Reports the frames per second the output runs at.
+    /// Reports the frames per second the mix runs at, which is the rate it
+    /// was opened for rather than the device's.
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
 
-    /// Reports the channels the output runs with.
+    /// Reports the channels the mix runs with.
     pub fn channels(&self) -> u16 {
         self.channels
+    }
+
+    /// Reports the mixer's clock: the seconds of mix rendered since the engine
+    /// opened, at its own rate. It keeps moving while a device is gone.
+    pub fn now(&self) -> f64 {
+        match self.mixer.lock() {
+            Err(_) => 0.0,
+            Ok(mixer) if self.sample_rate > 0 => mixer.rendered() as f64 / self.sample_rate as f64,
+            Ok(_) => 0.0,
+        }
+    }
+
+    /// Reports the output's `output::STATE_` constant.
+    pub fn output_state(&self) -> u32 {
+        match &self.output {
+            None => output::STATE_OFFLINE,
+            Some(value) => value.state(),
+        }
+    }
+
+    /// Reports how many times the output has dropped.
+    pub fn output_drops(&self) -> u32 {
+        self.output.as_ref().map_or(0, Output::drops)
+    }
+
+    /// Reports how many times the output has opened again after a drop.
+    pub fn output_reopens(&self) -> u32 {
+        self.output.as_ref().map_or(0, Output::reopens)
+    }
+
+    /// Returns why the output last dropped, and an empty string until it has.
+    pub fn output_reason(&self) -> String {
+        self.output.as_ref().map(Output::reason).unwrap_or_default()
+    }
+
+    /// Returns the same reason as a borrowed C string, on the terms of
+    /// `last_error_cstr`.
+    pub fn output_reason_cstr(&self) -> *const c_char {
+        let text = CString::new(self.output_reason()).unwrap_or_default();
+        match self.dropped.lock() {
+            Err(_) => std::ptr::null(),
+            Ok(mut slot) => {
+                *slot = text;
+                slot.as_ptr()
+            }
+        }
+    }
+
+    /// Reports the format the open stream runs at, and `None` while no stream
+    /// is open.
+    pub fn output_format(&self) -> Option<Format> {
+        self.output.as_ref().and_then(Output::device_format)
     }
 
     /// Returns the reason the most recent failing call gave.

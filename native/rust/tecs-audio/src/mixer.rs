@@ -139,6 +139,9 @@ pub struct Mixer {
     output_rate: u32,
     output_channels: u16,
     max_voices: usize,
+    /// Every frame rendered since the mixer was made, which is the clock every
+    /// position, fade and scheduled event here is counted on.
+    rendered: u64,
 }
 
 impl Mixer {
@@ -151,7 +154,16 @@ impl Mixer {
             output_rate,
             output_channels,
             max_voices,
+            rendered: 0,
         }
+    }
+
+    /// Reports how many frames the mixer has rendered since it was made.
+    ///
+    /// The output keeps rendering while its device is gone, so this keeps
+    /// counting at the mixer's own rate whatever the device does.
+    pub fn rendered(&self) -> u64 {
+        self.rendered
     }
 
     /// Reports how many voices are sounding, paused ones included.
@@ -369,6 +381,7 @@ impl Mixer {
             return;
         }
         let frames = out.len() / channels;
+        self.rendered += frames as u64;
         let rate = self.output_rate;
         let mut index = 0;
         while index < self.voices.len() {

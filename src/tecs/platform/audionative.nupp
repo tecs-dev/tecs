@@ -43,6 +43,13 @@ local readBytes: function(value: any, length: integer): string = ffilib.string a
 --- Bytes one interleaved sample occupies, which the C ABI fixes at four.
 local BYTES_PER_SAMPLE: integer = 4
 
+--- The output states `tecs_audio_output_state` answers, beside zero for none
+--- ever opened.
+local OUTPUT_PLAYING: integer = 1
+
+local OUTPUT_REOPENING: integer = 2
+local OUTPUT_FAILED: integer = 3
+
 cdef struct tecsAudioCommand
     kind: uint32
     handle: uint32
@@ -101,6 +108,18 @@ cdef function tecs_audio_microphone_failed(borrows microphone: voidptr?): int32
 cdef function tecs_audio_frequency(borrows device: voidptr?): uint32
 
 cdef function tecs_audio_channels(borrows device: voidptr?): uint32
+
+cdef function tecs_audio_output_state(borrows device: voidptr?): uint32
+
+cdef function tecs_audio_output_drops(borrows device: voidptr?): uint32
+
+cdef function tecs_audio_output_reopens(borrows device: voidptr?): uint32
+
+cdef function tecs_audio_output_reason(borrows device: voidptr?): cstring?
+
+cdef function tecs_audio_output_frequency(borrows device: voidptr?): uint32
+
+cdef function tecs_audio_output_channels(borrows device: voidptr?): uint32
 
 cdef function tecs_audio_submit(borrows device: voidptr?, borrows commands: tecsAudioCommand*, count: uint32)
 
@@ -388,6 +407,45 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
         return new audiobackend.ClipInfo(duration = info.duration as number, resident = info.resident ~= 0)
     end
 
+    local function output(): audiobackend.OutputStatus
+        if closed[1] then
+            return new audiobackend.OutputStatus(
+                state = "offline",
+                drops = 0,
+                reopens = 0,
+                reason = nil,
+                frequency = 0,
+                channels = 0
+            )
+        end
+        local code = tecs_audio_output_state(device) as integer
+        local state: "offline" | "playing" | "reopening" | "failed" = "offline"
+        if code == OUTPUT_PLAYING then
+            state = "playing"
+        elseif code == OUTPUT_REOPENING then
+            state = "reopening"
+        elseif code == OUTPUT_FAILED then
+            state = "failed"
+        end
+        local reason: string? = nil
+        local message = tecs_audio_output_reason(device)
+        if message ~= nil then
+            local text = readCString(message)
+            if text ~= "" then
+                reason = text
+            end
+        end
+
+        return new audiobackend.OutputStatus(
+            state = state,
+            drops = tecs_audio_output_drops(device) as integer,
+            reopens = tecs_audio_output_reopens(device) as integer,
+            reason = reason,
+            frequency = tecs_audio_output_frequency(device) as integer,
+            channels = tecs_audio_output_channels(device) as integer
+        )
+    end
+
     return new audiobackend.Backend(
         failure = function(): string?
             if not closed[1] and tecs_audio_failed(device) ~= 0 then
@@ -395,6 +453,14 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
             end
             return nil
         end,
+        outputChanges = function(): integer
+            if closed[1] then
+                return 0
+            end
+
+            return (tecs_audio_output_drops(device) as integer) + (tecs_audio_output_reopens(device) as integer)
+        end,
+        output = output,
         available = tecs_audio_available(device) ~= 0,
         frequency = tecs_audio_frequency(device) as integer,
         channels = tecs_audio_channels(device) as integer,
