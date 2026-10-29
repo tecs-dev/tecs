@@ -307,6 +307,10 @@ impl Output {
             device_rate: AtomicU32::new(0),
             device_channels: AtomicU32::new(0),
         });
+        // The first lock of a std mutex can allocate the platform mutex behind
+        // it (a pthread mutex on macOS is boxed lazily), so take it once here,
+        // before any stream exists, rather than let a callback be first.
+        drop(shared.mixer.lock());
         let (ready, opened) = mpsc::channel::<Result<(), String>>();
         let inner = Arc::clone(&shared);
         let thread = thread::Builder::new()
