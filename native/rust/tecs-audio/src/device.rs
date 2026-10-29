@@ -4,107 +4,98 @@
 //! calls it on its own realtime thread, and ALSA and WASAPI call it on a thread
 //! `cpal` spawned. Nothing reachable from inside it may enter the Lua virtual
 //! machine, allocate, or open a file, which is why the callback does one thing:
-//! lock the mixer and ask it to fill the buffer it was handed.
+//! hand the buffer it was given to the stream's [`Feed`], which locks the mixer
+//! and fills it.
+//!
+//! This is the platform half of [`crate::output`]. It opens the default output
+//! at the format the device has now, whatever the engine runs at, and turns
+//! each stream error into what the supervisor does about it.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::any::Any;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample};
 
-use crate::mixer::Mixer;
+use crate::conform::Format;
+use crate::output::{Alarm, Feed, Host, Tap};
 
-/// An open output and the layout it runs at.
-pub struct Output {
-    /// Kept because dropping it closes the stream.
-    _stream: cpal::Stream,
-    /// The frames per second the device actually opened at, which is not
-    /// always the rate that was asked for.
-    pub sample_rate: u32,
-    /// The channels the device actually opened with.
-    pub channels: u16,
-    pub failed: Arc<AtomicBool>,
+/// The platform's default output, as the supervisor reaches it.
+pub struct CpalHost {
+    host: cpal::Host,
 }
 
-/// Opens the default output and starts it.
-///
-/// The requested layout is a preference. A device that will not take it opens
-/// at its own default instead, and the caller reads back what it got rather
-/// than being told the request failed.
-///
-/// @return the open output, or the reason no output opened
-pub fn open(
-    sample_rate: u32,
-    channels: u16,
-    max_voices: usize,
-) -> Result<(Output, Arc<Mutex<Mixer>>), String> {
-    let host = cpal::default_host();
-    let device = host
-        .default_output_device()
-        .ok_or_else(|| "no default audio output device".to_string())?;
-    let supported = device
-        .default_output_config()
-        .map_err(|error| format!("no default output configuration: {error}"))?;
-
-    let format = supported.sample_format();
-    let mut config: cpal::StreamConfig = supported.into();
-    let wanted = cpal::StreamConfig {
-        channels,
-        sample_rate,
-        buffer_size: cpal::BufferSize::Default,
-    };
-    if accepts(&device, &wanted, format) {
-        config = wanted;
+impl CpalHost {
+    /// Takes the platform's default host.
+    pub fn new() -> Result<CpalHost, String> {
+        Ok(CpalHost {
+            host: cpal::default_host(),
+        })
     }
 
-    let mixer = Arc::new(Mutex::new(Mixer::new(
-        config.sample_rate,
-        config.channels,
-        max_voices,
-    )));
-    let failed = Arc::new(AtomicBool::new(false));
-    let stream = match format {
-        cpal::SampleFormat::F32 => {
-            build::<f32>(&device, &config, Arc::clone(&mixer), Arc::clone(&failed))
-        }
-        cpal::SampleFormat::I16 => {
-            build::<i16>(&device, &config, Arc::clone(&mixer), Arc::clone(&failed))
-        }
-        cpal::SampleFormat::U16 => {
-            build::<u16>(&device, &config, Arc::clone(&mixer), Arc::clone(&failed))
-        }
-        cpal::SampleFormat::I32 => {
-            build::<i32>(&device, &config, Arc::clone(&mixer), Arc::clone(&failed))
-        }
-        other => Err(format!("unsupported output sample format {other:?}")),
-    }?;
-    stream
-        .play()
-        .map_err(|error| format!("the output stream did not start: {error}"))?;
-
-    Ok((
-        Output {
-            _stream: stream,
-            sample_rate: config.sample_rate,
-            channels: config.channels,
-            failed,
-        },
-        mixer,
-    ))
+    /// Finds the default output and the configuration it runs at now.
+    fn default_config(&self) -> Result<(cpal::Device, cpal::SupportedStreamConfig), String> {
+        let device = self
+            .host
+            .default_output_device()
+            .ok_or_else(|| "no default audio output device".to_string())?;
+        let supported = device
+            .default_output_config()
+            .map_err(|error| format!("no default output configuration: {error}"))?;
+        Ok((device, supported))
+    }
 }
 
-/// Reports whether the device offers a configuration covering the request.
-fn accepts(device: &cpal::Device, wanted: &cpal::StreamConfig, format: cpal::SampleFormat) -> bool {
-    let ranges = match device.supported_output_configs() {
-        Err(_) => return false,
-        Ok(value) => value,
-    };
-    ranges.into_iter().any(|range| {
-        range.channels() == wanted.channels
-            && range.sample_format() == format
-            && range.min_sample_rate() <= wanted.sample_rate
-            && range.max_sample_rate() >= wanted.sample_rate
-    })
+impl Host for CpalHost {
+    fn current(&mut self) -> Result<Format, String> {
+        let (_, supported) = self.default_config()?;
+        Ok(Format {
+            sample_rate: supported.sample_rate(),
+            channels: supported.channels(),
+        })
+    }
+
+    /// Opens the default output at its own current configuration.
+    ///
+    /// The engine's rate is not asked for. Asking would have `cpal` set the
+    /// hardware's nominal rate, which changes it for every other program on the
+    /// device, and a headset in its microphone profile refuses anyway; the
+    /// stream's conformer meets whatever the device runs at instead.
+    fn open(&mut self, tap: Tap) -> Result<(Box<dyn Any>, Format), String> {
+        let (device, supported) = self.default_config()?;
+        let sample_format = supported.sample_format();
+        let config: cpal::StreamConfig = supported.into();
+        if config.channels == 0 || config.sample_rate == 0 {
+            return Err(format!(
+                "the default output reports {} Hz and {} channels",
+                config.sample_rate, config.channels
+            ));
+        }
+        let format = Format {
+            sample_rate: config.sample_rate,
+            channels: config.channels,
+        };
+        let feed = tap.feed(format);
+        let alarm = tap.alarm();
+        let stream = match sample_format {
+            cpal::SampleFormat::F32 => build::<f32>(&device, &config, feed, alarm),
+            cpal::SampleFormat::I16 => build::<i16>(&device, &config, feed, alarm),
+            cpal::SampleFormat::U16 => build::<u16>(&device, &config, feed, alarm),
+            cpal::SampleFormat::I32 => build::<i32>(&device, &config, feed, alarm),
+            other => Err(format!("unsupported output sample format {other:?}")),
+        }?;
+        stream
+            .play()
+            .map_err(|error| format!("the output stream did not start: {error}"))?;
+        Ok((Box::new(stream), format))
+    }
+
+    /// Polls on macOS, where a device can change format under a default-output
+    /// stream without `cpal` reporting anything. Elsewhere asking can mean
+    /// opening the device a second time, and the stream's own errors and the
+    /// stall check are what the supervisor goes by.
+    fn polls_format(&self) -> bool {
+        cfg!(target_os = "macos")
+    }
 }
 
 /// Reports whether a stream error leaves the output dead.
@@ -122,53 +113,66 @@ pub(crate) fn ends_the_stream(kind: cpal::ErrorKind) -> bool {
     )
 }
 
+/// What the supervisor does about one stream error.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Response {
+    /// Nothing: the stream plays on.
+    Ignore,
+    /// Compare the device's format with the stream's now. A reroute leaves the
+    /// stream playing, but the device it reached can run at another format.
+    Recheck,
+    /// Replace the stream.
+    Reopen,
+}
+
+/// Classifies a stream error for the supervisor.
+pub(crate) fn respond(kind: cpal::ErrorKind) -> Response {
+    if ends_the_stream(kind) {
+        Response::Reopen
+    } else if matches!(kind, cpal::ErrorKind::DeviceChanged) {
+        Response::Recheck
+    } else {
+        Response::Ignore
+    }
+}
+
+/// Names what happened to the stream, for the reason the output reports.
+fn describe(kind: cpal::ErrorKind) -> &'static str {
+    match kind {
+        cpal::ErrorKind::StreamInvalidated => "the output stream was invalidated",
+        cpal::ErrorKind::DeviceNotAvailable => "the output device went away",
+        cpal::ErrorKind::HostUnavailable => "the audio host went away",
+        _ => "the output stream failed",
+    }
+}
+
 /// Builds the output stream for one sample format.
 fn build<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
-    mixer: Arc<Mutex<Mixer>>,
-    failed: Arc<AtomicBool>,
+    mut feed: Feed,
+    alarm: Alarm,
 ) -> Result<cpal::Stream, String>
 where
     T: SizedSample + FromSample<f32>,
 {
-    let failure_callback = Arc::clone(&failed);
-    let channels = config.channels as usize;
-    let mut scratch: Vec<f32> = Vec::new();
     device
         .build_output_stream(
             *config,
             move |output: &mut [T], _info: &cpal::OutputCallbackInfo| {
-                // The buffer arrives filled with silence, so leaving it alone
-                // when the mixer is busy produces a gap rather than whatever
-                // was there before.
-                if failed.load(Ordering::Acquire) {
-                    output.fill(T::EQUILIBRIUM);
-                    return;
-                }
-                if channels == 0 {
-                    return;
-                }
-                if scratch.len() < output.len() {
-                    // Only on the first callbacks and after a buffer-size
-                    // change, which is where an allocation here is affordable.
-                    scratch.resize(output.len(), 0.0);
-                }
-                let frames = output.len() / channels;
-                let span = &mut scratch[..frames * channels];
-                match mixer.lock() {
-                    Err(_) => return,
-                    Ok(mut guard) => guard.render(span),
-                }
-                for (target, source) in output.iter_mut().zip(span.iter()) {
-                    *target = T::from_sample(*source);
-                }
+                feed.fill(output, T::from_sample);
             },
             move |error: cpal::Error| {
-                // A sticky observation, polled on the frame thread. No callback
-                // enters Nupp, allocates a message or attempts to reopen a device.
-                if ends_the_stream(error.kind()) {
-                    failure_callback.store(true, Ordering::Release);
+                // Classified before anything else, because an overrun arrives
+                // on the realtime thread and must cost nothing. The kinds that
+                // do act arrive on a `cpal` monitor thread, where formatting a
+                // reason is affordable. Nothing here reopens a device.
+                match respond(error.kind()) {
+                    Response::Ignore => {}
+                    Response::Recheck => alarm.recheck(),
+                    Response::Reopen => {
+                        alarm.lost(&format!("{}: {error}", describe(error.kind())));
+                    }
                 }
             },
             None,
@@ -178,8 +182,18 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::ends_the_stream;
+    use super::{ends_the_stream, respond, Response};
     use cpal::ErrorKind;
+
+    #[test]
+    fn a_reroute_asks_for_a_format_check_and_a_dead_stream_for_a_reopen() {
+        assert_eq!(respond(ErrorKind::Xrun), Response::Ignore);
+        assert_eq!(respond(ErrorKind::RealtimeDenied), Response::Ignore);
+        assert_eq!(respond(ErrorKind::DeviceChanged), Response::Recheck);
+        assert_eq!(respond(ErrorKind::StreamInvalidated), Response::Reopen);
+        assert_eq!(respond(ErrorKind::DeviceNotAvailable), Response::Reopen);
+        assert_eq!(respond(ErrorKind::BackendError), Response::Reopen);
+    }
 
     #[test]
     fn a_late_buffer_or_a_reroute_does_not_end_the_stream() {

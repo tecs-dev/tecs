@@ -1055,6 +1055,80 @@ function suite.answersTheMixerInstalledIntoAWorld(): nil
     test.equal(audio.of(world), nil)
 end
 
+function suite.aReopenedOutputKeepsTheMixerAvailableAndItsVoices(): nil
+    local recorder = newRecorder()
+    local status = new audiobackend.OutputStatus(
+        state = "playing",
+        drops = 0,
+        reopens = 0,
+        reason = nil,
+        frequency = 48000,
+        channels = 2
+    )
+    local asked = {0}
+    recorder.backend.outputChanges = function(): integer
+        return status.drops + status.reopens
+    end
+    recorder.backend.output = function(): audiobackend.OutputStatus
+        asked[1] = asked[1] + 1
+        return new audiobackend.OutputStatus(
+            state = status.state,
+            drops = status.drops,
+            reopens = status.reopens,
+            reason = status.reason,
+            frequency = status.frequency,
+            channels = status.channels
+        )
+    end
+    local mixer = audio.newAudio({backend = recorder.backend})
+    local path = freshPath()
+    recorder.durations[path] = 2
+    local clip = assert(mixer:load(path))
+    local handle = mixer:play(clip)
+    test.assert(handle > 0)
+
+    -- An unchanged count costs no status record.
+    test.equal(mixer:update(), 1)
+    test.equal(asked[1], 0)
+
+    -- The headset turns its microphone on: dropped, then reopened at its new
+    -- format, both inside one frame.
+    status.drops = 1
+    status.reopens = 1
+    status.reason = "the output's format changed from 48000 Hz, 2 channels to 24000 Hz, 1 channel"
+    status.frequency = 24000
+    status.channels = 1
+    test.equal(mixer:update(), 1)
+    test.equal(asked[1], 1)
+    test.assert(mixer.available)
+    test.equal(mixer.failureReason, nil)
+    test.assert(mixer:playing(handle))
+    test.assert(mixer:play(clip) > 0)
+
+    local report = mixer:output()
+    test.equal(report.state, "playing")
+    test.equal(report.reopens, 1)
+    test.equal(report.frequency, 24000)
+    test.equal(report.channels, 1)
+    test.matches(assert(report.reason), "24000 Hz")
+    mixer:destroy()
+end
+
+function suite.answersAnOutputReportForABackendWithNone(): nil
+    local mixer = audio.newAudio({backend = newRecorder().backend})
+    local report = mixer:output()
+    test.equal(report.state, "playing")
+    test.equal(report.frequency, 48000)
+    test.equal(report.channels, 2)
+    test.equal(report.drops, 0)
+    mixer:destroy()
+    test.equal(mixer:output().state, "offline")
+
+    local silent = audio.newAudio({backend = audiobackend.silent()})
+    test.equal(silent:output().state, "offline")
+    silent:destroy()
+end
+
 function suite.outputLossClearsVoicesAndDoesNotReplay(): nil
     local recorder = newRecorder()
     local failure: {string} = {""}

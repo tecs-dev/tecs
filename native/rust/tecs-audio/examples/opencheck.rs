@@ -7,10 +7,13 @@ fn main() {
     eprintln!("opening the default output");
     let engine = tecsaudio::engine::Engine::open(48_000, 2, 8);
     eprintln!(
-        "available={} rate={} channels={}",
+        "available={} rate={} channels={} stream={}",
         engine.available(),
         engine.sample_rate(),
-        engine.channels()
+        engine.channels(),
+        engine
+            .output_format()
+            .map_or("none".to_string(), |format| format.describe())
     );
     if !engine.available() {
         eprintln!("reason: {}", engine.last_error());
