@@ -1,32 +1,39 @@
+local assets = require("tecs.assets")
 local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
 local ecs = require("tecs.ecs")
+local hostpump = require("nupp.host.pump")
 local test = require("nupp.test")
 
 local suite = {}
+
+--- One `openDecoded` call the recorder took.
+local record Opened
+    decoder: integer
+    handle: integer
+    params: string
+    bytes: string
+end
 
 --- A backend that keeps the command stream instead of making a sound.
 local record Recorder
     backend: audiobackend.Backend
     log: {audiobackend.Command}
     finished: {integer}
-    durations: {[string]: number}
-    failures: {[string]: string}
-    released: {integer}
+    registered: {any}
+    opened: {Opened}
     closed: {boolean}
-    decoded: {[string]: string}
-    decodes: {integer}
 end
+
+--- The id the recorder hands every Decoder it registers.
+local DECODER_ID: integer = 7
 
 local function newRecorder(): Recorder
     local log: {audiobackend.Command} = {}
     local finished: {integer} = {}
-    local durations: {[string]: number} = {}
-    local failures: {[string]: string} = {}
-    local released: {integer} = {}
+    local registered: {any} = {}
+    local opened: {Opened} = {}
     local closed = {false}
-    local decoded: {[string]: string} = {}
-    local decodes = {0}
 
     local backend = new audiobackend.Backend(
         available = true,
@@ -67,42 +74,21 @@ local function newRecorder(): Recorder
 
             return written
         end,
-        loadClip = function(
-            path: string,
-            _clip: integer,
-            mode: audiobackend.LoadMode,
-            streamSeconds: number
-        ): (audiobackend.ClipInfo?, string?)
-            local failure = failures[path]
-            if failure ~= nil then
-                return nil, failure
-            end
-            local duration = durations[path] or 1
-            local resident = mode == "resident" or (mode == "auto" and duration <= streamSeconds)
+        registerDecoder = function(vtable: any): (integer?, string?)
+            registered[#registered + 1] = vtable
 
-            return new audiobackend.ClipInfo(duration = duration, resident = resident)
+            return DECODER_ID
         end,
-        loadClipBytes = function(name: string, bytes: string, _clip: integer): (audiobackend.ClipInfo?, string?)
-            decodes[1] = decodes[1] + 1
-            local failure = failures[name]
-            if failure ~= nil then
-                return nil, failure
-            end
-            decoded[name] = bytes
+        openDecoded = function(decoder: integer, handle: integer, params: string, bytes: string): (boolean, string?)
+            opened[#opened + 1] = new Opened(decoder = decoder, handle = handle, params = params, bytes = bytes)
 
-            return new audiobackend.ClipInfo(duration = durations[name] or 1, resident = true)
-        end,
-        releaseClip = function(clip: integer): nil
-            released[#released + 1] = clip
+            return true
         end,
         position = function(_handle: integer): number?
             return 0.25
         end,
         seek = function(_handle: integer, _seconds: number): boolean
             return true
-        end,
-        decoders = function(): {string}
-            return {"WAV", "OGG"}
         end,
         close = function(): nil
             closed[1] = true
@@ -113,12 +99,9 @@ local function newRecorder(): Recorder
         backend = backend,
         log = log,
         finished = finished,
-        durations = durations,
-        failures = failures,
-        released = released,
-        closed = closed,
-        decoded = decoded,
-        decodes = decodes
+        registered = registered,
+        opened = opened,
+        closed = closed
     )
 end
 
@@ -149,26 +132,55 @@ local function countOf(recorder: Recorder, kind: integer): integer
     return total
 end
 
-local nextPath = {0}
+local nextName = {0}
 
---- Returns a path nothing else in this suite has interned, so clip indices and
---- cached clips never cross between tests.
-local function freshPath(): string
-    nextPath[1] = nextPath[1] + 1
+--- Returns a Sound name nothing else in this suite has interned, so Sound
+--- indices never cross between tests.
+local function freshName(): string
+    nextName[1] = nextName[1] + 1
 
-    return "test/audio/clip" .. tostring(nextPath[1]) .. ".ogg"
+    return "test/audio/sound" .. tostring(nextName[1]) .. ".ogg"
 end
 
-local function loaded(mixer: audio.Audio): audio.Clip
-    return assert(mixer:load(freshPath()))
+--- Stands for the vtable address a Decoder's library exports. The recorder
+--- only keeps it, so any value it can compare does.
+local VTABLE: any = {"test decoder"}
+
+--- Makes a Sound a Decoder named `decoder` plays, the way an extension does.
+local function newSound(name: string, decoder: string?): audio.Sound
+    local made = new audio.Sound(
+        name = name,
+        duration = 1,
+        decoder = decoder or "test",
+        vtable = function(): any
+            return VTABLE
+        end,
+        params = "params:" .. name,
+        bytes = "bytes:" .. name,
+        reload = nil
+    )
+
+    return made
+end
+
+--- Makes a fresh Sound and adds it to the mixer, so a component row naming
+--- it by `soundId` plays it.
+local function loaded(mixer: audio.Audio): audio.Sound
+    local sound = newSound(freshName())
+    mixer:addSound(sound)
+
+    return sound
+end
+
+--- Returns the index a component row names a Sound by.
+local function idOf(sound: audio.Sound): integer
+    return audio.soundId(sound.name)
 end
 
 function suite.reportsNoOutputWithoutABackend(): nil
     local mixer = audio.newAudio({backend = audiobackend.silent()})
     test.assert(not mixer.available)
-    local clip = mixer:load("test/audio/silent.ogg")
-    test.assert(clip ~= nil)
-    test.equal(mixer:play(clip), 0)
+    test.equal(mixer:play(newSound(freshName())), 0)
     test.equal(mixer:sounding(), 0)
 end
 
@@ -188,17 +200,26 @@ function suite.rejectsAVoiceCeilingOutsideItsRange(): nil
     )
 end
 
-function suite.internsClipAndGroupNamesBothWays(): nil
-    local id = audio.clipId("test/audio/interned.ogg")
+function suite.internsSoundAndGroupNamesBothWays(): nil
+    local id = audio.soundId("test/audio/interned.ogg")
+    test.equal(audio.soundId("test/audio/interned.ogg"), id)
+    test.equal(audio.soundName(id), "test/audio/interned.ogg")
+    test.equal(audio.soundName(0), nil)
+    -- The deprecated names answer the same registry.
     test.equal(audio.clipId("test/audio/interned.ogg"), id)
     test.equal(audio.clipPath(id), "test/audio/interned.ogg")
-    test.equal(audio.clipPath(0), nil)
 
     local group = audio.groupId("interned")
     test.equal(audio.groupId("interned"), group)
     test.equal(audio.groupName(group), "interned")
     test.equal(audio.groupName(0), nil)
 
+    test.raises(
+        function(): nil
+            audio.soundId("")
+        end,
+        "name cannot be empty"
+    )
     test.raises(
         function(): nil
             audio.clipId("")
@@ -213,174 +234,158 @@ function suite.internsClipAndGroupNamesBothWays(): nil
     )
 end
 
-function suite.cachesOneClipPerPathAndReportsFailures(): nil
+function suite.playsASoundThroughItsDecoderRegisteringItOnce(): nil
     local recorder = newRecorder()
     local mixer = audio.newAudio({backend = recorder.backend})
-    local path = freshPath()
-    recorder.durations[path] = 2
+    test.equal(#mixer:decoders(), 0)
+    local first = newSound(freshName())
+    local second = newSound(freshName())
 
-    local clip = assert(mixer:load(path))
-    test.equal(clip.status, "ready")
-    test.equal(clip.duration, 2)
-    test.assert(clip.resident)
-    test.equal(mixer:load(path), clip)
-    test.equal(mixer:clip(clip.id), clip)
-    test.equal(#mixer:clips(), 1)
-
-    local badPath = freshPath()
-    recorder.failures[badPath] = "no such file"
-    local missing, reason = mixer:load(badPath)
-    test.equal(missing, nil)
-    test.equal(reason, "no such file")
-    -- The failure is cached, so a second load reports it without reading again.
-    local again, secondReason = mixer:load(badPath)
-    test.equal(again, nil)
-    test.equal(secondReason, "no such file")
-end
-
---- Returns a clip name nothing else in this suite has interned.
-local function freshName(): string
-    nextPath[1] = nextPath[1] + 1
-
-    return "test/memory/clip" .. tostring(nextPath[1]) .. ".wav"
-end
-
---- Stands for the bytes of an encoded file. The recorder never decodes them,
---- so all that matters is that they carry zeroes and arrive whole.
-local FILE_BYTES: string = "RIFF\0\0\0\0WAVE"
-
-function suite.decodesAClipFromBytesAndPlaysItResident(): nil
-    local recorder = newRecorder()
-    local mixer = audio.newAudio({backend = recorder.backend, streamSeconds = 3})
-    local name = freshName()
-    -- Longer than the streaming threshold, and resident regardless.
-    recorder.durations[name] = 30
-
-    local clip = assert(mixer:loadBytes(name, FILE_BYTES))
-    test.equal(recorder.decoded[name], FILE_BYTES)
-    test.equal(clip.path, name)
-    test.equal(clip.id, audio.clipId(name))
-    test.equal(audio.clipPath(clip.id), name)
-    test.equal(clip.status, "ready")
-    test.equal(clip.duration, 30)
-    test.assert(clip.resident)
-    test.assert(clip.memory)
-    test.equal(mixer:clip(clip.id), clip)
-    test.equal(mixer:clips()[1], clip)
-
-    local handle = mixer:play(clip, {gain = 0.5})
+    local handle = mixer:play(first, {gain = 0.5})
     test.assert(handle > 0)
+    test.assert(mixer:play(second) > 0)
+    test.assert(mixer:play(first) > 0)
+    -- One Decoder, registered on its first Sound's first play.
+    test.equal(#recorder.registered, 1)
+    test.equal(recorder.registered[1], VTABLE)
+    test.equal(#mixer:decoders(), 1)
+    test.equal(mixer:decoders()[1], "test")
+
+    -- Each start opens its Playback from the Sound's own parameters.
+    test.equal(#recorder.opened, 3)
+    local opened = recorder.opened[1]
+    test.equal(opened.decoder, DECODER_ID)
+    test.equal(opened.handle, handle)
+    test.equal(opened.params, first.params)
+    test.equal(opened.bytes, first.bytes)
+    test.equal(recorder.opened[2].params, second.params)
+
     mixer:flush()
     local command = assert(lastOf(recorder, audiobackend.PLAY))
-    test.equal(command.handle, handle)
-    test.equal(command.clip, clip.id)
-    test.equal(command.gain, 0.5)
-    test.equal(command.flags // audiobackend.STREAM % 2, 0)
+    test.equal(command.clip, idOf(first))
+    test.equal(command.flags & audiobackend.SYNTH, audiobackend.SYNTH)
 
-    -- A clip from a file says it is not one from memory.
-    test.assert(not assert(mixer:load(freshPath())).memory)
+    -- A Sound it played is one it knows, by name.
+    test.equal(mixer:sound(first.name), first)
+    test.equal(mixer:sound("test/audio/never-played.ogg"), nil)
+    test.equal(#mixer:sounds(), 2)
+    local info = assert(mixer:voiceList()[1])
+    test.equal(info.clip, first.name)
+
+    -- A second Decoder registers on its own first play, under its own id.
+    recorder.backend.registerDecoder = function(vtable: any): (integer?, string?)
+        recorder.registered[#recorder.registered + 1] = vtable
+
+        return DECODER_ID + 1
+    end
+    test.assert(mixer:play(newSound(freshName(), "other")) > 0)
+    test.equal(#recorder.registered, 2)
+    test.equal(assert(recorder.opened[#recorder.opened]).decoder, DECODER_ID + 1)
+    test.equal(#mixer:decoders(), 2)
+    test.equal(mixer:decoders()[2], "other")
 end
 
-function suite.keepsTheFirstClipLoadedUnderAName(): nil
+function suite.refusesASoundWhoseDecoderTheBackendRefuses(): nil
+    local recorder = newRecorder()
+    local asked = {0}
+    recorder.backend.registerDecoder = function(_vtable: any): (integer?, string?)
+        asked[1] = asked[1] + 1
+
+        return nil, "not this one"
+    end
+    local mixer = audio.newAudio({backend = recorder.backend})
+    local sound = newSound(freshName())
+
+    test.equal(mixer:play(sound), 0)
+    mixer:flush()
+    test.equal(countOf(recorder, audiobackend.PLAY), 0)
+    test.equal(#recorder.opened, 0)
+    test.equal(#mixer:decoders(), 0)
+    local events = mixer:events()
+    local last = assert(events[#events])
+    test.equal(last.event, "refuse")
+    test.equal(last.reason, "decoder")
+    test.equal(last.sound, sound.name)
+    test.equal(mixer:stats().refused, 1)
+
+    -- A refusal is not remembered: the next play asks again.
+    test.equal(mixer:play(sound), 0)
+    test.equal(asked[1], 2)
+end
+
+function suite.refusesEverySoundOnABackendThatTakesNoDecoders(): nil
+    local recorder = newRecorder()
+    recorder.backend.registerDecoder = nil
+    local mixer = audio.newAudio({backend = recorder.backend})
+    test.equal(mixer:play(newSound(freshName())), 0)
+    local events = mixer:events()
+    test.equal(assert(events[#events]).reason, "decoder")
+end
+
+function suite.takesAStartOnABackendThatOpensNothing(): nil
+    local recorder = newRecorder()
+    recorder.backend.openDecoded = nil
+    local mixer = audio.newAudio({backend = recorder.backend})
+    local handle = mixer:play(newSound(freshName()))
+    test.assert(handle > 0)
+    test.assert(mixer:playing(handle))
+end
+
+function suite.stopsAVoiceWhosePlaybackDidNotOpen(): nil
+    local recorder = newRecorder()
+    recorder.backend.openDecoded = function(
+        _decoder: integer,
+        _handle: integer,
+        _params: string,
+        _bytes: string
+    ): (boolean, string?)
+        return false, "the bytes are not audio"
+    end
+    local mixer = audio.newAudio({backend = recorder.backend})
+    test.equal(mixer:play(newSound(freshName())), 0)
+    test.equal(mixer:sounding(), 0)
+end
+
+function suite.reReadsASoundThroughItsReload(): nil
     local recorder = newRecorder()
     local mixer = audio.newAudio({backend = recorder.backend})
-    local name = freshName()
+    local sound = newSound(freshName())
+    local reloads = {0}
+    sound.reload = function(): (boolean, string?)
+        reloads[1] = reloads[1] + 1
+        sound.duration = 2
 
-    local clip = assert(mixer:loadBytes(name, FILE_BYTES))
-    -- A second load of the name returns the clip it already holds, without
-    -- decoding the new bytes, which is what `load` does for a path.
-    test.equal(mixer:loadBytes(name, "other bytes"), clip)
-    test.equal(recorder.decodes[1], 1)
-    test.equal(recorder.decoded[name], FILE_BYTES)
-    -- Names and paths share one namespace, in both directions.
-    test.equal(mixer:load(name), clip)
-    local path = freshPath()
-    local fromFile = assert(mixer:load(path))
-    test.equal(mixer:loadBytes(path, FILE_BYTES), fromFile)
-    test.equal(recorder.decodes[1], 1)
-    -- Stating residency outright is accepted, since it is what happens anyway.
-    test.equal(mixer:loadBytes(name, FILE_BYTES, {stream = false}), clip)
+        return true
+    end
+
+    local unknown, unknownReason = mixer:reload(sound.name)
+    test.assert(not unknown)
+    test.matches(assert(unknownReason), "nothing has played or added")
+
+    test.equal(mixer:addSound(sound), idOf(sound))
+    local ok, reason = mixer:reload(sound.name)
+    test.assert(ok)
+    test.equal(reason, nil)
+    test.equal(reloads[1], 1)
+    test.equal(sound.duration, 2)
+
+    local fixed = loaded(mixer)
+    local refused, refusedReason = mixer:reload(fixed.name)
+    test.assert(not refused)
+    test.matches(assert(refusedReason), "cannot be re%-read")
 end
 
-function suite.refusesToReloadAClipThatHasNoFile(): nil
-    local recorder = newRecorder()
-    local mixer = audio.newAudio({backend = recorder.backend})
-    local name = freshName()
-    recorder.durations[name] = 2
-    local clip = assert(mixer:loadBytes(name, FILE_BYTES))
-
-    local ok, reason = mixer:reload(name)
-    test.assert(not ok)
-    test.matches(assert(reason), "from bytes in memory")
-    test.equal(clip.status, "ready")
-    test.equal(clip.duration, 2)
-    test.equal(recorder.decodes[1], 1)
-end
-
-function suite.returnsAndCachesAFailedDecode(): nil
-    local recorder = newRecorder()
-    local mixer = audio.newAudio({backend = recorder.backend})
-    local name = freshName()
-    recorder.failures[name] = "the bytes are not audio"
-
-    local clip, reason = mixer:loadBytes(name, "junk")
-    test.equal(clip, nil)
-    test.equal(reason, "the bytes are not audio")
-    local failed = assert(mixer:clip(audio.clipId(name)))
-    test.equal(failed.status, "failed")
-    test.assert(failed.memory)
-
-    recorder.failures[name] = nil
-    local again, secondReason = mixer:loadBytes(name, FILE_BYTES)
-    test.equal(again, nil)
-    test.equal(secondReason, "the bytes are not audio")
-    test.equal(recorder.decodes[1], 1)
-end
-
-function suite.reportsABackendThatCannotDecodeFromMemory(): nil
-    local recorder = newRecorder()
-    recorder.backend.loadClipBytes = nil
-    local mixer = audio.newAudio({backend = recorder.backend})
-
-    local clip, reason = mixer:loadBytes(freshName(), FILE_BYTES)
-    test.equal(clip, nil)
-    test.matches(assert(reason), "cannot decode a clip from memory")
-end
-
-function suite.raisesOnAnEmptyNameAndOnAStreamRequest(): nil
-    local mixer = audio.newAudio({backend = newRecorder().backend})
-    test.raises(
-        function(): nil
-            mixer:loadBytes("", FILE_BYTES)
-        end,
-        "clip name cannot be empty"
-    )
-    test.raises(
-        function(): nil
-            mixer:loadBytes(freshName(), FILE_BYTES, {stream = true})
-        end,
-        "cannot stream"
-    )
-end
-
-function suite.loadsAClipFromBytesOnTheSilentBackend(): nil
-    local mixer = audio.newAudio({backend = audiobackend.silent()})
-    local clip = assert(mixer:loadBytes(freshName(), FILE_BYTES))
-    test.assert(clip.memory)
-    test.equal(mixer:play(clip), 0)
-end
-
-function suite.carriesAMemoryClipThroughASnapshotByName(): nil
+function suite.carriesASoundThroughASnapshotByName(): nil
     local name = freshName()
     local recorder = newRecorder()
     local world = ecs.newWorld()
     local mixer = audio.install(world, {backend = recorder.backend})
-    local clip = assert(mixer:loadBytes(name, FILE_BYTES))
-    world:spawn(audio.SoundComponent(clip.id))
+    local sound = newSound(name)
+    world:spawn(audio.SoundComponent(mixer:addSound(sound)))
     world:commit()
     local snapshot = world:saveSnapshot()
 
-    -- Another world and another mixer, which has not loaded the name yet.
+    -- Another world and another mixer, which does not know the Sound yet.
     local otherRecorder = newRecorder()
     local other = ecs.newWorld()
     local otherMixer = audio.install(other, {backend = otherRecorder.backend})
@@ -388,28 +393,10 @@ function suite.carriesAMemoryClipThroughASnapshotByName(): nil
     other:update(0)
     test.equal(countOf(otherRecorder, audiobackend.PLAY), 0)
 
-    -- The row names the clip, so it starts once this mixer holds it.
-    assert(otherMixer:loadBytes(name, FILE_BYTES))
+    -- The row names the Sound, so it starts once this mixer knows it.
+    otherMixer:addSound(newSound(name))
     other:update(0)
-    test.equal(assert(lastOf(otherRecorder, audiobackend.PLAY)).clip, audio.clipId(name))
-end
-
-function suite.streamsAClipPastTheThreshold(): nil
-    local recorder = newRecorder()
-    local mixer = audio.newAudio({backend = recorder.backend, streamSeconds = 3})
-    local shortPath = freshPath()
-    local longPath = freshPath()
-    recorder.durations[shortPath] = 1
-    recorder.durations[longPath] = 30
-
-    test.assert(assert(mixer:load(shortPath)).resident)
-    local music = assert(mixer:load(longPath))
-    test.assert(not music.resident)
-
-    mixer:play(music)
-    mixer:flush()
-    local command = assert(lastOf(recorder, audiobackend.PLAY))
-    test.equal(command.flags // audiobackend.STREAM % 2, 1)
+    test.equal(assert(lastOf(otherRecorder, audiobackend.PLAY)).clip, audio.soundId(name))
 end
 
 function suite.sendsOnePlayCarryingEveryStartingSetting(): nil
@@ -423,7 +410,7 @@ function suite.sendsOnePlayCarryingEveryStartingSetting(): nil
 
     local command = assert(lastOf(recorder, audiobackend.PLAY))
     test.equal(command.handle, handle)
-    test.equal(command.clip, clip.id)
+    test.equal(command.clip, idOf(clip))
     test.equal(command.gain, 0.5)
     test.equal(command.pitch, 1.5)
     test.equal(command.loopStart, 2)
@@ -841,7 +828,7 @@ function suite.placesAnEmitterTrackAgainstTheListenerAndSendsItToItsZone(): nil
     local mixer = audio.install(world, {backend = recorder.backend, maxVoices = 4, limiter = false})
     local clip = loaded(mixer)
     world:spawn(ecs.Transform2D(100, 50), audio.ListenerComponent(10))
-    local emitter = world:spawn(ecs.Transform2D(130, 10), audio.TrackComponent(clip.id, true, 1, true, 1, true))
+    local emitter = world:spawn(ecs.Transform2D(130, 10), audio.TrackComponent(idOf(clip), true, 1, true, 1, true))
     world:spawn(ecs.Transform2D(130, 10), audio.ReverbZoneComponent(audio.groupId("cave"), 50, 0.5))
     world:commit()
     clear(recorder)
@@ -877,20 +864,51 @@ function suite.placesAnEmitterTrackAgainstTheListenerAndSendsItToItsZone(): nil
     test.equal(assert(lastOf(recorder, audiobackend.TRACK_DESTROY)).target, play.target)
 end
 
-function suite.playsAPcmSoundAssetAndDecodesItOnce(): nil
+function suite.playsASoundAssetThroughItsHandle(): nil
     local recorder = newRecorder()
     local mixer = audio.newAudio({backend = recorder.backend})
-    local sound = new audio.PcmSound(path = "sounds/memory.wav", bytes = "RIFF", stream = false, serial = 99)
-    local first = mixer:play(sound)
-    local second = mixer:play(sound)
+    local name = freshName()
+    local made = {0}
+    local kind = new assets.Kind(
+        name = assets.SOUND .. ".test",
+        open = function(path: string): (assets.Job?, string?)
+            return new assets.Job(
+                poll = function(): (assets.Status, any?, string?)
+                    made[1] = made[1] + 1
+
+                    return "ready", newSound(path), nil
+                end,
+                cancel = function(): nil
+                end
+            )
+        end,
+        release = nil
+    )
+    local loader = assets.newAssets()
+    local handle: assets.Handle? = nil
+    local pump = hostpump.newPump()
+    local state = pump:start(function(): boolean
+        handle = loader:request(kind, name)
+
+        return true
+    end)
+    local passes: integer = 0
+    while state == "parked" and passes < 256 do
+        passes = passes + 1
+        state = pump:poll()
+    end
+    local requested = assert(handle)
+
+    local first = mixer:play(requested)
+    local second = mixer:play(requested)
     test.assert(first ~= 0 and second ~= 0)
-    test.equal(assert(mixer:clips()[1]).path, "sounds/memory.wav#99")
-    test.equal(#mixer:clips(), 1, "decoded once for both plays")
-    local streamed = new audio.PcmSound(path = "sounds/long.ogg", bytes = nil, stream = true, serial = 100)
-    mixer:play(streamed)
-    test.equal(#mixer:clips(), 2)
-    test.equal(audio.PCM.name, "sound")
+    test.equal(made[1], 1, "one Sound for both plays")
+    test.equal(#recorder.registered, 1)
+    -- The handle's Sound joins the mixer's, by name.
+    test.equal(assert(mixer:sound(name)).name, name)
+    test.equal(#mixer:sounds(), 1)
     mixer:destroy()
+    loader:shutdown()
 end
 
 function suite.refusesAnOutputItDoesNotKnow(): nil
@@ -1195,39 +1213,19 @@ function suite.scalesAndMutesTheWholeOutput(): nil
     test.equal(assert(lastOf(recorder, audiobackend.SET_MASTER_GAIN)).gain, 0.25)
 end
 
-function suite.releasesClipsAndTheOutputOnDestroy(): nil
+function suite.releasesVoicesAndTheOutputOnDestroy(): nil
     local recorder = newRecorder()
     local mixer = audio.newAudio({backend = recorder.backend})
     local clip = loaded(mixer)
     mixer:play(clip)
 
-    test.equal(#mixer:decoders(), 2)
+    test.equal(#mixer:decoders(), 1)
+    test.equal(#mixer:sounds(), 1)
     mixer:destroy()
-    test.equal(clip.status, "released")
-    test.assert(not clip.resident)
+    test.equal(#mixer:sounds(), 0)
     test.equal(mixer:sounding(), 0)
     test.assert(not mixer.available)
-    test.equal(recorder.released[1], clip.id)
     test.assert(recorder.closed[1])
-end
-
-function suite.reReadsAResidentClipUnderTheIndexRowsAlreadyCarry(): nil
-    local recorder = newRecorder()
-    local mixer = audio.newAudio({backend = recorder.backend, streamSeconds = 5})
-    local path = freshPath()
-    recorder.durations[path] = 1
-    local clip = assert(mixer:load(path))
-
-    recorder.durations[path] = 2
-    local ok, reason = mixer:reload(path)
-    test.assert(ok)
-    test.equal(reason, nil)
-    test.equal(clip.duration, 2)
-    test.equal(clip.id, audio.clipId(path))
-
-    local absent, missingReason = mixer:reload("test/audio/never-loaded.ogg")
-    test.assert(not absent)
-    test.matches(assert(missingReason), "nothing has loaded")
 end
 
 function suite.startsFollowsAndStopsAVoiceFromTheSoundComponent(): nil
@@ -1236,7 +1234,7 @@ function suite.startsFollowsAndStopsAVoiceFromTheSoundComponent(): nil
     local mixer = audio.install(world, {backend = recorder.backend, maxVoices = 4})
     local clip = loaded(mixer)
 
-    local entity = world:spawn(audio.SoundComponent(clip.id))
+    local entity = world:spawn(audio.SoundComponent(idOf(clip)))
     world:commit()
     world:update(0)
 
@@ -1270,7 +1268,7 @@ function suite.marksARowFinishedOnceItsVoiceEnds(): nil
     local mixer = audio.install(world, {backend = recorder.backend})
     local clip = loaded(mixer)
 
-    local entity = world:spawn(audio.SoundComponent(clip.id))
+    local entity = world:spawn(audio.SoundComponent(idOf(clip)))
     world:commit()
     world:update(0)
     local handle = assert(world:get(entity, audio.SoundComponent)).voice
@@ -1290,7 +1288,7 @@ function suite.takesBackTheVoiceOfADespawnedEntity(): nil
     local mixer = audio.install(world, {backend = recorder.backend})
     local clip = loaded(mixer)
 
-    local entity = world:spawn(audio.SoundComponent(clip.id))
+    local entity = world:spawn(audio.SoundComponent(idOf(clip)))
     world:commit()
     world:update(0)
     test.equal(mixer:sounding(), 1)
@@ -1307,7 +1305,7 @@ function suite.silencesADisabledEntityAndStartsItAgainOnEnabling(): nil
     local mixer = audio.install(world, {backend = recorder.backend})
     local clip = loaded(mixer)
 
-    local entity = world:spawn(audio.SoundComponent(clip.id))
+    local entity = world:spawn(audio.SoundComponent(idOf(clip)))
     world:commit()
     world:update(0)
     test.equal(mixer:sounding(), 1)
@@ -1330,11 +1328,10 @@ function suite.carriesTheClipPathAndGroupNameThroughASnapshot(): nil
     local recorder = newRecorder()
     local world = ecs.newWorld()
     local mixer = audio.install(world, {backend = recorder.backend})
-    local path = freshPath()
-    local clip = assert(mixer:load(path))
+    local clip = loaded(mixer)
     local group = audio.groupId("sfx")
 
-    local entity = world:spawn(audio.SoundComponent(clip.id, true, 0.5, true, 2, true, 1, 2, 3, group))
+    local entity = world:spawn(audio.SoundComponent(idOf(clip), true, 0.5, true, 2, true, 1, 2, 3, group))
     world:commit()
     mixer:setMasterGain(0.5)
     mixer:setGroupGain("sfx", 0.25)
@@ -1355,7 +1352,7 @@ function suite.carriesTheClipPathAndGroupNameThroughASnapshot(): nil
     test.assert(mixer:groupPaused("sfx"))
 
     local restored = assert(world:get(entity, audio.SoundComponent))
-    test.equal(restored.clip, clip.id)
+    test.equal(restored.clip, idOf(clip))
     test.equal(restored.group, group)
     test.equal(restored.gain, 0.5)
     test.assert(restored.loop)
@@ -1428,9 +1425,7 @@ function suite.aReopenedOutputKeepsTheMixerAvailableAndItsVoices(): nil
         )
     end
     local mixer = audio.newAudio({backend = recorder.backend})
-    local path = freshPath()
-    recorder.durations[path] = 2
-    local clip = assert(mixer:load(path))
+    local clip = loaded(mixer)
     local handle = mixer:play(clip)
     test.assert(handle > 0)
 
@@ -1483,9 +1478,7 @@ function suite.outputLossClearsVoicesAndDoesNotReplay(): nil
         return failure[1] ~= "" and failure[1] or nil
     end
     local mixer = audio.newAudio({backend = recorder.backend})
-    local path = freshPath()
-    recorder.durations[path] = 2
-    local clip = assert(mixer:load(path))
+    local clip = loaded(mixer)
     local handle = mixer:play(clip)
     test.assert(handle > 0)
     failure[1] = "output disconnected"

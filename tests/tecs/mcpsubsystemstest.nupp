@@ -206,6 +206,45 @@ function suite.audioInspectionUsesTheWorldMixer(): nil
     mcp.bind(nil)
 end
 
+function suite.audioToolsPlayAndReloadASoundTheMixerKnows(): nil
+    local world = ecs.newWorld()
+    mcp.bind(world)
+    local backend = audiobackend.silent(48000)
+    backend.available = true
+    backend.registerDecoder = function(_vtable: any): (integer?, string?)
+        return 3
+    end
+    local mixer = audio.install(world, {backend = backend})
+    test.equal(#content("audio").decoders, 0)
+    local reloads = {0}
+    local sound = new audio.Sound(
+        name = "mcp/known.wav",
+        duration = 1,
+        decoder = "test",
+        vtable = function(): any
+            return nil
+        end,
+        params = "",
+        bytes = "",
+        reload = function(): (boolean, string?)
+            reloads[1] = reloads[1] + 1
+
+            return true
+        end
+    )
+    test.equal(call("audio_play", {path = sound.name}).isError, true, "nothing has added it yet")
+    mixer:addSound(sound)
+    test.equal(content("audio_play", {path = sound.name}).started, true)
+    local report = content("audio")
+    test.equal(#report.decoders, 1)
+    test.equal(report.decoders[1], "test")
+    test.equal(content("reload_sound", {path = sound.name}).reloaded, true)
+    test.equal(reloads[1], 1)
+    mixer:destroy()
+    world:shutdown()
+    mcp.bind(nil)
+end
+
 function suite.audioToolsReportAndDriveTheConsoleOnAMemoryOutput(): nil
     local loaded = pcall(require, "tecs.platform.audionative")
     if not loaded then

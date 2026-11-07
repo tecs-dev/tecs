@@ -90,11 +90,6 @@ cdef struct tecsAudioEvent
     handle: uint32
 end
 
-cdef struct tecsAudioClipInfo
-    duration: float
-    resident: int32
-end
-
 --- One captured sample, so a block of them can be a `carray`.
 ---
 --- `carray` takes a struct type, and the captured samples are bare floats, so
@@ -149,28 +144,8 @@ cdef function tecs_audio_submit(borrows device: voidptr?, borrows commands: tecs
 
 cdef function tecs_audio_drain(borrows device: voidptr?, borrows events: tecsAudioEvent*, capacity: uint32): uint32
 
-cdef function tecs_audio_load_clip(
-    borrows device: voidptr?,
-    path: cstring,
-    clip: uint32,
-    mode: uint32,
-    streamSeconds: float,
-    borrows info: tecsAudioClipInfo*
-): int32
-
 -- The bytes cross as a pointer and a length rather than as a C string: an
 -- encoded file is full of zeroes, so its length cannot come from a terminator.
-
-cdef function tecs_audio_load_clip_bytes(
-    borrows device: voidptr?,
-    name: cstring,
-    borrows bytes: cstring,
-    length: uint64,
-    clip: uint32,
-    borrows info: tecsAudioClipInfo*
-): int32
-
-cdef function tecs_audio_release_clip(borrows device: voidptr?, clip: uint32)
 
 cdef function tecs_audio_position(borrows device: voidptr?, handle: uint32): float
 
@@ -221,8 +196,6 @@ cdef function tecs_audio_effect_prepare(
 ): int32
 
 cdef function tecs_audio_meters(borrows device: voidptr?, borrows out: tecsAudioMeter*, max: uint32): uint32
-
-cdef function tecs_audio_decoders(borrows device: voidptr?): cstring?
 
 cdef function tecs_audio_last_error(borrows device: voidptr?): cstring?
 
@@ -302,15 +275,6 @@ cdef function tecs_audio_microphone_last_error(borrows microphone: voidptr?): cs
 --- calls would give the saving straight back.
 local CAPACITY: integer = 512
 
---- Selects a load that measures the clip against the streaming threshold.
-local MODE_AUTO: integer = 0
-
---- Selects a load that holds decoded samples in memory.
-local MODE_RESIDENT: integer = 1
-
---- Selects a load each voice reads from the file for itself.
-local MODE_STREAM: integer = 2
-
 --- The event kind reporting that a voice has finished.
 local EVENT_FINISHED: integer = 1
 
@@ -319,9 +283,6 @@ local LAYOUT_COMMAND: integer = 0
 
 --- Selects the event struct in `tecs_audio_layout`.
 local LAYOUT_EVENT: integer = 1
-
---- Selects the clip-info struct in `tecs_audio_layout`.
-local LAYOUT_CLIP_INFO: integer = 2
 
 --- Selects the FM register-write struct in `tecs_audio_layout`.
 local LAYOUT_METER: integer = 4
@@ -334,16 +295,11 @@ local LAYOUT_METER: integer = 4
 ---
 --- @return the reason, or nil when every struct agrees
 local function layoutMismatch(): string?
-    local names: {string} = {"tecsAudioCommand", "tecsAudioEvent", "tecsAudioClipInfo", "tecsAudioMeter"}
-    local kinds: {integer} = {LAYOUT_COMMAND, LAYOUT_EVENT, LAYOUT_CLIP_INFO, LAYOUT_METER}
+    local names: {string} = {"tecsAudioCommand", "tecsAudioEvent", "tecsAudioMeter"}
+    local kinds: {integer} = {LAYOUT_COMMAND, LAYOUT_EVENT, LAYOUT_METER}
     local sizes: {
         integer
-    } = {
-        ffi.sizeof<tecsAudioCommand>(),
-        ffi.sizeof<tecsAudioEvent>(),
-        ffi.sizeof<tecsAudioClipInfo>(),
-        ffi.sizeof<tecsAudioMeter>(),
-    }
+    } = {ffi.sizeof<tecsAudioCommand>(), ffi.sizeof<tecsAudioEvent>(), ffi.sizeof<tecsAudioMeter>(),}
     for index = 1, #kinds do
         local reported = tecs_audio_layout(kinds[index] as uint32) as integer
         if reported ~= sizes[index] then
@@ -354,16 +310,6 @@ local function layoutMismatch(): string?
     end
 
     return nil
-end
-
-local function modeCode(mode: audiobackend.LoadMode): integer
-    if mode == "resident" then
-        return MODE_RESIDENT
-    elseif mode == "stream" then
-        return MODE_STREAM
-    else
-        return MODE_AUTO
-    end
 end
 
 --- Native entry points the backend reaches through one table, because a Lua
@@ -391,9 +337,7 @@ local extra = {
     output_channels = tecs_audio_output_channels,
     position = tecs_audio_position,
     seek = tecs_audio_seek,
-    release_clip = tecs_audio_release_clip,
     now = tecs_audio_now,
-    decoders = tecs_audio_decoders,
     frequency = tecs_audio_frequency,
     channels = tecs_audio_channels,
     available = tecs_audio_available,
@@ -443,7 +387,6 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
 
     local commands = carray(tecsAudioCommand, CAPACITY)
     local events = carray(tecsAudioEvent, CAPACITY)
-    local info = ffi.new<tecsAudioClipInfo>()
 
     local function reason(fallback: string): string
         local message = tecs_audio_last_error(device)
@@ -516,39 +459,6 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
         return written
     end
 
-    local function loadClipBytes(name: string, bytes: string, clip: integer): (audiobackend.ClipInfo?, string?)
-        if closed[1] then
-            return nil, "the audio output is closed"
-        end
-        local status = tecs_audio_load_clip_bytes(device, name, bytes, #bytes as uint64, clip as uint32, info)
-        if status ~= 0 then
-            return nil, reason("tecsaudio could not decode the bytes of '" .. name .. "'")
-        end
-
-        return new audiobackend.ClipInfo(duration = info.duration as number, resident = info.resident ~= 0)
-    end
-
-    local function loadClip(
-        path: string,
-        clip: integer,
-        mode: audiobackend.LoadMode,
-        streamSeconds: number
-    ): (audiobackend.ClipInfo?, string?)
-        local status = tecs_audio_load_clip(
-            device,
-            path,
-            clip as uint32,
-            modeCode(mode) as uint32,
-            nupp.math.f32.narrow(streamSeconds),
-            info
-        )
-        if status ~= 0 then
-            return nil, reason("tecsaudio could not read '" .. path .. "'")
-        end
-
-        return new audiobackend.ClipInfo(duration = info.duration as number, resident = info.resident ~= 0)
-    end
-
     local function output(): audiobackend.OutputStatus
         if closed[1] then
             return new audiobackend.OutputStatus(
@@ -610,11 +520,6 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
         channels = extra.channels(device) as integer,
         submit = submit,
         drain = drain,
-        loadClip = loadClip,
-        loadClipBytes = loadClipBytes,
-        releaseClip = function(clip: integer): nil
-            extra.release_clip(device, clip as uint32)
-        end,
         position = function(handle: integer): number?
             local seconds = extra.position(device, handle as uint32) as number
             if seconds < 0 then
@@ -632,18 +537,6 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
             end
 
             return extra.now(device)
-        end,
-        decoders = function(): {string}
-            local joined = extra.decoders(device)
-            if joined == nil then
-                return {}
-            end
-            local names: {string} = {}
-            for name in readCString(joined):gmatch("[^,]+") do
-                names[#names + 1] = name
-            end
-
-            return names
         end,
         render = render,
         listen = function(frames: integer): nil

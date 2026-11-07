@@ -45,12 +45,12 @@ export record Command
     --- zero for an operation on the whole output.
     handle: integer
 
-    --- Caller-writable. Selects the clip a `PLAY` reads, by the interned index
-    --- `tecs.audio.clipId` assigned.
+    --- Caller-writable. Selects the Sound a `PLAY` reads, by the interned index
+    --- `tecs.audio.soundId` assigned.
     clip: integer
 
-    --- Caller-writable. Carries the `LOOP`, `SPATIAL`, `STEREO`, `STREAM`,
-    --- `SYNTH` and `NEAREST` bits.
+    --- Caller-writable. Carries the `LOOP`, `SPATIAL`, `STEREO`, `SYNTH` and
+    --- `NEAREST` bits.
     flags: integer
 
     --- Caller-writable. Sets linear amplitude for `PLAY`, `SET_GAIN` and
@@ -103,17 +103,6 @@ export record Command
     data: integer
 end
 
---- Reports what a load settled on.
-export record ClipInfo
-    --- Read-only. Reports the audio duration in seconds, and zero when the
-    --- input cannot say.
-    duration: number
-
-    --- Read-only. Reports whether decoded samples stay in memory and are
-    --- shared by every voice reading the clip.
-    resident: boolean
-end
-
 --- Reports what became of a backend's output device.
 ---
 --- The mix runs at the backend's `frequency` and `channels` throughout. The
@@ -148,12 +137,6 @@ export record OutputStatus
     --- while no stream is open.
     channels: integer
 end
-
---- Selects residency for a load.
----
---- `"auto"` measures the clip's duration against the configured streaming
---- threshold, which is what a game that states no preference gets.
-export type LoadMode = "auto" | "resident" | "stream"
 
 --- Mixes sound for one output.
 ---
@@ -213,24 +196,6 @@ export record Backend
     --- `#out` when the array is preallocated by the caller.
     drain: function(out: {integer}): integer
 
-    --- Read-only. Reads a file and holds it under `clip`, returning what the
-    --- load settled on, or nil and a reason.
-    loadClip: function(path: string, clip: integer, mode: LoadMode, streamSeconds: number): (ClipInfo?, string?)
-
-    --- Read-only. Decodes `bytes`, the whole of an encoded file held in memory,
-    --- container and all, and holds the result under `clip`, returning what the
-    --- load settled on, or nil and a reason. The result is always resident,
-    --- because there is no file for a voice to stream from. `name` stands where
-    --- a path would: a reason names it, and its extension may hint the format.
-    --- The bytes are borrowed for the call and not kept. Omitted by a backend
-    --- that cannot decode from memory, which `tecs.audio` answers with a
-    --- reason rather than a raise.
-    loadClipBytes: (function(name: string, bytes: string, clip: integer): (ClipInfo?, string?))?
-
-    --- Read-only. Drops whatever a clip index holds. Voices already reading it
-    --- finish on the samples they started with.
-    releaseClip: function(clip: integer): nil
-
     --- Read-only. Reports a voice's read position in seconds, or nil when the
     --- handle names nothing and when the input will not say. Flushes queued
     --- commands first, because the answer has to include them.
@@ -240,10 +205,6 @@ export record Backend
     --- its clip, and reports whether the input accepted it. Flushes queued
     --- commands first.
     seek: function(handle: integer, seconds: number): boolean
-
-    --- Read-only. Reports the decoder names this build linked, in the
-    --- backend's own order.
-    decoders: function(): {string}
 
     --- Read-only. Reports the output clock a command's `at` is on, in seconds:
     --- the frames the backend has mixed over `frequency`. It counts what the
@@ -455,7 +416,6 @@ export const SET_MASTER_GAIN: integer = 11
 --- Sets how a voice reads between source frames, reading the `NEAREST` flag.
 export const SET_RESAMPLE: integer = 12
 
---- Marks a command that repeats forever.
 --- Delivers `data` to a voice's Decoder on the frame `at` names.
 export const EVENT: integer = 13
 
@@ -512,6 +472,7 @@ export const BUS_PARENT: integer = 4
 --- Marks an `EFFECT_INSERT` as going on a Bus.
 export const ON_BUS: integer = 64
 
+--- Marks a command that repeats forever.
 export const LOOP: integer = 1
 
 --- Marks a command carrying a position.
@@ -519,10 +480,6 @@ export const SPATIAL: integer = 2
 
 --- Marks a command carrying explicit speaker gains.
 export const STEREO: integer = 4
-
---- Marks a `PLAY` that reads its input from the file rather than from held
---- samples.
-export const STREAM: integer = 8
 
 --- Marks a `PLAY` whose input is the Playback a Decoder opened for the
 --- command's handle through `openDecoded`, rather than a clip.
@@ -578,27 +535,11 @@ export function silent(frequency: integer?): Backend
         drain = function(_out: {integer}): integer
             return 0
         end,
-        loadClip = function(
-            _path: string,
-            _clip: integer,
-            _mode: LoadMode,
-            _streamSeconds: number
-        ): (ClipInfo?, string?)
-            return new ClipInfo(duration = 0, resident = false)
-        end,
-        loadClipBytes = function(_name: string, _bytes: string, _clip: integer): (ClipInfo?, string?)
-            return new ClipInfo(duration = 0, resident = false)
-        end,
-        releaseClip = function(_clip: integer): nil
-        end,
         position = function(_handle: integer): number?
             return nil
         end,
         seek = function(_handle: integer, _seconds: number): boolean
             return false
-        end,
-        decoders = function(): {string}
-            return {}
         end,
         now = function(): number
             return 0

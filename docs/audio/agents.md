@@ -12,16 +12,16 @@ makes all of it deterministic: the audio clock then moves only with the frames
 
 | Tool              | What it does                                                                                                             |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `audio`           | Installed, available, failure, voice count, master gain, decoders                                                        |
+| `audio`           | Installed, available, failure, voice count, master gain, the Decoders registered                                         |
 | `audio_snapshot`  | Buses and Tracks with their faders, sends, effects and meters; voices; Timelines; the clock, the output and the counters |
 | `audio_events`    | Starts, refusals, steals, stops and finishes, each with its clock time; pass `after` to read only what is new            |
 | `audio_listen`    | Starts recording the next `seconds` of the mix                                                                           |
 | `audio_listening` | Summarizes the recording: peak, RMS, LUFS, clipped samples, silent spans and onset times; `save` writes a WAV            |
 | `audio_step`      | Renders `seconds` of a memory or held void output                                                                        |
 | `audio_control`   | Sets a Bus's or a Track's gain, mute, solo or pause                                                                      |
-| `audio_play`      | Plays a loaded clip on a Bus or a Track, now or at a clock time                                                          |
+| `audio_play`      | Plays a Sound the mixer knows, by name, on a Bus or a Track, now or at a clock time                                      |
 | `audio_timeline`  | Pauses, resumes, seeks or retempos a Timeline                                                                            |
-| `reload_sound`    | Reloads a cached clip from its file                                                                                      |
+| `reload_sound`    | Re-reads a Sound from where it came from, through its extension                                                          |
 
 To check "did the door sound play when the door opened": `clock_pause`, open
 the door, `clock_step`, then read `audio_events` for its start and

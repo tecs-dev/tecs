@@ -1,5 +1,5 @@
 ---
-description: "Plug Decoders and Effects into the mixer through versioned C vtables, as tecs-gm and tecs-ymfm do"
+description: "Plug Decoders and Effects into the mixer through versioned C vtables, as tecs-pcm, tecs-gm and tecs-ymfm do"
 order: 51
 ---
 
@@ -9,7 +9,12 @@ A kind of Sound is a Nupp module and a native Decoder registered together.
 The Nupp half parses at control rate and can sequence; the native half renders
 at audio rate, in the callback, where it must not allocate, lock or block.
 
-## The two in the monorepo
+## The three in the monorepo
+
+- **`tecs-pcm`**: encoded audio files (symphonia). `tecs.pcm` loads a file, or
+  the bytes of one, as a Sound, resident and shared by every voice or streamed
+  from its file on one feeder thread, and gives the `PCM` and `PCM_STREAM`
+  asset kinds.
 
 - **`tecs-gm`**: General MIDI from a SoundFont (`rustysynth`). `tecs.gm` loads
   SoundFonts and plays a `Synth` as a voice; `tecs.gm.midi` loads Standard MIDI
@@ -17,13 +22,14 @@ at audio rate, in the callback, where it must not allocate, lock or block.
 - **`tecs-ymfm`**: the 24 Yamaha FM chips `ymfm-oxide` emulates. `tecs.ymfm`
   plays a chip as a voice; `tecs.ymfm.music` plays VGM, VGZ and DRO logs.
 
-Neither is compiled in by default. Build their native libraries with
-`nupp task extensions`, and run their tests with `nupp task test-gm` and
-`nupp task test-ymfm`. Each is its own Nupp project over the tecs sources, and
-finds its library the way tecs finds its own services, or through
-`TECS_GM_LIBRARY` and `TECS_YMFM_LIBRARY`.
+None is compiled in by default. Build their native libraries with
+`nupp task extensions`, and run their tests with `nupp task test-pcm`,
+`nupp task test-gm` and `nupp task test-ymfm`. Each is its own Nupp project
+over the tecs sources, and finds its library the way tecs finds its own
+services, or through `TECS_PCM_LIBRARY`, `TECS_GM_LIBRARY` and
+`TECS_YMFM_LIBRARY`.
 
-Both drive their voices with Decoder events on the mixer's one clock, so a
+`tecs-gm` and `tecs-ymfm` drive their voices with Decoder events on the mixer's one clock, so a
 note or a register write lines up with every clip by arithmetic.
 
 ## The Decoder ABI
@@ -44,7 +50,12 @@ note or a register write lines up with every clip by arithmetic.
 bytes, options)` starts a Playback; `mixer:event(handle, data, at)` sends it an
 event. An event's top bits, from bit 40, name an operation every sequenced
 Decoder is asked for (notes off, reset); below them is the Decoder's own
-payload. The PCM Decoder is built in and speaks the same vtable.
+payload.
+
+A `tecs.audio.Sound` names its Decoder and carries what opens a Playback of
+it, so `mixer:play(sound)` registers that Decoder on first use and needs
+nothing else: this is how `tecs.pcm`'s Sounds play, and how a game's own kind
+of Sound would.
 
 ## The Effect ABI
 

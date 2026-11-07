@@ -314,7 +314,7 @@ register("audio", "Report the world's audio output, mixer and decoder state.", f
 end)
 register(
     "reload_sound",
-    "Reload an already cached sound through the world's audio owner.",
+    "Reload a sound the world's audio mixer knows, through its reload.",
     function(args: {[string]: any}): {[string]: any}
         local mixer = audio.of(bindings.requireWorld())
         assert(mixer ~= nil, "no audio mixer installed")
@@ -694,17 +694,11 @@ register(
 )
 register(
     "audio_play",
-    "Play a loaded clip, by the path it was loaded from, on a Bus's default Track or a Track id, optionally at a "
+    "Play a Sound the mixer knows, by its name (a path for a file), on a Bus's default Track or a Track id, optionally at a "
     .. "time on the audio clock.",
     function(args: {[string]: any}): {[string]: any}
         local mixer = requireMixer()
-        local found: audio.Clip? = nil
-        for _, clip in ipairs(mixer:clips()) do
-            if clip.path == args.path then
-                found = clip
-            end
-        end
-        local clip = assert(found, "no clip was loaded from that path")
+        local clip = assert(mixer:sound(args.path), "no Sound by that name has played or been added")
         local options: audio.PlayOptions = {gain = args.gain, at = args.at}
         if args.track ~= nil then
             for _, track in ipairs(mixer:tracks()) do

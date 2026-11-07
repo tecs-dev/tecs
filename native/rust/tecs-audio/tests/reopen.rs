@@ -21,6 +21,7 @@ use tecsaudio::command::{self, Command, Event};
 use tecsaudio::conform::Format;
 use tecsaudio::engine::Engine;
 use tecsaudio::output::{Host, Start, Tap, Timing, STATE_PLAYING, STATE_REOPENING, STATE_VOID};
+use tecsaudio::source::ResidentSource;
 
 /// Counts the allocations a thread makes while its flag is up.
 struct Counting;
@@ -259,34 +260,13 @@ fn open(control: &Arc<Control>) -> Engine {
     engine
 }
 
-/// A WAV of one second of stereo 16-bit PCM at a constant half-scale level.
-fn level_wav() -> Vec<u8> {
-    let frames: u32 = 48_000;
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"RIFF");
-    bytes.extend_from_slice(&(36 + frames * 4).to_le_bytes());
-    bytes.extend_from_slice(b"WAVEfmt ");
-    bytes.extend_from_slice(&16u32.to_le_bytes());
-    bytes.extend_from_slice(&1u16.to_le_bytes());
-    bytes.extend_from_slice(&2u16.to_le_bytes());
-    bytes.extend_from_slice(&48_000u32.to_le_bytes());
-    bytes.extend_from_slice(&192_000u32.to_le_bytes());
-    bytes.extend_from_slice(&4u16.to_le_bytes());
-    bytes.extend_from_slice(&16u16.to_le_bytes());
-    bytes.extend_from_slice(b"data");
-    bytes.extend_from_slice(&(frames * 4).to_le_bytes());
-    for _ in 0..frames * 2 {
-        bytes.extend_from_slice(&16_384i16.to_le_bytes());
-    }
-    bytes
-}
-
 fn play(handle: u32, looping: bool) -> Command {
     Command {
         kind: command::PLAY,
         handle,
         clip: 1,
-        flags: if looping { command::FLAG_LOOP } else { 0 },
+        // The level is a parked source, as a Decoder's Playback is.
+        flags: command::FLAG_SYNTH | if looping { command::FLAG_LOOP } else { 0 },
         gain: 1.0,
         pitch: 1.0,
         start: 0.0,
@@ -302,10 +282,14 @@ fn play(handle: u32, looping: bool) -> Command {
 
 /// Starts a looping half-scale level, so every stream should hear 0.5.
 fn start_level(engine: &Engine) {
-    engine
-        .load_clip_bytes("level.wav", &level_wav(), 1)
-        .expect("the level decodes");
+    park_level(engine, 65_537);
     engine.submit(&[play(65_537, true)]);
+}
+
+/// Parks a second of a half-scale stereo level for the `PLAY` of `handle`.
+fn park_level(engine: &Engine, handle: u32) {
+    let samples: std::sync::Arc<[f32]> = vec![0.5f32; 2 * 48_000].into();
+    engine.park_source(handle, Box::new(ResidentSource::new(samples, 2, 48_000)));
 }
 
 fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
@@ -471,9 +455,7 @@ fn keeps_the_clock_running_while_the_device_is_gone_and_resumes_when_it_returns(
 fn reports_a_voice_finished_in_the_gap() {
     let control = Control::new(STEREO_48K);
     let engine = open(&control);
-    engine
-        .load_clip_bytes("level.wav", &level_wav(), 1)
-        .expect("the level decodes");
+    park_level(&engine, 65_537);
     control.set(|state| state.format = None);
     wait_until("the output drops", || {
         engine.output_state() == STATE_REOPENING
@@ -569,9 +551,7 @@ fn a_void_output_finishes_a_timed_voice_on_the_wall_clock() {
     let engine = Engine::open_void(48_000, 2, 8);
     assert!(engine.available());
     assert_eq!(engine.output_state(), STATE_VOID);
-    engine
-        .load_clip_bytes("level.wav", &level_wav(), 1)
-        .expect("the level decodes");
+    park_level(&engine, 65_537);
     let mut start = play(65_537, false);
     // A second of clip, due a tenth of a second from now.
     start.at = engine.now() + 0.1;
@@ -616,6 +596,7 @@ fn builds_and_tears_down_the_console_live_without_the_callback_allocating() {
     insert.data = 5;
     let mut send = strip(command::SEND, 2, 1);
     send.gain = 0.5;
+    park_level(&engine, 65_538);
     let mut voice = play(65_538, true);
     voice.target = 2;
     engine.submit(&[insert, send, voice]);

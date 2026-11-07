@@ -1,0 +1,18 @@
+[package]
+name = "tecs-pcm"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Encoded audio files for tecs (symphonia), behind the Decoder ABI"
+
+[lib]
+name = "tecs_pcm"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+symphonia.workspace = true
+tecs-audio-abi = { path = "../native/rust/tecs-audio-abi" }
+
+[dev-dependencies]
+tecs-audio = { path = "../native/rust/tecs-audio" }

@@ -13,7 +13,6 @@ use std::sync::{Arc, Mutex, RwLock};
 use crate::abi::{Decoder, DecoderVTable, EffectKind, EffectVTable};
 use crate::command::{self, Command, Event};
 use crate::conform::Format;
-use crate::decode::{self, Streamer};
 use crate::device::CpalHost;
 use crate::effects::{self, Effect};
 use crate::listen::{self, Summary, Tap};
@@ -21,45 +20,13 @@ use crate::mixer::{Fresh, Mixer, Prepared, Storage, StripMeter};
 use crate::output::{self, Host, NoDevice, Output, Start, Timing};
 use crate::queue::{self, Consumer, Producer};
 use crate::render::{Message, Published, RenderSide, Report};
-use crate::source::{ResidentSource, Source, MAX_CHANNELS};
-use crate::stream::Feeder;
-
-/// Measures a clip's duration against the streaming threshold.
-pub const MODE_AUTO: u32 = 0;
-
-/// Holds a clip's decoded samples in memory.
-pub const MODE_RESIDENT: u32 = 1;
-
-/// Reads a clip from its file for each voice.
-pub const MODE_STREAM: u32 = 2;
+use crate::source::Source;
 
 /// The rate an engine asked for zero frames per second runs at.
 const DEFAULT_RATE: u32 = 48_000;
 
 /// The channels an engine asked for none runs with.
 const DEFAULT_CHANNELS: u16 = 2;
-
-/// A loaded clip, in whichever of the two forms it settled on.
-enum Clip {
-    /// Decoded once and shared by every voice reading it.
-    Resident {
-        samples: Arc<[f32]>,
-        channels: u16,
-        sample_rate: u32,
-        duration: f64,
-    },
-    /// Opened afresh by every voice, which is what makes a long piece of music
-    /// cost one decoder rather than its whole length in memory.
-    Streamed { path: String, duration: f64 },
-}
-
-/// Reports what a load settled on, for the caller to hand back to Tecs.
-pub struct Loaded {
-    /// The audio duration in seconds, and zero when the input cannot say.
-    pub duration: f64,
-    /// Whether decoded samples stay in memory.
-    pub resident: bool,
-}
 
 /// One audio output and everything Tecs reaches it through.
 pub struct Engine {
@@ -71,17 +38,15 @@ pub struct Engine {
     control: Mutex<ControlSide>,
     /// What the render side publishes for queries.
     published: Arc<Published>,
-    clips: RwLock<HashMap<u32, Clip>>,
     /// Sources a Decoder opened and not yet started, by the voice handle
     /// whose `PLAY` will take them.
     synths: Mutex<HashMap<u32, Box<dyn Source>>>,
-    /// Decoders by id, one-based: id one is the built-in PCM Decoder.
+    /// Decoders a library registered, by id less one.
     decoders: RwLock<Vec<Decoder>>,
     /// Effect kinds a library registered, by id less `ABI_EFFECTS`.
     effect_kinds: RwLock<Vec<EffectKind>>,
     /// Effects built for an `EFFECT_INSERT`, by the id Tecs gave them.
     effects: Mutex<HashMap<u64, Box<dyn Effect>>>,
-    feeder: Feeder,
     output: Option<Output>,
     /// The reason the most recent failing call gave, kept so the binding can
     /// read it after the fact rather than carrying a string across the seam on
@@ -525,15 +490,10 @@ impl Engine {
             render,
             control: Mutex::new(control),
             published,
-            clips: RwLock::new(HashMap::new()),
             synths: Mutex::new(HashMap::new()),
-            decoders: RwLock::new(vec![
-                // Valid by construction: it is this crate's own static.
-                unsafe { Decoder::from_raw(&crate::pcm::VTABLE) }.expect("the PCM vtable"),
-            ]),
+            decoders: RwLock::new(Vec::new()),
             effect_kinds: RwLock::new(Vec::new()),
             effects: Mutex::new(HashMap::new()),
-            feeder: Feeder::start(),
             output,
             last_error: Mutex::new(reason),
             reported: Mutex::new(CString::default()),
@@ -668,151 +628,21 @@ impl Engine {
         reason
     }
 
-    /// Reads a file and holds it under `clip`.
-    ///
-    /// @return what the load settled on, or the reason nothing was loaded
-    pub fn load_clip(
-        &self,
-        path: &str,
-        clip: u32,
-        mode: u32,
-        stream_seconds: f32,
-    ) -> Result<Loaded, String> {
-        let duration = match mode {
-            MODE_RESIDENT => None,
-            _ => decode::probe_duration(path).map_err(|reason| self.fail(reason))?,
-        };
-        // A file that will not say how long it is stays resident, because the
-        // question the threshold answers is whether the clip is large and an
-        // unanswered one is more likely a sound effect than a soundtrack.
-        let resident = match mode {
-            MODE_RESIDENT => true,
-            MODE_STREAM => false,
-            _ => duration.is_none_or(|seconds| seconds <= stream_seconds as f64),
-        };
-
-        let entry = if resident {
-            let decoded = decode::decode_all(path).map_err(|reason| self.fail(reason))?;
-            self.resident(path, decoded)?
-        } else {
-            // Opened and dropped, so a path that cannot be read fails here
-            // rather than silently producing a voice that never sounds.
-            let streamer = Streamer::open(path).map_err(|reason| self.fail(reason))?;
-            if streamer.channels() == 0 || streamer.channels() as usize > MAX_CHANNELS {
-                return Err(self.fail(format!(
-                    "'{path}' has {} channels, and the mixer carries at most {MAX_CHANNELS}",
-                    streamer.channels()
-                )));
-            }
-            Clip::Streamed {
-                path: path.to_string(),
-                duration: streamer.duration().or(duration).unwrap_or(0.0),
-            }
-        };
-
-        self.hold(clip, entry)
-    }
-
-    /// Decodes the bytes of a whole encoded file held in memory and holds the
-    /// result under `clip`.
-    ///
-    /// A clip from memory is always resident: there is no file for a voice to
-    /// stream from, and the bytes are not kept. `name` stands where a path
-    /// would, in every reason this reports and as the extension the probe is
-    /// hinted with.
-    ///
-    /// @return what the load settled on, or the reason nothing was loaded
-    pub fn load_clip_bytes(&self, name: &str, bytes: &[u8], clip: u32) -> Result<Loaded, String> {
-        let decoded = decode::decode_bytes(name, bytes).map_err(|reason| self.fail(reason))?;
-        let entry = self.resident(name, decoded)?;
-        self.hold(clip, entry)
-    }
-
-    /// Turns decoded samples into a resident clip, refusing a channel count the
-    /// mixer cannot carry.
-    fn resident(&self, label: &str, decoded: decode::Decoded) -> Result<Clip, String> {
-        if decoded.channels == 0 || decoded.channels as usize > MAX_CHANNELS {
-            return Err(self.fail(format!(
-                "'{label}' has {} channels, and the mixer carries at most {MAX_CHANNELS}",
-                decoded.channels
-            )));
-        }
-        let frames = decoded.samples.len() / decoded.channels.max(1) as usize;
-        let seconds = if decoded.sample_rate == 0 {
-            0.0
-        } else {
-            frames as f64 / decoded.sample_rate as f64
-        };
-        Ok(Clip::Resident {
-            samples: decoded.samples.into(),
-            channels: decoded.channels,
-            sample_rate: decoded.sample_rate,
-            duration: seconds,
-        })
-    }
-
-    /// Puts a clip under its index, replacing whatever the index held, and
-    /// reports what it settled on.
-    fn hold(&self, clip: u32, entry: Clip) -> Result<Loaded, String> {
-        let settled = match &entry {
-            Clip::Resident { duration, .. } => Loaded {
-                duration: *duration,
-                resident: true,
-            },
-            Clip::Streamed { duration, .. } => Loaded {
-                duration: *duration,
-                resident: false,
-            },
-        };
-        match self.clips.write() {
-            Err(_) => return Err(self.fail("the clip table is poisoned".to_string())),
-            Ok(mut clips) => {
-                clips.insert(clip, entry);
-            }
-        }
-        Ok(settled)
-    }
-
-    /// Drops whatever a clip index holds.
-    ///
-    /// Voices already reading it keep their own reference, so a sound playing
-    /// across a release finishes on the samples it started with.
-    pub fn release_clip(&self, clip: u32) {
-        if let Ok(mut clips) = self.clips.write() {
-            clips.remove(&clip);
-        }
-    }
-
     /// Builds the source a `PLAY` needs, outside the mixer lock.
     fn prepare(&self, command: &Command) -> Option<Box<dyn Source>> {
         if command.has(command::FLAG_SYNTH) {
             return self.synths.lock().ok()?.remove(&command.handle);
         }
-        let clips = self.clips.read().ok()?;
-        match clips.get(&command.clip)? {
-            Clip::Resident {
-                samples,
-                channels,
-                sample_rate,
-                ..
-            } => Some(Box::new(ResidentSource::new(
-                Arc::clone(samples),
-                *channels,
-                *sample_rate,
-            ))),
-            Clip::Streamed { path, .. } => {
-                let path = path.clone();
-                // The read lock is released before the file is opened, so a
-                // slow open never holds up a load on another thread.
-                drop(clips);
-                match Streamer::open(&path) {
-                    Err(reason) => {
-                        self.fail(reason);
-                        None
-                    }
-                    Ok(streamer) => Some(Box::new(self.feeder.attach(streamer, 0.0))),
-                }
-            }
+        // Every Playback comes from a Decoder now; a PLAY without one has
+        // nothing to sound.
+        None
+    }
+
+    /// Holds a source a Rust embedder built for the `PLAY` of `handle`, which
+    /// carries `FLAG_SYNTH` to take it, as a Decoder's Playback is held.
+    pub fn park_source(&self, handle: u32, source: Box<dyn Source>) {
+        if let Ok(mut parked) = self.synths.lock() {
+            parked.insert(handle, source);
         }
     }
 
@@ -1026,9 +856,6 @@ impl Engine {
         self.output = None;
         self.pump_inline();
         self.available = false;
-        if let Ok(mut clips) = self.clips.write() {
-            clips.clear();
-        }
         if let Ok(mut synths) = self.synths.lock() {
             synths.clear();
         }
@@ -1040,6 +867,7 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
+    use crate::source::ResidentSource;
     #[test]
     fn output_failure_is_distinct_from_offline_unavailability() {
         let mut engine = super::Engine::open_offline(48000, 2, 8);
@@ -1086,138 +914,6 @@ mod tests {
     }
 
     #[test]
-    fn reports_a_missing_file_rather_than_panicking() {
-        let engine = Engine::open_offline(48_000, 2, 8);
-        let failure = engine.load_clip("this/file/does/not/exist.ogg", 1, MODE_AUTO, 10.0);
-        assert!(failure.is_err());
-        assert!(!engine.last_error().is_empty());
-    }
-
-    #[test]
-    fn plays_a_clip_decoded_from_memory_like_one_read_from_a_file() {
-        // One second of mono 16-bit PCM at the engine's own rate, a constant
-        // half-scale level, so the render needs no resampling to compare.
-        let frames: u32 = 48_000;
-        let level: i16 = 16_384;
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"RIFF");
-        bytes.extend_from_slice(&(36 + frames * 2).to_le_bytes());
-        bytes.extend_from_slice(b"WAVEfmt ");
-        bytes.extend_from_slice(&16u32.to_le_bytes());
-        bytes.extend_from_slice(&1u16.to_le_bytes());
-        bytes.extend_from_slice(&1u16.to_le_bytes());
-        bytes.extend_from_slice(&48_000u32.to_le_bytes());
-        bytes.extend_from_slice(&96_000u32.to_le_bytes());
-        bytes.extend_from_slice(&2u16.to_le_bytes());
-        bytes.extend_from_slice(&16u16.to_le_bytes());
-        bytes.extend_from_slice(b"data");
-        bytes.extend_from_slice(&(frames * 2).to_le_bytes());
-        for _ in 0..frames {
-            bytes.extend_from_slice(&level.to_le_bytes());
-        }
-
-        let engine = Engine::open_offline(48_000, 2, 8);
-        let loaded = engine
-            .load_clip_bytes("level.wav", &bytes, 3)
-            .expect("the bytes decode");
-        assert!(loaded.resident);
-        assert!((loaded.duration - 1.0).abs() < 1.0e-9);
-
-        engine.submit(&[play(65_537, 3)]);
-        assert_eq!(engine.voice_count(), 1);
-        let mut out = vec![0.0f32; 2 * 256];
-        assert_eq!(engine.render(&mut out), 256);
-        assert!(
-            out.iter().skip(64).any(|value| *value != 0.0),
-            "a voice on a memory clip renders silence"
-        );
-    }
-
-    /// Builds a mono 8-bit unsigned WAV whose data chunk has an odd length and
-    /// so carries the RIFF pad byte after it.
-    fn odd_unsigned_wav(rate: u32, data: &[u8]) -> Vec<u8> {
-        assert!(data.len() % 2 == 1, "the case under test is an odd chunk");
-        let padded = data.len() as u32 + 1;
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"RIFF");
-        bytes.extend_from_slice(&(36 + padded).to_le_bytes());
-        bytes.extend_from_slice(b"WAVEfmt ");
-        bytes.extend_from_slice(&16u32.to_le_bytes());
-        bytes.extend_from_slice(&1u16.to_le_bytes());
-        bytes.extend_from_slice(&1u16.to_le_bytes());
-        bytes.extend_from_slice(&rate.to_le_bytes());
-        bytes.extend_from_slice(&rate.to_le_bytes());
-        bytes.extend_from_slice(&1u16.to_le_bytes());
-        bytes.extend_from_slice(&8u16.to_le_bytes());
-        bytes.extend_from_slice(b"data");
-        // The chunk size states the data alone; the pad byte is not counted.
-        bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
-        bytes.extend_from_slice(data);
-        bytes.push(0);
-        bytes
-    }
-
-    #[test]
-    fn resamples_an_odd_8_bit_clip_at_a_nonstandard_rate_from_memory() {
-        // A ramp, because linear interpolation reproduces a ramp exactly, so
-        // every resampled frame has a value to be checked against.
-        let data: Vec<u8> = (0..201u32).map(|index| 28 + index as u8).collect();
-        let source_value = |position: f64| (28.0 + position) / 128.0 - 1.0;
-
-        for rate in [10_989u32, 18_868] {
-            let bytes = odd_unsigned_wav(rate, &data);
-
-            let decoded = decode::decode_bytes("SOUND.WAV", &bytes).expect("the WAV decodes");
-            assert_eq!(decoded.sample_rate, rate);
-            assert_eq!(decoded.channels, 1);
-            // The pad byte is not a sample.
-            assert_eq!(decoded.samples.len(), data.len());
-            for (index, sample) in decoded.samples.iter().enumerate() {
-                assert_eq!(*sample, data[index] as f32 / 128.0 - 1.0);
-            }
-
-            let engine = Engine::open_offline(48_000, 2, 8);
-            let loaded = engine
-                .load_clip_bytes("SOUND.WAV", &bytes, 1)
-                .expect("the clip loads");
-            assert!(loaded.resident);
-            assert!((loaded.duration - data.len() as f64 / rate as f64).abs() < 1.0e-12);
-
-            engine.submit(&[play(65_537, 1)]);
-            let mut out = vec![0.0f32; 2 * 4096];
-            engine.render(&mut out);
-            assert_eq!(engine.voice_count(), 0, "the clip outlasted 4096 frames");
-
-            // Output frame k reads source position k * rate / 48000, up to the
-            // last pair of source frames the interpolator can blend.
-            let step = rate as f64 / 48_000.0;
-            let sounded = ((data.len() - 1) as f64 / step).ceil() as usize;
-            for frame in 0..sounded {
-                let want = source_value(frame as f64 * step) as f32;
-                assert!(
-                    (out[frame * 2] - want).abs() < 1.0e-4 && out[frame * 2 + 1] == out[frame * 2],
-                    "frame {frame} at {rate} Hz rendered {}, expected {want}",
-                    out[frame * 2]
-                );
-            }
-            assert!(
-                out[(sounded + 1) * 2..].iter().all(|value| *value == 0.0),
-                "the voice at {rate} Hz sounded past its {sounded} resampled frames"
-            );
-        }
-    }
-
-    #[test]
-    fn reports_bytes_that_are_not_audio_and_keeps_the_index_empty() {
-        let engine = Engine::open_offline(48_000, 2, 8);
-        let failure = engine.load_clip_bytes("junk.ogg", b"not audio", 4);
-        assert!(failure.is_err());
-        assert!(engine.last_error().contains("junk.ogg"));
-        engine.submit(&[play(65_537, 4)]);
-        assert_eq!(engine.voice_count(), 0);
-    }
-
-    #[test]
     fn answers_a_position_query_for_a_handle_naming_nothing() {
         let engine = Engine::open_offline(48_000, 2, 8);
         assert_eq!(engine.position(7), -1.0);
@@ -1244,15 +940,16 @@ mod tests {
         for _ in 0..frames {
             bytes.extend_from_slice(&16_384i16.to_le_bytes());
         }
+        drop(bytes);
         let engine = Engine::open_offline(48_000, 2, 8);
-        engine
-            .load_clip_bytes("level.wav", &bytes, 3)
-            .expect("the bytes decode");
+        let level: std::sync::Arc<[f32]> = vec![0.5f32; frames as usize].into();
+        engine.park_source(65_537, Box::new(ResidentSource::new(level, 1, 48_000)));
         assert_eq!(engine.now(), 0.0);
 
         // Started 40 frames into the first render, then stopped 7 frames into
         // the second, both scheduled before either render.
         let mut start = play(65_537, 3);
+        start.flags = command::FLAG_SYNTH;
         start.at = 40.0 / 48_000.0;
         let mut stop = play(65_537, 0);
         stop.kind = command::STOP;
@@ -1270,45 +967,5 @@ mod tests {
         assert!(out[..14].iter().all(|value| *value == 0.5));
         assert!(out[14..].iter().all(|value| *value == 0.0));
         assert_eq!(engine.voice_count(), 0);
-    }
-
-    #[test]
-    fn plays_a_sound_through_the_pcm_decoder_vtable_with_an_effect_and_meters() {
-        let engine = Engine::open_memory(48_000, 2, 4);
-        // 4801 frames of mono 8-bit PCM at three-quarters level.
-        let wav = odd_unsigned_wav(48_000, &[224u8; 4801]);
-        engine
-            .open_decoded(1, 65_537, &[], &wav)
-            .expect("the PCM decoder opens");
-        assert!(
-            engine.open_decoded(9, 65_538, &[], &wav).is_err(),
-            "an unknown decoder"
-        );
-        engine
-            .prepare_effect(crate::effects::FILTER, 77, &[])
-            .expect("a built-in effect");
-        let mut insert = Command {
-            kind: command::EFFECT_INSERT,
-            data: 77,
-            ..Default::default()
-        };
-        insert.flags = command::FLAG_BUS;
-        let mut start = play(65_537, 0);
-        start.flags = command::FLAG_SYNTH;
-        engine.submit(&[insert, start]);
-        let mut out = vec![0.0f32; 2 * 2400];
-        assert_eq!(engine.render(&mut out), 2400);
-        assert!((out[2 * 2000] - 0.75).abs() < 0.02, "got {}", out[2 * 2000]);
-        let meters = engine.meters();
-        assert!(meters[0].bus && meters[0].id == 0, "Master first");
-        // The filter rings on the clip's hard first step, so the peak is at least
-        // the level and below full scale.
-        let peak = meters[0].meter.peak;
-        assert!((0.74..1.0).contains(&peak), "master peak {peak}");
-        assert!((meters[0].meter.rms() - 0.75).abs() < 0.05);
-        assert!(meters
-            .iter()
-            .any(|meter| !meter.bus && meter.id == 0 && meter.meter.peak > 0.5));
-        assert_eq!(engine.meters()[0].meter.peak, 0.0, "reading resets");
     }
 }

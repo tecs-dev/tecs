@@ -8,17 +8,17 @@ order: 50
 Tecs audio is arranged as a mixing console, because that is how a person, or
 an agent, building a game thinks about sound.
 
-| Term     | On a console                     | In tecs                                                                         |
-| -------- | -------------------------------- | ------------------------------------------------------------------------------- |
-| Mixer    | The console                      | `tecs.audio.Audio`, one per world, installed with `tecs.audio.install`          |
-| Track    | A channel strip                  | `mixer:track()`, or the `Track` component on an entity                          |
-| Playback | The deck plugged into a strip    | A voice: one Sound rendered into one Track, named by its handle                 |
-| Sound    | The tape, or the score           | A `PcmSound` asset, or a sequenced Sound an extension plays                     |
-| Decoder  | The playback head                | Native, one instance per Playback; PCM is built in, others come from extensions |
-| Bus      | A subgroup, a return, the master | `mixer:bus(name)`; groups are Buses                                             |
-| Output   | The main out                     | A device, void (ticks with no device) or memory (renders on demand)             |
-| Clock    | The word clock                   | The frames the Output consumed, which `mixer:now()` reads                       |
-| Timeline | The sequencer                    | `mixer:timeline()`: beats with a tempo and a pause, mapped onto the Clock       |
+| Term     | On a console                     | In tecs                                                                                                         |
+| -------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Mixer    | The console                      | `tecs.audio.Audio`, one per world, installed with `tecs.audio.install`                                          |
+| Track    | A channel strip                  | `mixer:track()`, or the `Track` component on an entity                                                          |
+| Playback | The deck plugged into a strip    | A voice: one Sound rendered into one Track, named by its handle                                                 |
+| Sound    | The tape, or the score           | `tecs.audio.Sound`, which an extension makes: a file through `tecs.pcm`, music through `tecs.gm` or `tecs.ymfm` |
+| Decoder  | The playback head                | Native, one instance per Playback, from an extension; the core has none                                         |
+| Bus      | A subgroup, a return, the master | `mixer:bus(name)`; groups are Buses                                                                             |
+| Output   | The main out                     | A device, void (ticks with no device) or memory (renders on demand)                                             |
+| Clock    | The word clock                   | The frames the Output consumed, which `mixer:now()` reads                                                       |
+| Timeline | The sequencer                    | `mixer:timeline()`: beats with a tempo and a pause, mapped onto the Clock                                       |
 
 ## The signal flow
 
@@ -37,8 +37,9 @@ mixer:bus("sfx")
 mixer:bus("music", {gain = 0.8})
 mixer:bus("room", {effects = {effects.reverb({size = 0.7})}})
 
+local pcm <const> = require("tecs.pcm")
 local footsteps <const> = mixer:track({bus = "sfx", sends = {room = 0.3}, polyphony = 4})
-local step <const> = assert(app.assets:request(audio.PCM, "sounds/step.wav"))
+local step <const> = assert(app.assets:request(pcm.PCM, "sounds/step.wav"))
 footsteps:play(step, {pitch = 1.05})
 ```
 
@@ -96,10 +97,11 @@ its centre.
 
 ## Extensions
 
-General MIDI and the emulated Yamaha FM chips are extensions: top-level
-packages of the tecs monorepo, `tecs-gm` and `tecs-ymfm`, that a game opts
-into. See [Audio extensions](extensions.md) for how they plug in, and how to
-write one.
+Every Decoder is an extension: a top-level package of the tecs monorepo that a
+game opts into. `tecs-pcm` plays encoded audio files, `tecs-gm` General MIDI
+and `tecs-ymfm` the emulated Yamaha FM chips, and a game that needs none of
+them carries no codec. See [Audio extensions](extensions.md) for how they plug
+in, and how to write one.
 
 ## For agents
 
