@@ -303,7 +303,7 @@ end
 --- @param data1 from 0 to 127
 --- @param data2 from 0 to 127
 --- @param at seconds on the mixer's clock, or nil for at once
---- @return whether the voice is sounding
+--- @return whether the event was taken: true on a mixer with no output, false for a destroyed synth or a voice that stopped
 --- @raises string when a byte is out of range
 function Synth.send(exclusive self: Synth, status: integer, data1: integer, data2: integer, at: number?): boolean
     check("send", "status", status, 0x80, 0xFF)
@@ -311,6 +311,11 @@ function Synth.send(exclusive self: Synth, status: integer, data1: integer, data
     check("send", "data2", data2, 0, 127)
     if self.destroyed then
         return false
+    end
+
+    -- A mixer with no output takes every event and plays none.
+    if not self.mixer.available then
+        return true
     end
 
     return self.mixer:event(self.voice, status + data1 * 256 + data2 * 65536, at)
@@ -380,7 +385,7 @@ end
 --- @param channel from 0 to 15, or nil for every channel
 --- @param immediate true cuts the notes without their release
 --- @param at seconds on the mixer's clock, or nil for at once
---- @return whether the voice is sounding
+--- @return whether the event was taken: true on a mixer with no output, false for a destroyed synth or a voice that stopped
 --- @raises string when the channel is out of range
 function Synth.allNotesOff(exclusive self: Synth, channel: integer?, immediate: boolean?, at: number?): boolean
     if channel ~= nil then
@@ -391,6 +396,11 @@ function Synth.allNotesOff(exclusive self: Synth, channel: integer?, immediate: 
     end
     local payload = (immediate == true and 1 or 0) + (channel or 0xFF) * 256
 
+    -- A mixer with no output takes every event and plays none.
+    if not self.mixer.available then
+        return true
+    end
+
     return self.mixer:event(self.voice, OP_NOTES_OFF * OP_SHIFT + payload, at)
 end
 
@@ -398,10 +408,15 @@ end
 ---
 --- @param self the synth
 --- @param at seconds on the mixer's clock, or nil for at once
---- @return whether the voice is sounding
+--- @return whether the event was taken: true on a mixer with no output, false for a destroyed synth or a voice that stopped
 function Synth.reset(exclusive self: Synth, at: number?): boolean
     if self.destroyed then
         return false
+    end
+
+    -- A mixer with no output takes every event and plays none.
+    if not self.mixer.available then
+        return true
     end
 
     return self.mixer:event(self.voice, OP_RESET * OP_SHIFT, at)

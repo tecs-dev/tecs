@@ -636,6 +636,14 @@ end
 
 --- Sends one write as an event.
 local function send(exclusive self: Fm, data: integer, at: number?): boolean
+    if self.destroyed then
+        return false
+    end
+    -- A mixer with no output takes every write and plays none, so a game
+    -- needs no branch for the silent case.
+    if not self.mixer.available then
+        return true
+    end
     if not ensure(self) then
         return false
     end
