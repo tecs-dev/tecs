@@ -418,13 +418,13 @@ end
 
 function suite.makesAVoicelessSynthWithoutAnOutput(): nil
     -- A mixer with no output takes no voice. Its synth is still made, so a
-    -- game needs no branch for the silent case, and every call answers that
-    -- nothing is sounding.
+    -- game needs no branch for the silent case: every call is taken, and
+    -- nothing sounds.
     local mixer = audio.newAudio({backend = audiobackend.silent()})
     local music = assert(gm.new(mixer, font()))
     test.equal(mixer:sounding(), 0)
-    test.assert(not music:noteOn(0, 60, 100, 0.5))
-    test.assert(not music:allNotesOff())
+    test.assert(music:noteOn(0, 60, 100, 0.5))
+    test.assert(music:allNotesOff())
     test.assert(not music:playing())
     test.equal(music:now(), 0)
     music:pause()

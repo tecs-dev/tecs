@@ -364,13 +364,13 @@ end
 
 function suite.makesAVoicelessChipWithoutAnOutput(): nil
     -- A mixer with no output takes no voice. Its chip is still made and
-    -- answers every call without raising, reporting that nothing sounds.
+    -- takes every call, playing nothing, so a game needs no branch for it.
     local mixer = audio.newAudio({backend = audiobackend.silent()})
     local chip = assert(fm.new(mixer, {chip = "opl3"}))
     test.equal(mixer:sounding(), 0)
-    test.assert(not chip:write(0xB0, 0x20, 0.5))
-    test.assert(not chip:writes({0xA0, 0x41}))
-    test.assert(not chip:reset())
+    test.assert(chip:write(0xB0, 0x20, 0.5))
+    test.assert(chip:writes({0xA0, 0x41}))
+    test.assert(chip:reset())
     test.assert(not chip:playing())
     test.equal(chip:now(), 0)
     chip:setGain(0.5)
