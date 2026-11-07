@@ -1,0 +1,468 @@
+module tecs.audio.timeline
+
+--[[
+A timeline decides when. It has a local time of its own, counted in beats,
+with a tempo and a pause, mapped onto the one audio clock, which counts the
+frames the output has consumed. Events on a timeline are anything that should
+happen at a beat: play a sound on a track, stop a voice, set a parameter, or a
+function of the game's own.
+
+```nupp
+local song <const> = mixer:timeline({tempo = 120})
+song:play(theme, {track = music, at = song:nextBar()})
+song:at(song:nextBar() + 4, function(at: number): nil
+    mixer:setGain(voice, 0.5, at)
+end)
+song:pause()  -- the song stops advancing, the clock does not
+```
+
+A beat is a quarter note at `tempo` beats a minute, so at the default tempo of
+60 a beat is a second, and the mixer's default timeline, whose time is the
+clock, reads in seconds.
+
+Events go out a little ahead. Each `update`, which the mixer's own `update`
+runs, sends every event due within `lookahead` seconds of the clock, with the
+clock time its beat maps to, so the backend lands it on its exact frame
+whatever the frame rate does. An event already sent belongs to the backend:
+pausing, seeking or retempoing a timeline holds back every event not yet sent,
+and the ones inside the lookahead still happen when they said. A lookahead of a
+frame or two, the default 50 milliseconds, absorbs an ordinary hitch.
+
+Pausing a timeline pauses its events, not the clock and not the sounds they
+already started. A timeline may also follow a condition, such as its bus being
+paused, through `follow`: while the condition holds the timeline behaves as
+paused, and resumes where it was when it stops holding.
+]]
+
+--- Seconds of lookahead a timeline schedules by default.
+export const LOOKAHEAD: number = 0.05
+
+--- One event waiting for its beat.
+local record Pending
+    beat: number
+    sequence: integer
+    run: function(at: number): nil
+    cancelled: boolean
+end
+
+--- A handle on an event, to cancel it before it is sent.
+export record Cue
+    @private pending: Pending
+
+    --- Read-only. Reports whether the event has gone to the backend, or been
+    --- cancelled, so `cancel` would do nothing.
+    settled: boolean
+
+    --- Read-only. The voice a `play` cue started once it was sent, zero
+    --- before then and for a start the mixer refused.
+    handle: integer
+
+    cancel: function(exclusive self: Cue): boolean
+end
+
+--- Configures a timeline.
+export type Options = {
+    --- Caller-writable. Beats a minute, 60 by default, so a beat is a second.
+    tempo: number?,
+
+    --- Caller-writable. Beats in a bar, four by default, for `nextBar`.
+    beatsPerBar: integer?,
+
+    --- Caller-writable. Seconds ahead events are sent, 0.05 by default.
+    lookahead: number?,
+
+    --- Caller-writable. The beat the timeline starts at, zero by default.
+    start: number?,
+
+    --- Caller-writable. Starts the timeline paused.
+    paused: boolean?
+}
+
+--- Local time with a tempo and a pause, mapped onto the audio clock.
+export record Timeline
+    @private clock: function(): number
+    @private anchorClock: number
+    @private anchorBeat: number
+    @private beatsPerMinute: number
+    @private beatsPerBarCount: integer
+    @private lookaheadSeconds: number
+    @private held: boolean
+    @private following: (function(): boolean)?
+    @private followHeld: boolean
+    @private queue: {Pending}
+    @private sequence: integer
+    @private closed: boolean
+    @private player: (function(sound: any, options: any, at: number): integer)?
+
+    now: function(borrows self: Timeline): number
+    toClock: function(borrows self: Timeline, beat: number): number
+    fromClock: function(borrows self: Timeline, seconds: number): number
+    tempo: function(borrows self: Timeline): number
+    setTempo: function(exclusive self: Timeline, beatsPerMinute: number): nil
+    beatsPerBar: function(borrows self: Timeline): integer
+    nextBeat: function(borrows self: Timeline): number
+    nextBar: function(borrows self: Timeline): number
+    pause: function(exclusive self: Timeline): nil
+    resume: function(exclusive self: Timeline): nil
+    paused: function(borrows self: Timeline): boolean
+    seek: function(exclusive self: Timeline, beat: number): nil
+    follow: function(exclusive self: Timeline, held: (function(): boolean)?): nil
+    at: function(exclusive self: Timeline, beat: number, run: function(at: number): nil): Cue
+    play: function(exclusive self: Timeline, sound: any, options: {[string]: any}?): Cue
+    pending: function(borrows self: Timeline): integer
+    upcoming: function(borrows self: Timeline, limit: integer?): {number}
+    update: function(exclusive self: Timeline): boolean
+    close: function(exclusive self: Timeline): nil
+    closedState: function(borrows self: Timeline): boolean
+end
+
+--- Raises for a beat that is not a finite number.
+---
+--- @raises string when `beat` is NaN or infinite
+local function checkBeat(beat: number, method: string): nil
+    if beat ~= beat or beat == math.huge or beat == -math.huge then
+        error("tecs.audio.Timeline." .. method .. ": the beat must be finite, got " .. tostring(beat), 3)
+    end
+end
+
+--- Creates a timeline over a clock.
+---
+--- The mixer makes these, through `Audio.timeline`, and runs their `update`
+--- from its own. A timeline made here directly has to be updated by its maker.
+---
+--- @param clock reads the audio clock in seconds
+--- @param options the tempo, bar length, lookahead and start, or nil
+--- @return the timeline, running unless `options.paused`
+--- @raises string when the tempo is not positive and finite
+export function new(
+    clock: function(): number,
+    options: Options?,
+    player: (function(sound: any, options: any, at: number): integer)?
+): Timeline
+    local tempo = (options and options.tempo) or 60
+    if not (tempo > 0) or tempo == math.huge then
+        error("tecs.audio.timeline.new: tempo must be positive and finite", 2)
+    end
+
+    return new Timeline(
+        clock = clock,
+        anchorClock = clock(),
+        anchorBeat = (options and options.start) or 0,
+        beatsPerMinute = tempo,
+        beatsPerBarCount = (options and options.beatsPerBar) or 4,
+        lookaheadSeconds = (options and options.lookahead) or LOOKAHEAD,
+        held = (options and options.paused) == true,
+        following = nil,
+        followHeld = false,
+        queue = {},
+        sequence = 0,
+        closed = false,
+        player = player
+    )
+end
+
+--- Reports whether the timeline is holding, by its own pause or by what it
+--- follows.
+local function holding(borrows self: Timeline): boolean
+    return self.held or self.followHeld
+end
+
+--- Reports the local time, in beats. It stands still while paused.
+---
+--- @param self the timeline to read
+--- @return beats
+function Timeline.now(borrows self: Timeline): number
+    if holding(self) then
+        return self.anchorBeat
+    end
+
+    return self.anchorBeat + (self.clock() - self.anchorClock) * self.beatsPerMinute / 60
+end
+
+--- Maps a beat to the clock time it falls on at the current tempo, which is
+--- where an event at that beat lands if nothing changes before it is sent.
+---
+--- @param self the timeline
+--- @param beat the local time
+--- @return seconds on the audio clock
+function Timeline.toClock(borrows self: Timeline, beat: number): number
+    local anchor = self.anchorClock
+    if holding(self) then
+        -- Paused, the next beat would fall as far from now as it is ahead.
+        anchor = self.clock()
+    end
+
+    return anchor + (beat - self.anchorBeat) * 60 / self.beatsPerMinute
+end
+
+--- Maps a clock time to the beat it falls on.
+---
+--- @param self the timeline
+--- @param seconds on the audio clock
+--- @return beats
+function Timeline.fromClock(borrows self: Timeline, seconds: number): number
+    return self.anchorBeat + (seconds - self.anchorClock) * self.beatsPerMinute / 60
+end
+
+--- Reports beats a minute.
+function Timeline.tempo(borrows self: Timeline): number
+    return self.beatsPerMinute
+end
+
+--- Changes the tempo from now on, keeping the current beat where it is.
+---
+--- @param self the timeline
+--- @param beatsPerMinute the new tempo
+--- @raises string when the tempo is not positive and finite
+function Timeline.setTempo(exclusive self: Timeline, beatsPerMinute: number): nil
+    if not (beatsPerMinute > 0) or beatsPerMinute == math.huge then
+        error("tecs.audio.Timeline.setTempo: tempo must be positive and finite", 2)
+    end
+    local beat = self:now()
+    self.anchorBeat = beat
+    self.anchorClock = self.clock()
+    self.beatsPerMinute = beatsPerMinute
+end
+
+--- Reports beats in a bar.
+function Timeline.beatsPerBar(borrows self: Timeline): integer
+    return self.beatsPerBarCount
+end
+
+--- Returns the next whole beat after now.
+function Timeline.nextBeat(borrows self: Timeline): number
+    return math.floor(self:now()) + 1
+end
+
+--- Returns the first beat of the next bar after now.
+function Timeline.nextBar(borrows self: Timeline): number
+    local bar = self.beatsPerBarCount
+
+    return (math.floor(self:now() / bar) + 1) * bar
+end
+
+--- Stops local time, and with it every event not yet sent.
+function Timeline.pause(exclusive self: Timeline): nil
+    if self.held then
+        return
+    end
+    local beat = self:now()
+    self.held = true
+    self.anchorBeat = beat
+end
+
+--- Lets local time run again from where it stopped.
+function Timeline.resume(exclusive self: Timeline): nil
+    if not self.held then
+        return
+    end
+    self.held = false
+    if not self.followHeld then
+        self.anchorClock = self.clock()
+    end
+end
+
+--- Reports whether the timeline is paused, by `pause` or by what it follows.
+function Timeline.paused(borrows self: Timeline): boolean
+    return holding(self)
+end
+
+--- Moves local time to `beat`, dropping every event before it that has not
+--- been sent.
+---
+--- @param self the timeline
+--- @param beat the new local time
+--- @raises string when `beat` is not finite
+function Timeline.seek(exclusive self: Timeline, beat: number): nil
+    checkBeat(beat, "seek")
+    self.anchorBeat = beat
+    self.anchorClock = self.clock()
+    local kept: {Pending} = {}
+    for _, pending in ipairs(self.queue) do
+        if pending.beat >= beat then
+            kept[#kept + 1] = pending
+        else
+            pending.cancelled = true
+        end
+    end
+    self.queue = kept
+end
+
+--- Makes the timeline hold while `held` answers true, as a bus's pause holds
+--- the voices under it. Nil stops following.
+---
+--- @param self the timeline
+--- @param held the condition, read on every `update`
+function Timeline.follow(exclusive self: Timeline, held: (function(): boolean)?): nil
+    self.following = held
+end
+
+--- Schedules `run` at `beat`. It is called once, a lookahead ahead of the
+--- beat, with the clock time the beat falls on, which it passes as the `at`
+--- of whatever it sends.
+---
+--- @param self the timeline
+--- @param beat the local time it is due at
+--- @param run what to do, given the clock time
+--- @return a cue that can cancel it before it is sent
+--- @raises string when `beat` is not finite
+function Timeline.at(exclusive self: Timeline, beat: number, run: function(at: number): nil): Cue
+    checkBeat(beat, "at")
+    self.sequence = self.sequence + 1
+    local pending = new Pending(beat = beat, sequence = self.sequence, run = run, cancelled = false)
+    -- Sorted by beat, and by the order they were added within one beat.
+    local queue = self.queue
+    local index = #queue + 1
+    while index > 1 and queue[index - 1].beat > beat do
+        index = index - 1
+    end
+    table.insert(queue, index, pending)
+
+    return new Cue(pending = pending, settled = false, handle = 0)
+end
+
+--- Plays a sound at a beat, on the mixer that made this timeline.
+---
+--- `options` are the mixer's play options, with `at` a beat on this timeline
+--- rather than a clock time, and now when omitted. The cue's `handle` names
+--- the voice once the start has been sent.
+---
+--- @param self the timeline
+--- @param sound what `Audio.play` takes
+--- @param options play options, `at` in beats
+--- @return the cue
+--- @raises string on a timeline the mixer did not make, or a beat that is not
+---     finite
+function Timeline.play(exclusive self: Timeline, sound: any, options: {[string]: any}?): Cue
+    local player = self.player
+    if player == nil then
+        error("tecs.audio.Timeline.play: this timeline has no mixer; make it with Audio.timeline", 2)
+    end
+    local given = options or {}
+    local beat = (given.at as number?) or self:now()
+    local copy: {[string]: any} = {}
+    for key, value in pairs(given) do
+        copy[key] = value
+    end
+    local cue: Cue? = nil
+    cue = self:at(beat, function(at: number): nil
+        copy.at = at
+        local handle = player(sound, copy, at)
+        local made = cue
+        if made ~= nil then
+            made.handle = handle
+            made.settled = true
+        end
+    end)
+
+    return assert(cue)
+end
+
+--- Cancels the event if it has not been sent, reporting whether it had not.
+function Cue.cancel(exclusive self: Cue): boolean
+    if self.settled or self.pending.cancelled then
+        self.settled = true
+        return false
+    end
+    self.pending.cancelled = true
+    self.settled = true
+
+    return true
+end
+
+--- Reports how many events wait to be sent.
+function Timeline.pending(borrows self: Timeline): integer
+    local count: integer = 0
+    for _, pending in ipairs(self.queue) do
+        if not pending.cancelled then
+            count = count + 1
+        end
+    end
+
+    return count
+end
+
+--- Returns the beats of the next events, at most `limit` (16 by default), for
+--- an agent or a debugger to read.
+function Timeline.upcoming(borrows self: Timeline, limit: integer?): {number}
+    local out: {number} = {}
+    local most = limit or 16
+    for _, pending in ipairs(self.queue) do
+        if #out >= most then
+            break
+        end
+        if not pending.cancelled then
+            out[#out + 1] = pending.beat
+        end
+    end
+
+    return out
+end
+
+--- Sends every event due within the lookahead, in beat order.
+---
+--- @param self the timeline
+--- @return false once the timeline is closed, which is how the mixer knows to
+---     stop updating it
+function Timeline.update(exclusive self: Timeline): boolean
+    if self.closed then
+        return false
+    end
+    local follow = self.following
+    if follow ~= nil then
+        local held = follow()
+        if held and not self.followHeld then
+            local beat = self:now()
+            self.followHeld = true
+            self.anchorBeat = beat
+        elseif not held and self.followHeld then
+            self.followHeld = false
+            if not self.held then
+                self.anchorClock = self.clock()
+            end
+        end
+    end
+    if holding(self) then
+        return true
+    end
+    local horizon = self:fromClock(self.clock() + self.lookaheadSeconds)
+    -- Take the due events out first, so a run that schedules more, even
+    -- inside the horizon, neither shifts this walk nor runs twice.
+    local due: {Pending} = {}
+    local kept: {Pending} = {}
+    for _, pending in ipairs(self.queue) do
+        if pending.cancelled then
+            -- Dropped.
+        elseif pending.beat <= horizon then
+            due[#due + 1] = pending
+        else
+            kept[#kept + 1] = pending
+        end
+    end
+    if #due == 0 then
+        return true
+    end
+    self.queue = kept
+    for _, pending in ipairs(due) do
+        if not pending.cancelled then
+            pending.cancelled = true
+            pending.run(self:toClock(pending.beat))
+        end
+    end
+
+    return true
+end
+
+--- Drops every pending event and stops the timeline for good.
+function Timeline.close(exclusive self: Timeline): nil
+    for _, pending in ipairs(self.queue) do
+        pending.cancelled = true
+    end
+    self.queue = {}
+    self.closed = true
+end
+
+--- Reports whether `close` has run.
+function Timeline.closedState(borrows self: Timeline): boolean
+    return self.closed
+end

@@ -1,0 +1,525 @@
+local assets = require("tecs.assets")
+local audio = require("tecs.audio")
+local audiobackend = require("tecs.platform.audiobackend")
+local effects = require("tecs.audio.effects")
+local files = require("nupp.io.files")
+local hostpump = require("nupp.host.pump")
+local pcm = require("tecs.pcm")
+local test = require("nupp.test")
+local time = require("nupp.time")
+
+local suite = {}
+
+--- Returns `value` as `width` little-endian bytes.
+local function littleEndian(value: integer, width: integer): string
+    local bytes: {string} = {}
+    local rest = value
+    for index = 1, width do
+        bytes[index] = string.char(rest % 256)
+        rest = rest // 256
+    end
+
+    return table.concat(bytes)
+end
+
+--- Builds a mono 8-bit unsigned WAV holding `data`, padded to an even chunk.
+local function unsignedWav(rate: integer, data: string): string
+    local pad = #data % 2 == 1 and "\0" or ""
+    local format = "fmt " .. littleEndian(16, 4) .. littleEndian(1, 2) .. littleEndian(1, 2) .. littleEndian(
+        rate,
+        4
+    ) .. littleEndian(rate, 4) .. littleEndian(1, 2) .. littleEndian(8, 2)
+    local chunk = "data" .. littleEndian(#data, 4) .. data .. pad
+
+    return "RIFF" .. littleEndian(4 + #format + #chunk, 4) .. "WAVE" .. format .. chunk
+end
+
+--- `seconds` of silence at 48 kHz, which unsigned 8-bit PCM writes as 128.
+local function silenceWav(seconds: number): string
+    return unsignedWav(48000, string.rep(string.char(128), math.floor(48000 * seconds)))
+end
+
+--- A mono 8-bit square wave at 500 Hz, `seconds` long, at 48 kHz.
+local function squareWav(seconds: number, level: integer): string
+    local frames = math.floor(48000 * seconds)
+    local high = string.char(128 + level)
+    local low = string.char(128 - level)
+    local period = string.rep(high, 48) .. string.rep(low, 48)
+
+    return unsignedWav(48000, string.rep(period, frames // 96))
+end
+
+--- Reports whether a Sound is streamed rather than held decoded.
+local function streamedSound(sound: audio.Sound): boolean
+    return pcm.resident(sound) == false
+end
+
+local nextName = {0}
+
+--- Returns a name nothing else in this suite has loaded: a load is once per
+--- process, so every test takes its own.
+local function freshName(): string
+    nextName[1] = nextName[1] + 1
+
+    return "tests/memory/pcm" .. tostring(nextName[1]) .. ".wav"
+end
+
+--- Writes `bytes` to a temporary WAV file, runs `body` on its path and
+--- removes the file.
+local function temporary(bytes: string, body: function(path: string): nil): nil
+    local file = assert(files.createTemporaryFile(new files.TemporaryOptions(suffix = ".wav")))
+    local path = file:toString()
+    assert(files.write(path, bytes))
+    body(path)
+    file:close()
+end
+
+--- Opens a device-free native backend, skipping when the library refused.
+local function offline(): audiobackend.Backend
+    local ok, native = pcall(require, "tecs.platform.audionative")
+    if not ok then
+        test.skip("libtecsaudio is not on the loader path: " .. tostring(native))
+    end
+    local backend, reason = (native as {[string]: any}).openOffline(48000, 2, 8)
+    if backend == nil then
+        test.skip("libtecsaudio did not open: " .. tostring(reason))
+    end
+
+    return backend as audiobackend.Backend
+end
+
+--- Opens a native void output, skipping when the library refused.
+local function voided(): audiobackend.Backend
+    local ok, native = pcall(require, "tecs.platform.audionative")
+    if not ok then
+        test.skip("libtecsaudio is not on the loader path: " .. tostring(native))
+    end
+    local backend, reason = (native as {[string]: any}).openVoid(48000, 2, 8)
+    if backend == nil then
+        test.skip("libtecsaudio did not open a void output: " .. tostring(reason))
+    end
+
+    return backend as audiobackend.Backend
+end
+
+--- A memory mixer, skipping when the core library is absent.
+local function memory(config: {[string]: any}?): audio.Audio
+    offline().close()
+    local options: {[string]: any} = {output = "memory", maxVoices = 8}
+    for key, value in pairs(config or {}) do
+        options[key] = value
+    end
+
+    return audio.newAudio(options as any)
+end
+
+--- A memory mixer and a long half-scale square Sound for it.
+local function console(): (audio.Audio, audio.Sound)
+    local mixer = memory({limiter = false})
+    local sound = assert(pcm.loadBytes("tests/memory/console.wav", squareWav(1, 64)))
+
+    return mixer, sound
+end
+
+-------------------------------------------------------------------------------
+-- Loading
+-------------------------------------------------------------------------------
+
+function suite.loadsAFileOnceAndReportsAMissingOne(): nil
+    temporary(silenceWav(0.5), function(path: string): nil
+        local sound = assert(pcm.load(path))
+        test.equal(sound.name, path)
+        test.equal(sound.decoder, pcm.DECODER)
+        test.equal(sound.decoder, "pcm")
+        test.equal(#sound.params, 8, "an eight-byte clip id")
+        test.equal(sound.bytes, "")
+        test.assert(math.abs(assert(sound.duration) - 0.5) < 1e-6)
+        test.equal(pcm.resident(sound), true)
+        test.assert(sound.reload ~= nil, "a file Sound can be re-read")
+        -- Once for the whole process: loading it again is the same Sound.
+        test.equal(pcm.load(path), sound)
+        pcm.release(sound)
+    end)
+
+    local missing, reason = pcm.load("tests/audio/no-such-file.ogg")
+    test.equal(missing, nil)
+    test.assert(#assert(reason) > 0)
+end
+
+function suite.decodesBytesOnceUnderAName(): nil
+    -- 1099 frames at 10989 Hz, an odd chunk with its pad byte.
+    local bytes = unsignedWav(10989, string.rep(string.char(128), 1099))
+    local name = freshName()
+    local sound = assert(pcm.loadBytes(name, bytes))
+    test.equal(sound.name, name)
+    test.assert(math.abs(assert(sound.duration) - 1099 / 10989) < 1e-6)
+    test.equal(pcm.resident(sound), true)
+    test.equal(sound.reload, nil, "bytes have no file to re-read")
+    -- A second load of the name returns the Sound it already is, without
+    -- decoding the new bytes, and names and paths share one namespace.
+    test.equal(pcm.loadBytes(name, "other bytes"), sound)
+    test.equal(pcm.load(name), sound)
+
+    local junk, junkReason = pcm.loadBytes("tests/memory/junk.wav", "these bytes are not audio")
+    test.equal(junk, nil)
+    test.matches(assert(junkReason), "junk.wav")
+end
+
+function suite.raisesOnAnEmptyNameOrPath(): nil
+    test.raises(
+        function(): nil
+            pcm.loadBytes("", silenceWav(0.01))
+        end,
+        "name cannot be empty"
+    )
+    test.raises(
+        function(): nil
+            pcm.load("")
+        end,
+        "path cannot be empty"
+    )
+end
+
+function suite.streamsAFilePastTheThresholdOrWhenTold(): nil
+    temporary(silenceWav(0.5), function(path: string): nil
+        local streamed = assert(pcm.load(path, {streamSeconds = 0.25}))
+        test.assert(streamedSound(streamed))
+        pcm.release(streamed)
+        local told = assert(pcm.load(path, {stream = true}))
+        test.assert(streamedSound(told))
+        pcm.release(told)
+        local held = assert(pcm.load(path, {stream = false, streamSeconds = 0.25}))
+        test.equal(pcm.resident(held), true)
+        pcm.release(held)
+        local short = assert(pcm.load(path))
+        test.equal(pcm.resident(short), true, "under the default ten seconds")
+        pcm.release(short)
+    end)
+end
+
+function suite.releasesASoundSoTheNextLoadReadsAgain(): nil
+    temporary(silenceWav(0.1), function(path: string): nil
+        local sound = assert(pcm.load(path))
+        pcm.release(sound)
+        test.equal(pcm.resident(sound), nil, "no longer this module's")
+        local again = assert(pcm.load(path))
+        test.notEqual(again, sound)
+        -- Releasing a stale Sound leaves the live one alone.
+        pcm.release(sound)
+        test.equal(pcm.resident(again), true)
+        pcm.release(again)
+    end)
+end
+
+function suite.reReadsAFileSoundInPlaceThroughTheMixer(): nil
+    local mixer = audio.newAudio({backend = audiobackend.silent()})
+    temporary(silenceWav(0.1), function(path: string): nil
+        local sound = assert(pcm.load(path))
+        local params = sound.params
+        local id = mixer:addSound(sound)
+        assert(files.write(path, silenceWav(0.2)))
+
+        local ok, reason = mixer:reload(path)
+        test.assert(ok)
+        test.equal(reason, nil)
+        test.assert(math.abs(assert(sound.duration) - 0.2) < 1e-6)
+        test.notEqual(sound.params, params, "a new clip under the same Sound")
+        test.equal(id, audio.soundId(path), "under the index rows already carry")
+        test.equal(mixer:sound(path), sound)
+
+        -- A file that no longer decodes leaves the Sound as it was.
+        assert(files.write(path, "not audio any more"))
+        local failed, why = mixer:reload(path)
+        test.assert(not failed)
+        test.assert(#assert(why) > 0)
+        test.assert(math.abs(assert(sound.duration) - 0.2) < 1e-6)
+        pcm.release(sound)
+    end)
+
+    local bytes = assert(pcm.loadBytes(freshName(), silenceWav(0.01)))
+    mixer:addSound(bytes)
+    local refused, refusedReason = mixer:reload(bytes.name)
+    test.assert(not refused)
+    test.matches(assert(refusedReason), "cannot be re%-read")
+    mixer:destroy()
+end
+
+function suite.namesTheCodecsTheLibraryLinked(): nil
+    local codecs = pcm.codecs()
+    test.assert(#codecs > 0)
+    test.notEqual(pcm.codecs(), codecs, "a fresh list")
+end
+
+function suite.loadsThroughTheAssetKinds(): nil
+    test.equal(pcm.PCM.name, assets.SOUND)
+    test.equal(pcm.PCM_STREAM.name, assets.SOUND .. ".stream")
+    local missing, reason = pcm.PCM.open("")
+    test.equal(missing, nil)
+    test.assert(#assert(reason) > 0)
+
+    temporary(silenceWav(0.1), function(path: string): nil
+        local loader = assets.newAssets()
+        local resident: assets.Handle? = nil
+        local streamed: assets.Handle? = nil
+        local pump = hostpump.newPump()
+        local state = pump:start(function(): boolean
+            resident = loader:request(pcm.PCM, path)
+
+            return true
+        end)
+        local passes: integer = 0
+        while state == "parked" and passes < 256 do
+            passes = passes + 1
+            state = pump:poll()
+        end
+        local handle = assert(resident)
+        local sound = assert(handle:value()) as audio.Sound
+        test.equal(sound.name, path)
+        test.equal(pcm.resident(sound), true)
+        pcm.release(sound)
+
+        state = pump:start(function(): boolean
+            streamed = loader:request(pcm.PCM_STREAM, path)
+
+            return true
+        end)
+        passes = 0
+        while state == "parked" and passes < 256 do
+            passes = passes + 1
+            state = pump:poll()
+        end
+        local stream = assert(assert(streamed):value()) as audio.Sound
+        test.assert(streamedSound(stream))
+
+        -- A mixer plays the handle's Sound and comes to know it.
+        local mixer = memory()
+        test.assert(mixer:play(assert(streamed)) ~= 0)
+        test.equal(mixer:sound(path), stream)
+        mixer:destroy()
+        pcm.release(stream)
+        loader:shutdown()
+    end)
+end
+
+-------------------------------------------------------------------------------
+-- Playing over the native mixer
+-------------------------------------------------------------------------------
+
+function suite.registersTheDecoderOnTheFirstPlay(): nil
+    local mixer = memory()
+    test.equal(#mixer:decoders(), 0)
+    local sound = assert(pcm.loadBytes(freshName(), silenceWav(0.05)))
+    test.assert(mixer:play(sound) ~= 0)
+    test.assert(mixer:play(sound) ~= 0)
+    test.equal(#mixer:decoders(), 1)
+    test.equal(mixer:decoders()[1], pcm.DECODER)
+    test.equal(mixer:sound(sound.name), sound)
+    mixer:destroy()
+end
+
+function suite.carriesACommandsTimeAcrossTheSeam(): nil
+    local backend = offline()
+    test.equal(assert(backend.now)(), 0)
+    -- A tenth of a second of silence at the output rate.
+    local sound = assert(pcm.loadBytes(freshName(), silenceWav(0.1)))
+    local decoder = assert(assert(backend.registerDecoder)(sound.vtable()))
+    local open = assert(backend.openDecoded)
+    local commands: {audiobackend.Command} = {audiobackend.newCommand(), audiobackend.newCommand()}
+    for index, handle in ipairs({65537, 65538}) do
+        assert(open(decoder, handle, sound.params, sound.bytes))
+        commands[index].kind = audiobackend.PLAY
+        commands[index].handle = handle
+        commands[index].flags = audiobackend.SYNTH
+    end
+    commands[1].flags = audiobackend.SYNTH + audiobackend.NEAREST
+    -- Due once the clock reaches a second, which nothing renders here: the
+    -- voice waits in the schedule and the library knows nothing under it yet.
+    commands[2].at = 1
+    backend.submit(commands, 2)
+    test.equal(backend.position(65537), 0)
+    test.equal(backend.position(65538), nil)
+    -- The control: the same start with no time sounds at once.
+    assert(open(decoder, 65539, sound.params, sound.bytes))
+    commands[2].at = 0
+    commands[2].handle = 65539
+    backend.submit({commands[2]}, 1)
+    test.equal(backend.position(65539), 0)
+    test.equal(assert(backend.now)(), 0)
+    backend.close()
+    test.equal(assert(backend.now)(), 0)
+end
+
+function suite.keepsTimeOnAVoidOutputAndFinishesATimedVoice(): nil
+    local backend = voided()
+    test.assert(backend.available)
+    test.equal(assert(backend.output)().state, "void")
+    local mixer = audio.newAudio({backend = backend, maxVoices = 4})
+    test.assert(mixer.available)
+    -- A twentieth of a second of silence, due a twentieth from now.
+    local sound = assert(pcm.loadBytes(freshName(), silenceWav(0.05)))
+    local handle = mixer:play(sound, {at = mixer:now() + 0.05})
+    test.assert(handle ~= 0, "a void output takes a start")
+    mixer:flush()
+    local started = time.now()
+    while mixer:playing(handle) do
+        test.assert(time.now() - started < 5000, "the voice never finished on the void clock")
+        time.sleep(10)
+        mixer:update(0.01)
+    end
+    test.assert(mixer:now() >= 0.1, "the clock ran past the voice's end")
+    mixer:destroy()
+end
+
+function suite.cancelsAStartStillWaitingWhenItIsStoppedOverTheNativeMixer(): nil
+    local backend = voided()
+    local mixer = audio.newAudio({backend = backend, maxVoices = 1})
+    local sound = assert(pcm.loadBytes(freshName(), silenceWav(1)))
+    -- A looping voice due a minute from now, stopped before it starts. The
+    -- slot comes back at once, and the start never sounds under a handle no
+    -- one holds.
+    local handle = mixer:play(sound, {loop = true, at = mixer:now() + 60})
+    test.assert(handle ~= 0)
+    mixer:stop(handle)
+    test.equal(mixer:sounding(), 0)
+    mixer:update(0)
+    test.equal(assert(backend.position)(handle), nil)
+    local next = mixer:play(sound)
+    test.assert(next ~= 0, "the one slot is free again")
+    mixer:destroy()
+end
+
+function suite.rendersAndHearsAMemoryOutputDeterministically(): nil
+    local mixer = memory({maxVoices = 4})
+    test.assert(mixer.available)
+    test.equal(mixer:output().state, "offline")
+    local sound = assert(pcm.loadBytes("tests/memory/square.wav", squareWav(0.25, 64)))
+    test.assert(mixer:listen(0.5))
+    local handle = mixer:play(sound, {at = 0.1})
+    test.assert(handle ~= 0)
+    test.equal(mixer:now(), 0, "nothing moves a memory clock but step")
+    test.equal(mixer:step(0.5), 0.5)
+    test.equal(mixer:now(), 0.5)
+    test.assert(not mixer:playing(handle), "the step reaped the finished voice")
+
+    local heard = assert(mixer:listening())
+    test.equal(heard.frames, 24000)
+    test.assert(math.abs(heard.peak - 0.5) < 0.01, "a half-scale square peaks at half")
+    test.assert(heard.lufs ~= nil)
+    test.equal(heard.clipped, 0)
+    test.assert(#heard.onsets >= 1)
+    test.assert(math.abs(heard.onsets[1] - 0.1) < 0.011, "the onset is the timed start")
+    test.assert(#heard.silent >= 2, "silence before the start and after the end")
+
+    local events = mixer:events()
+    test.equal(events[1].event, "start")
+    test.equal(events[1].time, 0.1)
+    test.equal(events[1].sound, "tests/memory/square.wav")
+    test.equal(events[#events].event, "finish")
+    test.equal(#mixer:events(events[#events].sequence), 0)
+    mixer:destroy()
+end
+
+function suite.playsOneSoundOnTwoMixers(): nil
+    local sound = assert(pcm.loadBytes(freshName(), squareWav(0.25, 64)))
+    local first = memory()
+    local second = memory()
+    test.assert(first:play(sound) ~= 0)
+    test.assert(second:play(sound) ~= 0)
+    first:listen(0.1)
+    second:listen(0.1)
+    first:step(0.1)
+    second:step(0.1)
+    test.assert(math.abs(assert(first:listening()).peak - 0.5) < 0.01)
+    test.assert(math.abs(assert(second:listening()).peak - 0.5) < 0.01)
+    first:destroy()
+    second:destroy()
+end
+
+function suite.multipliesATracksFaderByItsBussesOnTheWayToMaster(): nil
+    local mixer, sound = console()
+    local sfx = mixer:bus("sfx", {gain = 0.5})
+    local track = mixer:track({bus = "sfx", gain = 0.5})
+    test.equal(track:bus(), "sfx")
+    track:play(sound)
+    mixer:step(0.1)
+    local meters = mixer:meters()
+    test.assert(math.abs(meters.master.peak - 0.125) < 0.005, "0.5 x 0.5 x 0.5: " .. tostring(meters.master.peak))
+    test.assert(math.abs(assert(meters.buses.sfx).peak - 0.125) < 0.005)
+    test.assert(math.abs(assert(meters.tracks[track.id]).peak - 0.25) < 0.005)
+    sfx:setMuted(true)
+    -- A mute glides over a few milliseconds rather than click; read past it.
+    mixer:step(0.05)
+    mixer:meters()
+    mixer:step(0.1)
+    test.assert(mixer:meters().master.peak < 0.01, "a muted Bus silences what routes to it")
+    mixer:destroy()
+end
+
+function suite.ringsAReturnBusReverbAfterTheSendStops(): nil
+    local mixer, sound = console()
+    mixer:bus("room", {effects = {effects.reverb({size = 0.8})}})
+    local track = mixer:track({sends = {room = 0.5}})
+    track:setMuted(true)
+    test.equal(track:sends().room, 0.5)
+    local handle = track:play(sound)
+    mixer:step(0.2)
+    mixer:stop(handle)
+    mixer:step(0.05)
+    test.assert(mixer:listen(0.3))
+    mixer:step(0.3)
+    local heard = assert(mixer:listening())
+    -- The dry Track is muted, so all of this is the room still ringing.
+    test.assert(heard.peak > 0.001, "the reverb tail rings: " .. tostring(heard.peak))
+    mixer:destroy()
+end
+
+function suite.limitsMasterByDefault(): nil
+    local mixer = memory()
+    local master = mixer:masterBus()
+    test.equal(#master:effects(), 1)
+    test.equal(master:effects()[1].name, "limiter")
+    local sound = assert(pcm.loadBytes("tests/memory/loud.wav", squareWav(0.5, 127)))
+    -- Three full-scale voices would sum to three; the limiter holds -1 dBFS.
+    for _ = 1, 3 do
+        mixer:play(sound)
+    end
+    mixer:listen(0.4)
+    mixer:step(0.4)
+    local heard = assert(mixer:listening())
+    test.equal(heard.clipped, 0)
+    test.assert(heard.peak <= 0.8913, "held under the ceiling: " .. tostring(heard.peak))
+    mixer:destroy()
+end
+
+function suite.playsOnATimelineBeatAndHoldsWhilePaused(): nil
+    local mixer, sound = console()
+    local song = mixer:timeline({tempo = 120})
+    test.equal(song:tempo(), 120)
+    -- Beat two at 120 bpm is one second from now.
+    local cue = song:play(sound, {at = 2})
+    test.equal(cue.handle, 0)
+    test.assert(mixer:listen(1.5))
+    for _ = 1, 30 do
+        mixer:step(0.05)
+    end
+    test.assert(cue.handle ~= 0, "the cue was sent")
+    local heard = assert(mixer:listening())
+    test.assert(#heard.onsets >= 1)
+    test.assert(math.abs(heard.onsets[1] - 1.0) < 0.011, "lands on the beat: " .. tostring(heard.onsets[1]))
+
+    local paused = mixer:timeline()
+    local later = paused:play(sound, {at = paused:now() + 0.2})
+    paused:pause()
+    for _ = 1, 10 do
+        mixer:step(0.05)
+    end
+    test.equal(later.handle, 0, "a paused timeline sends nothing")
+    paused:resume()
+    for _ = 1, 10 do
+        mixer:step(0.05)
+    end
+    test.assert(later.handle ~= 0, "resumed, it sends")
+    mixer:destroy()
+end
+
+return suite

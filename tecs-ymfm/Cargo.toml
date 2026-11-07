@@ -1,0 +1,15 @@
+[package]
+name = "tecs-ymfm"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Emulated Yamaha FM chips for tecs, behind the Decoder ABI"
+
+[lib]
+name = "tecs_ymfm"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tecs-audio-abi = { path = "../native/rust/tecs-audio-abi" }
+ymfm-oxide.workspace = true

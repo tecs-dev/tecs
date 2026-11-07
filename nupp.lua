@@ -13,6 +13,21 @@ local descriptions = {
     ["test-tools"] = "Check the development tools and their regression tests",
     clean = "Remove Nupp and native build outputs",
 }
+-- The audio extensions are top-level packages of this monorepo, each its own
+-- Nupp project over the tecs sources, built and tested only when asked for:
+-- a game opts into them, and nothing in the default build or test run
+-- reaches them.
+developmentTasks.extensions = {
+    description = "Build the tecs-pcm, tecs-gm and tecs-ymfm audio extensions' native libraries",
+    argv = { "cargo", "build", "--locked", "-p", "tecs-pcm", "-p", "tecs-gm", "-p", "tecs-ymfm" },
+}
+for _, extension in ipairs({ "pcm", "gm", "ymfm" }) do
+    developmentTasks["test-" .. extension] = {
+        description = "Run the tecs-" .. extension .. " extension's tests (after nupp task extensions)",
+        cwd = "tecs-" .. extension,
+        argv = { "nupp", "test" },
+    }
+end
 for name, description in pairs(descriptions) do
     local program = (name == "format" or name == "format-check") and "tecs/dev/formatmain.nupp" or "tecs/dev/main.nupp"
     developmentTasks[name] = {
@@ -234,6 +249,10 @@ return {
                     "tecs.internal.assetnative",
                     "tecs.assets",
                     "tecs.audio",
+                    "tecs.audio.effects",
+                    "tecs.audio.timeline",
+                    "tecs.audio.sequencer",
+                    "tecs.internal.audiosynth",
                     "tecs.ecs",
                     "tecs.files",
                     "tecs.gfx",

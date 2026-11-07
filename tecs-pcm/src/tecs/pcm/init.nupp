@@ -1,0 +1,325 @@
+module tecs.pcm
+
+--[[
+Encoded audio files for tecs: WAV, FLAC, Ogg Vorbis, MP3 and whatever else the
+build links, decoded by symphonia behind the Decoder ABI. An extension, a
+top-level package of the tecs monorepo a game opts into: a game that plays no
+recorded sound does not carry a codec.
+
+```nupp
+local pcm <const> = require("tecs.pcm")
+
+local step <const> = assert(pcm.load("sounds/step.wav"))
+mixer:play(step, {pitch = 1.05})
+
+-- Through tecs.assets, which follows a reload:
+local theme <const> = assert(app.assets:request(pcm.PCM_STREAM, "music/theme.ogg"))
+mixer:play(theme)
+```
+
+A load gives a `tecs.audio.Sound`, which any mixer plays. It is loaded once
+for the whole process, by its path or name, and loading it again returns the
+same Sound. A resident Sound is decoded whole into memory and shared by every
+voice playing it; a streamed one is read from its file as it plays, a block at
+a time on one feeder thread, which is what long music wants. A streamed voice
+whose feeder falls behind plays silence for what is missing rather than ending.
+
+The native library, `tecs_pcm`, builds with `nupp task extensions` and is
+found the way tecs finds its own services, or through `TECS_PCM_LIBRARY`.
+]]
+
+local assets = require("tecs.assets")
+local audio = require("tecs.audio")
+local nativelibrary = require("tecs.internal.nativelibrary")
+local ffilib = require("ffi")
+
+nativelibrary.open("tecs_pcm", "TECS_PCM_LIBRARY")
+
+--- What a load reports about a clip: `tecs_pcm::ClipInfo`.
+cdef struct tecsPcmClipInfo
+    duration: number
+    channels: uint32
+    sampleRate: uint32
+    resident: uint32
+    reserved: uint32
+end
+
+cdef function tecs_pcm_load(path: cstring, mode: uint32, streamSeconds: float, borrows info: tecsPcmClipInfo*): uint64
+
+cdef function tecs_pcm_load_bytes(
+    name: cstring,
+    borrows bytes: cstring,
+    length: uint64,
+    borrows info: tecsPcmClipInfo*
+): uint64
+
+cdef function tecs_pcm_release(clip: uint64)
+
+cdef function tecs_pcm_last_error(): cstring?
+
+cdef function tecs_pcm_codecs(): cstring?
+
+cdef function tecs_pcm_decoder(): voidptr?
+
+--- Reads a NUL-terminated C string the library owns.
+local readCString: function(value: cstring?): string = ffilib.string as any
+
+--- The Decoder's name on a mixer.
+export const DECODER: string = "pcm"
+
+--- Seconds past which `load` streams a file rather than holding it decoded,
+--- unless told.
+export const STREAM_SECONDS: number = 10
+
+local MODE_AUTO: integer = 0
+local MODE_RESIDENT: integer = 1
+local MODE_STREAM: integer = 2
+
+--- Configures `load`.
+export type LoadOptions = {
+    --- Caller-writable. True streams the file, false holds it decoded; unset,
+    --- its duration decides against `streamSeconds`.
+    stream: boolean?,
+
+    --- Caller-writable. The threshold for an unset `stream`, ten seconds by
+    --- default.
+    streamSeconds: number?
+}
+
+--- What this module knows about a Sound it made.
+local record Entry
+    clip: integer
+    resident: boolean
+    path: string?
+    stream: boolean?
+    streamSeconds: number
+end
+
+--- Every Sound this module made, by name, and its clip.
+local sounds: {[string]: audio.Sound} = {}
+local entries: {[string]: Entry} = {}
+
+--- Returns `value` as `width` little-endian bytes.
+local function littleEndian(value: integer, width: integer): string
+    local bytes: {string} = {}
+    local rest = value
+    for index = 1, width do
+        bytes[index] = string.char(rest % 256)
+        rest = rest // 256
+    end
+
+    return table.concat(bytes)
+end
+
+--- Reads the reason the library left.
+local function reason(fallback: string): string
+    local message = tecs_pcm_last_error()
+    if message == nil then
+        return fallback
+    end
+    local text = readCString(message)
+
+    return text ~= "" and text or fallback
+end
+
+--- Returns the Decoder's vtable, for a mixer to register.
+local function vtable(): any
+    return tecs_pcm_decoder()
+end
+
+--- Loads a file into the clip table, returning its id and what it is.
+local function loadFile(path: string, stream: boolean?, streamSeconds: number): (integer?, number?, boolean, string?)
+    local info = ffi.new<tecsPcmClipInfo>()
+    local mode = stream == true and MODE_STREAM or (stream == false and MODE_RESIDENT or MODE_AUTO)
+    local id = math.floor(tonumber(tecs_pcm_load(path, mode as uint32, nupp.math.f32.narrow(streamSeconds), info)) or 0)
+    if id == 0 then
+        return nil, nil, false, reason("'" .. path .. "' did not load")
+    end
+    local duration = info.duration as number
+
+    return id, duration >= 0 and duration or nil, info.resident ~= 0, nil
+end
+
+--- Makes the Sound for a clip.
+local function sound(name: string, clip: integer, duration: number?): audio.Sound
+    local made = new audio.Sound(
+        name = name,
+        duration = duration,
+        decoder = DECODER,
+        vtable = vtable,
+        params = littleEndian(clip, 8),
+        bytes = "",
+        reload = nil
+    )
+
+    return made
+end
+
+--- Re-reads a file Sound in place: the next start plays the new clip.
+local function reloader(name: string): function(): (boolean, string?)
+    return function(): (boolean, string?)
+        local entry = entries[name]
+        local found = sounds[name]
+        if entry == nil or found == nil or entry.path == nil then
+            return false, "'" .. name .. "' has no file to re-read"
+        end
+        local id, duration, resident, why = loadFile(assert(entry.path), entry.stream, entry.streamSeconds)
+        if id == nil then
+            return false, why
+        end
+        tecs_pcm_release(entry.clip as uint64)
+        entry.clip = id
+        entry.resident = resident
+        found.params = littleEndian(id, 8)
+        found.duration = duration
+
+        return true
+    end
+end
+
+--- Loads an encoded audio file as a Sound, once for the whole process.
+---
+--- @param path the file, which is also the Sound's name
+--- @param options whether to stream it, and the threshold that decides
+--- @return the Sound, or nil and the reason
+--- @raises string for an empty path
+export function load(path: string, options: LoadOptions?): (audio.Sound?, string?)
+    if path == "" then
+        error("tecs.pcm.load: a path cannot be empty", 2)
+    end
+    local known = sounds[path]
+    if known ~= nil then
+        return known
+    end
+    local threshold = (options and options.streamSeconds) or STREAM_SECONDS
+    local stream = options and options.stream
+    local id, duration, resident, why = loadFile(path, stream, threshold)
+    if id == nil then
+        return nil, why
+    end
+    local made = sound(path, id, duration)
+    made.reload = reloader(path)
+    sounds[path] = made
+    entries[path] = new Entry(clip = id, resident = resident, path = path, stream = stream, streamSeconds = threshold)
+
+    return made
+end
+
+--- Loads a Sound from the bytes of an encoded file, resident, under a name.
+---
+--- @param name what the Sound is known by; loading it again returns this one
+--- @param bytes the file's bytes, container and all
+--- @return the Sound, or nil and the reason
+--- @raises string for an empty name
+export function loadBytes(name: string, bytes: string): (audio.Sound?, string?)
+    if name == "" then
+        error("tecs.pcm.loadBytes: a name cannot be empty", 2)
+    end
+    local known = sounds[name]
+    if known ~= nil then
+        return known
+    end
+    local info = ffi.new<tecsPcmClipInfo>()
+    local id = math.floor(tonumber(tecs_pcm_load_bytes(name, bytes, #bytes as uint64, info)) or 0)
+    if id == 0 then
+        return nil, reason("'" .. name .. "' did not decode")
+    end
+    local duration = info.duration as number
+    local made = sound(name, id, duration >= 0 and duration or nil)
+    sounds[name] = made
+    entries[name] = new Entry(clip = id, resident = true, path = nil, stream = false, streamSeconds = STREAM_SECONDS)
+
+    return made
+end
+
+--- Reports whether a Sound this module made is held decoded, rather than
+--- streamed from its file.
+---
+--- @param made the Sound
+--- @return true for resident, false for streamed, nil for a Sound not this
+---     module's
+export function resident(made: audio.Sound): boolean?
+    local entry = entries[made.name]
+    if entry == nil then
+        return nil
+    end
+
+    return entry.resident
+end
+
+--- Lets go of a Sound: a later load reads the file again. Voices playing it
+--- keep what they have.
+---
+--- @param made the Sound
+export function release(made: audio.Sound): nil
+    local entry = entries[made.name]
+    if entry ~= nil and sounds[made.name] == made then
+        tecs_pcm_release(entry.clip as uint64)
+        entries[made.name] = nil
+        sounds[made.name] = nil
+    end
+end
+
+--- Returns the codecs this build links.
+---
+--- @return a fresh list of names
+export function codecs(): {string}
+    local joined = tecs_pcm_codecs()
+    local names: {string} = {}
+    if joined == nil then
+        return names
+    end
+    for name in readCString(joined):gmatch("[^,]+") do
+        names[#names + 1] = name
+    end
+
+    return names
+end
+
+--- The asset kind that loads a Sound resident through `tecs.assets`.
+export const PCM: assets.Kind = new assets.Kind(
+    name = assets.SOUND,
+    open = function(path: string): (assets.Job?, string?)
+        if path == "" then
+            return nil, "a sound needs a path"
+        end
+
+        return new assets.Job(
+            poll = function(): (assets.Status, any?, string?)
+                local made, why = load(path, {stream = false})
+                if made == nil then
+                    return "failed", nil, why
+                else
+                    return "ready", made, nil
+                end
+            end,
+            cancel = function(): nil
+            end
+        )
+    end,
+    release = nil
+)
+
+--- The asset kind that streams a Sound from its file as it plays.
+export const PCM_STREAM: assets.Kind = new assets.Kind(
+    name = assets.SOUND .. ".stream",
+    open = function(path: string): (assets.Job?, string?)
+        if path == "" then
+            return nil, "a streamed sound needs a path"
+        end
+
+        return new assets.Job(
+            poll = function(): (assets.Status, any?, string?)
+                local made, why = load(path, {stream = true})
+                if made == nil then
+                    return "failed", nil, why
+                else
+                    return "ready", made, nil
+                end
+            end,
+            cancel = function(): nil
+            end
+        )
+    end,
+    release = nil
+)

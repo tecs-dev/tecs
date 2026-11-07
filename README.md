@@ -50,8 +50,10 @@ test suite reach the same world without starting a graphics stack.
 - Camera, layers with positioning modes, images, clips, sprite sheets with
   animation, and distance-field text.
 - Input across keyboard, pointer, gamepad and touch; audio playback, recording
-  and device enumeration; physics over Rapier; sequencing with tweening; asset
-  orchestration; file watching; and an MCP debug server.
+  and device enumeration; General MIDI from a SoundFont; emulated Yamaha FM
+  chips, from the OPL2 and OPL3 to the YM2612 and the OPL4; MIDI, VGM, VGZ and
+  DRO music played on them; physics over Rapier; sequencing with tweening;
+  asset orchestration; file watching; and an MCP debug server.
 
 - [Tiled TMX maps and TSX tilesets](docs/tiled/index.md), animated tile and image
   layers, object factories, runtime tile edits and authored collision outlines.

@@ -31,7 +31,7 @@ use std::thread::{self, JoinHandle, Thread};
 use std::time::{Duration, Instant};
 
 use crate::conform::{Conformer, Format};
-use crate::mixer::Mixer;
+use crate::render::RenderSide;
 
 /// No output was ever opened: an offline engine, or a machine with no sound.
 pub const STATE_OFFLINE: u32 = 0;
@@ -45,6 +45,49 @@ pub const STATE_REOPENING: u32 = 2;
 
 /// The supervisor itself stopped, which only a panic does. Terminal.
 pub const STATE_FAILED: u32 = 3;
+
+/// No stream has opened, and the mix keeps time at the wall clock's pace
+/// anyway: a void output, or one whose device was missing at start. The
+/// latter opens a device when one appears and moves to playing.
+pub const STATE_VOID: u32 = 4;
+
+/// What the supervisor does when no device opens at start.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Start {
+    /// Report the failure, as an output always did: the engine has none.
+    RequireDevice,
+    /// Keep time without one, and open a device when one appears.
+    KeepTime,
+}
+
+/// A host with no device, which is what a void output runs on, and what a
+/// keep-time output falls back to when the platform's host would not start.
+pub struct NoDevice {
+    reason: String,
+}
+
+impl NoDevice {
+    /// Creates a host that never has a device, for the reason given.
+    pub fn new(reason: impl Into<String>) -> NoDevice {
+        NoDevice {
+            reason: reason.into(),
+        }
+    }
+}
+
+impl Host for NoDevice {
+    fn current(&mut self) -> Result<Format, String> {
+        Err(self.reason.clone())
+    }
+
+    fn open(&mut self, _tap: Tap) -> Result<(Box<dyn Any>, Format), String> {
+        Err(self.reason.clone())
+    }
+
+    fn polls_format(&self) -> bool {
+        false
+    }
+}
 
 /// Where streams come from: the platform's default output, or a test's fake.
 ///
@@ -120,7 +163,7 @@ const KEEP_BLOCK: usize = 512;
 
 /// What the supervisor, the callbacks and the engine share.
 struct Shared {
-    mixer: Arc<Mutex<Mixer>>,
+    mixer: Arc<Mutex<RenderSide>>,
     engine: Format,
     /// The generation whose callback may render, and zero for none. Written
     /// only under the mixer lock and read only under it, so an old stream's
@@ -149,6 +192,8 @@ struct Shared {
     reason: Mutex<String>,
     device_rate: AtomicU32,
     device_channels: AtomicU32,
+    /// Set while the caller steps the clock instead of the wall clock.
+    held: AtomicBool,
 }
 
 impl Shared {
@@ -272,16 +317,19 @@ pub struct Output {
 impl Output {
     /// Starts the supervisor and waits for its first stream.
     ///
-    /// The first open is not retried: a machine with no output at start is an
-    /// engine without one, as it always was, and only a stream that opened is
-    /// one the supervisor keeps open.
+    /// With [`Start::RequireDevice`] the first open is not retried: a machine
+    /// with no output at start is an engine without one. With
+    /// [`Start::KeepTime`] a first open that fails, or a host that would not
+    /// start, leaves the output keeping time in [`STATE_VOID`], waiting for a
+    /// device to appear as a dormant reopen does.
     ///
     /// @return the running output, or the reason the first stream did not open
     pub fn start<H, F>(
         make: F,
-        mixer: Arc<Mutex<Mixer>>,
+        mixer: Arc<Mutex<RenderSide>>,
         engine: Format,
         timing: Timing,
+        start: Start,
     ) -> Result<Output, String>
     where
         H: Host + 'static,
@@ -300,6 +348,7 @@ impl Output {
             supervisor: OnceLock::new(),
             stop: AtomicBool::new(false),
             state: AtomicU32::new(STATE_OFFLINE),
+            held: AtomicBool::new(false),
             failed: Arc::new(AtomicBool::new(false)),
             drops: AtomicU32::new(0),
             reopens: AtomicU32::new(0),
@@ -317,14 +366,16 @@ impl Output {
             .name("tecs-audio-output".to_string())
             .spawn(move || {
                 let _ = inner.supervisor.set(thread::current());
-                let host = match make() {
+                match make() {
+                    Ok(host) => Supervisor::new(host, inner, timing).run(ready, start),
+                    Err(reason) if start == Start::KeepTime => {
+                        // No host at all is a device that never appears.
+                        Supervisor::new(NoDevice::new(reason), inner, timing).run(ready, start)
+                    }
                     Err(reason) => {
                         let _ = ready.send(Err(reason));
-                        return;
                     }
-                    Ok(value) => value,
-                };
-                Supervisor::new(host, inner, timing).run(ready);
+                }
             })
             .map_err(|error| format!("the audio output thread did not start: {error}"))?;
         match opened.recv() {
@@ -341,6 +392,20 @@ impl Output {
                 Err("the audio output thread stopped before opening a stream".to_string())
             }
         }
+    }
+
+    /// Stops or restarts keeping time while no stream is open, so the caller
+    /// can step the clock itself. A held output keeps time again from the
+    /// moment it is released, with nothing owed for the hold.
+    pub fn hold(&self, held: bool) {
+        self.shared.held.store(held, Ordering::Release);
+        self.shared.wake();
+    }
+
+    /// Reports whether the output is held and has no stream, which is when
+    /// the caller may render it.
+    pub fn steppable(&self) -> bool {
+        self.shared.held.load(Ordering::Acquire) && self.state() != STATE_PLAYING
     }
 
     /// Reports one of the `STATE_` constants.
@@ -468,9 +533,14 @@ impl<H: Host> Supervisor<H> {
         }
     }
 
-    fn run(mut self, ready: mpsc::Sender<Result<(), String>>) {
+    fn run(mut self, ready: mpsc::Sender<Result<(), String>>, start: Start) {
         let _watch = Watch(Arc::clone(&self.shared));
         let mut phase = match self.open() {
+            Err(reason) if start == Start::KeepTime => {
+                let gap = self.start_void(reason);
+                let _ = ready.send(Ok(()));
+                Phase::Down(gap)
+            }
             Err(reason) => {
                 let _ = ready.send(Err(reason));
                 return;
@@ -498,6 +568,25 @@ impl<H: Host> Supervisor<H> {
         if let Phase::Playing(open) = phase {
             self.let_go();
             drop(open.stream);
+        }
+    }
+
+    /// Starts keeping time with no stream, waiting for a device to appear
+    /// rather than retrying the one that just refused.
+    fn start_void(&mut self, reason: String) -> Gap {
+        if let Ok(mut slot) = self.shared.reason.lock() {
+            *slot = reason;
+        }
+        self.shared.state.store(STATE_VOID, Ordering::Release);
+        let now = Instant::now();
+        Gap {
+            since: now,
+            rendered: 0,
+            attempts: self.timing.attempts,
+            delay: self.timing.first_retry,
+            next_attempt: now + self.timing.dormant_poll,
+            dormant: Some(self.host.current().ok()),
+            slow_retry: now + self.timing.slow_retry,
         }
     }
 
@@ -638,7 +727,12 @@ impl<H: Host> Supervisor<H> {
 
     /// Keeps the clock moving through the gap and tries for a new stream.
     fn recover(&mut self, mut gap: Gap) -> Phase {
-        if let Ok(mut mixer) = self.shared.mixer.lock() {
+        if self.shared.held.load(Ordering::Acquire) {
+            // Held for stepping: the caller renders, and the wall clock owes
+            // nothing for the time spent held.
+            gap.since = Instant::now();
+            gap.rendered = 0;
+        } else if let Ok(mut mixer) = self.shared.mixer.lock() {
             Self::keep_time(&mut mixer, &mut self.scratch, self.shared.engine, &mut gap);
         }
 
@@ -695,7 +789,7 @@ impl<H: Host> Supervisor<H> {
     }
 
     /// Renders the mix the wall clock says the gap owes it, into nothing.
-    fn keep_time(mixer: &mut Mixer, scratch: &mut [f32], engine: Format, gap: &mut Gap) {
+    fn keep_time(mixer: &mut RenderSide, scratch: &mut [f32], engine: Format, gap: &mut Gap) {
         let rate = engine.sample_rate as u64;
         let width = (engine.channels as usize).max(1);
         let elapsed = gap.since.elapsed().as_nanos() as u64;

@@ -109,24 +109,11 @@ local function silentBackend(): audiobackend.Backend
         drain = function(_out: {integer}): integer
             return 0
         end,
-        loadClip = function(
-            _path: string,
-            _clip: integer,
-            _mode: audiobackend.LoadMode,
-            _streamSeconds: number
-        ): (audiobackend.ClipInfo?, string?)
-            return nil, "the compatibility suite loads no clips"
-        end,
-        releaseClip = function(_clip: integer): nil
-        end,
         position = function(_handle: integer): number?
             return nil
         end,
         seek = function(_handle: integer, _seconds: number): boolean
             return false
-        end,
-        decoders = function(): {string}
-            return {}
         end,
         close = function(): nil
         end
@@ -683,6 +670,14 @@ function suite.mcpToolNames(): nil
         "archetypes_info",
         "archetypes_list",
         "audio",
+        "audio_control",
+        "audio_events",
+        "audio_listen",
+        "audio_listening",
+        "audio_play",
+        "audio_snapshot",
+        "audio_step",
+        "audio_timeline",
         "camera_info",
         "camera_move",
         "capabilities",
@@ -948,6 +943,9 @@ function suite.contentKindNames(): nil
     -- New with the rewrite: the SDL tree noted no font or shader content.
     test.equal(assets.FONT, "font")
     test.equal(assets.SHADER, "shader")
+    -- New with the music kinds.
+    test.equal(assets.MUSIC_MIDI, "music.midi")
+    test.equal(assets.MUSIC_FM, "music.fm")
 end
 
 -------------------------------------------------------------------------------

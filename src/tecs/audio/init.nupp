@@ -1,0 +1,4919 @@
+module tecs.audio
+
+--[[
+The mixing console: voices on Tracks, Buses, effects, one clock, and
+entity-owned sound.
+
+Tecs decides what should sound and a backend makes the noise. Voice slots,
+group settings, admission limits and every handle a game holds live here; the
+backend under `tecs.platform.audiobackend` receives one array of commands per
+frame and hands back the voices it has finished with. A machine with no output
+device still gets a working object: it keeps time on a void output, and on a
+build with no native audio library `play` answers zero, and nothing raises.
+
+## Sounds come from extensions
+
+The core holds no codec and no format. What plays is a
+[`Sound`](tecs.audio.Sound), which an extension makes and the mixer plays
+through that extension's Decoder: `tecs.pcm` for encoded audio files, `tecs.gm`
+for General MIDI, `tecs.ymfm` for the FM chips, or a game's own. A game that
+plays no recorded sound brings no codec.
+
+```nupp
+local pcm <const> = require("tecs.pcm")
+
+local mixer <const> = tecs.audio.newAudio()
+local step <const> = assert(pcm.load("assets/sfx/step.ogg"))
+mixer:setLimit("footstep", {voices = 3, cooldown = 0.05})
+
+local voice <const> = mixer:play(step, {gain = 0.7, group = "sfx", key = "footstep", pitchVariance = 0.1})
+if voice ~= 0 then
+    mixer:stop(voice, 0.2)
+end
+```
+
+A Sound's name is its identity: a [`Sound`](tecs.audio.Emitter) component row
+names it by `soundId`, and a snapshot carries the name. A mixer knows the
+Sounds it played or `addSound` added, which is how a row finds its Sound.
+
+Units, in one place, because none of them is in a signature. Time is seconds
+everywhere on this surface: a fade, a seek, a loop point, a cooldown, a Sound's
+duration. Every fade is a duration to run for rather than a moment to finish
+at, so calling one twice restarts it. Gain is linear amplitude rather than
+decibels, where zero is silence and one is the sound as recorded, and the level
+a voice reaches the output at is its own gain times its group's gain times the
+master gain. Pitch is a playback rate rather than an interval, so two is an
+octave up and half as long. Position is the backend's frame rather than the
+world's: the listener sits at the origin, x is positive right, y is positive
+up, and z is positive behind.
+
+A voice handle packs a slot with its generation, so a handle stays meaningful
+for exactly as long as its voice sounds and never starts naming the voice that
+takes the slot next. Holding a stale one is not an error and requires no
+release.
+
+## Timing on the audio clock
+
+A command takes effect on the next buffer the backend mixes, so its timing
+follows the frame rate: up to a frame late, and jittering frame by frame.
+`play` (through `PlayOptions.at`), `stop`, `setGain`, `setPitch`, `setLoop`,
+`setResample`, `setPosition` and `setStereo` take an optional `at` instead, in
+seconds on the output clock `now` reads, and the backend splits its mix there,
+so the command lands on exactly that output frame. The output clock is the
+frames the mixer has rendered over `frequency`, so `now() + n / frequency()`
+names the n-th frame after the last one mixed.
+
+```nupp
+local tick <const> = 1 / 50
+local start <const> = mixer:now() + 0.05
+for step = 0, 49 do
+    mixer:setPitch(voice, 1 + step / 100, start + step * tick)
+end
+```
+
+A time already mixed, zero and an omitted one all mean at once, which is the
+first frame of the next buffer. Commands due on one frame apply in the order
+they were sent, and one sent with no time comes after every timed one due by
+then. A game sends a little ahead, as a sequencer does: a lookahead of a frame
+or two absorbs an ordinary hitch and keeps every command on its frame. A time
+that is not finite raises.
+
+The clock counts frames mixed, not frames heard: it runs ahead of the speaker
+by the device's buffer. It keeps running while a device drops and is reopened,
+and on a void output, which keeps time at the wall clock's pace with no device
+at all. It stands still only on a mixer with no clock, the silent backend a run
+without the native library gets, where it reads zero and a timed command is
+taken and dropped like any other.
+
+A voice exists from the frame its start is due on, and its handle is good from
+the call that returned it. Anything sent to a voice that has not started yet
+lands on its first frame, after the start: a gain, a pause, a group's mute or
+pause, a placement. A stop before the start cancels it, so nothing is heard and
+the slot comes back.
+
+A synthesizer and an FM chip keep clocks of their own, which their `now` reads
+and their sending methods' `at` is on: the frames that voice has rendered, which
+start when the voice first renders and stand still while its group is paused.
+They are not this clock, and a voice's start on this one is not reported, so
+music on a synthesizer and clips on the mixer are aligned by ear rather than by
+arithmetic for now.
+
+`PlayOptions.resample` and `setResample` choose how a voice reads between the
+frames of its clip: `"linear"` interpolates, the default, and `"nearest"` holds
+the frame its position is in, which reproduces a tracker's fixed-point mix
+sample for sample.
+
+## Groups and limits
+
+A group name controls gain, mute, pause, resume and stop, and its settings
+apply to voices that join later as well as to the ones sounding now. A key
+controls admission through a concurrent voice limit and a cooldown. One voice
+may carry both, and neither name has to know about the other. Reaching a limit
+drops the new voice rather than stealing an older one.
+
+## Entity-owned sound
+
+An entity can carry [`Sound`](tecs.audio.Sound) instead of a game keeping a
+handle. The audio pass starts it, follows the writable playback fields, and
+stops it when the component or the entity disappears. Write through
+`world:getMut`.
+
+## Devices and recording
+
+`playbackDevices` and `recordingDevices` name what is attached now, and
+`openMicrophone` opens one for capture. A [`Microphone`](tecs.audio.Microphone)
+is pulled rather than pushed: the backend fills a bounded buffer from its own
+thread and `read` empties it on the frame thread, so nothing a device thread
+runs ever enters Nupp.
+
+```nupp
+for _, device in ipairs(tecs.audio.recordingDevices()) do
+    print(device.id, device.name, device.frequency, device.channels)
+end
+
+local microphone <const> = assert(tecs.audio.openMicrophone({channels = 1}))
+local block <const> = assert(microphone:read())
+microphone:destroy()
+```
+
+Listing devices opens no mixer and no microphone, and opening a microphone opens
+no mixer, so a game that only wants to name devices pays for nothing else.
+
+## The frame
+
+`update` is not a world system, and `install` deliberately does not add one.
+Reaping voices has to continue while a world is paused, so an application
+drives it from the iteration instead.
+
+An output device that drops is reopened rather than lost. A Bluetooth headset
+turning its microphone on changes the device from stereo at 48000 Hz to mono at
+16000 or 24000 under a running game; a headset leaves, or comes back. The
+backend notices (the stream's own error, a stream that stops asking for audio,
+or a device whose format moved), opens the default output again at whatever
+format it has now, and keeps the mix at its own rate and channels throughout,
+resampling and folding to the device inside its callback. While no device is
+open the mix keeps time without being heard, so voices that would have ended
+in the gap report finished and nothing a game scheduled shifts. `available`
+and `failureReason` do not move for any of this; `output` reports it, and
+`update` logs each drop and each reopen under `tecs.audio`.
+
+Only an output that can no longer reopen fails. The backend publishes a flag;
+the next `update` sets `available` false, records `failureReason`, discards
+queued starts and releases every active voice without replay. Destroy the mixer
+and create a new one to open an output again. Starting without an output
+remains a separate silent fallback, not a device-loss event.
+
+A failed microphone keeps already buffered frames. Once drained, `read` returns
+nil and the failure reason, while the value-only `readInto` raises that reason.
+`failure` reports loss even before the buffer drains. `resume` refuses a failed
+stream; destroy it and open a new microphone. Native capture supports one to
+eight channels. The public argument range remains one to 32 for compatibility;
+a valid request above eight returns an operational refusal from the native
+opener. Device enumeration is snapshot-only and provides no change
+notifications. Listing devices and observing failure of an active stream do not
+depend on notifications.
+]]
+
+local assets = require("tecs.assets")
+local audiobackend = require("tecs.platform.audiobackend")
+local audiosynth = require("tecs.internal.audiosynth")
+local ecs = require("tecs.ecs")
+local effectspecs = require("tecs.audio.effects")
+local timelines = require("tecs.audio.timeline")
+local json = require("nupp.codec.json")
+local log = require("nupp.log")
+local random = require("nupp.random")
+
+--- This logger name is a compatibility surface: a developer types it into a
+--- level filter, so it does not move when its module does.
+local LOGGER = log.named("tecs.audio")
+
+--- The native opener each `Config.output` names.
+local OPENERS: {[string]: string} = {device = "openOrVoid", void = "openVoid", memory = "openMemory"}
+
+--- Entries the event log keeps before the oldest go.
+local LOG_ENTRIES: integer = 512
+
+--- Master's name.
+local MASTER: string = "master"
+
+--- Voices a Track holds before it steals, unless told otherwise.
+local DEFAULT_POLYPHONY: integer = 8
+
+--- Seconds a stolen voice fades over, so a steal does not click.
+local STEAL_FADE: number = 0.01
+
+--- Voices the backend holds past `maxVoices`, so a stolen voice can fade out
+--- while the one that took its slot starts.
+local STEAL_HEADROOM: integer = 16
+
+--- Frames per second the mix runs at, unless configured otherwise.
+local DEFAULT_FREQUENCY: integer = 48000
+
+--- Mix channels. Two, because that is what a stereo mix needs; a mono device
+--- hears the backend's fold of the pair.
+local DEFAULT_CHANNELS: integer = 2
+
+--- Voices that may sound at once. Past this, `play` declines rather than
+--- stealing: a sound that stops halfway through because something else started
+--- is harder to explain than one that never started.
+local DEFAULT_MAX_VOICES: integer = 32
+
+--- Frames per second a microphone captures at unless configured otherwise.
+local DEFAULT_CAPTURE_FREQUENCY: integer = 48000
+
+--- Channels a microphone captures unless configured otherwise. One, because a
+--- microphone is one microphone and a game that wants a stereo pair asks.
+local DEFAULT_CAPTURE_CHANNELS: integer = 1
+
+--- Channels a microphone may be asked for. The public compatibility contract
+--- accepts up to 32 even though the native capture path carries fewer.
+local MAX_CAPTURE_CHANNELS: integer = 32
+
+--- Slots a voice handle reserves for its index. The rest of the handle is a
+--- generation, so a handle whose slot has been finished and reused refers to
+--- nothing rather than to whatever took its place.
+local SLOT_SPAN: integer = 65536
+
+--- Generations wrap here, which keeps a handle inside a signed 32-bit field
+--- and so inside the `Sound` component.
+local MAX_GENERATION: integer = 32767
+
+--- A voice that has finished, as written back into `Sound.voice`. Distinct
+--- from zero, which means "not started yet". Without the distinction a
+--- one-shot would restart on the frame after it ended, forever.
+local FINISHED: integer = -1
+
+--- A Sound's name is its identity, for the same reason an image's name is: an
+--- index is assigned in load order, and load order is not something a snapshot
+--- can rely on reproducing.
+local soundIds: {[string]: integer} = {}
+
+local soundNames: {[integer]: string} = {}
+local soundCount: integer = 0
+
+--- A group's name is its identity, on the same terms as a Sound's name.
+local groupIds: {[string]: integer} = {}
+
+local groupNames: {[integer]: string} = {}
+local groupCount: integer = 0
+
+--- Returns the index of a Sound's name, assigning one the first time it is
+--- seen. A `Sound` component row names its Sound by this index.
+---
+--- @param name the non-empty name, a path for a Sound loaded from a file
+--- @return an index from one up, shared by every mixer in the process and
+---     meaningless in a file, which is why the component serializes the name
+--- @raises string when the name is empty
+export function soundId(name: string): integer
+    if name == "" then
+        error("tecs.audio.soundId: a Sound's name cannot be empty", 2)
+    end
+    local existing = soundIds[name]
+    if existing ~= nil then
+        return existing
+    end
+    soundCount = soundCount + 1
+    soundIds[name] = soundCount
+    soundNames[soundCount] = name
+
+    return soundCount
+end
+
+--- Returns the name a Sound index represents.
+---
+--- @param id the index, where zero is the index of no Sound at all
+--- @return the name, or nil for zero and for an index never handed out
+export function soundName(id: integer): string?
+    return soundNames[id]
+end
+
+--- Deprecated: the old name of `soundId`, from when every Sound was a clip.
+---
+--- @raises string when the path is empty
+export function clipId(path: string): integer
+    if path == "" then
+        error("tecs.audio.clipId: a clip path cannot be empty", 2)
+    end
+
+    return soundId(path)
+end
+
+--- Deprecated: the old name of `soundName`.
+export function clipPath(id: integer): string?
+    return soundNames[id]
+end
+
+--- Returns the index of a group name, assigning one the first time it is seen.
+---
+--- @param name the non-empty name, which needs no declaring: naming one here
+---     is all it takes for the group to exist
+--- @return an index from one up, shared by every mixer in the process
+--- @raises string when the name is empty
+export function groupId(name: string): integer
+    if name == "" then
+        error("tecs.audio.groupId: a group name cannot be empty", 2)
+    end
+    local existing = groupIds[name]
+    if existing ~= nil then
+        return existing
+    end
+    groupCount = groupCount + 1
+    groupIds[name] = groupCount
+    groupNames[groupCount] = name
+
+    return groupCount
+end
+
+--- Returns the name a group index represents.
+---
+--- @param id the index, where zero is the index of no group at all
+--- @return the name, or nil for zero and for an index never handed out
+export function groupName(id: integer): string?
+    return groupNames[id]
+end
+
+--- Attaches a sound to an entity.
+---
+--- Presence is the instruction: an entity carrying this with a loaded clip
+--- starts sounding on the next audio pass and stops when the component or the
+--- entity goes away. That is what makes sound an entity rather than a handle a
+--- game has to remember to release, and it is why despawning something
+--- mid-sound does the obvious thing.
+---
+--- The audio pass sends position to the backend and does nothing else with it.
+--- A caller feeding world coordinates has three jobs this component does not do
+--- for it: subtract whatever it decided is listening, choose a scale between
+--- world units and the backend's, and decide that a screen-space sound has no
+--- world position at all and leaves `spatial` false.
+---
+--- The pass follows `playing`, `gain`, `loop`, `pitch` and the position for as
+--- long as the voice sounds, so writing any of them is enough and nothing has
+--- to restart the voice. `clip` and `group` are deliberately not followed:
+--- both take a stop and a fresh start to change anyway, and following them
+--- would put a read and a compare on every row that never does. Moving a sound
+--- into another group is setting `group` and clearing `voice`.
+---
+--- Disabling an entity silences its sound and re-enabling starts it again.
+@derive(nupp.derive.Debug)
+export struct Emitter
+    --- Caller-writable. Selects a Sound by its `soundId` index. Zero plays
+    --- nothing.
+    clip: integer
+
+    --- Caller-writable. Requests playback. This field gives an instruction
+    --- rather than a report: clearing it stops the voice and setting it again
+    --- starts one, including on a one-shot that has already run out.
+    playing: boolean
+
+    --- Caller-writable. Sets linear gain before group and master gain.
+    gain: number
+
+    --- Caller-writable. Repeats playback. Clearing it part way through lets
+    --- the voice play out to its end rather than cutting it.
+    loop: boolean
+
+    --- Caller-writable. Sets the playback rate. One leaves it unchanged, while
+    --- two plays an octave higher in half the time.
+    pitch: number
+
+    --- Caller-writable. Reads `x`, `y` and `z` when true, and mixes without a
+    --- position when false.
+    spatial: boolean
+
+    --- Caller-writable. Sets the position right of the listener.
+    x: number
+
+    --- Caller-writable. Sets the position above the listener, which is the
+    --- opposite sign from world Y.
+    y: number
+
+    --- Caller-writable. Sets the position behind the listener.
+    z: number
+
+    --- Caller-writable. Selects a group by its `groupId` index. Zero joins no
+    --- group.
+    group: integer
+
+    --- Engine-owned. Reports the voice the audio pass assigned: zero before it
+    --- starts and negative once a one-shot has finished. Ordinary game code
+    --- reads it and writes only zero, which is how it asks for the sound again.
+    voice: integer
+end
+
+--- The process-wide `Sound` component definition.
+---
+--- Its saved fields carry the clip path and the group name rather than their
+--- indices, because an index belongs to the run that handed it out and a file
+--- carrying one would name whatever the next run interned in its place. The
+--- voice is not saved: a snapshot records that an entity has a sound, not how
+--- far through it the backend had got, so it starts again.
+export const SoundComponent: ecs.ComponentDefinition<Emitter> = ecs.newComponent(Emitter, {
+    -- This persisted component name is a compatibility surface.
+    name = "Sound",
+    construct = function(
+        clip: integer?,
+        playing: boolean?,
+        gain: number?,
+        loop: boolean?,
+        pitch: number?,
+        spatial: boolean?,
+        x: number?,
+        y: number?,
+        z: number?,
+        group: integer?
+    ): Emitter
+        return new Emitter(
+            clip or 0,
+            playing ~= false,
+            gain or 1,
+            loop == true,
+            pitch or 1,
+            spatial == true,
+            x or 0,
+            y or 0,
+            z or 0,
+            group or 0,
+            0
+        )
+    end,
+    default = function(): Emitter
+        return new Emitter(0, true, 1, false, 1, false, 0, 0, 0, 0, 0)
+    end,
+    save = function(value: Emitter): any
+        -- These saved keys are a compatibility surface: a file written by an
+        -- earlier build names them, so they do not move when their module does.
+        return {
+            clip = soundNames[value.clip],
+            playing = value.playing,
+            gain = value.gain,
+            loop = value.loop,
+            pitch = value.pitch,
+            spatial = value.spatial,
+            x = value.x,
+            y = value.y,
+            z = value.z,
+            group = groupNames[value.group],
+        }
+    end,
+    load = function(value: any): Emitter
+        local saved = value as {[string]: any}
+        local path = saved.clip as string?
+        local clip: integer = 0
+        if path ~= nil and path ~= "" then
+            clip = soundId(path)
+        end
+        local name = saved.group as string?
+        local group: integer = 0
+        if name ~= nil and name ~= "" then
+            group = groupId(name)
+        end
+
+        -- A file written before `playing` existed carries no answer, and the
+        -- one that matches what it recorded is that the sound was on.
+
+        return new Emitter(
+            clip,
+            saved.playing ~= false,
+            (saved.gain as number?) or 1,
+            saved.loop == true,
+            (saved.pitch as number?) or 1,
+            saved.spatial == true,
+            (saved.x as number?) or 0,
+            (saved.y as number?) or 0,
+            (saved.z as number?) or 0,
+            group,
+            0
+        )
+    end,
+})
+
+--- The `Sound` component under the name the console gives it: an emitter,
+--- a channel strip on an entity. A spatial row's voice sounds on a Track of
+--- its own, placed from the row's position, and sent to every `ReverbZone`
+--- it is inside. `SoundComponent` stays as an alias, and the component keeps
+--- its persisted name, `"Sound"`.
+export const TrackComponent: ecs.ComponentDefinition<Emitter> = SoundComponent
+
+--- Marks the entity the mixer listens from.
+---
+--- With one in the world, carrying a `Transform2D` or a `Transform3D`, the
+--- audio pass places every spatial `Sound` row on an entity with a transform
+--- itself: its position less the listener's, over `scale`. On a 2D
+--- transform, world y grows downwards and the listener's frame upwards, so
+--- the sign flips. Without one, a game sets each row's `x`, `y` and `z`, as
+--- it always could. One listener is read: the first the query finds.
+@derive(nupp.derive.Debug)
+export struct Listener
+    --- Caller-writable. World units per unit of audio distance; a sound one
+    --- unit away is half as loud as at the listener. One by default.
+    scale: number
+end
+
+--- The process-wide `Listener` component definition.
+export const ListenerComponent: ecs.ComponentDefinition<Listener> = ecs.newComponent(Listener, {
+    -- This persisted component name is a compatibility surface.
+    name = "Listener",
+    construct = function(scale: number?): Listener
+        return new Listener(scale or 1)
+    end,
+    default = function(): Listener
+        return new Listener(1)
+    end,
+    save = function(value: Listener): any
+        return {scale = value.scale}
+    end,
+    load = function(value: any): Listener
+        return new Listener(((value as {[string]: any}).scale as number?) or 1)
+    end,
+})
+
+--- Places reverb in the world: every spatial `Sound` row inside `radius` of
+--- the zone's transform sends to the return Bus `bus` names, at `level` at
+--- the centre and falling to nothing at the edge.
+---
+--- The Bus is a group name, by its `groupId` index, and should carry a
+--- reverb: `mixer:bus("cave", {effects = {effects.reverb({size = 0.9})}})`.
+--- Zones need a `Listener`, which is what gives the rows a position.
+@derive(nupp.derive.Debug)
+export struct ReverbZone
+    --- Caller-writable. The return Bus, by its `groupId` index.
+    bus: integer
+
+    --- Caller-writable. How far the zone reaches, in world units.
+    radius: number
+
+    --- Caller-writable. The send level at the centre, linear.
+    level: number
+end
+
+--- The process-wide `ReverbZone` component definition.
+export const ReverbZoneComponent: ecs.ComponentDefinition<ReverbZone> = ecs.newComponent(ReverbZone, {
+    -- This persisted component name is a compatibility surface.
+    name = "ReverbZone",
+    construct = function(bus: integer?, radius: number?, level: number?): ReverbZone
+        return new ReverbZone(bus or 0, radius or 1, level or 0.5)
+    end,
+    default = function(): ReverbZone
+        return new ReverbZone(0, 1, 0.5)
+    end,
+    save = function(value: ReverbZone): any
+        return {bus = groupNames[value.bus], radius = value.radius, level = value.level}
+    end,
+    load = function(value: any): ReverbZone
+        local fields = value as {[string]: any}
+        local name = fields.bus as string?
+
+        return new ReverbZone(
+            name ~= nil and groupId(name) or 0,
+            (fields.radius as number?) or 1,
+            (fields.level as number?) or 0.5
+        )
+    end,
+})
+
+--- One zone as the audio pass found it this frame, in the listener's frame.
+local record Zone
+    bus: string
+    x: number
+    y: number
+    z: number
+    radius: number
+    level: number
+end
+
+--- One playback in progress, as this module tracks it.
+local record Voice
+    clip: integer
+
+    --- What the game asked for, before the group and the master.
+    gain: number
+
+    --- The gain last sent, so an unchanged one costs no command.
+    applied: number
+
+    --- The rate last sent, for the same reason and because a reused slot would
+    --- otherwise keep the previous voice's rate.
+    pitch: number
+
+    --- The resampling last sent: true holds the source frame.
+    nearest: boolean
+
+    --- The group name, or nil.
+    group: string?
+
+    --- The Track the voice sounds on, zero for Master's default Track.
+    track: integer
+
+    --- What a steal compares: a voice with a lower one goes first.
+    priority: number
+
+    --- The emitter Track a spatial `Sound` row's voice sounds on, made for it
+    --- and destroyed with it.
+    strip: Track?
+
+    --- Counts starts, so a steal among equals takes the oldest.
+    order: integer
+
+    --- The limit bucket, or nil.
+    key: string?
+
+    --- Rises each time the slot is taken, so a stale handle is inert.
+    generation: integer
+
+    sounding: boolean
+
+    --- Set while a stop is fading out. Such a voice keeps its slot until the
+    --- backend says it has finished, and takes no further instruction.
+    stopping: boolean
+
+    --- Tracked here because a paused voice is not a finished one.
+    paused: boolean
+
+    --- True when a `Sound` component started this voice.
+    owned: boolean
+
+    --- Set by the pass that walks `Sound` rows, cleared before each walk.
+    referenced: boolean
+
+    loop: boolean
+
+    --- The last position sent, so an unmoved sound costs no command. At most
+    --- one of this and `stereo` is ever set: the backend holds one placement
+    --- per voice.
+    spatial: boolean
+
+    x: number
+    y: number
+    z: number
+    stereo: boolean
+    left: number
+    right: number
+end
+
+--- How many voices one key holds, and when one last started.
+local record Bucket
+    count: integer
+    last: number
+end
+
+--- One entry in the mixer's event log.
+export record Event
+    --- Read-only. Counts entries since the mixer was made, so a reader asks
+    --- for what came after the last one it saw.
+    sequence: integer
+
+    --- Read-only. Seconds on the output clock: a start's or a stop's `at` when
+    --- it had one, and otherwise the clock when it was sent or reported.
+    time: number
+
+    --- Read-only. `"start"`, `"refuse"` for a start that did not happen,
+    --- `"stop"`, `"finish"` for a voice that ended, and `"steal"` for one
+    --- stopped to make room.
+    event: "start" | "refuse" | "stop" | "finish" | "steal"
+
+    --- Read-only. The voice, and zero for a refused start.
+    handle: integer
+
+    --- Read-only. The clip's name, when the event names one.
+    sound: string?
+
+    --- Read-only. The group the voice played in.
+    group: string?
+
+    --- Read-only. Why a start was refused: `"unavailable"`, `"limit"`,
+    --- `"voices"`, `"polyphony"`, `"track"` or `"decoder"`.
+    reason: string?
+end
+
+--- What a recording of the mix sounded like, as numbers an agent can read.
+export type Listening = {
+    --- Read-only. Frames recorded, and the seconds they span.
+    frames: integer,
+    seconds: number,
+
+    --- Read-only. Output clock seconds the recording began at.
+    started: number,
+
+    --- Read-only. Largest absolute sample, linear and in dBFS, nil for
+    --- digital silence.
+    peak: number,
+    peakDbfs: number?,
+
+    --- Read-only. Root mean square, linear and in dBFS.
+    rms: number,
+    rmsDbfs: number?,
+
+    --- Read-only. Integrated loudness in LUFS, BS.1770 gated, nil when the
+    --- recording is quieter than the absolute gate.
+    lufs: number?,
+
+    --- Read-only. Samples at or beyond full scale.
+    clipped: integer,
+
+    --- Read-only. Silent stretches, each a start and an end in seconds into
+    --- the recording, at most sixteen.
+    silent: {{number}},
+
+    --- Read-only. Seconds into the recording where the level jumps, at most
+    --- sixty-four.
+    onsets: {number}
+}
+
+--- Counters an agent reads to see what the mixer refused or lost.
+export type Stats = {
+    --- Read-only. Starts refused, for any reason.
+    refused: integer,
+
+    --- Read-only. Voices stopped to make room for another.
+    steals: integer,
+
+    --- Read-only. Timed commands that reached the backend after their frame.
+    late: integer,
+
+    --- Read-only. Times the output dropped, and reopened.
+    drops: integer,
+    reopens: integer
+}
+
+--- Configures `newAudio`.
+export type Config = {
+    --- Caller-writable. Sets the frequency the mix runs at in frames per
+    --- second, and defaults to 48000. It holds for the mixer's life whatever
+    --- the device runs at; the backend resamples to the device.
+    frequency: integer?,
+
+    --- Caller-writable. Sets the number of channels the mix carries, and
+    --- defaults to two. A device with another count is folded or spread to.
+    channels: integer?,
+
+    --- Caller-writable. Sets how many voices may sound at once, and defaults
+    --- to 32.
+    maxVoices: integer?,
+
+    --- Caller-writable. Chooses the output the native backend opens.
+    --- `"device"`, the default, opens the platform's default output, and on a
+    --- machine with none a void output that opens a device once one appears.
+    --- `"void"` never touches a device: the mix goes nowhere and its clock
+    --- moves at the wall clock's pace, so a headless run keeps time.
+    --- `"memory"` never touches a device either, and its clock moves only
+    --- when `step` renders it, so every run of the same calls produces the
+    --- same samples: what a test, an offline render and an agent comparing two
+    --- runs want. Ignored when `backend` is given.
+    output: ("device" | "void" | "memory")?,
+
+    --- Caller-writable. Voices a Track holds at once before it steals, for
+    --- every Track `track` makes without its own; eight by default.
+    polyphony: integer?,
+
+    --- Caller-writable. False leaves Master without the limiter it carries by
+    --- default, which holds the mix under -1 dBFS.
+    limiter: boolean?,
+
+    --- Caller-writable. Supplies the backend instead of opening the native
+    --- one, which is what a device-free test uses.
+    backend: audiobackend.Backend?
+}
+
+--- Names how a voice reads between the frames of its clip.
+---
+--- `"linear"` interpolates between the two source frames either side of the
+--- read position, which is the default. `"nearest"` holds the source frame the
+--- position is in, its integer part, which is how a tracker stepping a
+--- fixed-point position through its samples reads them: a voice in this mode
+--- reproduces such a mix sample for sample, and a one-shot holds its last
+--- frame for that frame's own span before it ends.
+export type Resample = "linear" | "nearest"
+
+--- A Sound: an immutable asset an extension makes, which the mixer plays
+--- through that extension's Decoder.
+---
+--- The core knows no codec and no format. `tecs.pcm` makes Sounds of encoded
+--- audio files, `tecs.gm` and `tecs.ymfm` play sequenced music, and a game can
+--- make its own over a Decoder of its own. A Sound says which Decoder plays it,
+--- registering that Decoder with a mixer the first time it plays there, and
+--- carries what the Decoder opens a Playback from.
+export record Sound
+    --- Read-only. Its identity: a path for one loaded from a file. Two Sounds
+    --- with one name are one Sound to a mixer and to a snapshot.
+    name: string
+
+    --- Read-only. Its length in seconds, or nil for one that does not say,
+    --- such as a stream or an instrument.
+    duration: number?
+
+    --- Read-only. The name of the Decoder that plays it, which a mixer
+    --- registers the first time a Sound naming it plays there.
+    decoder: string
+
+    --- Read-only. Returns that Decoder's vtable, the address its library
+    --- exports, for the mixer to register.
+    vtable: function(): any
+
+    --- Read-only. What the Decoder opens a Playback from: its parameters, and
+    --- the Sound's bytes when it carries them.
+    params: string
+
+    bytes: string
+
+    --- Read-only. Re-reads the Sound from where it came from, for
+    --- `Audio.reload`, or nil for one that cannot be.
+    reload: (function(): (boolean, string?))?
+end
+
+--- What `play` takes: a Sound, or the asset handle one was requested under,
+--- which follows the handle's reloads.
+export type Playable = Sound | assets.Handle
+
+--- Configures `Audio.play`.
+---
+--- Read once, when the voice starts. Changing the record afterwards reaches
+--- nothing: use the handle setters instead. Nothing here is retained, so one
+--- record may be filled and reused for every play.
+export type PlayOptions = {
+    --- Caller-writable. The Track to sound on. Omitted, the voice sounds on
+    --- its group's Bus's default Track, or Master's without a group. A Track
+    --- names its Bus, so `group` is ignored beside it.
+    track: Track?,
+
+    --- Caller-writable. What a steal compares, zero by default. Over a
+    --- Track's polyphony the lowest goes first, the oldest among equals; over
+    --- `maxVoices` a voice with a strictly lower priority is stolen, or the
+    --- start is refused.
+    priority: number?,
+
+    --- Caller-writable. Sets linear gain before group and master gain, and
+    --- defaults to one.
+    gain: number?,
+
+    --- Caller-writable. Repeats playback until stopped, and defaults to false.
+    loop: boolean?,
+
+    --- Caller-writable. Sets the position in seconds a repeat returns to, so
+    --- an intro can play once and the rest of it loop. Defaults to zero.
+    loopStart: number?,
+
+    --- Caller-writable. Sets where the first pass begins in seconds, and
+    --- defaults to zero.
+    start: number?,
+
+    --- Caller-writable. Sets the fade-in duration in seconds, and defaults to
+    --- zero.
+    fadeIn: number?,
+
+    --- Caller-writable. Sets the playback rate, and defaults to one.
+    pitch: number?,
+
+    --- Caller-writable. Sets the fraction of `pitch` varied for each new
+    --- voice, so 0.1 spreads voices over plus or minus a tenth. Defaults to
+    --- zero.
+    pitchVariance: number?,
+
+    --- Caller-writable. Selects the group this voice joins, and defaults to
+    --- none.
+    group: string?,
+
+    --- Caller-writable. Selects the limit bucket this voice counts against,
+    --- and defaults to none.
+    key: string?,
+
+    --- Caller-writable. Enables spatial positioning. See
+    --- [`Sound`](tecs.audio.Sound) for the coordinate system.
+    spatial: boolean?,
+
+    --- Caller-writable. Sets the position right of the listener.
+    x: number?,
+
+    --- Caller-writable. Sets the position above the listener.
+    y: number?,
+
+    --- Caller-writable. Sets the position behind the listener.
+    z: number?,
+
+    --- Caller-writable. Pins the voice to the front pair of speakers, which is
+    --- a pan rather than a position. Ignored when `spatial` is set, because
+    --- the backend holds one placement per voice.
+    stereo: boolean?,
+
+    --- Caller-writable. Sets left-speaker gain on the same linear scale as
+    --- `gain`, and defaults to one.
+    left: number?,
+
+    --- Caller-writable. Sets right-speaker gain on the same terms as `left`.
+    right: number?,
+
+    --- Caller-writable. Selects how the voice reads between source frames,
+    --- and defaults to `"linear"`.
+    resample: Resample?,
+
+    --- Caller-writable. Starts the voice at this many seconds on the output
+    --- clock `Audio.now` reads, on exactly that output frame, rather than at
+    --- the next buffer. Omitted, zero and a time already mixed mean at once.
+    --- The handle is live from this call, but the backend has no voice under
+    --- it until then: a command for it sent with no `at` before that time
+    --- reaches nothing, so a game scheduling a start schedules what follows
+    --- it too.
+    at: number?
+}
+
+--- Defines what one key allows.
+export type Limit = {
+    --- Caller-writable. Sets how many voices this key may hold at once. Zero
+    --- or absent removes the ceiling.
+    voices: integer?,
+
+    --- Caller-writable. Sets the cooldown in seconds after a voice starts.
+    --- Zero disables the cooldown.
+    cooldown: number?
+}
+
+--- Describes one sounding voice for inspection.
+export record VoiceInfo
+    --- Read-only. Reports the handle `playing` and `stop` accept.
+    handle: integer
+
+    --- Read-only. Reports the Sound's name, or nil once it is gone.
+    clip: string?
+
+    --- Read-only. Reports the gain the voice requested, before group and
+    --- master gain.
+    gain: number
+
+    --- Read-only. Reports the gain sent for the voice, group gain and group
+    --- mute included. Master gain is not in it: that is one number on the
+    --- output rather than something multiplied per voice.
+    applied: number
+
+    --- Read-only. Reports the playback rate sent, so the value already
+    --- includes whatever variance `play` drew.
+    pitch: number
+
+    --- Read-only. Reports the group name, or nil for no group.
+    group: string?
+
+    --- Read-only. Reports the limit bucket, or nil for no bucket.
+    key: string?
+
+    --- Read-only. Reports whether its own pause or its group holds it.
+    paused: boolean
+
+    --- Read-only. Reports whether a fade-out is stopping the voice.
+    stopping: boolean
+
+    --- Read-only. Reports whether a [`Sound`](tecs.audio.Sound) component
+    --- started the voice instead of `play`.
+    owned: boolean
+
+    --- Read-only. Reports whether playback repeats at the end.
+    loop: boolean
+
+    --- Read-only. Reports whether the voice carries a position. This stays
+    --- false when `stereo` does not, because a voice holds one placement.
+    spatial: boolean
+
+    --- Read-only. Reports the last horizontal position sent, positive right.
+    --- It has no meaning unless `spatial`.
+    x: number
+
+    --- Read-only. Reports the last vertical position sent, positive up. It has
+    --- no meaning unless `spatial`.
+    y: number
+
+    --- Read-only. Reports the last depth position sent, positive behind. It
+    --- has no meaning unless `spatial`.
+    z: number
+
+    --- Read-only. Reports whether the voice is pinned to the front pair.
+    stereo: boolean
+
+    --- Read-only. Reports the last left-speaker gain sent. It has no meaning
+    --- unless `stereo`.
+    left: number
+
+    --- Read-only. Reports the last right-speaker gain sent. It has no meaning
+    --- unless `stereo`.
+    right: number
+end
+
+--- Names one physical audio device.
+---
+--- Re-exported from the backend contract so a game reaches it as
+--- `tecs.audio.Device`.
+export type Device = audiobackend.Device
+
+--- Configures `openMicrophone`.
+export type MicrophoneConfig = {
+    --- Caller-writable. Selects a physical device by the `id` a
+    --- [`Device`](tecs.audio.Device) from `recordingDevices` reported. Omitted
+    --- or zero uses the system's current default. An id names a position in
+    --- the listing that produced it, so a game keeping a choice across runs
+    --- keeps `deviceName` instead.
+    device: integer?,
+
+    --- Caller-writable. Selects a physical device by the `name` a
+    --- [`Device`](tecs.audio.Device) reported, and wins over `device`. This is
+    --- the durable way to name a device, because a name survives a run and an
+    --- id moves when something is attached or removed.
+    deviceName: string?,
+
+    --- Caller-writable. Sets the frames per second `read` answers in, and
+    --- defaults to 48000. The backend converts the device's own rate, so this
+    --- is what arrives rather than what the hardware runs at.
+    frequency: integer?,
+
+    --- Caller-writable. Sets the interleaved channels `read` answers with, and
+    --- defaults to one. The backend folds or spreads the device's own channels
+    --- to reach it. The native backend carries at most eight, so a count above
+    --- that and inside the accepted range is refused with a reason rather than
+    --- raised.
+    channels: integer?,
+
+    --- Caller-writable. Sets how many frames the capture holds before the
+    --- oldest are dropped, and defaults to one second at `frequency`.
+    bufferFrames: integer?,
+
+    --- Caller-writable. Supplies the device provider instead of resolving the
+    --- native one, which is what a device-free test uses.
+    devices: audiobackend.Devices?
+}
+
+--- An open recording device, pulled rather than pushed.
+---
+--- Capture is running by the time one of these exists and the backend's own
+--- thread is filling a buffer behind it. Nothing arrives until `read` asks, and
+--- nothing that thread runs enters Nupp: a device thread is one the Lua virtual
+--- machine never created, so the frames cross by this side emptying a buffer
+--- rather than by anything calling in.
+---
+--- The buffer is bounded. When a game stops reading, capture drops the oldest
+--- frames and counts them in `overruns`, preserving the most recent audio
+--- without unbounded memory or latency growth.
+export record Microphone
+    --- Read-only. Reports the frames per second `read` answers in. This is the
+    --- requested value, not the device's own.
+    frequency: integer
+
+    --- Read-only. Reports the interleaved channels per frame `read` answers
+    --- with. This is the requested value, not the device's own.
+    channels: integer
+
+    @private capture: audiobackend.Capture?
+
+    --- Read-only. Reports terminal capture failure, or nil while the stream is
+    --- healthy. Frames already buffered remain readable; after draining, `read`
+    --- returns nil and this reason, and `readInto` raises it. A zero-frame read
+    --- remains a no-op. Recovery requires closing and reopening the microphone.
+    failure: function(borrows self: Microphone): string?
+
+    --- Read-only. Reports the complete sample frames ready to read without
+    --- waiting, so a partly arrived frame is not counted. Zero once destroyed,
+    --- rather than an error.
+    availableFrames: function(borrows self: Microphone): integer
+
+    --- Read-only. Reports the frames dropped because nothing read them in time,
+    --- counted since the microphone opened. Zero once destroyed.
+    overruns: function(borrows self: Microphone): integer
+
+    --- Read-only. Pulls up to `maxFrames` complete frames as interleaved
+    --- native-endian float32 samples, `channels * 4` bytes per frame. Omitting
+    --- `maxFrames` takes everything ready now, and a limit above what is ready
+    --- takes what is ready rather than waiting. An empty string means nothing
+    --- was ready and is not a failure. Returns nil and the reason for a
+    --- destroyed microphone or a backend failure, and raises when `maxFrames`
+    --- is not a non-negative integer.
+    read: function(exclusive self: Microphone, maxFrames: integer?): (string?, string?)
+
+    --- Read-only. Pulls up to `maxFrames` complete frames into `out` as
+    --- interleaved samples from index one, writing no more frames than `out`
+    --- holds, and returns how many it wrote. This is the allocation-free form
+    --- of `read`, for a game draining a microphone every frame.
+    readInto: function(exclusive self: Microphone, out: {number}, maxFrames: integer?): integer
+
+    --- Read-only. Stops the device filling the buffer, keeping whatever is
+    --- already in it. Pausing one already paused succeeds; a destroyed
+    --- microphone reports false with a reason.
+    pause: function(exclusive self: Microphone): (boolean, string?)
+
+    --- Read-only. Starts the device filling the buffer again after `pause`. A
+    --- destroyed microphone reports false with a reason.
+    resume: function(exclusive self: Microphone): (boolean, string?)
+
+    --- Read-only. Stops capture and closes the recording device. Safe more than
+    --- once. Whatever was captured and not yet read is discarded with the
+    --- buffer, so a last `read` belongs before this rather than after.
+    destroy: function(exclusive self: Microphone): nil
+end
+
+--- One output and the voices sounding on it.
+---
+--- Nothing here is thread safe and nothing here calls back. Every method runs
+--- on the thread that calls it, and the backend's own audio thread reaches
+--- Nupp only by leaving finished handles where `update` collects them.
+export record Audio
+    --- Read-only. Reports terminal output loss observed by `update`. Nil until
+    --- the output can no longer reopen a device. Loss clears voices, prevents
+    --- playback and requires a new mixer. A device that drops and is reopened
+    --- is not a loss and leaves this nil; `output` reports it.
+    failureReason: string?
+
+    @private closed: boolean
+
+    --- Read-only. Reports whether an output opened and remains usable as of
+    --- the last `update`. False also describes a device-free mixer.
+    available: boolean
+
+    @private backend: audiobackend.Backend
+    @private voices: {Voice}
+    @private free: {integer}
+    @private live: integer
+    @private master: number
+    @private mutedFlag: boolean
+    @private groupGains: {[string]: number}
+    @private groupMutedFlags: {[string]: boolean}
+    @private groupPausedFlags: {[string]: boolean}
+    @private limits: {[string]: Limit}
+    @private buckets: {[string]: Bucket}
+    @private soundsById: {[integer]: Sound}
+    @private decoderNames: {[integer]: string}
+    @private decoderIds: {[string]: integer}
+    @private variance: random.Xoshiro128
+    @private elapsed: number
+    @private pending: {audiobackend.Command}
+    @private pendingCount: integer
+    @private finished: {integer}
+    @private playSystem: ecs.System?
+    @private outputChanges: integer
+    @private outputDrops: integer
+    @private outputReopens: integer
+    @private history: {Event}
+    @private sequence: integer
+    @private refusals: integer
+    @private stolen: integer
+    @private stepRemainder: number
+    @private held: boolean
+    @private touched: boolean
+    @private busByName: {[string]: Bus}
+    @private busById: {[integer]: Bus}
+    @private trackById: {[integer]: Track}
+    @private nextBus: integer
+    @private nextTrack: integer
+    @private nextEffect: integer
+    @private nextOrder: integer
+    @private defaultPolyphony: integer
+    @private clockline: timelines.Timeline?
+    @private registry: integer
+    @private zones: {Zone}
+    @private timelineList: {timelines.Timeline}
+
+    flush: function(exclusive self: Audio): nil
+    now: function(borrows self: Audio): number
+    frequency: function(borrows self: Audio): integer
+    destroy: function(exclusive self: Audio): nil
+    decoders: function(borrows self: Audio): {string}
+    output: function(borrows self: Audio): audiobackend.OutputStatus
+    addSound: function(exclusive self: Audio, sound: Sound): integer
+    sound: function(borrows self: Audio, name: string): Sound?
+    sounds: function(borrows self: Audio): {Sound}
+    reload: function(exclusive self: Audio, name: string): (boolean, string?)
+    play: function(exclusive self: Audio, sound: Playable?, options: PlayOptions?): integer
+    stop: function(exclusive self: Audio, handle: integer, fadeOut: number?, at: number?): nil
+    stopAll: function(exclusive self: Audio, fadeOut: number?): nil
+    playing: function(borrows self: Audio, handle: integer): boolean
+    paused: function(borrows self: Audio, handle: integer): boolean
+    pause: function(exclusive self: Audio, handle: integer): nil
+    resume: function(exclusive self: Audio, handle: integer): nil
+    setGain: function(exclusive self: Audio, handle: integer, gain: number, at: number?): nil
+    setPitch: function(exclusive self: Audio, handle: integer, ratio: number, at: number?): nil
+    setLoop: function(exclusive self: Audio, handle: integer, loop: boolean, at: number?): nil
+    setResample: function(exclusive self: Audio, handle: integer, mode: Resample, at: number?): nil
+    resample: function(borrows self: Audio, handle: integer): Resample?
+    looping: function(borrows self: Audio, handle: integer): boolean
+    seek: function(exclusive self: Audio, handle: integer, seconds: number): boolean
+    tell: function(exclusive self: Audio, handle: integer): number?
+    setPosition: function(exclusive self: Audio, handle: integer, x: number, y: number, z: number, at: number?): nil
+    setStereo: function(exclusive self: Audio, handle: integer, left: number, right: number, at: number?): nil
+    clearSpatial: function(exclusive self: Audio, handle: integer): nil
+    setMasterGain: function(exclusive self: Audio, gain: number): nil
+    masterGain: function(borrows self: Audio): number
+    setMuted: function(exclusive self: Audio, muted: boolean): nil
+    muted: function(borrows self: Audio): boolean
+    sounding: function(borrows self: Audio): integer
+    maxVoices: function(borrows self: Audio): integer
+    setGroupGain: function(exclusive self: Audio, name: string, gain: number): nil
+    groupGain: function(borrows self: Audio, name: string): number
+    setGroupMuted: function(exclusive self: Audio, name: string, muted: boolean): nil
+    groupMuted: function(borrows self: Audio, name: string): boolean
+    pauseGroup: function(exclusive self: Audio, name: string): nil
+    resumeGroup: function(exclusive self: Audio, name: string): nil
+    groupPaused: function(borrows self: Audio, name: string): boolean
+    groups: function(borrows self: Audio): {string}
+    stopGroup: function(exclusive self: Audio, name: string, fadeOut: number?): nil
+    setLimit: function(exclusive self: Audio, key: string, limit: Limit?): nil
+    limit: function(borrows self: Audio, key: string): Limit?
+    keyCount: function(borrows self: Audio, key: string): integer
+    keys: function(borrows self: Audio): {string}
+    voiceList: function(borrows self: Audio): {VoiceInfo}
+    update: function(exclusive self: Audio, dt: number?): integer
+    step: function(exclusive self: Audio, seconds: number): number
+    hold: function(exclusive self: Audio, held: boolean): boolean
+    tick: function(exclusive self: Audio, dt: number): nil
+    listen: function(exclusive self: Audio, seconds: number): boolean
+    listening: function(borrows self: Audio): Listening?
+    saveListening: function(borrows self: Audio, path: string): (boolean, string?)
+    stopListening: function(exclusive self: Audio): nil
+    events: function(borrows self: Audio, after: integer?): {Event}
+    stats: function(borrows self: Audio): Stats
+    bus: function(exclusive self: Audio, name: string, options: BusOptions?): Bus
+    masterBus: function(exclusive self: Audio): Bus
+    buses: function(borrows self: Audio): {Bus}
+    track: function(exclusive self: Audio, options: TrackOptions?): Track
+    tracks: function(borrows self: Audio): {Track}
+    meters: function(exclusive self: Audio): Meters
+    timeline: function(exclusive self: Audio, options: timelines.Options?): timelines.Timeline
+    defaultTimeline: function(exclusive self: Audio): timelines.Timeline
+    timelines: function(borrows self: Audio): {timelines.Timeline}
+    registerDecoder: function(exclusive self: Audio, vtable: any, name: string?): (integer?, string?)
+    registerEffect: function(exclusive self: Audio, vtable: any): (integer?, string?)
+    playDecoded: function(
+        exclusive self: Audio,
+        decoder: integer,
+        params: string,
+        bytes: string,
+        options: PlayOptions?
+    ): (integer, string?)
+    event: function(exclusive self: Audio, handle: integer, data: integer, at: number?): boolean
+end
+
+--- Options for `Audio.bus`.
+export type BusOptions = {
+    --- Caller-writable. The Bus this one sums into, Master when omitted.
+    parent: string?,
+
+    --- Caller-writable. The fader, one by default.
+    gain: number?,
+
+    --- Caller-writable. Starts it muted.
+    muted: boolean?,
+
+    --- Caller-writable. Its insert chain, in order.
+    effects: {effectspecs.Spec}?
+}
+
+--- Options for `Audio.track`.
+export type TrackOptions = {
+    --- Caller-writable. The Bus it routes to, Master when omitted.
+    bus: string?,
+
+    --- Caller-writable. The fader, one by default.
+    gain: number?,
+
+    --- Caller-writable. Starts it muted, or soloed.
+    muted: boolean?,
+    solo: boolean?,
+
+    --- Caller-writable. Places its sum against the listener at `x y z`.
+    spatial: boolean?,
+    x: number?,
+    y: number?,
+    z: number?,
+
+    --- Caller-writable. Post-fader sends, by return Bus name and level.
+    sends: {[string]: number}?,
+
+    --- Caller-writable. Voices it holds at once before it steals, the
+    --- mixer's `polyphony` (eight) by default.
+    polyphony: integer?,
+
+    --- Caller-writable. Its insert chain, in order.
+    effects: {effectspecs.Spec}?
+}
+
+--- One effect in a strip's insert chain.
+export record Effect
+    --- Read-only. The id the mixer gave it.
+    id: integer
+
+    --- Read-only. Its kind's name.
+    name: string
+
+    @private owner: integer
+    @private names: {[string]: integer}
+    @private values: {[integer]: number}
+    @private removed: boolean
+    @private onBus: boolean
+    @private strip: integer
+
+    set: function(exclusive self: Effect, name: string, value: number, at: number?): nil
+    get: function(borrows self: Effect, name: string): number?
+    remove: function(exclusive self: Effect): nil
+end
+
+--- A subgroup, a return, or Master: sums what routes to it, through its
+--- inserts and fader, into its parent.
+export record Bus
+    --- Read-only. Its name; Master's is `"master"`.
+    name: string
+
+    --- Read-only. The id the backend knows it by; Master's is zero.
+    id: integer
+
+    @private owner: integer
+    @private parentName: string?
+    @private level: number
+    @private mutedFlag: boolean
+    @private pausedFlag: boolean
+    @private home: Track?
+    @private chain: {Effect}
+    @private destroyed: boolean
+
+    setGain: function(exclusive self: Bus, gain: number, at: number?): nil
+    gain: function(borrows self: Bus): number
+    setMuted: function(exclusive self: Bus, muted: boolean, at: number?): nil
+    muted: function(borrows self: Bus): boolean
+    pause: function(exclusive self: Bus, at: number?): nil
+    resume: function(exclusive self: Bus, at: number?): nil
+    paused: function(borrows self: Bus): boolean
+    held: function(borrows self: Bus): boolean
+    parent: function(borrows self: Bus): string?
+    setParent: function(exclusive self: Bus, name: string?): nil
+    track: function(exclusive self: Bus): Track
+    insert: function(exclusive self: Bus, spec: effectspecs.Spec, position: integer?): Effect
+    effects: function(borrows self: Bus): {Effect}
+    destroy: function(exclusive self: Bus): nil
+end
+
+--- A channel strip: voices sum into it, through its inserts, fader and pan
+--- or position, into its Bus and its sends.
+export record Track
+    --- Read-only. The id the backend knows it by; Master's default Track is
+    --- zero.
+    id: integer
+
+    @private owner: integer
+    @private busName: string
+    @private level: number
+    @private mutedFlag: boolean
+    @private soloFlag: boolean
+    @private placed: "none" | "spatial" | "stereo"
+    @private px: number
+    @private py: number
+    @private pz: number
+    @private sendLevels: {[string]: number}
+    @private limit: integer
+    @private chain: {Effect}
+    @private isDefault: boolean
+    @private destroyed: boolean
+
+    play: function(exclusive self: Track, sound: Playable?, options: PlayOptions?): integer
+    stopAll: function(exclusive self: Track, fadeOut: number?): nil
+    sounding: function(borrows self: Track): integer
+    setGain: function(exclusive self: Track, gain: number, at: number?): nil
+    gain: function(borrows self: Track): number
+    setMuted: function(exclusive self: Track, muted: boolean, at: number?): nil
+    muted: function(borrows self: Track): boolean
+    setSolo: function(exclusive self: Track, solo: boolean, at: number?): nil
+    solo: function(borrows self: Track): boolean
+    bus: function(borrows self: Track): string
+    setBus: function(exclusive self: Track, name: string): nil
+    setPosition: function(exclusive self: Track, x: number, y: number, z: number, at: number?): nil
+    setStereo: function(exclusive self: Track, left: number, right: number, at: number?): nil
+    clearPlacement: function(exclusive self: Track, at: number?): nil
+    position: function(borrows self: Track): (number?, number?, number?)
+    send: function(exclusive self: Track, bus: string, level: number, at: number?): nil
+    sends: function(borrows self: Track): {[string]: number}
+    polyphony: function(borrows self: Track): integer
+    setPolyphony: function(exclusive self: Track, voices: integer): nil
+    insert: function(exclusive self: Track, spec: effectspecs.Spec, position: integer?): Effect
+    effects: function(borrows self: Track): {Effect}
+    destroy: function(exclusive self: Track): nil
+end
+
+--- What `Audio.meters` reports for one strip since the last read.
+export type Meter = {
+    --- Read-only. Largest absolute sample, linear.
+    peak: number,
+
+    --- Read-only. Root mean square, linear.
+    rms: number,
+
+    --- Read-only. Samples at or past full scale.
+    clipped: integer
+}
+
+--- Every strip's meter: Master, each Bus by name, each Track by id.
+export type Meters = {
+    master: Meter,
+    buses: {[string]: Meter},
+    tracks: {[integer]: Meter}
+}
+
+--- Every live mixer by the id its Buses, Tracks and Effects name it by,
+--- weakly, so a mixer that has gone takes its entry with it.
+local mixers: {[integer]: Audio} = setmetatable({}, {__mode = "v"})
+
+local nextMixer: integer = 0
+
+--- Returns the mixer a console object belongs to.
+---
+--- @raises string when the mixer has been collected
+local function mixerOf(id: integer): Audio
+    return assert(mixers[id], "tecs.audio: the mixer this belongs to is gone")
+end
+
+--- The mixer each world had installed into it, keyed weakly so a world that
+--- has gone takes its entry with it.
+local installed: {[ecs.World]: Audio} = setmetatable({}, {__mode = "k"})
+
+--- Returns the next command record, growing the buffer only when a frame has
+--- never needed this many. Steady state allocates nothing.
+local function queue(exclusive self: Audio, kind: integer, handle: integer): audiobackend.Command
+    local index = self.pendingCount + 1
+    self.pendingCount = index
+    local command = self.pending[index]
+    if command == nil then
+        command = audiobackend.newCommand()
+        self.pending[index] = command
+    end
+    command.kind = kind
+    command.handle = handle
+    command.clip = 0
+    command.flags = 0
+    command.gain = 1
+    command.pitch = 1
+    command.start = 0
+    command.fade = 0
+    command.loopStart = 0
+    command.x = 0
+    command.y = 0
+    command.z = 0
+    command.at = 0
+
+    return command
+end
+
+--- Reports whether a call carries a time on the output clock, which is what
+--- makes it bypass the skip for an unchanged value: a timed value may land
+--- before or after one already sent, so only the backend knows which is last.
+local function isTimed(at: number?): boolean
+    return at ~= nil and at > 0
+end
+
+--- Raises for an `at` that names no time: not a number, or not finite.
+---
+--- A time already mixed is a time, and means at once; one that can never
+--- come is a mistake in the caller's arithmetic, typically a count of frames
+--- over a frequency of zero, and waiting for it forever would hide it.
+---
+--- @raises string when `at` is NaN or infinite
+local function checkAt(at: number?, method: string): nil
+    if at == nil then
+        return
+    end
+    if at ~= at or at == math.huge or at == -math.huge then
+        error("tecs.audio.Audio." .. method .. ": at must be a finite time, got " .. tostring(at), 3)
+    end
+end
+
+--- Returns the slot a handle names, with the generation divided back out.
+local function slotOf(handle: integer): integer
+    return handle - (handle // SLOT_SPAN) * SLOT_SPAN
+end
+
+--- Returns the voice a handle names, or nil when it names one that has ended.
+local function voiceOf(borrows self: Audio, handle: integer): Voice?
+    if handle <= 0 then
+        return nil
+    end
+    local slot = slotOf(handle)
+    local voice = self.voices[slot]
+    if voice == nil or not voice.sounding then
+        return nil
+    end
+    if voice.generation ~= (handle - slot) // SLOT_SPAN then
+        return nil
+    end
+
+    return voice
+end
+
+--- Returns the handle naming one slot's current voice.
+local function handleOf(borrows self: Audio, slot: integer): integer
+    return self.voices[slot].generation * SLOT_SPAN + slot
+end
+
+--- Returns the gain a voice should carry: its own. Its group's gain and mute
+--- are its Bus's fader, and the master is one number on the output.
+local function composedGain(borrows _self: Audio, voice: Voice): number
+    -- A group is a Bus now, whose fader applies on the backend.
+    return voice.gain
+end
+
+--- Sends a voice's gain, skipping the command when nothing changed.
+local function applyGain(exclusive self: Audio, slot: integer, at: number?): nil
+    local voice = self.voices[slot]
+    local applied = composedGain(self, voice)
+    if applied == voice.applied and not isTimed(at) then
+        return
+    end
+    voice.applied = applied
+    local command = queue(self, audiobackend.SET_GAIN, handleOf(self, slot))
+    command.gain = applied
+    command.at = at or 0
+end
+
+--- Sends a voice's rate, skipping the command when nothing changed.
+local function applyPitch(exclusive self: Audio, slot: integer, ratio: number, at: number?): nil
+    local voice = self.voices[slot]
+    if voice.pitch == ratio and not isTimed(at) then
+        return
+    end
+    voice.pitch = ratio
+    local command = queue(self, audiobackend.SET_PITCH, handleOf(self, slot))
+    command.pitch = ratio
+    command.at = at or 0
+end
+
+--- Sends how a voice resamples, skipping the command when nothing changed.
+local function applyResample(exclusive self: Audio, slot: integer, nearest: boolean, at: number?): nil
+    local voice = self.voices[slot]
+    if voice.nearest == nearest and not isTimed(at) then
+        return
+    end
+    voice.nearest = nearest
+    local command = queue(self, audiobackend.SET_RESAMPLE, handleOf(self, slot))
+    command.flags = nearest and audiobackend.NEAREST or 0
+    command.at = at or 0
+end
+
+--- Sends whether a voice repeats, skipping the command when nothing changed.
+local function applyLoop(exclusive self: Audio, slot: integer, loop: boolean, at: number?): nil
+    local voice = self.voices[slot]
+    if voice.loop == loop and not isTimed(at) then
+        return
+    end
+    voice.loop = loop
+    local command = queue(self, audiobackend.SET_LOOP, handleOf(self, slot))
+    command.flags = loop and audiobackend.LOOP or 0
+    command.at = at or 0
+end
+
+--- Places a voice, skipping the command when it has not moved.
+local function applyPosition(exclusive self: Audio, slot: integer, x: number, y: number, z: number, at: number?): nil
+    local voice = self.voices[slot]
+    if voice.spatial and voice.x == x and voice.y == y and voice.z == z and not isTimed(at) then
+        return
+    end
+    -- A voice holds one placement, so this leaves the other.
+    voice.spatial = true
+    voice.stereo = false
+    voice.x = x
+    voice.y = y
+    voice.z = z
+    local command = queue(self, audiobackend.SET_POSITION, handleOf(self, slot))
+    command.flags = audiobackend.SPATIAL
+    command.x = x
+    command.y = y
+    command.z = z
+    command.at = at or 0
+end
+
+--- Pans a voice, skipping the command when nothing changed.
+local function applyStereo(exclusive self: Audio, slot: integer, left: number, right: number, at: number?): nil
+    local voice = self.voices[slot]
+    if voice.stereo and voice.left == left and voice.right == right and not isTimed(at) then
+        return
+    end
+    voice.stereo = true
+    voice.spatial = false
+    voice.left = left
+    voice.right = right
+    local command = queue(self, audiobackend.SET_STEREO, handleOf(self, slot))
+    command.flags = audiobackend.STEREO
+    command.x = left
+    command.y = right
+    command.at = at or 0
+end
+
+--- Returns a voice to unpositioned mixing, out of either placement.
+local function applyUnplaced(exclusive self: Audio, slot: integer): nil
+    local voice = self.voices[slot]
+    if not voice.spatial and not voice.stereo then
+        return
+    end
+    voice.spatial = false
+    voice.stereo = false
+    queue(self, audiobackend.CLEAR_PLACEMENT, handleOf(self, slot))
+end
+
+--- Gives a slot back, un-counting whatever it held.
+local function release(exclusive self: Audio, slot: integer): nil
+    local voice = self.voices[slot]
+    if not voice.sounding then
+        return
+    end
+    local key = voice.key
+    if key ~= nil then
+        local bucket = self.buckets[key]
+        if bucket ~= nil then
+            bucket.count = bucket.count - 1
+        end
+    end
+    voice.group = nil
+    voice.key = nil
+    voice.sounding = false
+    voice.stopping = false
+    voice.paused = false
+    voice.owned = false
+    voice.clip = 0
+    voice.applied = -1
+    voice.spatial = false
+    voice.stereo = false
+    self.live = self.live - 1
+    self.free[#self.free + 1] = slot
+    local strip = voice.strip
+    if strip ~= nil then
+        voice.strip = nil
+        strip:destroy()
+    end
+end
+
+--- Reports whether a key has room for another voice right now.
+local function admits(borrows self: Audio, key: string): boolean
+    local limit = self.limits[key]
+    if limit == nil then
+        return true
+    end
+    local bucket = self.buckets[key]
+    if bucket == nil then
+        return true
+    end
+    local cooldown = limit.cooldown
+    if cooldown ~= nil and cooldown > 0 and self.elapsed - bucket.last < cooldown then
+        return false
+    end
+    local ceiling = limit.voices
+    if ceiling ~= nil and ceiling > 0 and bucket.count >= ceiling then
+        return false
+    end
+
+    return true
+end
+
+--- Appends one entry to the event log, dropping the oldest past the cap.
+local function record(
+    exclusive self: Audio,
+    event: "start" | "refuse" | "stop" | "finish" | "steal",
+    handle: integer,
+    at: number?,
+    clip: integer,
+    group: string?,
+    reason: string?
+): nil
+    local sequence = self.sequence + 1
+    self.sequence = sequence
+    local time = (at ~= nil and at > 0) and at or self:now()
+    local known = soundNames[clip]
+    local entry = new Event(
+        sequence = sequence,
+        time = time,
+        event = event,
+        handle = handle,
+        sound = known,
+        group = group,
+        reason = reason
+    )
+    local history = self.history
+    history[#history + 1] = entry
+    if #history > LOG_ENTRIES then
+        table.remove(history, 1)
+    end
+end
+
+--- Counts the voices sounding on a Track, a fading one not included.
+local function trackSounding(borrows self: Audio, track: integer): integer
+    local count: integer = 0
+    for slot = 1, #self.voices do
+        local voice = self.voices[slot]
+        if voice.sounding and not voice.stopping and voice.track == track then
+            count = count + 1
+        end
+    end
+
+    return count
+end
+
+--- Returns the slot of the voice a steal takes, or zero for none: the lowest
+--- priority, the oldest among equals, on `track` or anywhere when nil, and
+--- below `priority`, strictly so when `strictly`.
+local function lowest(borrows self: Audio, track: integer?, priority: number, strictly: boolean): integer
+    local chosen: integer = 0
+    local floor = math.huge
+    local oldest = math.huge
+    for slot = 1, #self.voices do
+        local voice = self.voices[slot]
+        if voice.sounding and not voice.stopping and (track == nil or voice.track == track) then
+            local eligible = strictly and voice.priority < priority or (not strictly and voice.priority <= priority)
+            if eligible and (voice.priority < floor or (voice.priority == floor and voice.order < oldest)) then
+                chosen = slot
+                floor = voice.priority
+                oldest = voice.order
+            end
+        end
+    end
+
+    return chosen
+end
+
+--- Stops a voice to make room, with a short fade, and frees its slot now.
+local function steal(exclusive self: Audio, slot: integer): nil
+    local voice = self.voices[slot]
+    local handle = handleOf(self, slot)
+    self.stolen = self.stolen + 1
+    record(self, "steal", handle, nil, voice.clip, voice.group, nil)
+    queue(self, audiobackend.STOP, handle).fade = STEAL_FADE
+    release(self, slot)
+end
+
+--- Counts and logs a start that did not happen, and answers its zero handle.
+local function refuse(exclusive self: Audio, clip: integer, options: PlayOptions, reason: string): integer
+    self.refusals = self.refusals + 1
+    record(self, "refuse", 0, options.at, clip, options.group, reason)
+
+    return 0
+end
+
+--- Takes a free slot for one voice reading `clip`, queues its start, and
+--- returns its handle, or zero when nothing started.
+---
+--- `flags` carries what the input adds to the command: `STREAM` for a clip read
+--- from its file, `SYNTH` for a synthesizer, which reads no clip at all.
+local function claim(
+    exclusive self: Audio,
+    clip: integer,
+    flags: integer,
+    options: PlayOptions,
+    owned: boolean
+): integer
+    if not self.available then
+        return refuse(self, clip, options, "unavailable")
+    end
+    local key = options.key
+    if key ~= nil and not admits(self, key) then
+        return refuse(self, clip, options, "limit")
+    end
+    local trackId: integer = 0
+    local group = options.group
+    local chosen = options.track
+    if chosen ~= nil then
+        if chosen.destroyed then
+            return refuse(self, clip, options, "track")
+        end
+        trackId = chosen.id
+        group = chosen.busName ~= MASTER and chosen.busName or nil
+    elseif group ~= nil then
+        local bus = self:bus(group)
+        trackId = bus:track().id
+    end
+    local priority = options.priority or 0
+    local owner = self.trackById[trackId]
+    if owner ~= nil and owner.limit > 0 and trackSounding(self, trackId) >= owner.limit then
+        local victim = lowest(self, trackId, priority, false)
+        if victim == 0 then
+            return refuse(self, clip, options, "polyphony")
+        end
+        steal(self, victim)
+    end
+    if #self.free == 0 then
+        local victim = lowest(self, nil, priority, true)
+        if victim == 0 then
+            return refuse(self, clip, options, "voices")
+        end
+        steal(self, victim)
+    end
+    local count = #self.free
+    local slot = self.free[count]
+    self.free[count] = nil
+
+    local voice = self.voices[slot]
+    voice.generation = voice.generation + 1
+    if voice.generation > MAX_GENERATION then
+        voice.generation = 1
+    end
+    voice.clip = clip
+    voice.gain = options.gain or 1
+    voice.applied = -1
+    voice.group = group
+    voice.track = trackId
+    voice.priority = priority
+    self.nextOrder = self.nextOrder + 1
+    voice.order = self.nextOrder
+    voice.key = key
+    voice.sounding = true
+    voice.stopping = false
+    voice.paused = false
+    voice.owned = owned
+    voice.referenced = false
+    voice.loop = options.loop == true
+    voice.nearest = options.resample == "nearest"
+    voice.spatial = false
+    voice.stereo = false
+
+    local pitch = options.pitch or 1
+    local spread = options.pitchVariance or 0
+    if spread ~= 0 then
+        pitch = pitch * (1 + (self.variance:next() * 2 - 1) * spread)
+    end
+    voice.pitch = pitch
+
+    local handle = handleOf(self, slot)
+    local command = queue(self, audiobackend.PLAY, handle)
+    command.clip = clip
+    command.gain = composedGain(self, voice)
+    command.pitch = pitch
+    command.start = options.start or 0
+    command.fade = options.fadeIn or 0
+    command.loopStart = options.loopStart or 0
+    local at = options.at or 0
+    command.at = at
+    command.target = trackId
+    if voice.loop then
+        flags = flags + audiobackend.LOOP
+    end
+    if voice.nearest then
+        flags = flags + audiobackend.NEAREST
+    end
+
+    -- The two placements are exclusive, and a position wins when a caller asks
+    -- for both rather than one silently undoing the other.
+    if options.spatial == true then
+        flags = flags + audiobackend.SPATIAL
+        voice.spatial = true
+        voice.x = options.x or 0
+        voice.y = options.y or 0
+        voice.z = options.z or 0
+        command.x = voice.x
+        command.y = voice.y
+        command.z = voice.z
+    elseif options.stereo == true then
+        flags = flags + audiobackend.STEREO
+        voice.stereo = true
+        voice.left = options.left or 1
+        voice.right = options.right or 1
+        command.x = voice.left
+        command.y = voice.right
+    end
+    command.flags = flags
+    voice.applied = command.gain
+
+    if key ~= nil then
+        local bucket = self.buckets[key]
+        if bucket == nil then
+            bucket = new Bucket(count = 0, last = 0)
+            self.buckets[key] = bucket
+        end
+        bucket.count = bucket.count + 1
+        bucket.last = self.elapsed
+    end
+
+    self.live = self.live + 1
+    record(self, "start", handle, at, clip, voice.group, nil)
+
+    return handle
+end
+
+--- Returns the Sound a Playable names: a Sound as it is, a handle's current
+--- one. Either joins this mixer's Sounds, so a `Sound` component row and a
+--- reload can find it by name.
+local function soundOf(exclusive self: Audio, sound: Playable?): Sound?
+    local found: any = sound
+    if found is assets.Handle then
+        found = found:value()
+    end
+    if found is Sound then
+        self.soundsById[soundId(found.name)] = found
+
+        return found
+    end
+
+    return nil
+end
+
+--- Returns the id a Sound's Decoder has on this mixer, registering it the
+--- first time a Sound naming it plays here.
+local function decoderFor(exclusive self: Audio, sound: Sound): (integer?, string?)
+    local known = self.decoderIds[sound.decoder]
+    if known ~= nil then
+        return known
+    end
+    local id, why = self:registerDecoder(sound.vtable(), sound.decoder)
+    if id ~= nil then
+        self.decoderIds[sound.decoder] = id
+    end
+
+    return id, why
+end
+
+--- Starts a Sound on a free slot, through its Decoder, and returns its
+--- handle, or zero.
+local function start(exclusive self: Audio, sound: Sound?, options: PlayOptions, owned: boolean): integer
+    if sound == nil then
+        return 0
+    end
+    local id = soundId(sound.name)
+    local decoder, why = decoderFor(self, sound)
+    if decoder == nil then
+        LOGGER:warn("no decoder plays %s: %s", sound.name, tostring(why))
+
+        return refuse(self, id, options, "decoder")
+    end
+    local handle = claim(self, id, audiobackend.SYNTH, options, owned)
+    if handle == 0 then
+        return 0
+    end
+    local open = self.backend.openDecoded
+    if open == nil then
+        -- A backend with no Decoders takes the start and plays nothing.
+        return handle
+    end
+    local opened, failure = open(decoder, handle, sound.params, sound.bytes)
+    if not opened then
+        LOGGER:warn("%s did not open: %s", sound.name, tostring(failure))
+        self:stop(handle)
+
+        return 0
+    end
+
+    return handle
+end
+
+--- Makes a Bus handle without telling the backend, which `Audio.bus` does.
+local function newBus(borrows self: Audio, name: string, id: integer, parent: string?): Bus
+    return new Bus(
+        name = name,
+        id = id,
+        owner = self.registry,
+        parentName = parent,
+        level = 1,
+        mutedFlag = false,
+        pausedFlag = false,
+        home = nil,
+        chain = {},
+        destroyed = false
+    )
+end
+
+--- Makes a Track handle without telling the backend.
+local function newTrack(borrows self: Audio, id: integer, bus: string, limit: integer): Track
+    return new Track(
+        id = id,
+        owner = self.registry,
+        busName = bus,
+        level = 1,
+        mutedFlag = false,
+        soloFlag = false,
+        placed = "none",
+        px = 0,
+        py = 0,
+        pz = 0,
+        sendLevels = {},
+        limit = limit,
+        chain = {},
+        isDefault = false,
+        destroyed = false
+    )
+end
+
+--- Queues a strip command with its target, control and value.
+local function stripCommand(
+    exclusive self: Audio,
+    kind: integer,
+    target: integer,
+    param: integer,
+    value: number,
+    at: number?
+): audiobackend.Command
+    local command = queue(self, kind, 0)
+    command.target = target
+    command.param = param
+    command.gain = value
+    command.at = at or 0
+
+    return command
+end
+
+--- Builds an effect on the backend and inserts it into a strip's chain.
+---
+--- @raises string when the backend cannot build it
+local function insertEffect(
+    exclusive self: Audio,
+    chain: {Effect},
+    onBus: boolean,
+    strip: integer,
+    spec: effectspecs.Spec,
+    position: integer?
+): Effect
+    local id = self.nextEffect
+    self.nextEffect = id + 1
+    local prepare = self.backend.prepareEffect
+    if prepare ~= nil and not self.closed then
+        local ok, reason = prepare(spec.kind, id, spec.params)
+        if not ok then
+            error("tecs.audio: the effect " .. spec.name .. " was not built: " .. tostring(reason), 3)
+        end
+    end
+    local at = position or (#chain + 1)
+    if at < 1 then
+        at = 1
+    elseif at > #chain + 1 then
+        at = #chain + 1
+    end
+    local command = queue(self, audiobackend.EFFECT_INSERT, 0)
+    command.target = strip
+    command.flags = onBus and audiobackend.ON_BUS or 0
+    command.param = at - 1
+    command.data = id
+    local values: {[integer]: number} = {}
+    for param, value in pairs(spec.values) do
+        values[param] = value
+        local set = queue(self, audiobackend.EFFECT_PARAM, 0)
+        set.data = id
+        set.param = param
+        set.gain = value
+    end
+    local effect = new Effect(
+        id = id,
+        name = spec.name,
+        owner = self.registry,
+        names = spec.names,
+        values = values,
+        removed = false,
+        onBus = onBus,
+        strip = strip
+    )
+    table.insert(chain, at, effect)
+
+    return effect
+end
+
+--- Raises unless `value` is a finite number.
+---
+--- @raises string when it is NaN or infinite
+local function checkFinite(value: number, method: string, what: string): nil
+    if value ~= value or value == math.huge or value == -math.huge then
+        error("tecs.audio." .. method .. ": " .. what .. " must be finite, got " .. tostring(value), 3)
+    end
+end
+
+--- Sets a parameter by name, on the frame `at` names, ramped by the effect.
+---
+--- @param self the effect
+--- @param name a parameter its kind has
+--- @param value the target
+--- @param at seconds on the output clock, or nil for at once
+--- @raises string for a name the kind does not have, or a value or time that
+---     is not finite
+function Effect.set(exclusive self: Effect, name: string, value: number, at: number?): nil
+    local mixer = mixerOf(self.owner)
+    local param = self.names[name]
+    if param == nil then
+        error("tecs.audio.Effect.set: " .. self.name .. " has no parameter named " .. name, 2)
+    end
+    checkFinite(value, "Effect.set", "value")
+    checkAt(at, "Effect.set")
+    if self.removed then
+        return
+    end
+    self.values[param] = value
+    local command = queue(mixer, audiobackend.EFFECT_PARAM, 0)
+    command.data = self.id
+    command.param = param
+    command.gain = value
+    command.at = at or 0
+end
+
+--- Reports the target last set for a parameter, or nil for one never set,
+--- which is at its kind's default.
+function Effect.get(borrows self: Effect, name: string): number?
+    local param = self.names[name]
+
+    return param ~= nil and self.values[param] or nil
+end
+
+--- Takes the effect out of its chain. Safe more than once.
+function Effect.remove(exclusive self: Effect): nil
+    if self.removed then
+        return
+    end
+    self.removed = true
+    local mixer = mixerOf(self.owner)
+    queue(mixer, audiobackend.EFFECT_REMOVE, 0).data = self.id
+    local owner: {Effect}? = nil
+    if self.onBus then
+        local bus = mixer.busById[self.strip]
+        owner = bus and bus.chain
+    else
+        local track = mixer.trackById[self.strip]
+        owner = track and track.chain
+    end
+    if owner ~= nil then
+        for index = #owner, 1, -1 do
+            if owner[index] == self then
+                table.remove(owner, index)
+            end
+        end
+    end
+end
+
+--- Sets the fader, gliding there over a few milliseconds from the frame `at`
+--- names.
+---
+--- @raises string for a gain or time that is not finite
+function Bus.setGain(exclusive self: Bus, gain: number, at: number?): nil
+    local mixer = mixerOf(self.owner)
+    checkFinite(gain, "Bus.setGain", "gain")
+    checkAt(at, "Bus.setGain")
+    self.level = gain
+    if not self.destroyed then
+        stripCommand(mixer, audiobackend.BUS_SET, self.id, audiobackend.BUS_GAIN, gain, at)
+    end
+end
+
+--- Reports the fader's target.
+function Bus.gain(borrows self: Bus): number
+    return self.level
+end
+
+--- Mutes or unmutes everything that sums through the Bus.
+---
+--- @raises string for a time that is not finite
+function Bus.setMuted(exclusive self: Bus, muted: boolean, at: number?): nil
+    local mixer = mixerOf(self.owner)
+    checkAt(at, "Bus.setMuted")
+    self.mutedFlag = muted
+    if not self.destroyed then
+        stripCommand(mixer, audiobackend.BUS_SET, self.id, audiobackend.BUS_MUTE, muted and 1 or 0, at)
+    end
+end
+
+--- Reports whether the Bus is muted.
+function Bus.muted(borrows self: Bus): boolean
+    return self.mutedFlag
+end
+
+--- Holds every voice routed through the Bus, or through any Bus under it.
+---
+--- @raises string for a time that is not finite
+function Bus.pause(exclusive self: Bus, at: number?): nil
+    local mixer = mixerOf(self.owner)
+    checkAt(at, "Bus.pause")
+    self.pausedFlag = true
+    if not self.destroyed then
+        stripCommand(mixer, audiobackend.BUS_SET, self.id, audiobackend.BUS_PAUSE, 1, at)
+    end
+end
+
+--- Lets the voices under the Bus carry on.
+---
+--- @raises string for a time that is not finite
+function Bus.resume(exclusive self: Bus, at: number?): nil
+    local mixer = mixerOf(self.owner)
+    checkAt(at, "Bus.resume")
+    self.pausedFlag = false
+    if not self.destroyed then
+        stripCommand(mixer, audiobackend.BUS_SET, self.id, audiobackend.BUS_PAUSE, 0, at)
+    end
+end
+
+--- Reports whether this Bus is paused, not counting one above it.
+function Bus.paused(borrows self: Bus): boolean
+    return self.pausedFlag
+end
+
+--- Reports whether this Bus, or any Bus above it, is paused, which is what
+--- holds the voices under it.
+function Bus.held(borrows self: Bus): boolean
+    if self.pausedFlag then
+        return true
+    end
+    local mixer = mixerOf(self.owner)
+    local above = self.parentName
+    local steps = 0
+    while above ~= nil and steps < 64 do
+        local bus = mixer.busByName[above]
+        if bus == nil then
+            return false
+        end
+        if bus.pausedFlag then
+            return true
+        end
+        above = bus.parentName
+        steps = steps + 1
+    end
+
+    return false
+end
+
+--- Reports the Bus this one sums into, nil for Master.
+function Bus.parent(borrows self: Bus): string?
+    return self.parentName
+end
+
+--- Routes this Bus into another, Master when nil.
+---
+--- @raises string for Master, which has no parent, or a parent that would
+---     make a loop
+function Bus.setParent(exclusive self: Bus, name: string?): nil
+    if self.id == 0 then
+        error("tecs.audio.Bus.setParent: Master sums into nothing", 2)
+    end
+    local mixer = mixerOf(self.owner)
+    local parent = mixer:bus(name or MASTER)
+    local cursor: Bus? = parent
+    while cursor ~= nil do
+        if cursor == self then
+            error("tecs.audio.Bus.setParent: routing " .. self.name .. " into " .. parent.name .. " makes a loop", 2)
+        end
+        local above = cursor.parentName
+        cursor = above and mixer.busByName[above] or nil
+    end
+    self.parentName = parent.name
+    local command = stripCommand(mixer, audiobackend.BUS_SET, self.id, audiobackend.BUS_PARENT, 0, nil)
+    command.data = parent.id
+end
+
+--- Returns the Bus's default Track, where a voice with this Bus as its group
+--- sounds. Its polyphony is unlimited, as a group's always was.
+function Bus.track(exclusive self: Bus): Track
+    return assert(self.home)
+end
+
+--- Inserts an effect into the Bus's chain, at `position` from one, or at
+--- the end.
+---
+--- @raises string when the backend cannot build it
+function Bus.insert(exclusive self: Bus, spec: effectspecs.Spec, position: integer?): Effect
+    local mixer = mixerOf(self.owner)
+    return insertEffect(mixer, self.chain, true, self.id, spec, position)
+end
+
+--- Returns the Bus's chain in order, a fresh table.
+function Bus.effects(borrows self: Bus): {Effect}
+    local out: {Effect} = {}
+    for index = 1, #self.chain do
+        out[index] = self.chain[index]
+    end
+
+    return out
+end
+
+--- Removes the Bus. What routed into it routes into its parent, and its
+--- default Track's voices move to Master's.
+---
+--- @raises string for Master
+function Bus.destroy(exclusive self: Bus): nil
+    if self.id == 0 then
+        error("tecs.audio.Bus.destroy: Master cannot be destroyed", 2)
+    end
+    if self.destroyed then
+        return
+    end
+    local mixer = mixerOf(self.owner)
+    local parent = self.parentName or MASTER
+    self.destroyed = true
+    for _, track in pairs(mixer.trackById) do
+        if track.busName == self.name then
+            track.busName = parent
+        end
+        track.sendLevels[self.name] = nil
+    end
+    for _, bus in pairs(mixer.busByName) do
+        if bus.parentName == self.name then
+            bus.parentName = parent
+        end
+    end
+    local home = self.home
+    if home ~= nil then
+        home.destroyed = true
+        mixer.trackById[home.id] = nil
+        for slot = 1, #mixer.voices do
+            local voice = mixer.voices[slot]
+            if voice.sounding and voice.track == home.id then
+                voice.track = 0
+                voice.group = nil
+            end
+        end
+        stripCommand(mixer, audiobackend.TRACK_DESTROY, home.id, 0, 0, nil)
+    end
+    stripCommand(mixer, audiobackend.BUS_DESTROY, self.id, 0, 0, nil)
+    mixer.busByName[self.name] = nil
+    mixer.busById[self.id] = nil
+    mixer.groupGains[self.name] = nil
+    mixer.groupMutedFlags[self.name] = nil
+    mixer.groupPausedFlags[self.name] = nil
+end
+
+--- Plays a clip on this Track. `options.track` is this Track whatever it
+--- says.
+function Track.play(exclusive self: Track, sound: Playable?, options: PlayOptions?): integer
+    local mixer = mixerOf(self.owner)
+    if self.destroyed then
+        return refuse(mixer, 0, options or {}, "track")
+    end
+    local given = options or {}
+    local copy: PlayOptions = {}
+    for key, value in pairs(given as {[string]: any}) do
+        (copy as {[string]: any})[key] = value
+    end
+    copy.track = mixer.trackById[self.id]
+
+    return mixer:play(sound, copy)
+end
+
+--- Stops every voice on this Track.
+function Track.stopAll(exclusive self: Track, fadeOut: number?): nil
+    local mixer = mixerOf(self.owner)
+    for slot = 1, #mixer.voices do
+        local voice = mixer.voices[slot]
+        if voice.sounding and voice.track == self.id then
+            mixer:stop(handleOf(mixer, slot), fadeOut)
+        end
+    end
+end
+
+--- Counts the voices sounding on this Track, a fading one not included.
+function Track.sounding(borrows self: Track): integer
+    local mixer = mixerOf(self.owner)
+    return trackSounding(mixer, self.id)
+end
+
+--- Sets the fader, gliding there from the frame `at` names.
+---
+--- @raises string for a gain or time that is not finite
+function Track.setGain(exclusive self: Track, gain: number, at: number?): nil
+    local mixer = mixerOf(self.owner)
+    checkFinite(gain, "Track.setGain", "gain")
+    checkAt(at, "Track.setGain")
+    self.level = gain
+    if not self.destroyed then
+        stripCommand(mixer, audiobackend.TRACK_SET, self.id, audiobackend.TRACK_GAIN, gain, at)
+    end
+end
+
+--- Reports the fader's target.
+function Track.gain(borrows self: Track): number
+    return self.level
+end
+
+--- Mutes or unmutes the Track.
+---
+--- @raises string for a time that is not finite
+function Track.setMuted(exclusive self: Track, muted: boolean, at: number?): nil
+    local mixer = mixerOf(self.owner)
+    checkAt(at, "Track.setMuted")
+    self.mutedFlag = muted
+    if not self.destroyed then
+        stripCommand(mixer, audiobackend.TRACK_SET, self.id, audiobackend.TRACK_MUTE, muted and 1 or 0, at)
+    end
+end
+
+--- Reports whether the Track is muted.
+function Track.muted(borrows self: Track): boolean
+    return self.mutedFlag
+end
+
+--- Solos the Track: while any Track is soloed, every Track that is not is
+--- silent. Return buses are not Tracks, so a soloed Track's sends still ring.
+---
+--- @raises string for a time that is not finite
+function Track.setSolo(exclusive self: Track, solo: boolean, at: number?): nil
+    local mixer = mixerOf(self.owner)
+    checkAt(at, "Track.setSolo")
+    self.soloFlag = solo
+    if not self.destroyed then
+        stripCommand(mixer, audiobackend.TRACK_SET, self.id, audiobackend.TRACK_SOLO, solo and 1 or 0, at)
+    end
+end
+
+--- Reports whether the Track is soloed.
+function Track.solo(borrows self: Track): boolean
+    return self.soloFlag
+end
+
+--- Reports the Bus the Track routes to.
+function Track.bus(borrows self: Track): string
+    return self.busName
+end
+
+--- Routes the Track to another Bus, made if it does not exist.
+---
+--- @raises string for a Bus's default Track, which stays on its Bus
+function Track.setBus(exclusive self: Track, name: string): nil
+    if self.isDefault then
+        error("tecs.audio.Track.setBus: a Bus's default Track stays on its Bus", 2)
+    end
+    local mixer = mixerOf(self.owner)
+    local bus = mixer:bus(name)
+    self.busName = bus.name
+    local command = stripCommand(mixer, audiobackend.TRACK_SET, self.id, audiobackend.TRACK_BUS, 0, nil)
+    command.data = bus.id
+    for slot = 1, #mixer.voices do
+        local voice = mixer.voices[slot]
+        if voice.sounding and voice.track == self.id then
+            voice.group = bus.name ~= MASTER and bus.name or nil
+        end
+    end
+end
+
+--- Places the Track's sum against the listener, folded to mono, on the frame
+--- `at` names. The frame is the listener's: x right, y up, z behind.
+---
+--- @raises string for a position or time that is not finite
+function Track.setPosition(exclusive self: Track, x: number, y: number, z: number, at: number?): nil
+    local mixer = mixerOf(self.owner)
+    checkFinite(x, "Track.setPosition", "x")
+    checkFinite(y, "Track.setPosition", "y")
+    checkFinite(z, "Track.setPosition", "z")
+    checkAt(at, "Track.setPosition")
+    self.placed = "spatial"
+    self.px = x
+    self.py = y
+    self.pz = z
+    if not self.destroyed then
+        local command = stripCommand(mixer, audiobackend.TRACK_SET, self.id, audiobackend.TRACK_POSITION, 0, at)
+        command.x = x
+        command.y = y
+        command.z = z
+    end
+end
+
+--- Scales the Track's left and right channels.
+---
+--- @raises string for a gain or time that is not finite
+function Track.setStereo(exclusive self: Track, left: number, right: number, at: number?): nil
+    local mixer = mixerOf(self.owner)
+    checkFinite(left, "Track.setStereo", "left")
+    checkFinite(right, "Track.setStereo", "right")
+    checkAt(at, "Track.setStereo")
+    self.placed = "stereo"
+    self.px = left
+    self.py = right
+    if not self.destroyed then
+        local command = stripCommand(mixer, audiobackend.TRACK_SET, self.id, audiobackend.TRACK_STEREO, 0, at)
+        command.x = left
+        command.y = right
+    end
+end
+
+--- Returns the Track to unplaced mixing.
+---
+--- @raises string for a time that is not finite
+function Track.clearPlacement(exclusive self: Track, at: number?): nil
+    local mixer = mixerOf(self.owner)
+    checkAt(at, "Track.clearPlacement")
+    self.placed = "none"
+    if not self.destroyed then
+        stripCommand(mixer, audiobackend.TRACK_SET, self.id, audiobackend.TRACK_UNPLACED, 0, at)
+    end
+end
+
+--- Reports the Track's position when it is spatial.
+function Track.position(borrows self: Track): (number?, number?, number?)
+    if self.placed == "spatial" then
+        return self.px, self.py, self.pz
+    else
+        return nil, nil, nil
+    end
+end
+
+--- Sends the Track, after its fader, to a return Bus at `level`, made if it
+--- does not exist. Zero removes the send.
+---
+--- @raises string for Master, which every Track already reaches, or a level
+---     or time that is not finite
+function Track.send(exclusive self: Track, bus: string, level: number, at: number?): nil
+    checkFinite(level, "Track.send", "level")
+    checkAt(at, "Track.send")
+    if bus == MASTER then
+        error("tecs.audio.Track.send: a send goes to a return Bus, not Master", 2)
+    end
+    local mixer = mixerOf(self.owner)
+    local target = mixer:bus(bus)
+    if level > 0 then
+        self.sendLevels[bus] = level
+    else
+        self.sendLevels[bus] = nil
+    end
+    if not self.destroyed then
+        stripCommand(mixer, audiobackend.SEND, self.id, target.id, level, at)
+    end
+end
+
+--- Returns the Track's sends by Bus name, a fresh table.
+function Track.sends(borrows self: Track): {[string]: number}
+    local out: {[string]: number} = {}
+    for name, level in pairs(self.sendLevels) do
+        out[name] = level
+    end
+
+    return out
+end
+
+--- Reports how many voices the Track holds before it steals, zero for no
+--- limit.
+function Track.polyphony(borrows self: Track): integer
+    return self.limit
+end
+
+--- Sets how many voices the Track holds before it steals. Lowering it stops
+--- none of those already sounding.
+---
+--- @raises string for a negative count
+function Track.setPolyphony(exclusive self: Track, voices: integer): nil
+    if voices < 0 then
+        error("tecs.audio.Track.setPolyphony: voices must not be negative", 2)
+    end
+    self.limit = voices
+end
+
+--- Inserts an effect into the Track's chain, at `position` from one, or at
+--- the end.
+---
+--- @raises string when the backend cannot build it
+function Track.insert(exclusive self: Track, spec: effectspecs.Spec, position: integer?): Effect
+    local mixer = mixerOf(self.owner)
+    return insertEffect(mixer, self.chain, false, self.id, spec, position)
+end
+
+--- Returns the Track's chain in order, a fresh table.
+function Track.effects(borrows self: Track): {Effect}
+    local out: {Effect} = {}
+    for index = 1, #self.chain do
+        out[index] = self.chain[index]
+    end
+
+    return out
+end
+
+--- Removes the Track, stopping every voice on it. Safe more than once.
+---
+--- @raises string for a Bus's default Track, which goes with its Bus
+function Track.destroy(exclusive self: Track): nil
+    if self.isDefault then
+        error("tecs.audio.Track.destroy: a Bus's default Track goes with its Bus", 2)
+    end
+    if self.destroyed then
+        return
+    end
+    self:stopAll()
+    self.destroyed = true
+    local mixer = mixerOf(self.owner)
+    mixer.trackById[self.id] = nil
+    stripCommand(mixer, audiobackend.TRACK_DESTROY, self.id, 0, 0, nil)
+end
+
+--- Creates the mixer a game plays sound through.
+---
+--- Never raises for want of hardware. A machine with no sound card gets an
+--- object whose calls all succeed and produce nothing, because few games
+--- require an audio device while many test machines lack one.
+---
+--- @param config the settings, or nil for the defaults
+--- @return the mixer, which the caller has to `destroy`
+--- @raises string when `maxVoices` falls outside one to 65535
+export function newAudio(config: Config?): Audio
+    local maxVoices = (config and config.maxVoices) or DEFAULT_MAX_VOICES
+    if maxVoices < 1 or maxVoices >= SLOT_SPAN then
+        error("tecs.audio.newAudio: maxVoices must be between 1 and " .. tostring(SLOT_SPAN - 1), 2)
+    end
+    local frequency = (config and config.frequency) or DEFAULT_FREQUENCY
+    local channels = (config and config.channels) or DEFAULT_CHANNELS
+
+    local output = (config and config.output) or "device"
+    if output ~= "device" and output ~= "void" and output ~= "memory" then
+        error("tecs.audio.newAudio: output must be \"device\", \"void\" or \"memory\"", 2)
+    end
+    local backend = config and config.backend
+    if backend == nil then
+        local loaded, native = pcall(require, "tecs.platform.audionative")
+        if loaded then
+            local opener = OPENERS[output] or "openOrVoid"
+            local opened, failure = (native as {[string]: any})[opener](frequency, channels, maxVoices + STEAL_HEADROOM)
+            backend = opened as audiobackend.Backend?
+            if backend == nil then
+                LOGGER:info("no audio output: %s", tostring(failure))
+            end
+        else
+            LOGGER:info("no audio backend: %s", tostring(native))
+        end
+    end
+    if backend == nil then
+        backend = audiobackend.silent(frequency)
+    end
+
+    local voices: {Voice} = {}
+    local free: {integer} = {}
+    for slot = 1, maxVoices do
+        voices[
+            slot
+        ] = new Voice(
+            clip = 0,
+            gain = 1,
+            applied = -1,
+            pitch = 1,
+            group = nil,
+            track = 0,
+            priority = 0,
+            strip = nil,
+            order = 0,
+            key = nil,
+            generation = 0,
+            sounding = false,
+            stopping = false,
+            paused = false,
+            owned = false,
+            referenced = false,
+            loop = false,
+            nearest = false,
+            spatial = false,
+            x = 0,
+            y = 0,
+            z = 0,
+            stereo = false,
+            left = 1,
+            right = 1
+        )
+        -- Taken from the end, so the first sound of a run uses slot one and a
+        -- log reads in the order things happened.
+        free[slot] = maxVoices + 1 - slot
+    end
+
+    local finished: {integer} = {}
+    for slot = 1, maxVoices do
+        finished[slot] = 0
+    end
+
+    local self = new Audio(
+        closed = false,
+        available = backend.available,
+        backend = backend,
+        voices = voices,
+        free = free,
+        live = 0,
+        master = 1,
+        mutedFlag = false,
+        groupGains = {},
+        groupMutedFlags = {},
+        groupPausedFlags = {},
+        limits = {},
+        buckets = {},
+        soundsById = {},
+        decoderNames = {},
+        decoderIds = {},
+        variance = new random.Xoshiro128(),
+        elapsed = 0,
+        pending = {},
+        pendingCount = 0,
+        finished = finished,
+        playSystem = nil,
+        outputChanges = 0,
+        outputDrops = 0,
+        outputReopens = 0,
+        history = {},
+        sequence = 0,
+        refusals = 0,
+        stolen = 0,
+        stepRemainder = 0,
+        -- A memory output is always held; anything else starts running.
+        held = backend.hold ~= nil and backend.hold(false),
+        touched = false,
+        busByName = {},
+        busById = {},
+        trackById = {},
+        nextBus = 1,
+        nextTrack = 1,
+        nextEffect = 1,
+        nextOrder = 0,
+        defaultPolyphony = (config and config.polyphony) or DEFAULT_POLYPHONY,
+        clockline = nil,
+        registry = 0,
+        zones = {},
+        timelineList = {}
+    )
+    nextMixer = nextMixer + 1
+    self.registry = nextMixer
+    mixers[nextMixer] = self
+    -- Master and its default Track exist on the backend from the start; these
+    -- are their handles here.
+    local master = newBus(self, MASTER, 0, nil)
+    self.busByName[MASTER] = master
+    self.busById[0] = master
+    local home = newTrack(self, 0, MASTER, 0)
+    home.isDefault = true
+    master.home = home
+    self.trackById[0] = home
+    if not (config and config.limiter == false) then
+        master:insert(effectspecs.limiter())
+    end
+    if not self.available then
+        LOGGER:info("no audio output; sound is silent for this run")
+    end
+
+    return self
+end
+
+--- Sends every queued command to the backend.
+---
+--- `update` and the audio pass both call this, so a game following the ordinary
+--- frame never needs it. Call it directly only to close the gap between a
+--- command and the buffer it reaches.
+---
+--- @param self the mixer whose queue is flushed
+function Audio.flush(exclusive self: Audio): nil
+    if self.pendingCount == 0 then
+        return
+    end
+    self.backend.submit(self.pending, self.pendingCount)
+    self.pendingCount = 0
+end
+
+--- Reports the output clock every `at` on this surface is on.
+---
+--- @param self the mixer to read
+--- @return seconds: the frames the backend has mixed over `frequency`. It
+---     counts what the device has been handed rather than what has been heard,
+---     never runs backwards, keeps running through a device reopen and on a
+---     void output, and reads zero on a closed mixer and on a backend without a
+---     clock
+function Audio.now(borrows self: Audio): number
+    local clock = self.backend.now
+    if self.closed or clock == nil then
+        return 0
+    end
+
+    return clock()
+end
+
+--- Reports the output's frames per second, which turns a count of output
+--- frames into an `at`.
+---
+--- @param self the mixer to read
+--- @return frames per second. The silent backend reports the frequency the
+---     mixer was configured for, so a count of frames over it is still a time.
+function Audio.frequency(borrows self: Audio): integer
+    return self.backend.frequency
+end
+
+--- Stops everything and closes the output.
+---
+--- Stops every voice without a fade, moves every clip to `"released"`, and
+--- removes this mixer from every world that installed it. There is no
+--- reopening: make a new instance instead.
+---
+--- @param self the mixer to close
+function Audio.destroy(exclusive self: Audio): nil
+    if self.closed then
+        return
+    end
+    self.closed = true
+    for slot = 1, #self.voices do
+        if self.voices[slot].sounding then
+            queue(self, audiobackend.STOP, handleOf(self, slot))
+            release(self, slot)
+        end
+    end
+    self:flush()
+    self.buckets = {}
+
+    self.soundsById = {}
+
+    self.backend.close()
+    self.available = false
+
+    -- Every world this was installed into stops naming it, because nothing
+    -- here can open an output again and a world still answering with this
+    -- mixer would hand the debug tools one that can only report itself
+    -- unavailable.
+    for world, mixer in pairs(installed) do
+        if mixer == self then
+            installed[world] = nil
+        end
+    end
+end
+
+--- Returns the names of the Decoders registered with this mixer, in the
+--- order they were, which is what the extensions a game brought add up to.
+---
+--- @param self the mixer to ask
+--- @return a fresh table, empty before any Sound played or any extension
+---     installed
+function Audio.decoders(borrows self: Audio): {string}
+    local names: {string} = {}
+    local ids: {integer} = {}
+    for id in pairs(self.decoderNames) do
+        ids[#ids + 1] = id
+    end
+    table.sort(ids)
+    for _, id in ipairs(ids) do
+        names[#names + 1] = assert(self.decoderNames[id])
+    end
+
+    return names
+end
+
+--- Reports what became of the output device.
+---
+--- `available` and `failureReason` describe the mixer, and a device that drops
+--- moves neither: the backend reopens the default output at whatever format it
+--- has now, the mix keeps running at its own, and every voice carries on. This
+--- is where such a drop shows, and `update` logs each drop and each reopen
+--- under `tecs.audio`.
+---
+--- @param self the mixer to ask
+--- @return the backend's report. A backend with nothing to report on answers
+---     `"playing"` at the mix's own format while `available`, `"failed"` after
+---     `failureReason`, and `"offline"` otherwise. A fresh record each call.
+function Audio.output(borrows self: Audio): audiobackend.OutputStatus
+    local report = self.backend.output
+    if report ~= nil and not self.closed then
+        return report()
+    end
+    local state: "offline" | "playing" | "reopening" | "failed" = "offline"
+    local frequency: integer = 0
+    local channels: integer = 0
+    if self.failureReason ~= nil then
+        state = "failed"
+    elseif self.available then
+        state = "playing"
+        frequency = self.backend.frequency
+        channels = self.backend.channels
+    end
+
+    return new audiobackend.OutputStatus(
+        state = state,
+        drops = 0,
+        reopens = 0,
+        reason = nil,
+        frequency = frequency,
+        channels = channels
+    )
+end
+
+--- Adds a Sound to this mixer's, so a `Sound` component row naming it by
+--- `soundId` plays it. `play` adds what it plays, so this is for a row that
+--- names a Sound nothing has played yet.
+---
+--- @param self the mixer
+--- @param sound the Sound
+--- @return the index its rows name it by
+function Audio.addSound(exclusive self: Audio, sound: Sound): integer
+    local id = soundId(sound.name)
+    self.soundsById[id] = sound
+
+    return id
+end
+
+--- Returns the Sound this mixer knows by a name.
+---
+--- @param self the mixer
+--- @param name the Sound's name
+--- @return the Sound, or nil when nothing has added or played it here
+function Audio.sound(borrows self: Audio, name: string): Sound?
+    local id = soundIds[name]
+
+    return id ~= nil and self.soundsById[id] or nil
+end
+
+--- Returns every Sound this mixer knows, by name, a fresh list.
+function Audio.sounds(borrows self: Audio): {Sound}
+    local names: {string} = {}
+    for id in pairs(self.soundsById) do
+        names[#names + 1] = assert(soundNames[id])
+    end
+    table.sort(names)
+    local out: {Sound} = {}
+    for _, name in ipairs(names) do
+        out[#out + 1] = assert(self.soundsById[assert(soundIds[name])])
+    end
+
+    return out
+end
+
+--- Re-reads a Sound from where it came from, through the extension that made
+--- it. Voices playing it keep what they have; the next start plays the new.
+---
+--- @param self the mixer
+--- @param name the Sound's name
+--- @return whether it was re-read, and the reason when it was not
+function Audio.reload(exclusive self: Audio, name: string): (boolean, string?)
+    local found = self:sound(name)
+    if found == nil then
+        return false, "nothing has played or added '" .. name .. "' here"
+    end
+    local reload = found.reload
+    if reload == nil then
+        return false, "'" .. name .. "' cannot be re-read"
+    end
+
+    return reload()
+end
+
+--- Plays a clip and returns a handle, or zero when nothing started.
+---
+--- Zero means the clip is not loaded, loading failed, a key's limit or cooldown
+--- declined it, or every voice is busy. None of those is worth raising over: a
+--- sound that does not play is not a reason for a frame to stop.
+---
+--- A key's limit drops the new voice and never steals an older one, which is
+--- the same reasoning a full voice pool follows.
+---
+--- @param self the mixer that starts the voice
+--- @param sound a Sound, or the asset handle one was requested under, whose
+---     current Sound plays. Nil, a Sound still loading, a failed one and a
+---     Sound whose Decoder the backend refuses start nothing.
+--- @param options read once, with no later change followed
+--- @return the handle the voice methods take, or zero when nothing started. It
+---     stays valid while the voice sounds, goes inert for good once it does
+---     not, is never reissued, and requires no release.
+function Audio.play(exclusive self: Audio, sound: Playable?, options: PlayOptions?): integer
+    checkAt(options and options.at, "play")
+    return start(self, soundOf(self, sound), options or {}, false)
+end
+
+--- Stops a voice. A handle to one that has already ended does nothing.
+---
+--- @param self the mixer holding the voice
+--- @param handle a stale one is a no-op, as is one already fading out: a second
+---     stop does not shorten a fade in progress
+--- @param fadeOut seconds to ramp down over, a duration rather than a moment to
+---     finish at. Omitted or zero frees the slot within this call, unless `at`
+---     is given. The ramp is the backend's, so it follows the audio clock
+---     rather than the frame rate.
+--- @param at seconds on the output clock `now` reads to stop on, on exactly
+---     that output frame, where the fade starts. Omitted, zero and a time
+---     already mixed mean at once. A timed stop keeps the slot until the
+---     backend reports the voice finished, as a fade does, and the voice takes
+---     no further instruction meanwhile.
+function Audio.stop(exclusive self: Audio, handle: integer, fadeOut: number?, at: number?): nil
+    checkAt(at, "stop")
+    local voice = voiceOf(self, handle)
+    if voice == nil or voice.stopping then
+        return
+    end
+    local seconds = fadeOut or 0
+    local command = queue(self, audiobackend.STOP, handle)
+    command.fade = seconds > 0 and seconds or 0
+    command.at = at or 0
+    record(self, "stop", handle, at, voice.clip, voice.group, nil)
+    if seconds <= 0 and not isTimed(at) then
+        release(self, slotOf(handle))
+
+        return
+    end
+    voice.stopping = true
+    -- A paused voice does not advance, so its fade would never finish and the
+    -- slot would never come back.
+    voice.paused = false
+end
+
+--- Stops every voice, over `fadeOut` seconds when that is given.
+---
+--- Reaches every voice, whichever group it is in and whether a
+--- [`Sound`](tecs.audio.Sound) component started it or `play` did. A row still
+--- asking to sound starts a fresh voice on the next audio pass, so this
+--- silences a world rather than keeping it silent.
+---
+--- @param self the mixer to silence
+--- @param fadeOut seconds, a duration. Omitted or zero frees every slot within
+---     this call, and a positive one unpauses the voices it fades.
+function Audio.stopAll(exclusive self: Audio, fadeOut: number?): nil
+    local seconds = fadeOut or 0
+    for slot = 1, #self.voices do
+        local voice = self.voices[slot]
+        if voice.sounding then
+            record(self, "stop", handleOf(self, slot), nil, voice.clip, voice.group, nil)
+            queue(self, audiobackend.STOP, handleOf(self, slot)).fade = seconds > 0 and seconds or 0
+            if seconds > 0 then
+                voice.stopping = true
+                voice.paused = false
+            else
+                release(self, slot)
+            end
+        end
+    end
+end
+
+--- Reports whether a handle still names a sounding voice.
+---
+--- @param self the mixer to read
+--- @param handle the handle to test
+--- @return whether the voice has not finished. A paused or fading voice counts.
+---     A voice that ended on its own reads true until the next `update` reaps
+---     it, since nothing here is told the instant it finished.
+function Audio.playing(borrows self: Audio, handle: integer): boolean
+    return voiceOf(self, handle) ~= nil
+end
+
+--- Reports whether a handle names a paused voice.
+---
+--- @param self the mixer to read
+--- @param handle the handle to test
+--- @return whether a hold applies, whether it came from `pause` on this handle
+---     or from `pauseGroup` on its group. The two are not told apart.
+function Audio.paused(borrows self: Audio, handle: integer): boolean
+    local voice = voiceOf(self, handle)
+    if voice == nil then
+        return false
+    end
+    if voice.paused then
+        return true
+    end
+    local track = self.trackById[voice.track]
+    local bus = track and self.busByName[track.busName]
+
+    return bus ~= nil and bus:held()
+end
+
+--- Holds a voice where it is, keeping its slot until something resumes or
+--- stops it.
+---
+--- Neither this nor `resume` takes a fade, and that is a decision rather than an
+--- omission. A faded pause would be a ramp run from here, a command that takes effect
+--- later and needs its own answer for what a stop or a group gain during the ramp
+--- means. A game wanting that builds it from `tell`, `stop` with a fade, and a later
+--- `play` with `start` and `fadeIn`.
+---
+--- @param self the mixer holding the voice
+--- @param handle a no-op for a handle naming nothing, one already paused, and
+---     one fading out. Not holder counted: one `resume` undoes any number of
+---     these.
+function Audio.pause(exclusive self: Audio, handle: integer): nil
+    local voice = voiceOf(self, handle)
+    if voice == nil or voice.paused or voice.stopping then
+        return
+    end
+    voice.paused = true
+    queue(self, audiobackend.PAUSE, handle)
+end
+
+--- Lets a paused voice carry on.
+---
+--- @param self the mixer holding the voice
+--- @param handle a no-op for a handle naming nothing and for one not paused.
+---     Resumes a voice its group paused, and the group's hold does not put it
+---     back.
+function Audio.resume(exclusive self: Audio, handle: integer): nil
+    local voice = voiceOf(self, handle)
+    if voice == nil or not voice.paused then
+        return
+    end
+    voice.paused = false
+    queue(self, audiobackend.RESUME, handle)
+end
+
+--- Sets a voice's gain, before its group's and the master's.
+---
+--- @param self the mixer holding the voice
+--- @param handle a no-op for one naming nothing
+--- @param gain linear amplitude rather than decibels. It takes effect on the
+---     next buffer the backend fills, or on the frame `at` names, rather than
+---     ramping, so a large jump on a sounding voice can be audible as a step.
+--- @param at seconds on the output clock `now` reads, on exactly that output
+---     frame. Omitted, zero and a time already mixed mean at once. A timed
+---     value is always sent; an untimed one equal to the last value sent is
+---     skipped, whenever the earlier one was due.
+function Audio.setGain(exclusive self: Audio, handle: integer, gain: number, at: number?): nil
+    checkAt(at, "setGain")
+    local voice = voiceOf(self, handle)
+    if voice == nil then
+        return
+    end
+    voice.gain = gain
+    applyGain(self, slotOf(handle), at)
+end
+
+--- Sets a voice's playback rate.
+---
+--- @param self the mixer holding the voice
+--- @param handle a no-op for one naming nothing
+--- @param ratio a resampling rate rather than an interval, so it changes how
+---     long the clip takes and a looped voice's period moves with it
+--- @param at seconds on the output clock `now` reads, on the terms of
+---     `setGain`. The output frame it names is the first read at the new rate:
+---     it sits where the old rate brought the voice, and the frame after it is
+---     one new step further on.
+function Audio.setPitch(exclusive self: Audio, handle: integer, ratio: number, at: number?): nil
+    checkAt(at, "setPitch")
+    if voiceOf(self, handle) == nil then
+        return
+    end
+    applyPitch(self, slotOf(handle), ratio, at)
+end
+
+--- Changes how a voice reads between the frames of its clip, part way through.
+---
+--- @param self the mixer holding the voice
+--- @param handle a no-op for one naming nothing
+--- @param mode see [`Resample`](tecs.audio.Resample)
+--- @param at seconds on the output clock `now` reads, on the terms of `setGain`
+function Audio.setResample(exclusive self: Audio, handle: integer, mode: Resample, at: number?): nil
+    checkAt(at, "setResample")
+    if voiceOf(self, handle) == nil then
+        return
+    end
+    applyResample(self, slotOf(handle), mode == "nearest", at)
+end
+
+--- Reports how a voice reads between the frames of its clip.
+---
+--- @param self the mixer to read
+--- @param handle the handle to test
+--- @return what this module last sent rather than a reading from the backend,
+---     and nil for a handle naming nothing
+function Audio.resample(borrows self: Audio, handle: integer): Resample?
+    local voice = voiceOf(self, handle)
+    if voice == nil then
+        return nil
+    end
+
+    return voice.nearest and "nearest" or "linear"
+end
+
+--- Changes whether a voice repeats, part way through.
+---
+--- Clearing this on a looping piece of music lets it play out to its end rather
+--- than cutting it, and setting it on a one-shot keeps it going. It reaches a
+--- sounding voice only: a stopped one takes its answer from the next play.
+---
+--- @param self the mixer holding the voice
+--- @param handle a no-op for one naming nothing
+--- @param loop true repeats forever, and there is no finite repeat count here.
+---     Setting it does not move the loop point, which stays where `play` put it.
+--- @param at seconds on the output clock `now` reads, on the terms of `setGain`
+function Audio.setLoop(exclusive self: Audio, handle: integer, loop: boolean, at: number?): nil
+    checkAt(at, "setLoop")
+    if voiceOf(self, handle) == nil then
+        return
+    end
+    applyLoop(self, slotOf(handle), loop == true, at)
+end
+
+--- Reports whether a voice repeats at the end.
+---
+--- @param self the mixer to read
+--- @param handle the handle to test
+--- @return what this module last told the backend rather than a reading from
+---     it, and false for a handle naming nothing
+function Audio.looping(borrows self: Audio, handle: integer): boolean
+    local voice = voiceOf(self, handle)
+
+    return voice ~= nil and voice.loop
+end
+
+--- Moves a voice's read position.
+---
+--- @param self the mixer holding the voice
+--- @param handle the voice to move
+--- @param seconds from the start of the clip rather than from where the voice
+---     is now, and not from the loop point
+--- @return false when the handle names nothing or the input refused the seek.
+---     A true does not promise the exact sample: some decoders reach only the
+---     nearest point they can.
+function Audio.seek(exclusive self: Audio, handle: integer, seconds: number): boolean
+    if voiceOf(self, handle) == nil then
+        return false
+    end
+    self:flush()
+
+    return self.backend.seek(handle, seconds)
+end
+
+--- Returns a voice's read position in seconds.
+---
+--- A paused voice reports where it stopped, which with `seek` and a later
+--- `play` carrying `start` and `fadeIn` is what taking a sound back where it
+--- left off is built from.
+---
+--- @param self the mixer holding the voice
+--- @param handle the voice to read
+--- @return seconds from the start of the clip, so a looped voice's reading
+---     falls back at each repeat rather than accumulating. Nil when the handle
+---     names nothing and nil when the backend will not say, which are not told
+---     apart here.
+function Audio.tell(exclusive self: Audio, handle: integer): number?
+    if voiceOf(self, handle) == nil then
+        return nil
+    end
+    self:flush()
+
+    return self.backend.position(handle)
+end
+
+--- Places a voice in space.
+---
+--- Deprecated: place a Track instead, with `Track.setPosition`, or a `Sound`
+--- row with a `Listener`, which places its emitter Track. A voice's own
+--- placement stays for code written before Tracks.
+---
+--- Replaces a pan set by `setStereo` rather than combining with it. Positioning
+--- folds the input down to mono before placing it, so a stereo clip loses its
+--- stereo image when positioned.
+---
+--- @param self the mixer holding the voice
+--- @param handle a no-op for one naming nothing
+--- @param x positive to the right of the listener, which sits at the origin
+--- @param y positive above the listener. World Y runs down, so world
+---     coordinates need their Y negated on the way in.
+--- @param z positive behind the listener
+--- @param at seconds on the output clock `now` reads, on the terms of `setGain`
+function Audio.setPosition(exclusive self: Audio, handle: integer, x: number, y: number, z: number, at: number?): nil
+    checkAt(at, "setPosition")
+    if voiceOf(self, handle) == nil then
+        return
+    end
+    applyPosition(self, slotOf(handle), x, y, z, at)
+end
+
+--- Pins a voice to the front pair of speakers at explicit gains.
+---
+--- Deprecated: pan a Track instead, with `Track.setStereo`. A voice's own
+--- placement stays for code written before Tracks.
+---
+--- A pan rather than a position, and usually what a game laid out on a plane
+--- wants: there is no listener to subtract and no distance model to argue with,
+--- only how much of this comes out of each side. Replaces a position set by
+--- `setPosition` rather than combining with it.
+---
+--- @param self the mixer holding the voice
+--- @param handle a no-op for one naming nothing
+--- @param left gain out of the left speaker on the same linear scale as
+---     `setGain`, multiplying with the voice, group and master gains rather
+---     than replacing any of them
+--- @param right gain out of the right speaker. There is no normalization
+---     between the two: one and one is the sound at full out of both sides.
+--- @param at seconds on the output clock `now` reads, on the terms of `setGain`
+function Audio.setStereo(exclusive self: Audio, handle: integer, left: number, right: number, at: number?): nil
+    checkAt(at, "setStereo")
+    if voiceOf(self, handle) == nil then
+        return
+    end
+    applyStereo(self, slotOf(handle), left, right, at)
+end
+
+--- Returns a voice to unpositioned mixing, out of either placement.
+---
+--- Deprecated: return a Track to unplaced mixing with
+--- `Track.clearPlacement` instead.
+---
+--- One call answers for both, because a voice holds one placement.
+---
+--- @param self the mixer holding the voice
+--- @param handle a no-op for one naming nothing and for a voice never placed
+function Audio.clearSpatial(exclusive self: Audio, handle: integer): nil
+    if voiceOf(self, handle) == nil then
+        return
+    end
+    applyUnplaced(self, slotOf(handle))
+end
+
+--- Scales everything.
+---
+--- One number on the output, so this costs the same whether one voice is
+--- sounding or every voice is. Setting it while muted changes the level a later
+--- unmute returns to and nothing audible now, which is what a volume slider
+--- moved with the sound off should do.
+---
+--- @param self the mixer to scale
+--- @param gain linear amplitude rather than decibels
+function Audio.setMasterGain(exclusive self: Audio, gain: number): nil
+    self.master = gain
+    if not self.mutedFlag then
+        queue(self, audiobackend.SET_MASTER_GAIN, 0).gain = gain
+    end
+end
+
+--- Returns master gain, whether or not mute holds it down.
+---
+--- @param self the mixer to read
+--- @return the level rather than what is audible
+function Audio.masterGain(borrows self: Audio): number
+    return self.master
+end
+
+--- Silences everything without discarding the master gain.
+---
+--- It does not fan out to the groups: `groupMuted` answers whether a group is
+--- silenced, and writing every group's bit here would overwrite the answers an
+--- unmute has to put back.
+---
+--- @param self the mixer to mute
+--- @param muted whether the output is held at zero
+function Audio.setMuted(exclusive self: Audio, muted: boolean): nil
+    local wanted = muted == true
+    if self.mutedFlag == wanted then
+        return
+    end
+    self.mutedFlag = wanted
+    queue(self, audiobackend.SET_MASTER_GAIN, 0).gain = wanted and 0 or self.master
+end
+
+--- Reports whether master mute holds the output down.
+---
+--- @param self the mixer to read
+--- @return whether mute applies
+function Audio.muted(borrows self: Audio): boolean
+    return self.mutedFlag
+end
+
+--- Returns the number of voices sounding now, paused and fading ones included.
+---
+--- @param self the mixer to read
+--- @return slots in use, so it drops when `update` reaps a voice rather than
+---     the instant one ends
+function Audio.sounding(borrows self: Audio): integer
+    return self.live
+end
+
+--- Returns the configured ceiling on simultaneous voices.
+---
+--- @param self the mixer to read
+--- @return what `newAudio` was given, fixed for the instance's life
+function Audio.maxVoices(borrows self: Audio): integer
+    return #self.voices
+end
+
+--- Scales every voice in a group, and every voice that joins it later.
+---
+--- Deprecated: a group is a Bus; prefer `mixer:bus(name):setGain`.
+---
+--- Composed here rather than sent as one number for the group, because a
+--- per-group gain on the backend would overwrite what each voice asked for.
+---
+--- @param self the mixer holding the group
+--- @param name needs no declaring, so setting a gain on a name nothing is in is
+---     how a game configures a group before anything joins it
+--- @param gain linear amplitude multiplied with each voice's own. There is no
+---     removing it: set one to return the group to unscaled.
+function Audio.setGroupGain(exclusive self: Audio, name: string, gain: number): nil
+    self.groupGains[name] = gain
+    local bus = self:bus(name)
+    bus:setGain(gain)
+end
+
+--- Returns a group's gain.
+---
+--- @param self the mixer to read
+--- @param name the group name
+--- @return the level rather than what is audible, and one for a group nothing
+---     has set
+function Audio.groupGain(borrows self: Audio, name: string): number
+    return self.groupGains[name] or 1
+end
+
+--- Silences a group without discarding the level it was set to.
+---
+--- Deprecated: a group is a Bus; prefer `mixer:bus(name):setMuted`.
+---
+--- Every voice in the group contributes zero while this holds, and an unmute
+--- puts each one back at its own gain times `groupGain`.
+---
+--- @param self the mixer holding the group
+--- @param name the group name
+--- @param muted whether the group contributes zero
+function Audio.setGroupMuted(exclusive self: Audio, name: string, muted: boolean): nil
+    local wanted = muted == true
+    if (self.groupMutedFlags[name] == true) == wanted then
+        return
+    end
+    if wanted then
+        self.groupMutedFlags[name] = true
+    else
+        self.groupMutedFlags[name] = nil
+    end
+    local bus = self:bus(name)
+    bus:setMuted(wanted)
+end
+
+--- Reports whether mute applies to a group.
+---
+--- @param self the mixer to read
+--- @param name the group name
+--- @return whether the group is silenced
+function Audio.groupMuted(borrows self: Audio, name: string): boolean
+    return self.groupMutedFlags[name] == true
+end
+
+--- Holds every voice in a group, and every voice that joins it later.
+---
+--- Deprecated: a group is a Bus; prefer `mixer:bus(name):pause`.
+---
+--- The mixer records the pause as well as sending it, because a voice started
+--- into a paused group would otherwise be the one thing still heard.
+---
+--- @param self the mixer holding the group
+--- @param name not holder counted: one `resumeGroup` undoes any number of
+---     these. The group is a Bus, and its pause holds every voice routed
+---     through it, so resuming one voice does not take it out of the hold.
+function Audio.pauseGroup(exclusive self: Audio, name: string): nil
+    self.groupPausedFlags[name] = true
+    local bus = self:bus(name)
+    bus:pause()
+end
+
+--- Lets a paused group carry on, and lets later joiners start sounding.
+---
+--- Deprecated: a group is a Bus; prefer `mixer:bus(name):resume`.
+---
+--- @param self the mixer holding the group
+--- @param name the group name
+function Audio.resumeGroup(exclusive self: Audio, name: string): nil
+    self.groupPausedFlags[name] = nil
+    local bus = self:bus(name)
+    bus:resume()
+end
+
+--- Reports whether a group holds its current and future voices.
+---
+--- @param self the mixer to read
+--- @param name the group name
+--- @return whether the group is paused
+function Audio.groupPaused(borrows self: Audio, name: string): boolean
+    return self.groupPausedFlags[name] == true
+end
+
+--- Appends a name unless it is already listed.
+local function note(names: {string}, seen: {[string]: boolean}, name: string): nil
+    if seen[name] then
+        return
+    end
+    seen[name] = true
+    names[#names + 1] = name
+end
+
+--- Collects every group carrying a gain, a mute or a pause.
+local function settledGroups(borrows self: Audio, names: {string}, seen: {[string]: boolean}): nil
+    for name in pairs(self.groupGains) do
+        note(names, seen, name)
+    end
+    for name in pairs(self.groupMutedFlags) do
+        note(names, seen, name)
+    end
+    for name in pairs(self.groupPausedFlags) do
+        note(names, seen, name)
+    end
+end
+
+--- Returns every group this mixer knows about, sorted.
+---
+--- @param self the mixer to read
+--- @return a fresh sorted table the caller owns. A group whose only voice has
+---     ended and which nothing was set on drops out of it, so this is not a
+---     stable list of a game's groups.
+function Audio.groups(borrows self: Audio): {string}
+    local names: {string} = {}
+    local seen: {[string]: boolean} = {}
+    settledGroups(self, names, seen)
+    for slot = 1, #self.voices do
+        local voice = self.voices[slot]
+        local group = voice.group
+        if voice.sounding and group ~= nil then
+            note(names, seen, group)
+        end
+    end
+    table.sort(names)
+
+    return names
+end
+
+--- Ends every voice in a group, over `fadeOut` seconds when that is given.
+---
+--- Deprecated: a group is a Bus; prefer `mixer:bus(name):track():stopAll`.
+---
+--- Stops the voices rather than the group: a gain, mute or pause set on the
+--- name survives, and anything joining afterwards starts under them.
+---
+--- @param self the mixer holding the group
+--- @param name the group name
+--- @param fadeOut seconds, a duration. Omitted or zero frees the slots within
+---     this call, and a positive one unpauses the voices it fades.
+function Audio.stopGroup(exclusive self: Audio, name: string, fadeOut: number?): nil
+    local seconds = fadeOut or 0
+    for slot = 1, #self.voices do
+        local voice = self.voices[slot]
+        if voice.sounding and voice.group == name then
+            queue(self, audiobackend.STOP, handleOf(self, slot)).fade = seconds > 0 and seconds or 0
+            if seconds > 0 then
+                voice.stopping = true
+                voice.paused = false
+            else
+                release(self, slot)
+            end
+        end
+    end
+end
+
+--- Caps how many voices a key may hold and how often it may start one.
+---
+--- A key is not a group. A group says where a sound's gain comes from and what
+--- a pause reaches; a key says how many of one sound the mix will carry. The
+--- two are set independently on `play`, so "at most three footsteps at once,
+--- all of them in the effects group" is the ordinary case.
+---
+--- Reaching a limit drops the new voice: `play` returns zero and leaves every
+--- sounding voice alone.
+---
+--- @param self the mixer holding the limit
+--- @param key the bucket name
+--- @param limit nil removes the limit. Lowering `voices` below what the key
+---     already holds stops none of them and only refuses the next until enough
+---     have ended. `cooldown` is measured against the time passed to `update`,
+---     so a game that never calls `update` never advances one.
+function Audio.setLimit(exclusive self: Audio, key: string, limit: Limit?): nil
+    if limit == nil then
+        self.limits[key] = nil
+    else
+        self.limits[key] = limit
+    end
+end
+
+--- Returns the limit assigned to a key.
+---
+--- @param self the mixer to read
+--- @param key the bucket name
+--- @return the record that was set rather than a copy, so writing through it
+---     changes the limit in force. Nil when the key has none.
+function Audio.limit(borrows self: Audio, key: string): Limit?
+    return self.limits[key]
+end
+
+--- Returns how many voices a key holds now.
+---
+--- @param self the mixer to read
+--- @param key the bucket name
+--- @return voices counted against the key, paused and fading ones included,
+---     and zero for a key that has never held one
+function Audio.keyCount(borrows self: Audio, key: string): integer
+    local bucket = self.buckets[key]
+
+    return bucket ~= nil and bucket.count or 0
+end
+
+--- Returns every key with a limit or a counted voice, sorted.
+---
+--- @param self the mixer to read
+--- @return a fresh table the caller owns. A key keeps its bucket once one
+---     exists, so a key that has played and stopped is still listed.
+function Audio.keys(borrows self: Audio): {string}
+    local names: {string} = {}
+    local seen: {[string]: boolean} = {}
+    for name in pairs(self.limits) do
+        note(names, seen, name)
+    end
+    for name in pairs(self.buckets) do
+        note(names, seen, name)
+    end
+    table.sort(names)
+
+    return names
+end
+
+--- Returns every sounding voice, paused and fading ones included.
+---
+--- For introspection, on the same terms as `clips`. The handles it reports are
+--- the ones `playing` and `stop` take, so a caller can act on these results.
+---
+--- @param self the mixer to read
+--- @return a fresh list of fresh records each call, ordered by voice slot
+---     rather than by when the voices started. It is a snapshot: nothing in it
+---     follows the voice afterwards.
+function Audio.voiceList(borrows self: Audio): {VoiceInfo}
+    local list: {VoiceInfo} = {}
+    for slot = 1, #self.voices do
+        local voice = self.voices[slot]
+        if voice.sounding then
+            list[
+                #list + 1
+            ] = new VoiceInfo(
+                handle = handleOf(self, slot),
+                clip = soundNames[voice.clip],
+                gain = voice.gain,
+                applied = voice.applied,
+                pitch = voice.pitch,
+                group = voice.group,
+                key = voice.key,
+                paused = voice.paused,
+                stopping = voice.stopping,
+                owned = voice.owned,
+                loop = voice.loop,
+                spatial = voice.spatial,
+                x = voice.x,
+                y = voice.y,
+                z = voice.z,
+                stereo = voice.stereo,
+                left = voice.left,
+                right = voice.right
+            )
+        end
+    end
+
+    return list
+end
+
+--- Logs what the output device did since the last report.
+---
+--- Warnings rather than information, because a game that went quiet is
+--- diagnosed from these two lines and the default level is `"warn"`.
+local function reportOutput(exclusive self: Audio): nil
+    local status = self:output()
+    if status.drops > self.outputDrops then
+        LOGGER:warn("audio output dropped (%s); reopening it", status.reason or "no reason given")
+    end
+    if status.reopens > self.outputReopens then
+        LOGGER:warn(
+            "audio output reopened at %d Hz, %d channels; the mix stays at %d Hz, %d channels",
+            status.frequency,
+            status.channels,
+            self.backend.frequency,
+            self.backend.channels
+        )
+    end
+    self.outputDrops = status.drops
+    self.outputReopens = status.reopens
+end
+
+--- Sends queued commands and reaps the voices the backend has finished with.
+---
+--- Call once per frame with the frame's step. The step advances cooldowns, and
+--- nothing else here needs time: a fade is the backend's to run, and a voice is
+--- over when the backend says so rather than when a clock here says it should
+--- be. It also advances every [`Player`](tecs.audio.sequencer.Player) made on this
+--- mixer, which schedules on its voices' own clock rather than on the step.
+---
+--- Not a world system, and `install` deliberately does not add one: reaping has
+--- to continue during a world pause, so the application drives it from each
+--- iteration through `tick`, which skips it when the game already called it.
+---
+--- It also notices a dropped or reopened output device, logging each under
+--- `tecs.audio`, and a terminal failure, after which `failureReason` is set.
+---
+--- @param self the mixer to advance
+--- @param dt seconds since the last call. Omitting it advances nothing, which
+---     is what a test stepping voices without time wants.
+--- @return voices still sounding after the reap, the same number `sounding`
+---     answers
+function Audio.update(exclusive self: Audio, dt: number?): integer
+    if self.closed then
+        return 0
+    end
+    self.touched = true
+    -- Music players first, so what they schedule this frame rides the same
+    -- flush as the voices they start.
+    local updates = audiosynth.updates[self]
+    if updates ~= nil then
+        local kept: integer = 0
+        for index = 1, #updates do
+            local advance = updates[index]
+            if advance() then
+                kept = kept + 1
+                updates[kept] = advance
+            end
+        end
+        for index = #updates, kept + 1, -1 do
+            updates[index] = nil
+        end
+    end
+    local changes = self.backend.outputChanges
+    if changes ~= nil then
+        local count = changes()
+        if count ~= self.outputChanges then
+            self.outputChanges = count
+            reportOutput(self)
+        end
+    end
+    local observe = self.backend.failure
+    if self.failureReason == nil and observe ~= nil then
+        local failure = observe()
+        if failure ~= nil then
+            self.failureReason = failure
+            self.available = false
+            -- Discard pending starts before issuing stops for every live handle.
+            self.pendingCount = 0
+            for slot = 1, #self.voices do
+                if self.voices[slot].sounding then
+                    queue(self, audiobackend.STOP, handleOf(self, slot))
+                    release(self, slot)
+                end
+            end
+        end
+    end
+    self.elapsed = self.elapsed + (dt or 0)
+    self:flush()
+
+    local count = self.backend.drain(self.finished)
+    for index = 1, count do
+        local handle = self.finished[index]
+        -- A handle whose slot has already been recycled fails the generation
+        -- check, so a late report about a voice this mixer already released
+        -- cannot take the voice that replaced it.
+        local voice = voiceOf(self, handle)
+        if voice ~= nil then
+            record(self, "finish", handle, nil, voice.clip, voice.group, nil)
+            release(self, slotOf(handle))
+        end
+    end
+
+    return self.live
+end
+
+--- Renders `seconds` of the mix on a memory output, whose clock moves only
+--- here, then reaps what finished, as `update` does.
+---
+--- A frame fraction left over carries to the next call, so stepping by a
+--- frame's `dt` sixty times renders exactly a second. Anything queued is sent
+--- first, so a start just made sounds inside this step.
+---
+--- @param self the mixer to step
+--- @param seconds how far to move the clock
+--- @return the seconds rendered, and zero on any output but memory, whose
+---     clock its device or the wall clock moves
+--- @raises string when `seconds` is negative or not finite
+function Audio.step(exclusive self: Audio, seconds: number): number
+    if seconds ~= seconds or seconds < 0 or seconds == math.huge then
+        error("tecs.audio.Audio.step: seconds must be finite and not negative", 2)
+    end
+    local render = self.backend.render
+    local rate = self.backend.frequency
+    if self.closed or render == nil or rate <= 0 then
+        return 0
+    end
+    self:flush()
+    local exact = seconds * rate + self.stepRemainder
+    local frames = math.floor(exact)
+    self.stepRemainder = exact - frames
+    local done = render(frames)
+    self:update(0)
+
+    return done / rate
+end
+
+--- Holds the output clock so that only `step` moves it, or lets it run again.
+---
+--- A memory output is always held. A void output stops keeping time at the
+--- wall clock's pace while held, and owes nothing for the hold when released,
+--- which is what the debug harness does when it pauses and steps a frame at a
+--- time. A device that is playing cannot be held.
+---
+--- @param self the mixer to hold
+--- @param held true to hold, false to release
+--- @return whether `step` now moves the clock
+function Audio.hold(exclusive self: Audio, held: boolean): boolean
+    local hold = self.backend.hold
+    if self.closed or hold == nil then
+        return false
+    end
+    self.stepRemainder = 0
+    self.held = hold(held)
+
+    return self.held
+end
+
+--- What the application calls once per iteration, paused or not: `update`,
+--- unless the game already called it since the last tick, and on a held clock
+--- a `step` of `dt`, so a memory output and a paused void output follow the
+--- frames the application runs.
+---
+--- A game driving its own loop calls `update` itself and never needs this.
+---
+--- @param self the mixer to advance
+--- @param dt the iteration's simulation step, zero for a held turn
+function Audio.tick(exclusive self: Audio, dt: number): nil
+    if self.closed then
+        return
+    end
+    if self.held and dt > 0 then
+        self:step(dt)
+    elseif not self.touched then
+        self:update(dt)
+    end
+    self.touched = false
+end
+
+--- Starts recording the next `seconds` of the mix, on any output: a memory
+--- output records what `step` renders, a void output what its clock renders,
+--- and a device what it is handed.
+---
+--- @param self the mixer to record
+--- @param seconds how much to record; the recording stops filling there
+--- @return whether the backend can record, which the silent one cannot
+--- @raises string when `seconds` is not positive and finite
+function Audio.listen(exclusive self: Audio, seconds: number): boolean
+    if seconds ~= seconds or seconds <= 0 or seconds == math.huge then
+        error("tecs.audio.Audio.listen: seconds must be positive and finite", 2)
+    end
+    local listen = self.backend.listen
+    local rate = self.backend.frequency
+    if self.closed or listen == nil or rate <= 0 then
+        return false
+    end
+    self:flush()
+    listen(math.ceil(seconds * rate))
+
+    return true
+end
+
+--- Summarizes the recording `listen` started, as far as it has got.
+---
+--- @param self the mixer recording
+--- @return the summary, or nil with no recording
+function Audio.listening(borrows self: Audio): Listening?
+    local summarize = self.backend.listenSummary
+    if self.closed or summarize == nil then
+        return nil
+    end
+    local text = summarize()
+    if text == nil then
+        return nil
+    end
+    local value = json.decode(text) as {[string]: any}?
+    if value == nil then
+        return nil
+    end
+    local started = self.backend.listenStarted
+
+    return {
+        frames = value.frames as integer,
+        seconds = value.seconds as number,
+        started = started and started() or 0,
+        peak = value.peak as number,
+        peakDbfs = value.peakDbfs as number?,
+        rms = value.rms as number,
+        rmsDbfs = value.rmsDbfs as number?,
+        lufs = value.lufs as number?,
+        clipped = value.clipped as integer,
+        silent = value.silent as {{number}},
+        onsets = value.onsets as {number}
+    }
+end
+
+--- Writes the recording `listen` started, as far as it has got, to a 32-bit
+--- float WAV file.
+---
+--- @param self the mixer recording
+--- @param path where to write it
+--- @return whether it was written
+--- @return the reason when it was not
+function Audio.saveListening(borrows self: Audio, path: string): (boolean, string?)
+    local save = self.backend.listenSave
+    if self.closed or save == nil then
+        return false, "this backend cannot record"
+    end
+
+    return save(path)
+end
+
+--- Ends the recording `listen` started, freeing it.
+---
+--- @param self the mixer recording
+function Audio.stopListening(exclusive self: Audio): nil
+    local stop = self.backend.listenStop
+    if not self.closed and stop ~= nil then
+        stop()
+    end
+end
+
+--- Returns the event log: starts, refusals, stops and finishes, each with its
+--- time on the output clock, oldest first.
+---
+--- The log keeps the last 512 entries. A reader that remembers the
+--- `sequence` of the last entry it saw passes it back to get only what came
+--- after, so polling every frame costs only the new entries.
+---
+--- @param self the mixer to read
+--- @param after the sequence of the last entry already seen, or nil for all
+--- @return the entries, a fresh table the caller owns
+function Audio.events(borrows self: Audio, after: integer?): {Event}
+    local floor = after or 0
+    local out: {Event} = {}
+    local history = self.history
+    for index = 1, #history do
+        local entry = history[index]
+        if entry.sequence > floor then
+            out[#out + 1] = entry
+        end
+    end
+
+    return out
+end
+
+--- Reports the counters an agent reads to see what the mixer refused or lost.
+---
+--- @param self the mixer to read
+--- @return the counters, a fresh table
+function Audio.stats(borrows self: Audio): Stats
+    local late = self.backend.late
+    local status = self:output()
+
+    return {
+        refused = self.refusals,
+        steals = self.stolen,
+        late = (late ~= nil and not self.closed) and late() or 0,
+        drops = status.drops,
+        reopens = status.reopens
+    }
+end
+
+--- Returns the Bus with this name, making it under `options.parent` (Master
+--- by default) when it does not exist. A group name is a Bus name: a voice
+--- played with `group` sounds on that Bus's default Track.
+---
+--- @param self the mixer
+--- @param name the Bus's name; `"master"` is Master
+--- @param options applied when the Bus is made: parent, gain, mute, effects
+--- @return the Bus
+function Audio.bus(exclusive self: Audio, name: string, options: BusOptions?): Bus
+    local found = self.busByName[name]
+    if found ~= nil then
+        return found
+    end
+    local parent = (options and options.parent) and self:bus(assert(options).parent as string)
+        or assert(self.busByName[MASTER])
+    local id = self.nextBus
+    self.nextBus = id + 1
+    stripCommand(self, audiobackend.BUS_CREATE, id, parent.id, 0, nil)
+    local bus = newBus(self, name, id, parent.name)
+    self.busByName[name] = bus
+    self.busById[id] = bus
+    local trackId = self.nextTrack
+    self.nextTrack = trackId + 1
+    stripCommand(self, audiobackend.TRACK_CREATE, trackId, id, 0, nil)
+    local home = newTrack(self, trackId, name, 0)
+    home.isDefault = true
+    bus.home = home
+    self.trackById[trackId] = home
+    if options ~= nil then
+        if options.gain ~= nil then
+            bus:setGain(options.gain as number)
+        end
+        if options.muted == true then
+            bus:setMuted(true)
+        end
+        for _, spec in ipairs(options.effects or {}) do
+            bus:insert(spec)
+        end
+    end
+
+    return bus
+end
+
+--- Returns Master.
+function Audio.masterBus(exclusive self: Audio): Bus
+    return assert(self.busByName[MASTER])
+end
+
+--- Returns every Bus, Master first and the rest by id, a fresh table.
+function Audio.buses(borrows self: Audio): {Bus}
+    local out: {Bus} = {}
+    for id = 0, self.nextBus - 1 do
+        local bus = self.busById[id]
+        if bus ~= nil then
+            out[#out + 1] = bus
+        end
+    end
+
+    return out
+end
+
+--- Makes a Track: a persistent channel strip voices play into.
+---
+--- @param self the mixer
+--- @param options bus, fader, mute, solo, position, sends, polyphony, effects
+--- @return the Track
+function Audio.track(exclusive self: Audio, options: TrackOptions?): Track
+    local bus = (options and options.bus) and self:bus(assert(options).bus as string) or assert(self.busByName[MASTER])
+    local id = self.nextTrack
+    self.nextTrack = id + 1
+    stripCommand(self, audiobackend.TRACK_CREATE, id, bus.id, 0, nil)
+    local track = newTrack(self, id, bus.name, (options and options.polyphony) or self.defaultPolyphony)
+    self.trackById[id] = track
+    if options ~= nil then
+        if options.gain ~= nil then
+            track:setGain(options.gain as number)
+        end
+        if options.muted == true then
+            track:setMuted(true)
+        end
+        if options.solo == true then
+            track:setSolo(true)
+        end
+        if options.spatial == true then
+            track:setPosition(options.x or 0, options.y or 0, options.z or 0)
+        end
+        for name, level in pairs(options.sends or {}) do
+            track:send(name, level)
+        end
+        for _, spec in ipairs(options.effects or {}) do
+            track:insert(spec)
+        end
+    end
+
+    return track
+end
+
+--- Returns every Track, default ones included, by id, a fresh table.
+function Audio.tracks(borrows self: Audio): {Track}
+    local out: {Track} = {}
+    for id = 0, self.nextTrack - 1 do
+        local track = self.trackById[id]
+        if track ~= nil then
+            out[#out + 1] = track
+        end
+    end
+
+    return out
+end
+
+--- Reads and resets every strip's meter: peak, RMS and clipped samples since
+--- the last read, measured on the render path as it mixes.
+---
+--- @param self the mixer
+--- @return Master, the Buses by name and the Tracks by id; all zero on a
+---     backend that does not meter
+function Audio.meters(exclusive self: Audio): Meters
+    local silent: Meter = {peak = 0, rms = 0, clipped = 0}
+    local out: Meters = {master = silent, buses = {}, tracks = {}}
+    local read = self.backend.meters
+    if self.closed or read == nil then
+        return out
+    end
+    for _, reading in ipairs(read()) do
+        local meter: Meter = {peak = reading.peak, rms = reading.rms, clipped = reading.clipped}
+        if reading.bus then
+            local bus = self.busById[reading.id]
+            if reading.id == 0 then
+                out.master = meter
+            elseif bus ~= nil then
+                out.buses[bus.name] = meter
+            end
+        elseif self.trackById[reading.id] ~= nil then
+            out.tracks[reading.id] = meter
+        end
+    end
+
+    return out
+end
+
+--- Makes a Timeline on this mixer's clock, which `update` advances.
+---
+--- @param self the mixer
+--- @param options tempo, bar length, lookahead, start beat, paused
+--- @return the timeline; `close` it to stop it
+function Audio.timeline(exclusive self: Audio, options: timelines.Options?): timelines.Timeline
+    local id = self.registry
+    local made = timelines.new(
+        function(): number
+            return mixerOf(id):now()
+        end,
+        options,
+        function(sound: any, given: any, _at: number): integer
+            local mixer = mixerOf(id)
+
+            return mixer:play(sound as Playable?, given as PlayOptions)
+        end
+    )
+    local updates = audiosynth.updates[self]
+    if updates == nil then
+        updates = {}
+        audiosynth.updates[self] = updates
+    end
+    updates[#updates + 1] = function(): boolean
+        return made:update()
+    end
+    self.timelineList[#self.timelineList + 1] = made
+
+    return made
+end
+
+--- Returns every Timeline made on this mixer and not closed, oldest first.
+function Audio.timelines(borrows self: Audio): {timelines.Timeline}
+    local out: {timelines.Timeline} = {}
+    for _, line in ipairs(self.timelineList) do
+        if not line:closedState() then
+            out[#out + 1] = line
+        end
+    end
+
+    return out
+end
+
+--- Returns the default Timeline, whose time is the clock: beat `n` is `n`
+--- seconds on it, so "play this now" is an event at `now()`.
+function Audio.defaultTimeline(exclusive self: Audio): timelines.Timeline
+    local existing = self.clockline
+    if existing ~= nil then
+        return existing
+    end
+    local made = self:timeline({start = self:now()})
+    self.clockline = made
+
+    return made
+end
+
+--- Registers a Decoder an extension's library exports, given the address of
+--- its vtable, and returns the id a Sound of that kind plays through.
+---
+--- @return the id, or nil and the reason the backend refused it
+function Audio.registerDecoder(exclusive self: Audio, vtable: any, name: string?): (integer?, string?)
+    local register = self.backend.registerDecoder
+    if self.closed or register == nil then
+        return nil, "this backend takes no decoders"
+    end
+    local id, why = register(vtable)
+    if id ~= nil then
+        self.decoderNames[id] = name or ("decoder " .. tostring(id))
+    end
+
+    return id, why
+end
+
+--- Starts a Playback rendered by a registered Decoder, as `play` starts a
+--- clip: the same slot, Track, gain, limits and steals.
+---
+--- The Decoder opens its instance now, on this thread, from `params` and
+--- `bytes`, which mean what that Decoder says: a SoundFont id and a
+--- polyphony for General MIDI, a chip and its memory images for FM.
+---
+--- @param self the mixer
+--- @param decoder what `registerDecoder` returned
+--- @param params the Decoder's parameters
+--- @param bytes the Sound's bytes, or empty
+--- @param options as for `play`; `start`, `loop` and `loopStart` apply only
+---     to a Decoder that seeks
+--- @return the voice's handle, or zero and a reason
+function Audio.playDecoded(
+    exclusive self: Audio,
+    decoder: integer,
+    params: string,
+    bytes: string,
+    options: PlayOptions?
+): (integer, string?)
+    checkAt(options and options.at, "playDecoded")
+    local open = self.backend.openDecoded
+    local handle = claim(self, 0, audiobackend.SYNTH, options or {}, false)
+    if handle == 0 then
+        -- The refusal is the last entry the log took, with its reason.
+        local last = self.history[#self.history]
+        local why = last ~= nil and last.event == "refuse" and last.reason or nil
+        local reasons: {
+            [string]: string
+        } = {
+            unavailable = "the mixer has no output",
+            limit = "the key's limit refused the start",
+            voices = "every voice is busy",
+            polyphony = "the Track's voices are all busy with higher priorities",
+            track = "the Track has been destroyed"
+        }
+
+        return 0, why and reasons[why] or "the mixer refused the start"
+    end
+    if open == nil then
+        -- A backend without Decoders takes the start and plays nothing, as
+        -- the silent backend takes every other call.
+        return handle
+    end
+    local opened, reason = open(decoder, handle, params, bytes)
+    if not opened then
+        self:stop(handle)
+
+        return 0, reason
+    end
+
+    return handle
+end
+
+--- Sends a timed event to a voice's Decoder: a note, a register write,
+--- whatever that Decoder's events mean. It lands on the frame `at` names, and
+--- on the voice's first frame when it comes before the voice starts.
+---
+--- @param self the mixer
+--- @param handle the voice
+--- @param data the event, at most 2^53; tecs-audio-abi packs the common ones
+--- @param at seconds on the output clock, or nil for at once
+--- @return whether the handle names a sounding voice
+--- @raises string for a time that is not finite
+function Audio.event(exclusive self: Audio, handle: integer, data: integer, at: number?): boolean
+    checkAt(at, "event")
+    if voiceOf(self, handle) == nil then
+        return false
+    end
+    local command = queue(self, audiobackend.EVENT, handle)
+    command.data = data
+    command.at = at or 0
+
+    return true
+end
+
+--- Registers an Effect an extension's library exports, given the address of
+--- its vtable, and returns the kind `tecs.audio.effects.custom` builds.
+---
+--- @return the kind, or nil and the reason the backend refused it
+function Audio.registerEffect(exclusive self: Audio, vtable: any): (integer?, string?)
+    local register = self.backend.registerEffect
+    if self.closed or register == nil then
+        return nil, "this backend takes no effects"
+    end
+
+    return register(vtable)
+end
+
+--- Options the audio pass fills per row, so a walk over a million sounds
+--- allocates nothing.
+local rowOptions: PlayOptions = {}
+
+--- Puts the rows of disabled entities back to rest.
+---
+--- The walk below skips disabled rows, so the sweep treats their voices as
+--- abandoned and takes them back. The row would still name a voice that has
+--- gone, which reads on re-enabling as a one-shot that finished and never comes
+--- back. Clearing the handle here is what makes the sound return with the
+--- entity.
+---
+--- Archetype-shaped rather than per-row: a disabled entity sits in an archetype
+--- of its own, so a world with nothing disabled matches nothing.
+local function hush(hushed: ecs.Query): nil
+    @unsafe do
+        for source, length in hushed:iter() do
+            local rows = source:get(SoundComponent)
+            local total = length or 0
+            if rows ~= nil then
+                local mutable: Emitter[?]? = nil
+                for row = 1, total do
+                    if rows[row].voice > 0 then
+                        if mutable == nil then
+                            mutable = source:getMut(SoundComponent)
+                        end
+                        -- Zero rather than finished: a voice the sweep is about to
+                        -- take back is not one that ran to its end.
+                        assert(mutable)[row].voice = 0
+                    end
+                end
+            end
+        end
+    end
+end
+
+--- Starts, stops, follows and reaps the voices `Sound` components ask for.
+---
+--- One walk answers all of it. The pass starts a voice for a row asking to
+--- sound, follows gain, rate, loop and position for sounding rows, returns
+--- finished rows to rest, and treats a voice with no reference as belonging to
+--- an entity that has gone or that the game disabled. That last case makes
+--- despawning something mid-sound work without an observer on every archetype
+--- that might hold one.
+--- Sets an emitter Track's send to each zone's Bus by its distance from the
+--- zone, changing only what moved.
+local function sendToZones(exclusive self: Audio, strip: Track, x: number, y: number, z: number): nil
+    local zones = self.zones
+    local wanted: {[string]: number} = {}
+    for _, zone in ipairs(zones) do
+        local dx, dy, dz = x - zone.x, y - zone.y, z - zone.z
+        local distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if distance < zone.radius then
+            local level = zone.level * (1 - distance / zone.radius)
+            wanted[zone.bus] = math.max(wanted[zone.bus] or 0, level)
+        end
+    end
+    local current = strip:sends()
+    for bus, level in pairs(wanted) do
+        if math.abs((current[bus] or 0) - level) > 1e-3 then
+            strip:send(bus, level)
+        end
+    end
+    for bus, _ in pairs(current) do
+        if wanted[bus] == nil then
+            strip:send(bus, 0)
+        end
+    end
+end
+
+--- The listener's position and scale, or nil without one.
+local function listenerOf(listeners: {ecs.Query}): (number?, number?, number?, number?)
+    @unsafe do
+        for index, query in ipairs(listeners) do
+            for source, length in query:iter() do
+                if (length or 0) > 0 then
+                    local found = assert(source:get(ListenerComponent))
+                    local scale = found[1].scale
+                    if index == 1 then
+                        local places = assert(source:get(ecs.Transform2D))
+
+                        return places[1].x, places[1].y, 0, scale
+                    end
+                    local places = assert(source:get(ecs.Transform3D))
+
+                    return places[1].x, places[1].y, places[1].z, scale
+                end
+            end
+        end
+    end
+
+    return nil, nil, nil, nil
+end
+
+--- Places spatial rows from their transforms against the listener, and
+--- gathers the zones, before the rows are reconciled.
+local function listen(
+    exclusive self: Audio,
+    listeners: {ecs.Query},
+    emitters: {ecs.Query},
+    zoneQueries: {ecs.Query}
+): nil
+    local foundX, foundY, foundZ, scale = listenerOf(listeners)
+    self.zones = {}
+    if foundX == nil then
+        return
+    end
+    local lx: number = foundX
+    local ly: number = foundY or 0
+    local lz: number = foundZ or 0
+    local unit = (scale ~= nil and scale > 0) and scale or 1
+    @unsafe do
+        for index, query in ipairs(emitters) do
+            local flat = index == 1
+            for source, length in query:iter() do
+                local rows = source:get(SoundComponent)
+                local total = length or 0
+                if rows ~= nil then
+                    local mutable: Emitter[?]? = nil
+                    for row = 1, total do
+                        local entry = rows[row]
+                        if entry.spatial then
+                            local x: number = 0
+                            local y: number = 0
+                            local z: number = 0
+                            if flat then
+                                local places = assert(source:get(ecs.Transform2D))
+                                x = (places[row].x - lx) / unit
+                                y = -(places[row].y - ly) / unit
+                            else
+                                local places = assert(source:get(ecs.Transform3D))
+                                x = (places[row].x - lx) / unit
+                                y = (places[row].y - ly) / unit
+                                z = (places[row].z - lz) / unit
+                            end
+                            if x ~= entry.x or y ~= entry.y or z ~= entry.z then
+                                if mutable == nil then
+                                    mutable = source:getMut(SoundComponent)
+                                end
+                                local written = assert(mutable)[row]
+                                written.x = x
+                                written.y = y
+                                written.z = z
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        for index, query in ipairs(zoneQueries) do
+            local flat = index == 1
+            for source, length in query:iter() do
+                local zones = assert(source:get(ReverbZoneComponent))
+                for row = 1, (length or 0) do
+                    local zone = zones[row]
+                    local bus = groupNames[zone.bus]
+                    if bus ~= nil then
+                        local x: number = 0
+                        local y: number = 0
+                        local z: number = 0
+                        if flat then
+                            local places = assert(source:get(ecs.Transform2D))
+                            x = (places[row].x - lx) / unit
+                            y = -(places[row].y - ly) / unit
+                        else
+                            local places = assert(source:get(ecs.Transform3D))
+                            x = (places[row].x - lx) / unit
+                            y = (places[row].y - ly) / unit
+                            z = (places[row].z - lz) / unit
+                        end
+                        self.zones[
+                            #self.zones + 1
+                        ] = new Zone(bus = bus, x = x, y = y, z = z, radius = zone.radius / unit, level = zone.level)
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function reconcile(exclusive self: Audio, sounds: ecs.Query, hushed: ecs.Query): nil
+    local voices = self.voices
+    for slot = 1, #voices do
+        voices[slot].referenced = false
+    end
+
+    hush(hushed)
+
+    @unsafe do
+        for source, length in sounds:iter() do
+            local rows = source:get(SoundComponent)
+            local total = length or 0
+            if rows ~= nil then
+                -- Taken mutable on the first row that actually changes and not at
+                -- all otherwise, because taking it up front would mark the column
+                -- dirty every frame for every archetype holding a sound.
+                local mutable: Emitter[?]? = nil
+
+                for row = 1, total do
+                    local entry = rows[row]
+                    local handle = entry.voice
+
+                    if not entry.playing then
+                        -- Asked for silence. The row goes back to zero rather than
+                        -- to finished, so setting the flag again starts it: a
+                        -- one-shot that has run out plays a second time instead of
+                        -- staying spent.
+                        if handle ~= 0 then
+                            if voiceOf(self, handle) ~= nil then
+                                queue(self, audiobackend.STOP, handle)
+                                release(self, slotOf(handle))
+                            end
+                            if mutable == nil then
+                                mutable = source:getMut(SoundComponent)
+                            end
+                            assert(mutable)[row].voice = 0
+                        end
+                    elseif handle == 0 then
+                        rowOptions.gain = entry.gain
+                        rowOptions.loop = entry.loop
+                        rowOptions.pitch = entry.pitch
+                        rowOptions.spatial = entry.spatial
+                        rowOptions.x = entry.x
+                        rowOptions.y = entry.y
+                        rowOptions.z = entry.z
+                        -- Nil for index zero, which is what "no group" reads as.
+                        -- Only rows that are starting pay for the lookup: a
+                        -- sounding voice keeps the group it joined.
+                        rowOptions.group = groupNames[entry.group]
+                        -- A spatial row is an emitter: a Track of its own,
+                        -- placed and sent to its zones, rather than a
+                        -- placement on its voice.
+                        local strip: Track? = nil
+                        rowOptions.track = nil
+                        if entry.spatial then
+                            local made = self:track({bus = rowOptions.group, polyphony = 0})
+                            made:setPosition(entry.x, entry.y, entry.z)
+                            rowOptions.spatial = false
+                            rowOptions.track = made
+                            strip = made
+                        end
+                        local started = start(self, self.soundsById[entry.clip], rowOptions, true)
+                        if started ~= 0 then
+                            if mutable == nil then
+                                mutable = source:getMut(SoundComponent)
+                            end
+                            assert(mutable)[row].voice = started
+                            local voice = voices[slotOf(started)]
+                            voice.referenced = true
+                            voice.strip = strip
+                            if strip ~= nil then
+                                sendToZones(self, strip, entry.x, entry.y, entry.z)
+                            end
+                        elseif strip ~= nil then
+                            strip:destroy()
+                        end
+                    else
+                        local voice = voiceOf(self, handle)
+                        if voice == nil then
+                            if mutable == nil then
+                                mutable = source:getMut(SoundComponent)
+                            end
+                            assert(mutable)[row].voice = FINISHED
+                        else
+                            voice.referenced = true
+                            local slot = slotOf(handle)
+                            -- Each of these is a load and a compare, and the call
+                            -- past it runs only on the frame the value moved.
+                            if voice.gain ~= entry.gain then
+                                voice.gain = entry.gain
+                                applyGain(self, slot)
+                            end
+                            if voice.pitch ~= entry.pitch then
+                                applyPitch(self, slot, entry.pitch)
+                            end
+                            if voice.loop ~= entry.loop then
+                                applyLoop(self, slot, entry.loop)
+                            end
+                            local strip = voice.strip
+                            if strip ~= nil then
+                                local x, y, z = strip:position()
+                                if x ~= entry.x or y ~= entry.y or z ~= entry.z then
+                                    strip:setPosition(entry.x, entry.y, entry.z)
+                                end
+                                sendToZones(self, strip, entry.x, entry.y, entry.z)
+                            elseif entry.spatial then
+                                applyPosition(self, slot, entry.x, entry.y, entry.z)
+                            elseif voice.spatial then
+                                applyUnplaced(self, slot)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    for slot = 1, #voices do
+        local voice = voices[slot]
+        if voice.sounding and voice.owned and not voice.referenced then
+            queue(self, audiobackend.STOP, handleOf(self, slot))
+            release(self, slot)
+        end
+    end
+
+    self:flush()
+end
+
+--- Returns the mixer state a snapshot carries.
+---
+--- The master gain and mute, and every group's gain, mute and pause. A player
+--- who turned the music down and held the effects for a menu expects to find it
+--- that way after a load, and none of it is in the world.
+---
+--- Keyed limits are not here, and neither is what a bucket holds. A limit is a
+--- rule the build states at startup beside the clip it governs, so persisted
+--- data must not override it. Voices determine each bucket, and a snapshot
+--- restores no voices.
+local function saveMixer(borrows self: Audio): any
+    local groups: {[string]: any} = {}
+    for _, name in ipairs(self:groups()) do
+        local gain = self.groupGains[name]
+        local muted = self.groupMutedFlags[name] == true
+        local paused = self.groupPausedFlags[name] == true
+        -- A group that only has voices in it has nothing set, and writing its
+        -- defaults out would make a save grow with what a run happened to play.
+        if gain ~= nil or muted or paused then
+            groups[name] = {gain = gain or 1, muted = muted, paused = paused}
+        end
+    end
+
+    -- These saved keys are a compatibility surface.
+
+    return {masterGain = self.master, muted = self.mutedFlag, groups = groups}
+end
+
+--- Puts saved mixer state back, through the ordinary setters.
+---
+--- Visits every group this mixer knows about rather than only the ones the
+--- snapshot names, so an omitted group returns to its defaults instead of
+--- keeping this run's settings. Going through the setters makes sounding voices
+--- follow.
+local function loadMixer(exclusive self: Audio, value: any): nil
+    local saved = value as {[string]: any}?
+    local savedGroups = saved ~= nil and saved.groups as {[string]: any}? or nil
+
+    local names: {string} = {}
+    local seen: {[string]: boolean} = {}
+    settledGroups(self, names, seen)
+    if savedGroups ~= nil then
+        for name in pairs(savedGroups) do
+            note(names, seen, name)
+        end
+    end
+
+    for _, name in ipairs(names) do
+        local entry = savedGroups ~= nil and savedGroups[name] as {[string]: any}? or nil
+        self:setGroupGain(name, entry ~= nil and (entry.gain as number?) or 1)
+        self:setGroupMuted(name, entry ~= nil and entry.muted == true)
+        if entry ~= nil and entry.paused == true then
+            self:pauseGroup(name)
+        else
+            self:resumeGroup(name)
+        end
+    end
+
+    self:setMasterGain(saved ~= nil and (saved.masterGain as number?) or 1)
+    self:setMuted(saved ~= nil and saved.muted == true)
+end
+
+--- Returns the mixer installed into a world.
+---
+--- What lets something holding only the world reach the mixer, which is what
+--- the debug tools have and what a game writing its own systems often has too.
+---
+--- @param world the world to inspect
+--- @return the mixer, or nil before `install` and again after `destroy`
+export function of(borrows world: ecs.World): Audio?
+    return installed[world]
+end
+
+--- Creates a mixer, installs it into a world, and returns it.
+---
+--- Adds the system that plays [`Sound`](tecs.audio.Sound) components and the
+--- snapshot handler that carries master and group settings.
+--- Pitch variance uses the world's named tecs.audio random stream, so reseeding
+--- and snapshot restore also restart future pitch draws. Standalone mixers made
+--- with newAudio keep an independent Nupp generator.
+---
+--- `update` is not added here. Reaping voices is not world work: it has to
+--- continue during a world pause, so the application drives it from each
+--- iteration through `tick`.
+---
+--- @param world the world to install into, which expects one mixer
+--- @param config the mixer settings, or nil for the defaults
+--- @return the new mixer, also available through `of`
+--- @raises string when the world already has a mixer installed
+export function install(exclusive world: ecs.World, config: Config?): Audio
+    if installed[world] ~= nil then
+        error("tecs.audio.install: the world already has a mixer installed", 2)
+    end
+    local mixer = newAudio(config)
+    -- This stream name is a compatibility surface from the old world registry.
+    mixer.variance = world:randomStream("tecs.audio")
+    installed[world] = mixer
+
+    local sounds = world:newQuery({include = {SoundComponent}, exclude = {ecs.Disabled}})
+    -- The disabled rows and only those. They sit in archetypes of their own, so
+    -- this matches nothing until something is disabled.
+    local hushed = world:newQuery({include = {SoundComponent, ecs.Disabled}})
+
+    local listeners: {ecs.Query} = {
+        world:newQuery({
+            include = {ListenerComponent, ecs.Transform2D}
+        }),
+        world:newQuery({
+            include = {ListenerComponent, ecs.Transform3D}
+        }),
+    }
+    local emitters: {ecs.Query} = {
+        world:newQuery({
+            include = {SoundComponent, ecs.Transform2D},
+            exclude = {ecs.Disabled}
+        }),
+        world:newQuery({include = {SoundComponent, ecs.Transform3D}, exclude = {ecs.Disabled}}),
+    }
+    local zoneQueries: {ecs.Query} = {
+        world:newQuery({
+            include = {ReverbZoneComponent, ecs.Transform2D},
+            exclude = {ecs.Disabled}
+        }),
+        world:newQuery({include = {ReverbZoneComponent, ecs.Transform3D}, exclude = {ecs.Disabled}}),
+    }
+    mixer.playSystem = function(_dt: number, exclusive _world: ecs.World): nil
+        listen(mixer, listeners, emitters, zoneQueries)
+        reconcile(mixer, sounds, hushed)
+    end
+
+    world:addSystem({
+        -- This system name is a compatibility surface: the debug server reports
+        -- it and an agent selects on it.
+        name = "tecs.PlaySounds",
+        -- After gameplay has decided what exists and before anything renders,
+        -- so a sound spawned this frame starts this frame.
+        phase = ecs.phases.PostUpdate,
+        run = assert(mixer.playSystem),
+    })
+
+    world:addSnapshotHandler({
+        -- This snapshot handler key is a compatibility surface: a save file
+        -- written by an earlier build names it.
+        name = "tecs.audio",
+        save = function(exclusive _world: ecs.World): any
+            return saveMixer(mixer)
+        end,
+        load = function(exclusive _world: ecs.World, value: any): nil
+            loadMixer(mixer, value)
+        end,
+    })
+
+    return mixer
+end
+
+--- The native device provider, resolved once and kept.
+---
+--- Resolving it loads `libtecsaudio` and builds a record of closures. It opens
+--- nothing and lists nothing, so this is safe to do on a machine with no sound
+--- and safe to do before a game has decided whether it wants any.
+local resolvedDevices: {audiobackend.Devices} = {}
+
+--- Returns the provider a call should use.
+---
+--- @param given the provider a caller supplied, or nil to resolve the native one
+--- @return the caller's provider, the native one, or the silent fallback
+local function providerFor(given: audiobackend.Devices?): audiobackend.Devices
+    if given ~= nil then
+        return given
+    end
+    local existing = resolvedDevices[1]
+    if existing ~= nil then
+        return existing
+    end
+    local resolved: audiobackend.Devices? = nil
+    local loaded, native = pcall(require, "tecs.platform.audionative")
+    if loaded then
+        resolved = (native as {[string]: any}).devices() as audiobackend.Devices?
+    else
+        LOGGER:info("no audio devices: %s", tostring(native))
+    end
+    if resolved == nil then
+        resolved = audiobackend.silentDevices()
+    end
+    resolvedDevices[1] = resolved
+
+    return resolved
+end
+
+--- Names the playback devices attached now.
+---
+--- A snapshot rather than a subscription: devices come and go while a game
+--- runs, so an id held across a hotplug may name nothing. A
+--- [`Device`](tecs.audio.Device) `name` is what survives a run.
+---
+--- @param devices the provider to ask, or nil for the platform's own
+--- @return the devices, listed afresh each call and the caller's to keep. Empty
+---     rather than nil when nothing could be asked, so a caller that only
+---     iterates needs no nil check.
+--- @return the reason, when something went wrong. Nil on success, including for
+---     a machine that genuinely has no playback device.
+export function playbackDevices(devices: audiobackend.Devices?): ({Device}, string?)
+    return providerFor(devices).playback()
+end
+
+--- Names the recording devices attached now.
+---
+--- @param devices the provider to ask, or nil for the platform's own
+--- @return the devices, read as `playbackDevices` reads its own
+--- @return the reason, when something went wrong
+export function recordingDevices(devices: audiobackend.Devices?): ({Device}, string?)
+    return providerFor(devices).recording()
+end
+
+--- Opens a microphone as interleaved native-endian 32-bit float samples.
+---
+--- No callback is installed anywhere. The backend's own thread fills a bounded
+--- buffer and the game pulls completed frames from the frame thread with
+--- [`Microphone.read`](tecs.audio.Microphone), because a device thread is one
+--- the Lua virtual machine never created and entering Nupp from it is
+--- undefined.
+---
+--- @param config the settings, or nil to open the system's current default
+---     recording device at 48000 Hz in mono with a one-second buffer
+--- @return an open microphone, already recording: capture is running before
+---     this returns, so frames accumulate from here whether or not anything
+---     reads them. Nil on failure, with the reason beside it, and nothing is
+---     left open in that case.
+--- @return the reason, when the first return is nil
+--- @raises string when `frequency` is not a positive integer, when `channels` is not
+---     an integer from 1 to 32, or when `bufferFrames` is not a positive
+---     integer
+export function openMicrophone(config: MicrophoneConfig?): (Microphone?, string?)
+    local frequency = (config and config.frequency) or DEFAULT_CAPTURE_FREQUENCY
+    local channels = (config and config.channels) or DEFAULT_CAPTURE_CHANNELS
+    if frequency < 1 then
+        -- These two refusals are compatibility surfaces: the SDL implementation
+        -- published them word for word, so the wording stays even though the
+        -- house rule moved them from a returned reason to a raise. Neither
+        -- checks that the value is whole any more, because `integer` is its own
+        -- type here and a fractional one is refused before the call runs.
+        error("tecs.audio.openMicrophone: microphone frequency must be a positive integer", 2)
+    end
+    if channels < 1 or channels > MAX_CAPTURE_CHANNELS then
+        error("tecs.audio.openMicrophone: microphone channels must be an integer from 1 to 32", 2)
+    end
+    local bufferFrames = (config and config.bufferFrames) or frequency
+    if bufferFrames < 1 then
+        error("tecs.audio.openMicrophone: bufferFrames must be a positive integer", 2)
+    end
+
+    local provider = providerFor(config and config.devices)
+    local capture, reason = provider.open(
+        (config and config.device) or 0,
+        config and config.deviceName,
+        frequency,
+        channels,
+        bufferFrames
+    )
+    if capture == nil then
+        return nil, reason or "no recording device opened"
+    end
+
+    return new Microphone(frequency = capture.frequency, channels = capture.channels, capture = capture)
+end
+
+function Microphone.failure(borrows self: Microphone): string?
+    local capture = self.capture
+    if capture == nil then
+        return "microphone is destroyed"
+    end
+    local observe = capture.failure
+
+    return observe ~= nil and observe() or nil
+end
+
+function Microphone.availableFrames(borrows self: Microphone): integer
+    local capture = self.capture
+    if capture == nil then
+        return 0
+    end
+
+    return capture.availableFrames()
+end
+
+function Microphone.overruns(borrows self: Microphone): integer
+    local capture = self.capture
+    if capture == nil then
+        return 0
+    end
+
+    return capture.overruns()
+end
+
+--- Returns how many frames a call should take, given what is ready.
+---
+--- @param ready the frames the capture has
+--- @param maxFrames the caller's ceiling, or nil for everything ready
+--- @return the frames to take
+--- @raises string when `maxFrames` is not a non-negative integer
+local function capped(ready: integer, maxFrames: integer?): integer
+    if maxFrames == nil then
+        return ready
+    end
+    if maxFrames < 0 then
+        -- Another compatibility surface, kept word for word. The SDL
+        -- implementation also had to check that the value was whole, and this
+        -- one does not: `integer` is its own type here, so a fractional count
+        -- is refused before the call runs.
+        error("maxFrames must be a non-negative integer", 3)
+    end
+    if maxFrames < ready then
+        return maxFrames
+    end
+
+    return ready
+end
+
+function Microphone.read(exclusive self: Microphone, maxFrames: integer?): (string?, string?)
+    local capture = self.capture
+    if capture == nil then
+        -- This reason is a compatibility surface: the SDL implementation
+        -- returned it word for word.
+        return nil, "microphone is destroyed"
+    end
+    local frames = capped(capture.availableFrames(), maxFrames)
+    if frames == 0 then
+        local failure = self:failure()
+        if maxFrames ~= 0 and failure ~= nil then
+            return nil, failure
+        end
+        return ""
+    end
+
+    return capture.read(frames)
+end
+
+function Microphone.readInto(exclusive self: Microphone, out: {number}, maxFrames: integer?): integer
+    local capture = self.capture
+    if capture == nil then
+        return 0
+    end
+    local frames = capped(capture.availableFrames(), maxFrames)
+    if frames == 0 then
+        local failure = self:failure()
+        if maxFrames ~= 0 and failure ~= nil then
+            error(failure, 2)
+        end
+        return 0
+    end
+
+    return capture.readInto(out, frames)
+end
+
+function Microphone.pause(exclusive self: Microphone): (boolean, string?)
+    local capture = self.capture
+    if capture == nil then
+        return false, "microphone is destroyed"
+    end
+
+    return capture.pause()
+end
+
+function Microphone.resume(exclusive self: Microphone): (boolean, string?)
+    local capture = self.capture
+    if capture == nil then
+        return false, "microphone is destroyed"
+    end
+
+    local failure = self:failure()
+    if failure ~= nil then
+        return false, failure
+    end
+
+    return capture.resume()
+end
+
+function Microphone.destroy(exclusive self: Microphone): nil
+    local capture = self.capture
+    if capture == nil then
+        return
+    end
+    self.capture = nil
+    capture.close()
+end

@@ -20,7 +20,8 @@ use std::time::{Duration, Instant};
 use tecsaudio::command::{self, Command, Event};
 use tecsaudio::conform::Format;
 use tecsaudio::engine::Engine;
-use tecsaudio::output::{Host, Tap, Timing, STATE_PLAYING, STATE_REOPENING};
+use tecsaudio::output::{Host, Start, Tap, Timing, STATE_PLAYING, STATE_REOPENING, STATE_VOID};
+use tecsaudio::source::ResidentSource;
 
 /// Counts the allocations a thread makes while its flag is up.
 struct Counting;
@@ -259,51 +260,36 @@ fn open(control: &Arc<Control>) -> Engine {
     engine
 }
 
-/// A WAV of one second of stereo 16-bit PCM at a constant half-scale level.
-fn level_wav() -> Vec<u8> {
-    let frames: u32 = 48_000;
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"RIFF");
-    bytes.extend_from_slice(&(36 + frames * 4).to_le_bytes());
-    bytes.extend_from_slice(b"WAVEfmt ");
-    bytes.extend_from_slice(&16u32.to_le_bytes());
-    bytes.extend_from_slice(&1u16.to_le_bytes());
-    bytes.extend_from_slice(&2u16.to_le_bytes());
-    bytes.extend_from_slice(&48_000u32.to_le_bytes());
-    bytes.extend_from_slice(&192_000u32.to_le_bytes());
-    bytes.extend_from_slice(&4u16.to_le_bytes());
-    bytes.extend_from_slice(&16u16.to_le_bytes());
-    bytes.extend_from_slice(b"data");
-    bytes.extend_from_slice(&(frames * 4).to_le_bytes());
-    for _ in 0..frames * 2 {
-        bytes.extend_from_slice(&16_384i16.to_le_bytes());
-    }
-    bytes
-}
-
 fn play(handle: u32, looping: bool) -> Command {
     Command {
         kind: command::PLAY,
         handle,
         clip: 1,
-        flags: if looping { command::FLAG_LOOP } else { 0 },
+        // The level is a parked source, as a Decoder's Playback is.
+        flags: command::FLAG_SYNTH | if looping { command::FLAG_LOOP } else { 0 },
         gain: 1.0,
         pitch: 1.0,
         start: 0.0,
         fade: 0.0,
         loop_start: 0.0,
+        at: 0.0,
         x: 0.0,
         y: 0.0,
         z: 0.0,
+        ..Default::default()
     }
 }
 
 /// Starts a looping half-scale level, so every stream should hear 0.5.
 fn start_level(engine: &Engine) {
-    engine
-        .load_clip_bytes("level.wav", &level_wav(), 1)
-        .expect("the level decodes");
+    park_level(engine, 65_537);
     engine.submit(&[play(65_537, true)]);
+}
+
+/// Parks a second of a half-scale stereo level for the `PLAY` of `handle`.
+fn park_level(engine: &Engine, handle: u32) {
+    let samples: std::sync::Arc<[f32]> = vec![0.5f32; 2 * 48_000].into();
+    engine.park_source(handle, Box::new(ResidentSource::new(samples, 2, 48_000)));
 }
 
 fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
@@ -469,9 +455,7 @@ fn keeps_the_clock_running_while_the_device_is_gone_and_resumes_when_it_returns(
 fn reports_a_voice_finished_in_the_gap() {
     let control = Control::new(STEREO_48K);
     let engine = open(&control);
-    engine
-        .load_clip_bytes("level.wav", &level_wav(), 1)
-        .expect("the level decodes");
+    park_level(&engine, 65_537);
     control.set(|state| state.format = None);
     wait_until("the output drops", || {
         engine.output_state() == STATE_REOPENING
@@ -525,5 +509,115 @@ fn stops_retrying_a_refusing_device_and_recovers_when_another_appears() {
     wait_until("the new device is opened", || engine.output_reopens() == 1);
     hears_the_level(&control, STEREO_48K);
     assert_eq!(control.streams(), 2);
+    no_callback_allocated();
+}
+
+fn open_keeping_time(control: &Arc<Control>) -> Engine {
+    let shared = Arc::clone(control);
+    Engine::start_with(
+        move || Ok(FakeHost { control: shared }),
+        timing(),
+        Start::KeepTime,
+        48_000,
+        2,
+        8,
+    )
+}
+
+#[test]
+fn a_missing_device_at_start_keeps_time_and_plays_once_one_appears() {
+    let control = Control::new(STEREO_48K);
+    control.set(|state| state.format = None);
+    let engine = open_keeping_time(&control);
+    assert!(engine.available(), "an output keeping time takes commands");
+    assert_eq!(engine.output_state(), STATE_VOID);
+    assert_eq!(control.streams(), 0);
+
+    let before = engine.now();
+    wait_until("the clock moves with no device", || {
+        engine.now() > before + 0.02
+    });
+
+    start_level(&engine);
+    control.set(|state| state.format = Some(STEREO_48K));
+    wait_until("a device that appears is opened", || {
+        engine.output_state() == STATE_PLAYING
+    });
+    hears_the_level(&control, STEREO_48K);
+}
+
+#[test]
+fn a_void_output_finishes_a_timed_voice_on_the_wall_clock() {
+    let engine = Engine::open_void(48_000, 2, 8);
+    assert!(engine.available());
+    assert_eq!(engine.output_state(), STATE_VOID);
+    park_level(&engine, 65_537);
+    let mut start = play(65_537, false);
+    // A second of clip, due a tenth of a second from now.
+    start.at = engine.now() + 0.1;
+    engine.submit(&[start]);
+    let mut events = [Event { kind: 0, handle: 0 }; 4];
+    wait_until("the voice starts", || engine.voice_count() == 1);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let count = engine.drain(&mut events);
+        if count > 0 {
+            assert_eq!(events[0].handle, 65_537);
+            break;
+        }
+        assert!(Instant::now() < deadline, "the voice never finished");
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(engine.now() >= 1.1, "the clock ran the voice to its end");
+}
+
+#[test]
+fn builds_and_tears_down_the_console_live_without_the_callback_allocating() {
+    let control = Control::new(STEREO_48K);
+    let engine = open(&control);
+    start_level(&engine);
+    hears_the_level(&control, STEREO_48K);
+    let strip = |kind: u32, target: u32, param: u32| Command {
+        kind,
+        target,
+        param,
+        ..Default::default()
+    };
+    // A return bus with a reverb, a Track sending to it, and a voice on it.
+    engine.submit(&[
+        strip(command::BUS_CREATE, 1, 0),
+        strip(command::TRACK_CREATE, 2, 0),
+    ]);
+    engine
+        .prepare_effect(tecsaudio::effects::REVERB, 5, &[])
+        .expect("a reverb");
+    let mut insert = strip(command::EFFECT_INSERT, 1, 0);
+    insert.flags = command::FLAG_BUS;
+    insert.data = 5;
+    let mut send = strip(command::SEND, 2, 1);
+    send.gain = 0.5;
+    park_level(&engine, 65_538);
+    let mut voice = play(65_538, true);
+    voice.target = 2;
+    engine.submit(&[insert, send, voice]);
+    wait_until("the second voice sounds", || engine.voice_count() == 2);
+    // A timed stop, an effect parameter, and the Track destroyed under it.
+    let mut stop = strip(command::STOP, 0, 0);
+    stop.handle = 65_538;
+    stop.at = engine.now() + 0.02;
+    let mut param = strip(command::EFFECT_PARAM, 0, tecsaudio::effects::REVERB_SIZE);
+    param.data = 5;
+    param.gain = 0.9;
+    engine.submit(&[stop, param]);
+    wait_until("the timed stop lands", || engine.voice_count() == 1);
+    engine.submit(&[
+        strip(command::TRACK_DESTROY, 2, 0),
+        strip(command::BUS_DESTROY, 1, 0),
+    ]);
+    thread::sleep(Duration::from_millis(50));
+    let mut events = [Event { kind: 0, handle: 0 }; 8];
+    let count = engine.drain(&mut events);
+    assert!(events[..count].iter().any(|event| event.handle == 65_538));
+    hears_the_level(&control, STEREO_48K);
     no_callback_allocated();
 }

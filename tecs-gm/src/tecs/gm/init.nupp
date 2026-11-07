@@ -1,0 +1,466 @@
+module tecs.gm
+
+--[[
+General MIDI for tecs, from a SoundFont, rendered in-process: an extension
+that registers a Decoder with the mixer and plays a synthesizer as one of its
+voices.
+
+```nupp
+local gm <const> = require("tecs.gm")
+
+local font <const> = assert(gm.loadSoundFont("assets/music/FluidR3_GM.sf2"))
+local music <const> = assert(gm.new(mixer, font, {track = mixer:bus("music"):track()}))
+
+-- A C major scale, scheduled ahead on the mixer's clock.
+local start <const> = mixer:now() + 0.1
+music:programChange(0, 0)
+for step, key in ipairs({60, 62, 64, 65, 67, 69, 71, 72}) do
+    local at <const> = start + (step - 1) * 0.25
+    music:noteOn(0, key, 100, at)
+    music:noteOff(0, key, at + 0.22)
+end
+```
+
+A synth is a voice: it takes a slot the way `Audio.play` does, sounds on a
+Track, and follows its Bus's fader, mute and pause like anything else. Its
+MIDI goes to the mixer as Decoder events with an `at` on the one clock the
+mixer keeps, so a note lands within eight frames of its time (the
+synthesizer's block) and lines up with every clip and every other synth. There
+is no clock of its own: `now` is the mixer's.
+
+Values are MIDI's own. Channels count from zero to fifteen, so the General
+MIDI percussion channel is 9. Keys, velocities, controllers, controller values
+and programs run from zero to 127, and a pitch bend from zero to 16383 with
+8192 at the centre. A value outside its range raises.
+
+The extension is a package of the tecs monorepo that a game opts into: its
+native library, `tecs_gm`, is built by `nupp task extensions`, and this
+module finds it the way tecs finds its own services, or through
+`TECS_GM_LIBRARY`.
+]]
+
+local audio = require("tecs.audio")
+local nativelibrary = require("tecs.internal.nativelibrary")
+local ffilib = require("ffi")
+
+nativelibrary.open("tecs_gm", "TECS_GM_LIBRARY")
+
+--- Reads a NUL-terminated C string the library owns.
+local readCString: function(value: cstring?): string = ffilib.string as any
+
+cdef function tecs_gm_load_font(path: cstring): uint64
+
+cdef function tecs_gm_load_font_bytes(borrows bytes: cstring, length: uint64): uint64
+
+cdef function tecs_gm_release_font(font: uint64)
+
+cdef function tecs_gm_last_error(): cstring?
+
+cdef function tecs_gm_decoder(): voidptr?
+
+--- Notes a synthesizer sounds at once unless asked otherwise.
+local DEFAULT_POLYPHONY: integer = 64
+local MIN_POLYPHONY: integer = 8
+local MAX_POLYPHONY: integer = 256
+
+--- Event operations, from `tecs-audio-abi`: bit 40 up.
+local OP_SHIFT: integer = 1099511627776
+local OP_NOTES_OFF: integer = 1
+local OP_RESET: integer = 2
+
+--- A loaded SoundFont, shared by every synth made on it, in any mixer.
+export record SoundFont
+    --- Read-only. The path or name it was loaded under.
+    path: string
+
+    --- Read-only. The id the library keeps it under.
+    id: integer
+end
+
+--- Configures `new`.
+export type Options = {
+    --- Caller-writable. The Track the synth sounds on. Omitted, its group's
+    --- Bus's default Track, or Master's.
+    track: audio.Track?,
+
+    --- Caller-writable. A group, which is a Bus, for a synth with no Track.
+    group: string?,
+
+    --- Caller-writable. The voice's gain, one by default.
+    gain: number?,
+
+    --- Caller-writable. Notes at once, from 8 to 256, 64 by default.
+    polyphony: integer?,
+
+    --- Caller-writable. Runs the synthesizer's reverb and chorus, on by
+    --- default.
+    effects: boolean?,
+
+    --- Caller-writable. What a steal compares, as for `Audio.play`.
+    priority: number?
+}
+
+--- One General MIDI synthesizer, playing as one voice of a mixer.
+---
+--- Every sending method returns whether the event went to a sounding voice.
+--- None raises for a destroyed synth, because a note that cannot be played
+--- is not a reason for a frame to stop.
+export record Synth
+    --- Read-only. The voice the synth plays as.
+    voice: integer
+
+    @private mixer: audio.Audio
+    @private destroyed: boolean
+
+    send: function(exclusive self: Synth, status: integer, data1: integer, data2: integer, at: number?): boolean
+    noteOn: function(exclusive self: Synth, channel: integer, key: integer, velocity: integer, at: number?): boolean
+    noteOff: function(exclusive self: Synth, channel: integer, key: integer, at: number?): boolean
+    controlChange: function(
+        exclusive self: Synth,
+        channel: integer,
+        controller: integer,
+        value: integer,
+        at: number?
+    ): boolean
+    programChange: function(exclusive self: Synth, channel: integer, program: integer, at: number?): boolean
+    pitchBend: function(exclusive self: Synth, channel: integer, value: integer, at: number?): boolean
+    allNotesOff: function(exclusive self: Synth, channel: integer?, immediate: boolean?, at: number?): boolean
+    reset: function(exclusive self: Synth, at: number?): boolean
+    now: function(borrows self: Synth): number
+    setGain: function(exclusive self: Synth, gain: number, at: number?): nil
+    pause: function(exclusive self: Synth): nil
+    resume: function(exclusive self: Synth): nil
+    paused: function(borrows self: Synth): boolean
+    playing: function(borrows self: Synth): boolean
+    destroy: function(exclusive self: Synth, fadeOut: number?): nil
+end
+
+--- Every SoundFont loaded, by path.
+local fonts: {[string]: SoundFont} = {}
+
+--- The Decoder id each mixer gave this extension, keyed weakly.
+local decoders: {[audio.Audio]: integer} = setmetatable({}, {__mode = "k"})
+
+--- Reads the reason the library left.
+local function reason(fallback: string): string
+    local message = tecs_gm_last_error()
+    if message == nil then
+        return fallback
+    end
+    local text = readCString(message)
+
+    return text ~= "" and text or fallback
+end
+
+--- Returns `value` as `width` little-endian bytes.
+local function littleEndian(value: integer, width: integer): string
+    local bytes: {string} = {}
+    local rest = value
+    for index = 1, width do
+        bytes[index] = string.char(rest % 256)
+        rest = rest // 256
+    end
+
+    return table.concat(bytes)
+end
+
+--- Raises unless `value` is an integer from `low` to `high`.
+---
+--- @raises string when it is not
+local function check(name: string, what: string, value: integer, low: integer, high: integer): nil
+    if value % 1 ~= 0 or value < low or value > high then
+        error(
+            "tecs.gm.Synth." .. name .. ": " .. what .. " must be from " .. tostring(low) .. " to " .. tostring(high)
+                .. ", got " .. tostring(value),
+            3
+        )
+    end
+end
+
+--- Loads a SoundFont 2 file, once per path for the whole process.
+---
+--- A file that is not a SoundFont, or is malformed, is refused with a reason
+--- rather than taking the process down.
+---
+--- @param path the file
+--- @return the SoundFont, or nil and the reason
+--- @raises string for an empty path
+export function loadSoundFont(path: string): (SoundFont?, string?)
+    if path == "" then
+        error("tecs.gm.loadSoundFont: a SoundFont path cannot be empty", 2)
+    end
+    local known = fonts[path]
+    if known ~= nil then
+        return known
+    end
+    -- The id crosses as a 64-bit cdata, which the parameters cannot encode.
+    local id = tonumber(tecs_gm_load_font(path)) as integer
+    if id == 0 then
+        return nil, reason("'" .. path .. "' did not load")
+    end
+    local font = new SoundFont(path = path, id = id)
+    fonts[path] = font
+
+    return font
+end
+
+--- Loads a SoundFont from the bytes of the file, under a name.
+---
+--- @param name what the font is known by; loading it again returns this one
+--- @param bytes the file's bytes
+--- @return the SoundFont, or nil and the reason
+export function loadSoundFontBytes(name: string, bytes: string): (SoundFont?, string?)
+    local known = fonts[name]
+    if known ~= nil then
+        return known
+    end
+    local id = tonumber(tecs_gm_load_font_bytes(bytes, #bytes as uint64)) as integer
+    if id == 0 then
+        return nil, reason("'" .. name .. "' did not load")
+    end
+    local font = new SoundFont(path = name, id = id)
+    fonts[name] = font
+
+    return font
+end
+
+--- Lets go of a SoundFont. Synths already playing it keep it.
+export function releaseSoundFont(font: SoundFont): nil
+    if fonts[font.path] == font then
+        fonts[font.path] = nil
+        tecs_gm_release_font(font.id as uint64)
+    end
+end
+
+--- Registers this extension's Decoder with a mixer, once, and returns its
+--- id. `new` calls it; a game needs it only to play through the Decoder
+--- itself.
+---
+--- @param mixer the mixer
+--- @return the id, or nil and the reason the mixer refused it
+export function install(mixer: audio.Audio): (integer?, string?)
+    local known = decoders[mixer]
+    if known ~= nil then
+        return known
+    end
+    local id, refused = mixer:registerDecoder(tecs_gm_decoder())
+    if id == nil then
+        return nil, refused
+    end
+    decoders[mixer] = id
+
+    return id
+end
+
+--- Makes a synthesizer on a SoundFont, as one voice of a mixer.
+---
+--- @param mixer the mixer it plays in
+--- @param font the SoundFont
+--- @param options Track, gain, polyphony and effects
+--- @return the synth, or nil and the reason. A mixer with no output is not
+---     such a case: it returns a synth with no voice, which sends nothing.
+--- @raises string for a polyphony out of range
+export function new(mixer: audio.Audio, font: SoundFont, options: Options?): (Synth?, string?)
+    local polyphony = (options and options.polyphony) or DEFAULT_POLYPHONY
+    if polyphony < MIN_POLYPHONY or polyphony > MAX_POLYPHONY then
+        error("tecs.gm.new: polyphony must be from 8 to 256, got " .. tostring(polyphony), 2)
+    end
+    local decoder, refused = install(mixer)
+    if decoder == nil then
+        -- A backend without Decoders, such as a test's, still gets a synth
+        -- whose events it can watch.
+        decoder = 0
+        if mixer.available and refused ~= "this backend takes no decoders" then
+            return nil, refused
+        end
+    end
+    -- `tecs_gm::Params`: the font id, the polyphony, and the effects flag.
+    local effects = (options and options.effects == false) and 0 or 1
+    local params = littleEndian(font.id, 8) .. littleEndian(polyphony, 4) .. littleEndian(effects, 4)
+    local voice, failure = mixer:playDecoded(decoder, params, "", {
+        track = options and options.track,
+        group = options and options.group,
+        gain = options and options.gain,
+        priority = options and options.priority
+    })
+    if voice == 0 then
+        if not mixer.available then
+            -- A mixer with no output starts no voice, and its synth still
+            -- answers every call, so a game needs no branch for it.
+            return new Synth(voice = 0, mixer = mixer, destroyed = false)
+        end
+
+        return nil, failure or "the mixer started no synthesizer"
+    end
+
+    return new Synth(voice = voice, mixer = mixer, destroyed = false)
+end
+
+--- Sends any short MIDI message at `at` on the mixer's clock.
+---
+--- @param self the synth
+--- @param status from 0x80 to 0xFF; system messages are accepted and ignored
+--- @param data1 from 0 to 127
+--- @param data2 from 0 to 127
+--- @param at seconds on the mixer's clock, or nil for at once
+--- @return whether the event was taken: true on a mixer with no output, false for a destroyed synth or a voice that stopped
+--- @raises string when a byte is out of range
+function Synth.send(exclusive self: Synth, status: integer, data1: integer, data2: integer, at: number?): boolean
+    check("send", "status", status, 0x80, 0xFF)
+    check("send", "data1", data1, 0, 127)
+    check("send", "data2", data2, 0, 127)
+    if self.destroyed then
+        return false
+    end
+
+    -- A mixer with no output takes every event and plays none.
+    if not self.mixer.available then
+        return true
+    end
+
+    return self.mixer:event(self.voice, status + data1 * 256 + data2 * 65536, at)
+end
+
+--- Sends a note on.
+---
+--- @raises string when a value is out of range
+function Synth.noteOn(exclusive self: Synth, channel: integer, key: integer, velocity: integer, at: number?): boolean
+    check("noteOn", "channel", channel, 0, 15)
+    check("noteOn", "key", key, 0, 127)
+    check("noteOn", "velocity", velocity, 0, 127)
+
+    return self:send(0x90 + channel, key, velocity, at)
+end
+
+--- Sends a note off.
+---
+--- @raises string when a value is out of range
+function Synth.noteOff(exclusive self: Synth, channel: integer, key: integer, at: number?): boolean
+    check("noteOff", "channel", channel, 0, 15)
+    check("noteOff", "key", key, 0, 127)
+
+    return self:send(0x80 + channel, key, 0, at)
+end
+
+--- Sends a control change.
+---
+--- @raises string when a value is out of range
+function Synth.controlChange(
+    exclusive self: Synth,
+    channel: integer,
+    controller: integer,
+    value: integer,
+    at: number?
+): boolean
+    check("controlChange", "channel", channel, 0, 15)
+    check("controlChange", "controller", controller, 0, 127)
+    check("controlChange", "value", value, 0, 127)
+
+    return self:send(0xB0 + channel, controller, value, at)
+end
+
+--- Sends a program change.
+---
+--- @raises string when a value is out of range
+function Synth.programChange(exclusive self: Synth, channel: integer, program: integer, at: number?): boolean
+    check("programChange", "channel", channel, 0, 15)
+    check("programChange", "program", program, 0, 127)
+
+    return self:send(0xC0 + channel, program, 0, at)
+end
+
+--- Sends a pitch bend, from 0 to 16383 with 8192 at the centre.
+---
+--- @raises string when a value is out of range
+function Synth.pitchBend(exclusive self: Synth, channel: integer, value: integer, at: number?): boolean
+    check("pitchBend", "channel", channel, 0, 15)
+    check("pitchBend", "value", value, 0, 16383)
+
+    return self:send(0xE0 + channel, value % 128, value // 128, at)
+end
+
+--- Releases every sounding note on a channel, or on all of them.
+---
+--- @param self the synth
+--- @param channel from 0 to 15, or nil for every channel
+--- @param immediate true cuts the notes without their release
+--- @param at seconds on the mixer's clock, or nil for at once
+--- @return whether the event was taken: true on a mixer with no output, false for a destroyed synth or a voice that stopped
+--- @raises string when the channel is out of range
+function Synth.allNotesOff(exclusive self: Synth, channel: integer?, immediate: boolean?, at: number?): boolean
+    if channel ~= nil then
+        check("allNotesOff", "channel", channel, 0, 15)
+    end
+    if self.destroyed then
+        return false
+    end
+    local payload = (immediate == true and 1 or 0) + (channel or 0xFF) * 256
+
+    -- A mixer with no output takes every event and plays none.
+    if not self.mixer.available then
+        return true
+    end
+
+    return self.mixer:event(self.voice, OP_NOTES_OFF * OP_SHIFT + payload, at)
+end
+
+--- Returns every channel to its General MIDI defaults, cutting every note.
+---
+--- @param self the synth
+--- @param at seconds on the mixer's clock, or nil for at once
+--- @return whether the event was taken: true on a mixer with no output, false for a destroyed synth or a voice that stopped
+function Synth.reset(exclusive self: Synth, at: number?): boolean
+    if self.destroyed then
+        return false
+    end
+
+    -- A mixer with no output takes every event and plays none.
+    if not self.mixer.available then
+        return true
+    end
+
+    return self.mixer:event(self.voice, OP_RESET * OP_SHIFT, at)
+end
+
+--- Returns the mixer's clock, which every `at` here is on.
+function Synth.now(borrows self: Synth): number
+    return self.mixer:now()
+end
+
+--- Sets the synth's gain, before its Track's and Bus's faders.
+function Synth.setGain(exclusive self: Synth, gain: number, at: number?): nil
+    self.mixer:setGain(self.voice, gain, at)
+end
+
+--- Pauses the synth's voice. Events due while it is paused still apply, so
+--- a song pauses through its Player, or its Timeline, rather than here.
+function Synth.pause(exclusive self: Synth): nil
+    self.mixer:pause(self.voice)
+end
+
+--- Resumes the synth's voice.
+function Synth.resume(exclusive self: Synth): nil
+    self.mixer:resume(self.voice)
+end
+
+--- Reports whether the synth's voice is held, by its own pause or its Bus's.
+function Synth.paused(borrows self: Synth): boolean
+    return self.mixer:paused(self.voice)
+end
+
+--- Reports whether the synth's voice is still sounding.
+function Synth.playing(borrows self: Synth): boolean
+    return not self.destroyed and self.mixer:playing(self.voice)
+end
+
+--- Stops the synth's voice and frees its synthesizer. Safe more than once.
+---
+--- @param self the synth
+--- @param fadeOut seconds to fade over, or nil to stop at once
+function Synth.destroy(exclusive self: Synth, fadeOut: number?): nil
+    if self.destroyed then
+        return
+    end
+    self.destroyed = true
+    self.mixer:stop(self.voice, fadeOut)
+end

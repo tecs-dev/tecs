@@ -49,6 +49,13 @@ local OUTPUT_PLAYING: integer = 1
 
 local OUTPUT_REOPENING: integer = 2
 local OUTPUT_FAILED: integer = 3
+local OUTPUT_VOID: integer = 4
+
+--- Strip meters read per call.
+local METER_RECORDS: integer = 256
+
+--- Frames a memory output renders per call into its scratch block.
+local RENDER_FRAMES: integer = 1024
 
 cdef struct tecsAudioCommand
     kind: uint32
@@ -63,16 +70,24 @@ cdef struct tecsAudioCommand
     x: float
     y: float
     z: float
+    at: number
+    target: uint32
+    param: uint32
+    data: uint64
+end
+
+cdef struct tecsAudioMeter
+    bus: uint32
+    id: uint32
+    peak: float
+    rms: float
+    clipped: uint32
+    reserved: uint32
 end
 
 cdef struct tecsAudioEvent
     kind: uint32
     handle: uint32
-end
-
-cdef struct tecsAudioClipInfo
-    duration: float
-    resident: int32
 end
 
 --- One captured sample, so a block of them can be a `carray`.
@@ -98,6 +113,10 @@ end
 cdef function tecs_audio_open(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr?
 
 cdef function tecs_audio_open_offline(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr?
+
+cdef function tecs_audio_open_or_void(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr?
+
+cdef function tecs_audio_open_void(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr?
 
 cdef function tecs_audio_close(borrows device: voidptr?)
 
@@ -125,34 +144,58 @@ cdef function tecs_audio_submit(borrows device: voidptr?, borrows commands: tecs
 
 cdef function tecs_audio_drain(borrows device: voidptr?, borrows events: tecsAudioEvent*, capacity: uint32): uint32
 
-cdef function tecs_audio_load_clip(
-    borrows device: voidptr?,
-    path: cstring,
-    clip: uint32,
-    mode: uint32,
-    streamSeconds: float,
-    borrows info: tecsAudioClipInfo*
-): int32
-
 -- The bytes cross as a pointer and a length rather than as a C string: an
 -- encoded file is full of zeroes, so its length cannot come from a terminator.
-
-cdef function tecs_audio_load_clip_bytes(
-    borrows device: voidptr?,
-    name: cstring,
-    borrows bytes: cstring,
-    length: uint64,
-    clip: uint32,
-    borrows info: tecsAudioClipInfo*
-): int32
-
-cdef function tecs_audio_release_clip(borrows device: voidptr?, clip: uint32)
 
 cdef function tecs_audio_position(borrows device: voidptr?, handle: uint32): float
 
 cdef function tecs_audio_seek(borrows device: voidptr?, handle: uint32, seconds: float): int32
 
-cdef function tecs_audio_decoders(borrows device: voidptr?): cstring?
+cdef function tecs_audio_now(borrows device: voidptr?): number
+
+cdef function tecs_audio_open_memory(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr?
+
+cdef function tecs_audio_render(borrows device: voidptr?, borrows out: tecsAudioSample*, frames: uint32): uint32
+
+cdef function tecs_audio_listen(borrows device: voidptr?, frames: uint32)
+
+cdef function tecs_audio_listened(borrows device: voidptr?): uint32
+
+cdef function tecs_audio_listen_started(borrows device: voidptr?): number
+
+cdef function tecs_audio_listen_summary(borrows device: voidptr?): cstring?
+
+cdef function tecs_audio_listen_save(borrows device: voidptr?, path: string): int32
+
+cdef function tecs_audio_listen_stop(borrows device: voidptr?)
+
+cdef function tecs_audio_late(borrows device: voidptr?): uint64
+
+cdef function tecs_audio_hold(borrows device: voidptr?, held: int32): int32
+
+cdef function tecs_audio_register_decoder(borrows device: voidptr?, borrows vtable: voidptr?): uint32
+
+cdef function tecs_audio_register_effect(borrows device: voidptr?, borrows vtable: voidptr?): uint32
+
+cdef function tecs_audio_decoder_open(
+    borrows device: voidptr?,
+    decoder: uint32,
+    handle: uint32,
+    borrows params: cstring,
+    paramsLength: uint64,
+    borrows bytes: cstring,
+    bytesLength: uint64
+): int32
+
+cdef function tecs_audio_effect_prepare(
+    borrows device: voidptr?,
+    kind: uint32,
+    id: uint64,
+    borrows params: cstring,
+    paramsLength: uint64
+): int32
+
+cdef function tecs_audio_meters(borrows device: voidptr?, borrows out: tecsAudioMeter*, max: uint32): uint32
 
 cdef function tecs_audio_last_error(borrows device: voidptr?): cstring?
 
@@ -232,15 +275,6 @@ cdef function tecs_audio_microphone_last_error(borrows microphone: voidptr?): cs
 --- calls would give the saving straight back.
 local CAPACITY: integer = 512
 
---- Selects a load that measures the clip against the streaming threshold.
-local MODE_AUTO: integer = 0
-
---- Selects a load that holds decoded samples in memory.
-local MODE_RESIDENT: integer = 1
-
---- Selects a load each voice reads from the file for itself.
-local MODE_STREAM: integer = 2
-
 --- The event kind reporting that a voice has finished.
 local EVENT_FINISHED: integer = 1
 
@@ -250,8 +284,8 @@ local LAYOUT_COMMAND: integer = 0
 --- Selects the event struct in `tecs_audio_layout`.
 local LAYOUT_EVENT: integer = 1
 
---- Selects the clip-info struct in `tecs_audio_layout`.
-local LAYOUT_CLIP_INFO: integer = 2
+--- Selects the FM register-write struct in `tecs_audio_layout`.
+local LAYOUT_METER: integer = 4
 
 --- Reports where LuaJIT and the library disagree about a struct size.
 ---
@@ -261,11 +295,11 @@ local LAYOUT_CLIP_INFO: integer = 2
 ---
 --- @return the reason, or nil when every struct agrees
 local function layoutMismatch(): string?
-    local names: {string} = {"tecsAudioCommand", "tecsAudioEvent", "tecsAudioClipInfo"}
-    local kinds: {integer} = {LAYOUT_COMMAND, LAYOUT_EVENT, LAYOUT_CLIP_INFO}
+    local names: {string} = {"tecsAudioCommand", "tecsAudioEvent", "tecsAudioMeter"}
+    local kinds: {integer} = {LAYOUT_COMMAND, LAYOUT_EVENT, LAYOUT_METER}
     local sizes: {
         integer
-    } = {ffi.sizeof<tecsAudioCommand>(), ffi.sizeof<tecsAudioEvent>(), ffi.sizeof<tecsAudioClipInfo>(),}
+    } = {ffi.sizeof<tecsAudioCommand>(), ffi.sizeof<tecsAudioEvent>(), ffi.sizeof<tecsAudioMeter>(),}
     for index = 1, #kinds do
         local reported = tecs_audio_layout(kinds[index] as uint32) as integer
         if reported ~= sizes[index] then
@@ -278,15 +312,37 @@ local function layoutMismatch(): string?
     return nil
 end
 
-local function modeCode(mode: audiobackend.LoadMode): integer
-    if mode == "resident" then
-        return MODE_RESIDENT
-    elseif mode == "stream" then
-        return MODE_STREAM
-    else
-        return MODE_AUTO
-    end
-end
+--- Native entry points the backend reaches through one table, because a Lua
+--- function holds at most sixty upvalues and `wrap` is near that.
+local extra = {
+    render = tecs_audio_render,
+    listen = tecs_audio_listen,
+    listened = tecs_audio_listened,
+    listen_started = tecs_audio_listen_started,
+    listen_summary = tecs_audio_listen_summary,
+    listen_save = tecs_audio_listen_save,
+    listen_stop = tecs_audio_listen_stop,
+    hold = tecs_audio_hold,
+    late = tecs_audio_late,
+    register_decoder = tecs_audio_register_decoder,
+    register_effect = tecs_audio_register_effect,
+    decoder_open = tecs_audio_decoder_open,
+    effect_prepare = tecs_audio_effect_prepare,
+    meters = tecs_audio_meters,
+    output_state = tecs_audio_output_state,
+    output_drops = tecs_audio_output_drops,
+    output_reopens = tecs_audio_output_reopens,
+    output_reason = tecs_audio_output_reason,
+    output_frequency = tecs_audio_output_frequency,
+    output_channels = tecs_audio_output_channels,
+    position = tecs_audio_position,
+    seek = tecs_audio_seek,
+    now = tecs_audio_now,
+    frequency = tecs_audio_frequency,
+    channels = tecs_audio_channels,
+    available = tecs_audio_available,
+    failed = tecs_audio_failed,
+}
 
 --- Opens a device with the thunk and wraps it in the backend contract.
 ---
@@ -303,9 +359,34 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
         return nil, absent
     end
     local closed = {false}
+    local meterBlock = carray(tecsAudioMeter, METER_RECORDS)
+    local channelCount = extra.channels(device) as integer
+    local scratch = carray(tecsAudioSample, RENDER_FRAMES * (channelCount > 0 and channelCount or 1))
+
+    --- Renders `frames` frames of the mix into nothing, for a memory output,
+    --- whose clock moves only here. A recording armed by `listen` keeps them.
+    local function render(frames: integer): integer
+        if closed[1] then
+            return 0
+        end
+        local done: integer = 0
+        while done < frames do
+            local block = frames - done
+            if block > RENDER_FRAMES then
+                block = RENDER_FRAMES
+            end
+            local wrote = extra.render(device, scratch, block as uint32) as integer
+            if wrote == 0 then
+                return done
+            end
+            done = done + wrote
+        end
+
+        return done
+    end
+
     local commands = carray(tecsAudioCommand, CAPACITY)
     local events = carray(tecsAudioEvent, CAPACITY)
-    local info = ffi.new<tecsAudioClipInfo>()
 
     local function reason(fallback: string): string
         local message = tecs_audio_last_error(device)
@@ -341,6 +422,10 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
                 target.x = nupp.math.f32.narrow(source.x)
                 target.y = nupp.math.f32.narrow(source.y)
                 target.z = nupp.math.f32.narrow(source.z)
+                target.at = source.at
+                target.target = source.target as uint32
+                target.param = source.param as uint32
+                target.data = source.data as uint64
             end
             written = written + 1
             if written == CAPACITY then
@@ -374,39 +459,6 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
         return written
     end
 
-    local function loadClipBytes(name: string, bytes: string, clip: integer): (audiobackend.ClipInfo?, string?)
-        if closed[1] then
-            return nil, "the audio output is closed"
-        end
-        local status = tecs_audio_load_clip_bytes(device, name, bytes, #bytes as uint64, clip as uint32, info)
-        if status ~= 0 then
-            return nil, reason("tecsaudio could not decode the bytes of '" .. name .. "'")
-        end
-
-        return new audiobackend.ClipInfo(duration = info.duration as number, resident = info.resident ~= 0)
-    end
-
-    local function loadClip(
-        path: string,
-        clip: integer,
-        mode: audiobackend.LoadMode,
-        streamSeconds: number
-    ): (audiobackend.ClipInfo?, string?)
-        local status = tecs_audio_load_clip(
-            device,
-            path,
-            clip as uint32,
-            modeCode(mode) as uint32,
-            nupp.math.f32.narrow(streamSeconds),
-            info
-        )
-        if status ~= 0 then
-            return nil, reason("tecsaudio could not read '" .. path .. "'")
-        end
-
-        return new audiobackend.ClipInfo(duration = info.duration as number, resident = info.resident ~= 0)
-    end
-
     local function output(): audiobackend.OutputStatus
         if closed[1] then
             return new audiobackend.OutputStatus(
@@ -418,17 +470,19 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
                 channels = 0
             )
         end
-        local code = tecs_audio_output_state(device) as integer
-        local state: "offline" | "playing" | "reopening" | "failed" = "offline"
+        local code = extra.output_state(device) as integer
+        local state: "offline" | "playing" | "reopening" | "failed" | "void" = "offline"
         if code == OUTPUT_PLAYING then
             state = "playing"
         elseif code == OUTPUT_REOPENING then
             state = "reopening"
         elseif code == OUTPUT_FAILED then
             state = "failed"
+        elseif code == OUTPUT_VOID then
+            state = "void"
         end
         local reason: string? = nil
-        local message = tecs_audio_output_reason(device)
+        local message = extra.output_reason(device)
         if message ~= nil then
             local text = readCString(message)
             if text ~= "" then
@@ -438,17 +492,17 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
 
         return new audiobackend.OutputStatus(
             state = state,
-            drops = tecs_audio_output_drops(device) as integer,
-            reopens = tecs_audio_output_reopens(device) as integer,
+            drops = extra.output_drops(device) as integer,
+            reopens = extra.output_reopens(device) as integer,
             reason = reason,
-            frequency = tecs_audio_output_frequency(device) as integer,
-            channels = tecs_audio_output_channels(device) as integer
+            frequency = extra.output_frequency(device) as integer,
+            channels = extra.output_channels(device) as integer
         )
     end
 
     return new audiobackend.Backend(
         failure = function(): string?
-            if not closed[1] and tecs_audio_failed(device) ~= 0 then
+            if not closed[1] and extra.failed(device) ~= 0 then
                 return "the output stream failed; destroy and recreate the audio mixer"
             end
             return nil
@@ -458,21 +512,16 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
                 return 0
             end
 
-            return (tecs_audio_output_drops(device) as integer) + (tecs_audio_output_reopens(device) as integer)
+            return (extra.output_drops(device) as integer) + (extra.output_reopens(device) as integer)
         end,
         output = output,
-        available = tecs_audio_available(device) ~= 0,
-        frequency = tecs_audio_frequency(device) as integer,
-        channels = tecs_audio_channels(device) as integer,
+        available = extra.available(device) ~= 0,
+        frequency = extra.frequency(device) as integer,
+        channels = extra.channels(device) as integer,
         submit = submit,
         drain = drain,
-        loadClip = loadClip,
-        loadClipBytes = loadClipBytes,
-        releaseClip = function(clip: integer): nil
-            tecs_audio_release_clip(device, clip as uint32)
-        end,
         position = function(handle: integer): number?
-            local seconds = tecs_audio_position(device, handle as uint32) as number
+            local seconds = extra.position(device, handle as uint32) as number
             if seconds < 0 then
                 return nil
             end
@@ -480,19 +529,150 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
             return seconds
         end,
         seek = function(handle: integer, seconds: number): boolean
-            return tecs_audio_seek(device, handle as uint32, nupp.math.f32.narrow(seconds)) ~= 0
+            return extra.seek(device, handle as uint32, nupp.math.f32.narrow(seconds)) ~= 0
         end,
-        decoders = function(): {string}
-            local joined = tecs_audio_decoders(device)
-            if joined == nil then
-                return {}
-            end
-            local names: {string} = {}
-            for name in readCString(joined):gmatch("[^,]+") do
-                names[#names + 1] = name
+        now = function(): number
+            if closed[1] then
+                return 0
             end
 
-            return names
+            return extra.now(device)
+        end,
+        render = render,
+        listen = function(frames: integer): nil
+            if not closed[1] then
+                extra.listen(device, frames as uint32)
+            end
+        end,
+        listened = function(): integer
+            if closed[1] then
+                return 0
+            end
+
+            return extra.listened(device) as integer
+        end,
+        listenStarted = function(): number
+            if closed[1] then
+                return 0
+            end
+
+            return extra.listen_started(device)
+        end,
+        listenSummary = function(): string?
+            if closed[1] then
+                return nil
+            end
+            local text = extra.listen_summary(device)
+            if text == nil then
+                return nil
+            end
+
+            return readCString(text)
+        end,
+        listenSave = function(path: string): (boolean, string?)
+            if closed[1] then
+                return false, "the mixer is closed"
+            end
+            if extra.listen_save(device, path) == 0 then
+                return false, reason("nothing has been recorded")
+            end
+
+            return true
+        end,
+        listenStop = function(): nil
+            if not closed[1] then
+                extra.listen_stop(device)
+            end
+        end,
+        hold = function(held: boolean): boolean
+            if closed[1] then
+                return false
+            end
+
+            return extra.hold(device, held and 1 or 0) ~= 0
+        end,
+        registerDecoder = function(vtable: any): (integer?, string?)
+            if closed[1] then
+                return nil, "the mixer is closed"
+            end
+            local id = extra.register_decoder(device, vtable as voidptr?) as integer
+            if id == 0 then
+                return nil, reason("the decoder was refused")
+            end
+
+            return id
+        end,
+        registerEffect = function(vtable: any): (integer?, string?)
+            if closed[1] then
+                return nil, "the mixer is closed"
+            end
+            local id = extra.register_effect(device, vtable as voidptr?) as integer
+            if id == 0 then
+                return nil, reason("the effect was refused")
+            end
+
+            return id
+        end,
+        openDecoded = function(decoder: integer, handle: integer, params: string, bytes: string): (boolean, string?)
+            if closed[1] then
+                return false, "the mixer is closed"
+            end
+            local opened = extra.decoder_open(
+                device,
+                decoder as uint32,
+                handle as uint32,
+                params,
+                #params as uint64,
+                bytes,
+                #bytes as uint64
+            )
+            if opened == 0 then
+                return false, reason("the decoder opened nothing")
+            end
+
+            return true
+        end,
+        prepareEffect = function(kind: integer, id: integer, params: string): (boolean, string?)
+            if closed[1] then
+                return false, "the mixer is closed"
+            end
+            if extra.effect_prepare(device, kind as uint32, id as uint64, params, #params as uint64) == 0 then
+                return false, reason("the effect was not built")
+            end
+
+            return true
+        end,
+        meters = function(): {audiobackend.MeterReading}
+            local out: {audiobackend.MeterReading} = {}
+            if closed[1] then
+                return out
+            end
+            local count = extra.meters(device, meterBlock, METER_RECORDS as uint32) as integer
+            for index = 0, count - 1 do
+                @unsafe do
+                    local record = meterBlock[index]
+                    out[
+                        #out + 1
+                    ] = new audiobackend.MeterReading(
+                        bus = record.bus ~= 0,
+                        id = record.id as integer,
+                        peak = record.peak as number,
+                        rms = record.rms as number,
+                        clipped = record.clipped as integer
+                    )
+                end
+            end
+
+            return out
+        end,
+        late = function(): integer
+            if closed[1] then
+                return 0
+            end
+
+            -- A uint64 comes back boxed; unbox it so it encodes and compares.
+
+            return math.floor(tonumber(extra.late(device)) or 0)
         end,
         close = function(): nil
             if closed[1] then
@@ -517,6 +697,68 @@ export function open(frequency: integer, channels: integer, maxVoices: integer):
             return tecs_audio_open(frequency as uint32, channels as uint32, maxVoices as uint32)
         end,
         "tecsaudio opened no output"
+    )
+end
+
+--- Opens the platform's default output, or, on a machine with none, a void
+--- output that keeps time without one.
+---
+--- Unlike `open`, the backend is available either way: commands play into
+--- it, its clock moves at the wall clock's pace, and a device that appears
+--- later is opened and heard.
+---
+--- @param frequency the requested output frequency in frames per second
+--- @param channels the requested number of output channels
+--- @param maxVoices the greatest number of voices the mixer holds at once
+--- @return the backend, or nil when the library opened nothing
+--- @return the reason, when the first return is nil
+export function openOrVoid(frequency: integer, channels: integer, maxVoices: integer): (audiobackend.Backend?, string?)
+    return wrap(
+        function(): voidptr?
+            return tecs_audio_open_or_void(frequency as uint32, channels as uint32, maxVoices as uint32)
+        end,
+        "tecsaudio opened no output"
+    )
+end
+
+--- Opens a memory output: an available backend that never touches a device,
+--- whose clock moves only when `render` renders it.
+---
+--- Deterministic: the same commands and the same steps produce the same
+--- samples on every run, which is what a test and an agent comparing two runs
+--- want. `listen` records what it renders.
+---
+--- @param frequency the output frequency in frames per second
+--- @param channels the number of output channels
+--- @param maxVoices the greatest number of voices the mixer holds at once
+--- @return the backend, or nil when the library refused
+--- @return the reason, when the first return is nil
+export function openMemory(frequency: integer, channels: integer, maxVoices: integer): (audiobackend.Backend?, string?)
+    return wrap(
+        function(): voidptr?
+            return tecs_audio_open_memory(frequency as uint32, channels as uint32, maxVoices as uint32)
+        end,
+        "tecsaudio opened no memory output"
+    )
+end
+
+--- Opens a void output: an available backend that never touches a device,
+--- whose clock moves at the wall clock's pace.
+---
+--- A headless run reaches for this to keep time, so a timed command lands and
+--- a voice finishes when it would have on a device, with nothing heard.
+---
+--- @param frequency the output frequency in frames per second
+--- @param channels the number of output channels
+--- @param maxVoices the greatest number of voices the mixer holds at once
+--- @return the backend, or nil when the library refused
+--- @return the reason, when the first return is nil
+export function openVoid(frequency: integer, channels: integer, maxVoices: integer): (audiobackend.Backend?, string?)
+    return wrap(
+        function(): voidptr?
+            return tecs_audio_open_void(frequency as uint32, channels as uint32, maxVoices as uint32)
+        end,
+        "tecsaudio opened no void output"
     )
 end
 
