@@ -48,6 +48,10 @@ local function newRecorder(): Recorder
                 copy.x = source.x
                 copy.y = source.y
                 copy.z = source.z
+                copy.at = source.at
+                copy.target = source.target
+                copy.param = source.param
+                copy.data = source.data
                 log[#log + 1] = copy
             end
         end,
@@ -568,6 +572,336 @@ function suite.sendsGainPitchAndLoopOnlyWhenTheyMove(): nil
     test.assert(not mixer:looping(handle))
 end
 
+function suite.stampsEveryVoiceCommandWithTheTimeItWasGiven(): nil
+    local recorder = newRecorder()
+    local mixer = audio.newAudio({backend = recorder.backend})
+    local clip = loaded(mixer)
+    local handle = mixer:play(clip, {at = 1.25, resample = "nearest"})
+    mixer:flush()
+    local play = assert(lastOf(recorder, audiobackend.PLAY))
+    test.equal(play.at, 1.25)
+    test.equal(play.flags // audiobackend.NEAREST % 2, 1)
+    test.equal(mixer:resample(handle), "nearest")
+
+    clear(recorder)
+    mixer:setGain(handle, 0.5, 1.5)
+    mixer:setPitch(handle, 2, 1.5)
+    mixer:setLoop(handle, true, 1.75)
+    mixer:setPosition(handle, 1, 2, 3, 2)
+    mixer:setStereo(handle, 0.25, 0.75, 2.25)
+    mixer:setResample(handle, "linear", 2.5)
+    mixer:flush()
+    test.equal(assert(lastOf(recorder, audiobackend.SET_GAIN)).at, 1.5)
+    test.equal(assert(lastOf(recorder, audiobackend.SET_PITCH)).at, 1.5)
+    test.equal(assert(lastOf(recorder, audiobackend.SET_LOOP)).at, 1.75)
+    test.equal(assert(lastOf(recorder, audiobackend.SET_POSITION)).at, 2)
+    test.equal(assert(lastOf(recorder, audiobackend.SET_STEREO)).at, 2.25)
+    local resample = assert(lastOf(recorder, audiobackend.SET_RESAMPLE))
+    test.equal(resample.at, 2.5)
+    test.equal(resample.flags, 0)
+    test.equal(mixer:resample(handle), "linear")
+    test.equal(mixer:resample(0), nil)
+
+    -- A command sent with no time carries none, even from a reused record.
+    clear(recorder)
+    mixer:setGain(handle, 0.25)
+    mixer:flush()
+    test.equal(assert(lastOf(recorder, audiobackend.SET_GAIN)).at, 0)
+end
+
+function suite.sendsATimedValueEvenWhenItRepeatsTheLastOne(): nil
+    local recorder = newRecorder()
+    local mixer = audio.newAudio({backend = recorder.backend})
+    local clip = loaded(mixer)
+    local handle = mixer:play(clip, {pitch = 2})
+    mixer:flush()
+    clear(recorder)
+    -- The second lands after the first only if the backend says so, so both go.
+    mixer:setPitch(handle, 3, 2)
+    mixer:setPitch(handle, 3, 1)
+    mixer:setResample(handle, "linear", 1)
+    mixer:flush()
+    test.equal(countOf(recorder, audiobackend.SET_PITCH), 2)
+    test.equal(countOf(recorder, audiobackend.SET_RESAMPLE), 1)
+    -- An untimed repeat of the last value sent is still skipped.
+    clear(recorder)
+    mixer:setPitch(handle, 3)
+    mixer:setResample(handle, "linear")
+    mixer:flush()
+    test.equal(#recorder.log, 0)
+end
+
+function suite.holdsATimedStopsSlotUntilTheBackendReportsItFinished(): nil
+    local recorder = newRecorder()
+    local mixer = audio.newAudio({backend = recorder.backend})
+    local clip = loaded(mixer)
+    local handle = mixer:play(clip)
+    mixer:flush()
+    clear(recorder)
+    mixer:stop(handle, nil, 3)
+    mixer:flush()
+    local stop = assert(lastOf(recorder, audiobackend.STOP))
+    test.equal(stop.at, 3)
+    test.equal(stop.fade, 0)
+    test.assert(mixer:playing(handle))
+    test.equal(mixer:update(0), 1)
+    recorder.finished[1] = handle
+    test.equal(mixer:update(0), 0)
+    test.assert(not mixer:playing(handle))
+end
+
+function suite.holdsATimedStartIntoAPausedGroupOnItsOwnFrame(): nil
+    local recorder = newRecorder()
+    local mixer = audio.newAudio({backend = recorder.backend})
+    local clip = loaded(mixer)
+    mixer:pauseGroup("music")
+    clear(recorder)
+    local handle = mixer:play(clip, {group = "music", at = 4})
+    mixer:flush()
+    -- The Bus holds it from its first frame, with no pause of its own to
+    -- race the start.
+    test.equal(assert(lastOf(recorder, audiobackend.PLAY)).at, 4)
+    test.equal(countOf(recorder, audiobackend.PAUSE), 0)
+    test.assert(mixer:paused(handle))
+end
+
+function suite.readsTheOutputClockAndFrequencyFromTheBackend(): nil
+    -- A backend with no clock reads as zero.
+    local recorder = newRecorder()
+    local mixer = audio.newAudio({backend = recorder.backend})
+    test.equal(mixer:now(), 0)
+    test.equal(mixer:frequency(), 48000)
+
+    local backend = newRecorder().backend
+    local frames = {0}
+    backend.now = function(): number
+        return frames[1] / 48000
+    end
+    local clocked = audio.newAudio({backend = backend})
+    frames[1] = 1200
+    test.equal(clocked:now(), 0.025)
+    clocked:destroy()
+    test.equal(clocked:now(), 0)
+
+    local silent = audio.newAudio({backend = audiobackend.silent()})
+    test.equal(silent:now(), 0)
+    test.equal(silent:frequency(), 0)
+    -- Taken and dropped like any other command.
+    test.equal(silent:play(nil, {at = 1}), 0)
+
+    -- What `newAudio` falls back to reports the configured frequency, so a
+    -- count of frames over it is still a time.
+    test.equal(audiobackend.silent(44100).frequency, 44100)
+end
+
+function suite.refusesATimeThatIsNotFinite(): nil
+    local recorder = newRecorder()
+    local mixer = audio.newAudio({backend = recorder.backend})
+    local clip = loaded(mixer)
+    local handle = mixer:play(clip)
+    test.raises(
+        function(): nil
+            mixer:play(clip, {at = 1 / 0})
+        end,
+        "finite"
+    )
+    test.raises(
+        function(): nil
+            mixer:setGain(handle, 0.5, 0 / 0)
+        end,
+        "finite"
+    )
+    test.raises(
+        function(): nil
+            mixer:stop(handle, 0, -1 / 0)
+        end,
+        "finite"
+    )
+    -- A time already mixed is still a time.
+    mixer:setGain(handle, 0.5, -1)
+    mixer:destroy()
+end
+
+function suite.logsRefusalsAndCountsThem(): nil
+    local recorder = newRecorder()
+    local mixer = audio.newAudio({backend = recorder.backend, maxVoices = 1})
+    local clip = loaded(mixer)
+    local first = mixer:play(clip, {group = "sfx"})
+    test.equal(mixer:play(clip), 0)
+    mixer:stop(first)
+    local events = mixer:events()
+    test.equal(#events, 3)
+    test.equal(events[1].event, "start")
+    test.equal(events[1].group, "sfx")
+    test.equal(events[2].event, "refuse")
+    test.equal(events[2].reason, "voices")
+    test.equal(events[3].event, "stop")
+    test.equal(mixer:stats().refused, 1)
+    mixer:destroy()
+end
+
+function suite.ticksUpdateOnlyWhenTheGameDidNot(): nil
+    local recorder = newRecorder()
+    local mixer = audio.newAudio({backend = recorder.backend})
+    local clip = loaded(mixer)
+    mixer:play(clip)
+    -- The tick flushes what the game queued, as update does.
+    mixer:tick(0.016)
+    test.assert(#recorder.log >= 1)
+    local sent = #recorder.log
+    mixer:play(clip)
+    mixer:update(0.016)
+    test.equal(#recorder.log, sent + 1)
+    -- Already updated this frame: the tick leaves it.
+    mixer:tick(0.016)
+    test.equal(#recorder.log, sent + 1)
+    mixer:destroy()
+end
+
+function suite.stealsTheOldestOverATracksPolyphonyAndRefusesAnEqualOverTheBudget(): nil
+    local recorder = newRecorder()
+    local mixer = audio.newAudio({backend = recorder.backend, maxVoices = 3})
+    local clip = loaded(mixer)
+    local track = mixer:track({polyphony = 2})
+    test.equal(track:polyphony(), 2)
+    local first = track:play(clip)
+    local second = track:play(clip)
+    local third = track:play(clip)
+    test.assert(third ~= 0)
+    test.assert(not mixer:playing(first), "the oldest went")
+    test.assert(mixer:playing(second))
+    test.equal(track:sounding(), 2)
+    test.equal(mixer:stats().steals, 1)
+    -- One more on the default Track fills the budget; another of equal
+    -- priority is refused, and a higher one steals the lowest.
+    test.assert(mixer:play(clip) ~= 0)
+    test.equal(mixer:play(clip), 0)
+    local urgent = mixer:play(clip, {priority = 5})
+    test.assert(urgent ~= 0)
+    test.equal(mixer:stats().steals, 2)
+    local logged = mixer:events()
+    local steals = 0
+    for _, entry in ipairs(logged) do
+        if entry.event == "steal" then
+            steals = steals + 1
+        end
+    end
+    test.equal(steals, 2)
+    mixer:destroy()
+end
+
+function suite.routesATrackAndItsEffectsThroughTheCommands(): nil
+    local recorder = newRecorder()
+    local mixer = audio.newAudio({backend = recorder.backend, limiter = false})
+    local effects = require("tecs.audio.effects")
+    clear(recorder)
+    local track = mixer:track({bus = "sfx", sends = {room = 0.25}})
+    local filter = track:insert(effects.filter({shape = "highpass", frequency = 200}))
+    filter:set("frequency", 400, 2)
+    mixer:flush()
+    local insert = assert(lastOf(recorder, audiobackend.EFFECT_INSERT))
+    test.equal(insert.target, track.id)
+    test.equal(insert.data, filter.id)
+    local param = assert(lastOf(recorder, audiobackend.EFFECT_PARAM))
+    test.equal(param.gain, 400)
+    test.equal(param.at, 2)
+    test.equal(filter:get("frequency"), 400)
+    test.equal(assert(lastOf(recorder, audiobackend.SEND)).gain, 0.25)
+    test.raises(
+        function(): nil
+            filter:set("resonance", 1)
+        end,
+        "no parameter"
+    )
+    test.raises(
+        function(): nil
+            effects.filter({shape = "comb"})
+        end,
+        "no shape"
+    )
+    filter:remove()
+    test.equal(#track:effects(), 0)
+    track:destroy()
+    mixer:flush()
+    test.equal(assert(lastOf(recorder, audiobackend.TRACK_DESTROY)).target, track.id)
+    test.equal(track:play(loaded(mixer)), 0, "a destroyed Track refuses")
+    local master = mixer:masterBus()
+    test.raises(
+        function(): nil
+            master:destroy()
+        end,
+        "Master"
+    )
+    mixer:destroy()
+end
+
+function suite.placesAnEmitterTrackAgainstTheListenerAndSendsItToItsZone(): nil
+    local recorder = newRecorder()
+    local world = ecs.newWorld()
+    local mixer = audio.install(world, {backend = recorder.backend, maxVoices = 4, limiter = false})
+    local clip = loaded(mixer)
+    world:spawn(ecs.Transform2D(100, 50), audio.ListenerComponent(10))
+    local emitter = world:spawn(ecs.Transform2D(130, 10), audio.TrackComponent(clip.id, true, 1, true, 1, true))
+    world:spawn(ecs.Transform2D(130, 10), audio.ReverbZoneComponent(audio.groupId("cave"), 50, 0.5))
+    world:commit()
+    clear(recorder)
+    world:update(0)
+
+    -- The row's position is the transform less the listener's, over the
+    -- scale, with world y flipped into the listener's frame.
+    local row = assert(world:get(emitter, audio.TrackComponent))
+    test.equal(row.x, 3)
+    test.equal(row.y, 4)
+    test.assert(row.voice > 0)
+    -- The voice sounds on an emitter Track of its own, placed there.
+    local play = assert(lastOf(recorder, audiobackend.PLAY))
+    test.assert(play.target ~= 0, "an emitter Track, not the default")
+    test.equal(play.flags & audiobackend.SPATIAL, 0, "the Track is placed, not the voice")
+    local placed = assert(lastOf(recorder, audiobackend.TRACK_SET))
+    test.equal(placed.param, audiobackend.TRACK_POSITION)
+    test.equal(placed.x, 3)
+    test.equal(placed.y, 4)
+    -- At the zone's centre it sends at the zone's level.
+    local send = assert(lastOf(recorder, audiobackend.SEND))
+    test.equal(send.target, play.target)
+    test.equal(send.param, mixer:bus("cave").id)
+    test.equal(send.gain, 0.5)
+
+    -- Moving the listener moves the Track, not the voice.
+    clear(recorder)
+    world:update(0)
+    test.equal(countOf(recorder, audiobackend.TRACK_SET), 0, "nothing moved, nothing sent")
+    -- Stopping the row destroys its Track with its voice.
+    assert(world:getMut(emitter, audio.TrackComponent)).playing = false
+    world:update(0)
+    test.equal(assert(lastOf(recorder, audiobackend.TRACK_DESTROY)).target, play.target)
+end
+
+function suite.playsAPcmSoundAssetAndDecodesItOnce(): nil
+    local recorder = newRecorder()
+    local mixer = audio.newAudio({backend = recorder.backend})
+    local sound = new audio.PcmSound(path = "sounds/memory.wav", bytes = "RIFF", stream = false, serial = 99)
+    local first = mixer:play(sound)
+    local second = mixer:play(sound)
+    test.assert(first ~= 0 and second ~= 0)
+    test.equal(assert(mixer:clips()[1]).path, "sounds/memory.wav#99")
+    test.equal(#mixer:clips(), 1, "decoded once for both plays")
+    local streamed = new audio.PcmSound(path = "sounds/long.ogg", bytes = nil, stream = true, serial = 100)
+    mixer:play(streamed)
+    test.equal(#mixer:clips(), 2)
+    test.equal(audio.PCM.name, "sound")
+    mixer:destroy()
+end
+
+function suite.refusesAnOutputItDoesNotKnow(): nil
+    test.raises(
+        function(): nil
+            audio.newAudio({output = "speakers" as any})
+        end,
+        "output"
+    )
+end
+
 function suite.spreadsPitchAroundTheRequestedRate(): nil
     local recorder = newRecorder()
     local mixer = audio.newAudio({backend = recorder.backend, maxVoices = 8})
@@ -698,25 +1032,32 @@ function suite.composesGroupGainAndMuteOverEachVoiceGain(): nil
     local mixer = audio.newAudio({backend = recorder.backend})
     local clip = loaded(mixer)
     local handle = mixer:play(clip, {gain = 0.5, group = "sfx"})
+    local sfx = mixer:bus("sfx")
 
     clear(recorder)
     mixer:setGroupGain("sfx", 0.5)
     mixer:flush()
-    test.equal(assert(lastOf(recorder, audiobackend.SET_GAIN)).gain, 0.25)
+    -- One command for the Bus's fader, none for its voices.
+    local gain = assert(lastOf(recorder, audiobackend.BUS_SET))
+    test.equal(gain.target, sfx.id)
+    test.equal(gain.param, audiobackend.BUS_GAIN)
+    test.equal(gain.gain, 0.5)
+    test.equal(countOf(recorder, audiobackend.SET_GAIN), 0)
     test.equal(mixer:groupGain("sfx"), 0.5)
 
     clear(recorder)
     mixer:setGroupMuted("sfx", true)
     mixer:flush()
-    test.equal(assert(lastOf(recorder, audiobackend.SET_GAIN)).gain, 0)
+    local mute = assert(lastOf(recorder, audiobackend.BUS_SET))
+    test.equal(mute.param, audiobackend.BUS_MUTE)
+    test.equal(mute.gain, 1)
     test.assert(mixer:groupMuted("sfx"))
 
-    -- Unmuting puts back the voice gain times the group gain rather than one.
     clear(recorder)
     mixer:setGroupMuted("sfx", false)
     mixer:flush()
-    test.equal(assert(lastOf(recorder, audiobackend.SET_GAIN)).gain, 0.25)
-    test.equal(assert(mixer:voiceList()[1]).applied, 0.25)
+    test.equal(assert(lastOf(recorder, audiobackend.BUS_SET)).gain, 0)
+    test.equal(assert(mixer:voiceList()[1]).applied, 0.5, "the voice keeps its own gain")
     test.assert(mixer:playing(handle))
 end
 
@@ -727,21 +1068,27 @@ function suite.appliesAGroupSettingToAVoiceThatJoinsLater(): nil
 
     mixer:setGroupGain("music", 0.25)
     mixer:pauseGroup("music")
+    local music = mixer:bus("music")
 
     clear(recorder)
     local handle = mixer:play(clip, {gain = 1, group = "music"})
     mixer:flush()
-    test.equal(assert(lastOf(recorder, audiobackend.PLAY)).gain, 0.25)
-    -- A voice starting into a paused group is held, or it would be the one
-    -- sound the menu missed.
-    test.equal(countOf(recorder, audiobackend.PAUSE), 1)
-    test.assert(mixer:paused(handle))
+    -- The group is a Bus: the voice keeps its own gain and sounds on the
+    -- Bus's default Track, whose fader and pause the backend applies.
+    local play = assert(lastOf(recorder, audiobackend.PLAY))
+    test.equal(play.gain, 1)
+    test.equal(play.target, music:track().id)
+    test.equal(countOf(recorder, audiobackend.PAUSE), 0)
+    test.assert(mixer:paused(handle), "a voice under a paused Bus is held")
     test.assert(mixer:groupPaused("music"))
+    test.equal(music:gain(), 0.25)
 
     clear(recorder)
     mixer:resumeGroup("music")
     mixer:flush()
-    test.equal(countOf(recorder, audiobackend.RESUME), 1)
+    local resume = assert(lastOf(recorder, audiobackend.BUS_SET))
+    test.equal(resume.param, audiobackend.BUS_PAUSE)
+    test.equal(resume.gain, 0)
     test.assert(not mixer:paused(handle))
     test.assert(not mixer:groupPaused("music"))
 end

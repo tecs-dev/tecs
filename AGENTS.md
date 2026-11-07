@@ -108,14 +108,14 @@ tecs/
 │   ├── platform/           # Window, events, audio and gamepad backends
 │   ├── physics/            # Rapier contract and binding
 │   ├── input.nupp          # Gameplay input over the platform event stream
-│   ├── audio.nupp          # Clips, voices, groups, limits, the Sound component
+│   ├── audio/              # Clips, voices, groups, limits, the Sound component, General MIDI, Yamaha FM, music
 │   ├── sequence.nupp       # Sequencer, with the tween runtime inside it
 │   ├── assets.nupp         # Asset orchestration
 │   ├── mcp.nupp            # Debug server: transport, tools, sandbox
 │   └── events.nupp, files.nupp, watch.nupp
 ├── native/rust/
 │   ├── winit-host/         # The application loop, the wgpu renderer, the host ABI
-│   ├── tecs-audio/         # cpal output and capture behind a batched contract
+│   ├── tecs-audio/         # cpal output and capture behind a batched contract; General MIDI and Yamaha FM voices
 │   ├── tecs-gamepad/       # gilrs enumeration and observations
 │   ├── physics/            # Rapier storage and stepping
 │   └── build-support/      # Native packaging and binary inspection

@@ -1,0 +1,164 @@
+module tecs.audio.effects
+
+--[[
+Effects for a Track's or a Bus's insert chain.
+
+```nupp
+local effects <const> = require("tecs.audio.effects")
+
+local room <const> = mixer:bus("room", {effects = {effects.reverb({size = 0.7})}})
+local voice <const> = mixer:track({bus = "sfx", sends = {room = 0.3}})
+local muffle <const> = voice:insert(effects.filter({shape = "lowpass", frequency = 800}))
+muffle:set("frequency", 20000, mixer:now() + 2)  -- open it up over two seconds' time
+```
+
+A spec says what to build; inserting it builds one instance on the strip, on
+the control side, and every parameter after that is a target the effect ramps
+towards on the exact frame its `at` names.
+
+The built-ins are `limiter`, which Master carries by default, `filter`, a
+biquad of any of the cookbook shapes, `eq`, three bands, and `reverb`, an
+algorithmic room for a return bus. A library that speaks the Effect ABI adds
+more through `Audio.registerEffect`, which returns a kind for `custom`.
+]]
+
+--- Built-in kinds, as the native mixer numbers them.
+export const LIMITER: integer = 1
+
+export const FILTER: integer = 2
+export const EQ: integer = 3
+export const REVERB: integer = 4
+
+--- What an insert builds: a kind, its parameter names, and their values.
+export record Spec
+    --- Read-only. The native kind.
+    kind: integer
+
+    --- Read-only. The kind's name, for a snapshot.
+    name: string
+
+    --- Read-only. Parameter ids by name, for `Effect.set`.
+    names: {[string]: integer}
+
+    --- Read-only. Starting values by parameter id.
+    values: {[integer]: number}
+
+    --- Read-only. Bytes a registered kind's `open` reads, empty for a
+    --- built-in.
+    params: string
+end
+
+--- Filter shapes by name.
+local SHAPES: {
+    [string]: integer
+} = {lowpass = 0, highpass = 1, bandpass = 2, notch = 3, peak = 4, lowshelf = 5, highshelf = 6}
+
+--- Builds a spec, copying the values a caller gave for the names it knows.
+---
+--- @raises string for a name the kind does not have, or a value that is not
+---     a finite number
+local function spec(
+    kind: integer,
+    name: string,
+    names: {[string]: integer},
+    given: {[string]: any}?,
+    convert: {[string]: function(value: any): number}?
+): Spec
+    local values: {[integer]: number} = {}
+    for key, value in pairs(given or {}) do
+        local id = names[key]
+        if id == nil then
+            error("tecs.audio.effects." .. name .. ": no parameter named " .. tostring(key), 3)
+        end
+        local transform = convert and convert[key]
+        local number = transform and transform(value) or value
+        if type(number) ~= "number" or number ~= number or number == math.huge or number == -math.huge then
+            error("tecs.audio.effects." .. name .. ": " .. tostring(key) .. " must be a finite number", 3)
+        end
+        values[id] = number as number
+    end
+
+    return new Spec(kind = kind, name = name, names = names, values = values, params = "")
+end
+
+--- A lookahead peak limiter: nothing past `ceiling` leaves it.
+---
+--- @param options `ceiling`, linear full scale (0.891, -1 dBFS, by default),
+---     and `release` in seconds (0.05)
+--- @return the spec
+export function limiter(options: {
+    ceiling: number?,
+    release: number?
+}?): Spec
+    return spec(LIMITER, "limiter", {ceiling = 0, release = 1}, options as {[string]: any}?)
+end
+
+--- A biquad filter.
+---
+--- @param options `shape`: "lowpass" (the default), "highpass", "bandpass",
+---     "notch", "peak", "lowshelf" or "highshelf"; `frequency` in hertz
+---     (20000); `q` (0.707); `gain` in dB for the peak and shelves (0)
+--- @return the spec
+--- @raises string for a shape it does not know
+export function filter(options: {
+    shape: string?,
+    frequency: number?,
+    q: number?,
+    gain: number?
+}?): Spec
+    return spec(FILTER, "filter", {shape = 0, frequency = 1, q = 2, gain = 3}, options as {[string]: any}?, {
+        shape = function(value: any): number
+            local code = SHAPES[value as string]
+            if code == nil then
+                error("tecs.audio.effects.filter: no shape named " .. tostring(value), 5)
+            end
+
+            return code
+        end
+    })
+end
+
+--- A three-band equalizer, flat until a band's gain moves.
+---
+--- @param options gains in dB and frequencies in hertz: `lowGain`,
+---     `lowFrequency` (200), `midGain`, `midFrequency` (1000), `midQ` (1),
+---     `highGain`, `highFrequency` (5000)
+--- @return the spec
+export function eq(options: {[string]: number}?): Spec
+    return spec(
+        EQ,
+        "eq",
+        {lowGain = 0, lowFrequency = 1, midGain = 2, midFrequency = 3, midQ = 4, highGain = 5, highFrequency = 6},
+        options as {[string]: any}?
+    )
+end
+
+--- An algorithmic room, for a return bus.
+---
+--- @param options each from zero to one: `size` (0.5), `damping` (0.5), `wet`
+---     (1), `dry` (0) and `width` (1)
+--- @return the spec
+export function reverb(options: {[string]: number}?): Spec
+    return spec(REVERB, "reverb", {size = 0, damping = 1, wet = 2, dry = 3, width = 4}, options as {[string]: any}?)
+end
+
+--- A spec for a kind a library registered.
+---
+--- @param kind what `Audio.registerEffect` returned
+--- @param name the kind's name, for a snapshot
+--- @param names parameter ids by name
+--- @param values starting values by name
+--- @param params bytes the library's `open` reads
+--- @return the spec
+export function custom(
+    kind: integer,
+    name: string,
+    names: {[string]: integer}?,
+    values: {[string]: number}?,
+    params: string?
+): Spec
+    local made = spec(kind, name, names or {}, values as {[string]: any}?)
+    made.params = params or ""
+
+    return made
+end

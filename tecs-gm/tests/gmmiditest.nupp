@@ -1,0 +1,770 @@
+local assets = require("tecs.assets")
+local audio = require("tecs.audio")
+local audiobackend = require("tecs.platform.audiobackend")
+local files = require("nupp.io.files")
+local gm = require("tecs.gm")
+local hostpump = require("nupp.host.pump")
+local midi = require("tecs.gm.midi")
+local music = require("tecs.audio.sequencer")
+local test = require("nupp.test")
+
+local suite = {}
+
+-------------------------------------------------------------------------------
+-- Fixtures, built byte by byte: no music in this suite comes from anywhere
+-------------------------------------------------------------------------------
+
+local function be16(value: integer): string
+    return string.char(value // 256 % 256, value % 256)
+end
+
+local function be32(value: integer): string
+    return string.char(value // 16777216 % 256, value // 65536 % 256, value // 256 % 256, value % 256)
+end
+
+--- Encodes a MIDI variable-length quantity.
+local function vlq(value: integer): string
+    local text = string.char(value % 128)
+    local rest = value // 128
+    while rest > 0 do
+        text = string.char(rest % 128 + 128) .. text
+        rest = rest // 128
+    end
+
+    return text
+end
+
+--- One event of a track: a delta time and its bytes.
+local function at(delta: integer, ...: integer): string
+    return vlq(delta) .. string.char(...)
+end
+
+local function meta(delta: integer, kind: integer, data: string): string
+    return vlq(delta) .. string.char(0xFF, kind) .. vlq(#data) .. data
+end
+
+local function tempo(delta: integer, micro: integer): string
+    return meta(delta, 0x51, string.char(micro // 65536, micro // 256 % 256, micro % 256))
+end
+
+local function finish(delta: integer): string
+    return meta(delta, 0x2F, "")
+end
+
+--- A whole Standard MIDI File.
+local function smf(format: integer, division: integer, tracks: {string}): string
+    local chunks: {string} = {"MThd", be32(6), be16(format), be16(#tracks), be16(division)}
+    for _, track in ipairs(tracks) do
+        chunks[#chunks + 1] = "MTrk" .. be32(#track) .. track
+    end
+
+    return table.concat(chunks)
+end
+--- Writes `bytes` to a temporary file, runs `body` on its path and removes
+--- the file.
+local function temporary(bytes: string, suffix: string, body: function(path: string): nil): nil
+    local file = assert(files.createTemporaryFile(new files.TemporaryOptions(suffix = suffix)))
+    local path = file:toString()
+    assert(files.write(path, bytes))
+    body(path)
+    file:close()
+end
+
+--- Runs `body` under a host pump until it settles.
+local function underPump(body: function(): boolean): nil
+    local pump = hostpump.newPump()
+    local state = pump:start(body)
+    local passes: integer = 0
+    while state == "parked" and passes < 256 do
+        passes = passes + 1
+        state = pump:poll()
+    end
+    test.assert(state ~= "parked", "the load never finished")
+end
+
+--- Loads one asset through a fresh loader.
+local function load(kind: assets.Kind, path: string): (assets.Assets, assets.Handle?, string?)
+    local loader = assets.newAssets()
+    local handle: assets.Handle? = nil
+    local reason: string? = nil
+    underPump(function(): boolean
+        handle, reason = loader:request(kind, path)
+
+        return true
+    end)
+
+    return loader, handle, reason
+end
+
+-------------------------------------------------------------------------------
+-- Standard MIDI Files
+-------------------------------------------------------------------------------
+
+function suite.readsAFormatZeroSongWithRunningStatusAndATempo(): nil
+    local track = meta(
+        0,
+        0x03,
+        "Theme"
+    ) .. tempo(0, 250000) .. at(0, 0xC0, 5) .. at(0, 0x90, 60, 100) .. at(96, 64, 90) -- running status: another note on
+        .. at(96, 0x80, 60, 0) .. at(0, 64, 0) .. finish(96)
+    local song = assert(midi.parse(smf(0, 96, {track})))
+    test.equal(song.format, 0)
+    test.equal(song.ppq, 96)
+    test.equal(song.title, "Theme")
+    test.equal(#song.tracks, 1)
+    test.equal(song.tracks[1].endTick, 288)
+    -- The tempo of 250 000 microseconds a quarter is 0.25 seconds a beat.
+    test.equal(#song.tempos, 1)
+    test.equal(song.tempos[1].microsecondsPerQuarter, 250000)
+    test.equal(song.duration, 0.75)
+    local notes: {midi.Event} = {}
+    for _, event in ipairs(song.events) do
+        if event.status < 0xF0 then
+            notes[#notes + 1] = event
+        end
+    end
+    test.equal(#notes, 5)
+    test.equal(notes[1].status, 0xC0)
+    test.equal(notes[1].data2, 0, "a program change carries one data byte")
+    test.equal(notes[3].status, 0x90)
+    test.equal(notes[3].data1, 64)
+    test.equal(notes[3].time, 0.25)
+    test.equal(notes[5].status, 0x80, "running status carries the note off")
+    test.equal(notes[5].time, 0.5)
+end
+
+function suite.mergesFormatOneTracksThroughOneTempoMap(): nil
+    -- The tempo track halves the speed at beat one; the note track's events
+    -- at beat two land at 0.5 + 1.0 seconds.
+    local conductor = tempo(0, 500000) .. tempo(480, 1000000) .. finish(0)
+    local notes = at(0, 0x91, 60, 100) .. at(960, 0x81, 60, 0) .. finish(0)
+    local song = assert(midi.parse(smf(1, 480, {conductor, notes})))
+    test.equal(#song.tempos, 2)
+    test.equal(song.tempos[2].time, 0.5)
+    local off: midi.Event? = nil
+    for _, event in ipairs(song.events) do
+        if event.status == 0x81 then
+            off = event
+        end
+    end
+    test.equal(assert(off).time, 1.5)
+    test.equal(assert(off).track, 2)
+    test.equal(song.duration, 1.5)
+end
+
+function suite.playsFormatTwoPatternsOneAfterAnother(): nil
+    local first = at(0, 0x90, 60, 100) .. at(480, 0x80, 60, 0) .. finish(0)
+    local second = at(0, 0x90, 62, 100) .. at(480, 0x80, 62, 0) .. finish(0)
+    local song = assert(midi.parse(smf(2, 480, {first, second})))
+    test.equal(song.format, 2)
+    test.equal(song.tracks[2].endTick, 960)
+    test.equal(song.events[3].tick, 480, "the second pattern starts where the first ended")
+    test.equal(song.events[3].data1, 62)
+    test.equal(song.duration, 1)
+end
+
+function suite.timesAnSmpteFileInFrames(): nil
+    -- 25 frames a second, 40 ticks a frame: a thousand ticks a second.
+    local division = (256 - 25) * 256 + 40
+    local song = assert(midi.parse(smf(0, division, {at(0, 0x90, 60, 1) .. at(1500, 0x80, 60, 0) .. finish(500)})))
+    test.equal(song.ppq, nil)
+    test.equal(song.framesPerSecond, 25)
+    test.equal(song.ticksPerFrame, 40)
+    test.equal(song.events[2].time, 1.5)
+    test.equal(song.duration, 2)
+end
+
+function suite.findsLoopPointsInMarkersOrController111(): nil
+    local marked = meta(480, 0x06, "Loop Start") .. at(0, 0x90, 60, 1) .. meta(480, 0x06, "loopEnd") .. finish(480)
+    local song = assert(midi.parse(smf(0, 480, {marked})))
+    test.equal(song.loopStart, 0.5)
+    test.equal(song.loopEnd, 1)
+    test.equal(song.duration, 1.5)
+    local rpg = at(0, 0x90, 60, 1) .. at(960, 0xB0, 111, 0) .. finish(960)
+    local looped = assert(midi.parse(smf(0, 480, {rpg})))
+    test.equal(looped.loopStart, 1)
+    test.equal(looped.loopEnd, nil, "a loop with no end runs to the end of the song")
+    local plain = assert(midi.parse(smf(0, 480, {at(0, 0x90, 60, 1) .. finish(10)})))
+    test.equal(plain.loopStart, nil)
+end
+
+function suite.keepsSystemExclusiveAndSkipsForeignChunks(): nil
+    local reset = "\xF0" .. vlq(5) .. "\x7E\x7F\x09\x01\xF7"
+    local track = vlq(0) .. reset .. at(0, 0x90, 60, 1) .. finish(10)
+    local bytes = smf(0, 96, {track})
+    -- A chunk that is not a track, between the header and the track.
+    bytes = string.sub(bytes, 1, 14) .. "XFIH" .. be32(3) .. "abc" .. string.sub(bytes, 15)
+    local song = assert(midi.parse(bytes))
+    test.equal(song.events[1].status, 0xF0)
+    test.equal(song.events[1].data, "\x7E\x7F\x09\x01\xF7")
+    test.equal(#song.events, 2)
+end
+
+function suite.refusesWhatIsNotAStandardMidiFile(): nil
+    local function refused(bytes: string, pattern: string): nil
+        local song, reason = midi.parse(bytes, "song.mid")
+        test.equal(song, nil)
+        test.matches(assert(reason), pattern)
+    end
+
+    refused("RIFF....", "song.mid: not a Standard MIDI File")
+    refused(smf(3, 96, {finish(0)}), "format 3 is not")
+    refused("MThd" .. be32(6) .. be16(0) .. be16(0) .. be16(96), "declares no tracks")
+    refused(smf(0, 0, {finish(0)}), "division is zero")
+    refused(smf(0, (256 - 27) * 256 + 4, {finish(0)}), "27 frames")
+    refused(smf(0, 96, {at(0, 60, 100) .. finish(0)}), "a data byte with no status before it")
+    refused(smf(0, 96, {at(0, 0x90, 60, 0x80) .. finish(0)}), "top bit set")
+    refused(smf(0, 96, {"\x81\x81\x81\x81\x01\x90\x3C\x01"}), "longer than four bytes")
+    local cut = smf(0, 96, {at(0, 0x90, 60, 100) .. finish(0)})
+    -- The track claims more bytes than the file has.
+    refused(string.sub(cut, 1, #cut - 5), "cut short")
+    refused(smf(0, 96, {at(0, 0xF4, 0)}), "0xF4 is not allowed")
+    refused("MThd" .. be32(6) .. be16(0) .. be16(1) .. be16(96), "holds no MTrk chunk")
+end
+
+function suite.loadsAMidiFileThroughItsKind(): nil
+    temporary(
+        smf(0, 96, {
+            at(0, 0x90, 60, 100) .. at(96, 0x80, 60, 0) .. finish(0)
+        }),
+        ".mid",
+        function(path: string): nil
+            local loader, handle, reason = load(midi.kind, path)
+            test.assert(handle ~= nil, reason or "no handle")
+            local held = assert(handle)
+            test.equal(held.kind, "music.midi")
+            local song = held:value() as midi.Song
+            test.equal(song.duration, 0.5)
+            held:release()
+            local _, missing, failure = load(midi.kind, path .. ".none")
+            test.equal(missing, nil)
+            test.assert(failure ~= nil)
+            loader:shutdown()
+        end
+    )
+    temporary("not midi", ".mid", function(path: string): nil
+        local loader, nothing, refusal = load(midi.kind, path)
+        test.equal(nothing, nil)
+        test.matches(assert(refusal), "not a Standard MIDI File")
+        loader:shutdown()
+    end)
+end
+
+-------------------------------------------------------------------------------
+-- Players
+-------------------------------------------------------------------------------
+
+--- Event operations sit at bit 40 of an event's data, as `tecs-audio-abi`
+--- packs them.
+local OP: integer = 1099511627776
+
+--- One event a synth was sent, decoded from its `EVENT` command: a
+--- `"message"` with `a`, `b` and `c` its status and data bytes, a
+--- `"notesOff"` with `a` the channel and `b` whether it cuts, or a `"reset"`.
+local record Sent
+    voice: integer
+    kind: string
+    a: integer
+    b: integer
+    c: integer
+    at: number
+end
+
+--- A backend that copies every command and opens every synth it is asked
+--- to, on a clock the test moves.
+local record Harness
+    backend: audiobackend.Backend
+    commands: {audiobackend.Command}
+    opened: {integer}
+    clock: {number}
+end
+
+local function newHarness(): Harness
+    local commands: {audiobackend.Command} = {}
+    local opened: {integer} = {}
+    local clock = {0.0}
+
+    local backend = audiobackend.silent()
+    backend.available = true
+    backend.submit = function(pending: {audiobackend.Command}, count: integer): nil
+        for index = 1, count do
+            local source = pending[index]
+            local copy = audiobackend.newCommand()
+            copy.kind = source.kind
+            copy.handle = source.handle
+            copy.clip = source.clip
+            copy.flags = source.flags
+            copy.gain = source.gain
+            copy.target = source.target
+            copy.param = source.param
+            copy.data = source.data
+            copy.at = source.at
+            copy.fade = source.fade
+            commands[#commands + 1] = copy
+        end
+    end
+    backend.now = function(): number
+        return clock[1]
+    end
+    backend.registerDecoder = function(_vtable: any): (integer?, string?)
+        return 3
+    end
+    backend.openDecoded = function(_decoder: integer, handle: integer, _params: string, _bytes: string): (boolean, string?)
+        opened[#opened + 1] = handle
+
+        return true
+    end
+
+    return new Harness(backend = backend, commands = commands, opened = opened, clock = clock)
+end
+
+--- Flushes the mixer and decodes every event it has sent.
+local function allSent(harness: Harness, mixer: audio.Audio): {Sent}
+    mixer:flush()
+    local found: {Sent} = {}
+    for _, command in ipairs(harness.commands) do
+        if command.kind == audiobackend.EVENT then
+            local op = command.data // OP
+            local rest = command.data % OP
+            local event: Sent
+            if op == 1 then
+                event = new Sent(
+                    voice = command.handle,
+                    kind = "notesOff",
+                    a = rest // 256 % 256,
+                    b = rest % 256,
+                    c = 0,
+                    at = command.at
+                )
+            else
+                event = new Sent(
+                    voice = command.handle,
+                    kind = op == 0 and "message" or op == 2 and "reset" or "unknown",
+                    a = rest % 256,
+                    b = rest // 256 % 256,
+                    c = rest // 65536 % 256,
+                    at = command.at
+                )
+            end
+            found[#found + 1] = event
+        end
+    end
+
+    return found
+end
+
+--- Returns the events of `kind` sent after the first `since`, whose first
+--- byte is `first` when that is given.
+local function sentSince(harness: Harness, mixer: audio.Audio, since: integer, kind: string, first: integer?): {Sent}
+    local found: {Sent} = {}
+    local sent = allSent(harness, mixer)
+    for index = since + 1, #sent do
+        local event = sent[index]
+        if event.kind == kind and (first == nil or event.a == first) then
+            found[#found + 1] = event
+        end
+    end
+
+    return found
+end
+
+--- Returns every event of `kind` sent so far, whose first byte is `first`
+--- when that is given.
+local function sentOf(harness: Harness, mixer: audio.Audio, kind: string, first: integer?): {Sent}
+    return sentSince(harness, mixer, 0, kind, first)
+end
+
+local function lastCommand(harness: Harness, kind: integer): audiobackend.Command?
+    for index = #harness.commands, 1, -1 do
+        if harness.commands[index].kind == kind then
+            return harness.commands[index]
+        end
+    end
+
+    return nil
+end
+
+local function countOf(harness: Harness, kind: integer): integer
+    local count: integer = 0
+    for _, command in ipairs(harness.commands) do
+        if command.kind == kind then
+            count = count + 1
+        end
+    end
+
+    return count
+end
+
+local function near(actual: number, expected: number, what: string?): nil
+    test.assert(
+        math.abs(actual - expected) < 1e-9,
+        (what or "") .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual)
+    )
+end
+
+--- A SoundFont the harness never reads: the backend is handed only its id.
+local function font(): gm.SoundFont
+    return new gm.SoundFont(path = "font.sf2", id = 1)
+end
+
+--- A song of four notes, one every half second, two seconds long.
+local function scale(loop: boolean): midi.Song
+    local track = at(0, 0x90, 60, 100) .. at(480, 0x80, 60, 0) .. at(0, 0x90, 62, 100)
+    if loop then
+        track = meta(0, 0x06, "loopStart") .. track
+    end
+    track = track .. at(480, 0x80, 62, 0) .. at(0, 0x90, 64, 100) .. at(480, 0x80, 64, 0) .. at(0, 0x90, 65, 100)
+    if loop then
+        track = track .. meta(480, 0x06, "loopEnd") .. at(0, 0x80, 65, 0) .. finish(0)
+    else
+        track = track .. at(480, 0x80, 65, 0) .. finish(0)
+    end
+
+    return assert(midi.parse(smf(0, 480, {track})))
+end
+
+local function midiPlayer(harness: Harness, song: midi.Song, options: music.PlayOptions?): (audio.Audio, music.Player)
+    local mixer = audio.newAudio({backend = harness.backend, maxVoices = 8})
+
+    return mixer, assert(midi.playSong(mixer, font(), song, options))
+end
+
+function suite.schedulesAheadOnTheMixerClock(): nil
+    local harness = newHarness()
+    local mixer, player = midiPlayer(harness, scale(false))
+    test.equal(#harness.opened, 1, "the song plays on a synth of its own")
+    -- Started at 0 with a lead of 0.01: the first note is due then, and the
+    -- next one, half a second in, is past the lookahead.
+    local ons = sentOf(harness, mixer, "message", 0x90)
+    test.equal(#ons, 1)
+    test.equal(ons[1].voice, harness.opened[1])
+    near(ons[1].at, 0.01, "first note")
+    harness.clock[1] = 0.48
+    mixer:update()
+    ons = sentOf(harness, mixer, "message", 0x90)
+    test.equal(#ons, 2)
+    near(ons[2].at, 0.51, "second note")
+    test.equal(sentOf(harness, mixer, "message", 0x80)[1].a, 0x80)
+    near(player:position(), 0.47, "position")
+    test.assert(player:playing())
+    test.equal(player:status(), "playing")
+    near(player:duration(), 2)
+end
+
+function suite.slipsAfterAStallRatherThanRushing(): nil
+    local harness = newHarness()
+    local mixer, _player = midiPlayer(harness, scale(false))
+    -- The frame thread stalls for three seconds of audio clock: the note due
+    -- at half a second is late, and plays at once.
+    harness.clock[1] = 3
+    mixer:update()
+    local ons = sentOf(harness, mixer, "message", 0x90)
+    test.equal(#ons, 2, "only the late note goes, not all that was missed")
+    near(ons[2].at, 3.01, "the late note")
+    harness.clock[1] = 3.48
+    mixer:update()
+    ons = sentOf(harness, mixer, "message", 0x90)
+    test.equal(#ons, 3)
+    near(ons[3].at, 3.51, "the next keeps its distance")
+end
+
+function suite.finishesAndFreesItsSynthAfterTheTail(): nil
+    local harness = newHarness()
+    local mixer, player = midiPlayer(harness, scale(false))
+    for step = 1, 50 do
+        harness.clock[1] = step * 0.05
+        mixer:update()
+    end
+    test.equal(#sentOf(harness, mixer, "message", 0x90), 4)
+    test.assert(player:finished())
+    test.equal(player:status(), "finished")
+    test.equal(countOf(harness, audiobackend.STOP), 0, "the release tail still rings")
+    test.equal(mixer:sounding(), 1)
+    harness.clock[1] = 2.01 + 2.1
+    mixer:update()
+    test.equal(player:status(), "stopped")
+    test.assert(player:finished())
+    test.equal(countOf(harness, audiobackend.STOP), 1)
+    test.equal(assert(lastCommand(harness, audiobackend.STOP)).handle, harness.opened[1])
+    test.equal(mixer:sounding(), 0)
+end
+
+function suite.loopsForeverReleasingHeldNotesAtTheEnd(): nil
+    local harness = newHarness()
+    local song = scale(true)
+    near(assert(song.loopStart), 0)
+    near(assert(song.loopEnd), 2)
+    local mixer, player = midiPlayer(harness, song)
+    test.assert(player:looping())
+    for step = 1, 100 do
+        harness.clock[1] = step * 0.05
+        mixer:update()
+    end
+    test.equal(player:loops(), 2)
+    test.assert(not player:finished())
+    local ons = sentOf(harness, mixer, "message", 0x90)
+    test.assert(#ons >= 9)
+    -- The fifth note is the first of the second pass, two seconds on.
+    near(ons[5].at, 2.01, "the loop's first note")
+    -- The note held at the loop's end was released there.
+    local offs = sentOf(harness, mixer, "message", 0x80)
+    local released = false
+    for _, off in ipairs(offs) do
+        if off.b == 65 and math.abs(off.at - 2.01) < 1e-9 then
+            released = true
+        end
+    end
+    test.assert(released, "the held note is released at the loop")
+    player:setLoop(false)
+    for step = 101, 160 do
+        harness.clock[1] = step * 0.05
+        mixer:update()
+    end
+    test.assert(player:finished())
+end
+
+function suite.scalesTheTempoFromWhatIsScheduled(): nil
+    local harness = newHarness()
+    local mixer, player = midiPlayer(harness, scale(false), {tempo = 2})
+    test.equal(player:tempo(), 2)
+    harness.clock[1] = 0.24
+    mixer:update()
+    local ons = sentOf(harness, mixer, "message", 0x90)
+    test.equal(#ons, 2)
+    near(ons[2].at, 0.26, "twice as fast")
+    player:setTempo(1)
+    harness.clock[1] = 0.6
+    mixer:update()
+    ons = sentOf(harness, mixer, "message", 0x90)
+    test.equal(#ons, 2)
+    test.raises(
+        function(): nil
+            player:setTempo(0)
+        end,
+        "tempo must be from 0.01 to 100"
+    )
+end
+
+function suite.seeksByResettingAndChasingTheSongState(): nil
+    local track = at(
+        0,
+        0xB1,
+        7,
+        90
+    ) .. at(
+        0,
+        0xC1,
+        33
+    ) .. at(
+        0,
+        0xE1,
+        0,
+        80
+    ) .. at(0, 0x91, 40, 100) .. at(960, 0x81, 40, 0) .. at(0, 0x91, 43, 100) .. at(480, 0x81, 43, 0) .. finish(0)
+    local harness = newHarness()
+    local mixer, player = midiPlayer(harness, assert(midi.parse(smf(0, 480, {track}))))
+    harness.clock[1] = 1
+    local before = #allSent(harness, mixer)
+    player:seek(1.5)
+    test.equal(#sentOf(harness, mixer, "reset"), 1)
+    local controls = sentSince(harness, mixer, before, "message", 0xB1)
+    test.equal(#controls, 1)
+    test.equal(controls[1].c, 90)
+    near(controls[1].at, 1.01, "the chase lands at the seek")
+    test.equal(sentSince(harness, mixer, before, "message", 0xC1)[1].b, 33)
+    local bend = sentSince(harness, mixer, before, "message", 0xE1)[1]
+    test.equal(bend.b, 0)
+    test.equal(bend.c, 80)
+    mixer:update()
+    -- From 1.5 the next event is the note off at 1.5 itself.
+    local offs = sentOf(harness, mixer, "message", 0x81)
+    near(offs[#offs].at, 1.01, "the event at the seek point")
+    near(player:position(), 1.49)
+end
+
+function suite.mutesAChannelAndPausesTheSong(): nil
+    local track = at(
+        0,
+        0x90,
+        60,
+        100
+    ) .. at(0, 0x91, 62, 100) .. at(480, 0x80, 60, 0) .. at(0, 0x81, 62, 0) .. finish(0)
+    local harness = newHarness()
+    local mixer, player = midiPlayer(harness, assert(midi.parse(smf(0, 480, {track}))))
+    test.equal(#sentOf(harness, mixer, "message", 0x91), 1)
+    player:setMuted(1, true)
+    local cut = sentOf(harness, mixer, "notesOff")
+    test.equal(#cut, 1)
+    test.equal(cut[1].a, 1)
+    player:seek(0)
+    mixer:update()
+    test.equal(#sentOf(harness, mixer, "message", 0x91), 1, "no note on reaches the muted channel")
+    test.equal(#sentOf(harness, mixer, "message", 0x90), 2, "the other channel plays on")
+    player:pause()
+    test.assert(player:paused())
+    mixer:update()
+    test.assert(lastCommand(harness, audiobackend.PAUSE) ~= nil)
+    -- Paused, nothing more is scheduled, however far the clock runs.
+    harness.clock[1] = 0.6
+    mixer:update()
+    test.equal(#sentOf(harness, mixer, "message", 0x80), 0)
+    player:resume()
+    mixer:update()
+    test.assert(lastCommand(harness, audiobackend.RESUME) ~= nil)
+    -- Resuming seeks back to where it paused, the song's start, and plays on
+    -- from there on the clock as it now stands.
+    test.equal(#sentOf(harness, mixer, "reset"), 2)
+    local ons = sentOf(harness, mixer, "message", 0x90)
+    test.equal(#ons, 3)
+    near(ons[3].at, 0.61, "the resumed note")
+    test.raises(
+        function(): nil
+            player:setMuted(16, true)
+        end,
+        "from 0 to 15"
+    )
+    player:stop(0.5)
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.STOP)).fade, 0.5)
+    player:stop()
+    test.equal(player:status(), "stopped")
+end
+
+function suite.playsOnTheTrackItIsGiven(): nil
+    local harness = newHarness()
+    local mixer = audio.newAudio({backend = harness.backend, maxVoices = 8})
+    local bus = mixer:bus("music")
+    local track = bus:track()
+    local player = assert(midi.playSong(mixer, font(), scale(false), {track = track, gain = 0.5}))
+    mixer:update()
+    local play = assert(lastCommand(harness, audiobackend.PLAY))
+    test.equal(play.target, track.id)
+    test.equal(play.gain, 0.5)
+    player:stop()
+end
+
+function suite.playsOnWhenItsSynthLosesItsVoice(): nil
+    -- Nothing waits on an event a synth refused: a synth whose voice was
+    -- taken stays silent, and the song still runs to its end.
+    local harness = newHarness()
+    local mixer, player = midiPlayer(harness, scale(false))
+    mixer:stopAll()
+    for step = 1, 100 do
+        harness.clock[1] = step * 0.05
+        mixer:update()
+    end
+    test.assert(player:finished())
+    test.equal(player:status(), "stopped")
+end
+
+function suite.playsOnAMixerWithNoOutput(): nil
+    local mixer = audio.newAudio({backend = audiobackend.silent()})
+    local player = assert(midi.playSong(mixer, font(), scale(false)), "no output needs no branch")
+    mixer:update()
+    test.equal(player:status(), "playing")
+    test.equal(mixer:sounding(), 0)
+    player:stop()
+end
+
+function suite.followsAReloadOfTheSongHandle(): nil
+    local first = smf(0, 480, {at(0, 0x90, 60, 100) .. at(9600, 0x80, 60, 0) .. finish(0)})
+    temporary(first, ".mid", function(path: string): nil
+        local loader, handle = load(midi.kind, path)
+        local held = assert(handle)
+        local harness = newHarness()
+        local mixer = audio.newAudio({backend = harness.backend, maxVoices = 8})
+        local player = assert(midi.play(mixer, font(), held, {loop = false}))
+        held:release()
+        test.equal(held:holds(), 1, "the player holds the song")
+        harness.clock[1] = 1
+        mixer:update()
+        assert(files.write(path, smf(0, 480, {at(0, 0x90, 72, 100) .. at(9600, 0x80, 72, 0) .. finish(0)})))
+        underPump(function(): boolean
+            assert(loader:reload(midi.kind, held))
+
+            return true
+        end)
+        mixer:update()
+        test.equal(#sentOf(harness, mixer, "reset"), 1, "the reload seeks")
+        harness.clock[1] = 20
+        mixer:update()
+        local offs = sentOf(harness, mixer, "message", 0x80)
+        test.equal(offs[#offs].b, 72, "the new song plays from where the old one was")
+        player:stop()
+        test.equal(held:holds(), 0)
+        loader:shutdown()
+    end)
+end
+
+function suite.refusesAHandleOfAnotherKind(): nil
+    local song = smf(0, 96, {at(0, 0x90, 60, 100) .. finish(0)})
+    temporary(song, ".mid", function(path: string): nil
+        local loader, handle = load(assets.bytes, path)
+        local held = assert(handle)
+        local harness = newHarness()
+        local mixer = audio.newAudio({backend = harness.backend, maxVoices = 8})
+        test.raises(
+            function(): nil
+                midi.play(mixer, font(), held)
+            end,
+            "not as a MIDI song"
+        )
+        held:release()
+        loader:shutdown()
+    end)
+end
+
+function suite.refusesPlayOptionsOutOfRange(): nil
+    local harness = newHarness()
+    local mixer = audio.newAudio({backend = harness.backend, maxVoices = 8})
+    test.raises(
+        function(): nil
+            midi.playSong(mixer, font(), scale(false), {lookahead = 5})
+        end,
+        "lookahead must be from"
+    )
+    test.raises(
+        function(): nil
+            midi.playSong(mixer, font(), scale(false), {start = -1})
+        end,
+        "start must not be negative"
+    )
+end
+
+--- Returns the native binding, or skips when `libtecsaudio` is not staged.
+local function binding(): {[string]: any}
+    local ok, loaded = pcall(require, "tecs.platform.audionative")
+    if not ok then
+        test.skip("libtecsaudio is not on the loader path: " .. tostring(loaded))
+    end
+
+    return loaded as {[string]: any}
+end
+
+function suite.playsASongFromARealSoundFontOnTime(): nil
+    local path = os.getenv("TECS_TEST_SOUNDFONT")
+    if path == nil or path == "" then
+        test.skip("TECS_TEST_SOUNDFONT names no SoundFont")
+    end
+    binding()
+    local mixer = audio.newAudio({output = "memory", maxVoices = 4, limiter = false})
+    local loaded = assert(gm.loadSoundFont(assert(path)))
+    -- Two short notes with a rest between, so each has an onset of its own.
+    local track = at(0, 0x90, 60, 110) .. at(96, 0x80, 60, 0) .. at(384, 0x90, 67, 110) .. at(96, 0x80, 67, 0)
+    local song = assert(midi.parse(smf(0, 480, {track .. finish(0)})))
+    local player = assert(midi.playSong(mixer, loaded, song, {loop = false}))
+    test.assert(mixer:listen(1.2))
+    for _ = 1, 24 do
+        mixer:step(0.05)
+    end
+    local heard = assert(mixer:listening())
+    test.assert(heard.peak > 0.01, "the song sounds, peaking at " .. tostring(heard.peak))
+    -- Both notes, half a second apart from the start's lead.
+    test.assert(#heard.onsets >= 2, "two notes have onsets, got " .. tostring(#heard.onsets))
+    test.assert(math.abs(heard.onsets[1] - 0.01) < 0.03, "the first note, got " .. tostring(heard.onsets[1]))
+    test.assert(math.abs(heard.onsets[2] - 0.51) < 0.03, "the second note, got " .. tostring(heard.onsets[2]))
+    player:stop()
+    mixer:destroy()
+end
+
+return suite

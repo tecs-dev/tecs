@@ -39,6 +39,18 @@ pub trait Source: Send {
 
     /// Reports whether the input has run out.
     fn exhausted(&self) -> bool;
+
+    /// Applies one timed event, which the mixer delivers on the output frame
+    /// it is due at: a note, a register write, whatever the source's kind
+    /// means by the 64 bits. A source that takes none ignores it.
+    fn event(&mut self, _data: u64) {}
+
+    /// Reports whether the source takes events, which makes the mixer read
+    /// it a frame at a time rather than ahead, so an event lands within a
+    /// frame of where it was due rather than a staging buffer later.
+    fn sequenced(&self) -> bool {
+        false
+    }
 }
 
 /// Reads a clip whose decoded samples stay in memory.

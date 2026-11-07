@@ -1,0 +1,10 @@
+[package]
+name = "tecs-audio-abi"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "The Decoder and Effect vtables a tecs audio extension exports"
+
+[lib]
+name = "tecs_audio_abi"

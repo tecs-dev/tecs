@@ -53,6 +53,7 @@ Repeated application shutdown does nothing.
 ]]
 
 local assets = require("tecs.assets")
+local audio = require("tecs.audio")
 local ecs = require("tecs.ecs")
 local files = require("nupp.io.files")
 local mcp = require("tecs.mcp")
@@ -226,6 +227,14 @@ local function nameIdentity(): nil
     end
 end
 
+--- Advances the world's mixer, when it has one, by one iteration.
+local function tickAudio(exclusive self: Application, dt: number): nil
+    local mixer = audio.of(self.world)
+    if mixer ~= nil then
+        mixer:tick(dt)
+    end
+end
+
 local function captureFailure(exclusive app: Application, failure: any): nil
     if hostcancellation.is(failure) then
         error(failure, 0)
@@ -395,6 +404,9 @@ function Application.iterate(exclusive self: Application, dt: number, batch: {pl
                 incoming = kept
             end
             self.held = incoming
+            -- Reaping continues while the world is held; the clock does not
+            -- move unless a device moves it.
+            tickAudio(self, 0)
 
             return true
         end
@@ -434,6 +446,7 @@ function Application.iterate(exclusive self: Application, dt: number, batch: {pl
         if not succeeded then
             captureFailure(self, failure)
         end
+        tickAudio(self, dt)
     end
 
     self.frame = self.frame + 1

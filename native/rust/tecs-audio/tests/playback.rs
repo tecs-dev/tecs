@@ -77,6 +77,8 @@ fn play(handle: u32, clip: u32) -> Command {
         x: 0.0,
         y: 0.0,
         z: 0.0,
+        at: 0.0,
+        ..Default::default()
     }
 }
 

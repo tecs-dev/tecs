@@ -34,7 +34,8 @@ backend.submit(buffer, 1)
 --- One record covers every operation, because the array crossing the seam has
 --- to be one contiguous run of identical elements. A field a command does not
 --- name carries whatever the previous use of that record left behind, so a
---- backend reads only the fields its `kind` claims.
+--- backend reads only the fields its `kind` claims. `at` is the one field every
+--- kind claims.
 export record Command
     --- Caller-writable. Selects the operation from this module's kind
     --- constants.
@@ -48,7 +49,8 @@ export record Command
     --- `tecs.audio.clipId` assigned.
     clip: integer
 
-    --- Caller-writable. Carries the `LOOP`, `SPATIAL` and `STEREO` bits.
+    --- Caller-writable. Carries the `LOOP`, `SPATIAL`, `STEREO`, `STREAM`,
+    --- `SYNTH` and `NEAREST` bits.
     flags: integer
 
     --- Caller-writable. Sets linear amplitude for `PLAY`, `SET_GAIN` and
@@ -78,6 +80,27 @@ export record Command
 
     --- Caller-writable. Sets the position behind the listener.
     z: number
+
+    --- Caller-writable. Schedules the command at this many seconds on the
+    --- output clock `Backend.now` reads, rounded to the nearest output frame,
+    --- where it takes effect on exactly that sample. Zero, a negative time and
+    --- a time already rendered mean at once, which is the first frame of the
+    --- next buffer. Commands due on one frame apply in the order they were
+    --- submitted, and one applied at once comes after every scheduled one due
+    --- by then.
+    at: number
+
+    --- Caller-writable. Names the Track or Bus a strip command acts on, and
+    --- the Track a `PLAY` sounds on, zero for the default Track.
+    target: integer
+
+    --- Caller-writable. Selects a control, a Bus, a position in a chain or an
+    --- effect parameter, by kind.
+    param: integer
+
+    --- Caller-writable. Carries an event's payload, an effect's id, or a Bus
+    --- for `TRACK_BUS` and `BUS_PARENT`.
+    data: integer
 end
 
 --- Reports what a load settled on.
@@ -103,8 +126,10 @@ export record OutputStatus
     --- Read-only. Reports `"offline"` when no output ever opened, `"playing"`
     --- while a stream plays, `"reopening"` while a dropped device is being
     --- replaced (the mix keeps time, and nothing is heard), and `"failed"` once
-    --- the backend can no longer reopen, which `failure` reports too.
-    state: "offline" | "playing" | "reopening" | "failed"
+    --- the backend can no longer reopen, which `failure` reports too, and
+    --- `"void"` while it keeps time with no device: a void output, or one whose
+    --- device was missing at start, which opens one when it appears.
+    state: "offline" | "playing" | "reopening" | "failed" | "void"
 
     --- Read-only. Reports how many times the output has dropped.
     drops: integer
@@ -135,6 +160,22 @@ export type LoadMode = "auto" | "resident" | "stream"
 --- Every field is a plain function rather than a method, so a test stub is a
 --- record of closures and nothing has to be subclassed to observe the command
 --- stream Tecs produces.
+--- One strip's meter since the last read.
+export record MeterReading
+    --- Read-only. Whether the strip is a Bus, and its id; Master is Bus zero.
+    bus: boolean
+
+    id: integer
+
+    --- Read-only. Largest absolute sample, and the root mean square.
+    peak: number
+
+    rms: number
+
+    --- Read-only. Samples at or past full scale.
+    clipped: integer
+end
+
 export record Backend
     --- Read-only. Reports terminal stream failure, or nil while healthy. Omitted
     --- by backends without a device. The frame thread polls; no callback enters Nupp.
@@ -203,6 +244,63 @@ export record Backend
     --- Read-only. Reports the decoder names this build linked, in the
     --- backend's own order.
     decoders: function(): {string}
+
+    --- Read-only. Reports the output clock a command's `at` is on, in seconds:
+    --- the frames the backend has mixed over `frequency`. It counts what the
+    --- device has been handed rather than what has been heard, never runs
+    --- backwards, and stands still while nothing is mixed, which on a backend
+    --- with no output device is always. Omitted by a backend with no clock,
+    --- which `tecs.audio` reads as zero.
+    now: (function(): number)?
+
+    --- Optional. Renders frames of the mix on the caller, for a memory
+    --- output whose clock moves only here, and reports how many it rendered.
+    --- Zero on any other output, whose device or wall clock renders it.
+    render: (function(frames: integer): integer)?
+
+    --- Optional. Starts recording the next `frames` frames of the mix,
+    --- replacing a recording in progress.
+    listen: (function(frames: integer): nil)?
+
+    --- Optional. Reports the frames recorded so far.
+    listened: (function(): integer)?
+
+    --- Optional. Reports the output clock, in seconds, the recording began at.
+    listenStarted: (function(): number)?
+
+    --- Optional. Summarizes the recording so far as a JSON object, or nil
+    --- with none.
+    listenSummary: (function(): string?)?
+
+    --- Optional. Writes the recording so far to a WAV file.
+    listenSave: (function(path: string): (boolean, string?))?
+
+    --- Optional. Ends the recording.
+    listenStop: (function(): nil)?
+
+    --- Optional. Reports how many timed commands arrived after their frame.
+    late: (function(): integer)?
+
+    --- Optional. Holds a void output's clock so `render` steps it, or lets
+    --- it keep time again, and reports whether `render` now steps it.
+    hold: (function(held: boolean): boolean)?
+
+    --- Optional. Registers a Decoder vtable an extension's library exported,
+    --- given as its address, and returns its id, or nil and a reason.
+    registerDecoder: (function(vtable: any): (integer?, string?))?
+
+    --- Optional. Registers an Effect vtable, returning its kind id.
+    registerEffect: (function(vtable: any): (integer?, string?))?
+
+    --- Optional. Opens a Playback through a Decoder for the `PLAY` of
+    --- `handle`, which carries `SYNTH` to take it.
+    openDecoded: (function(decoder: integer, handle: integer, params: string, bytes: string): (boolean, string?))?
+
+    --- Optional. Builds effect `id` of kind `kind` for an `EFFECT_INSERT`.
+    prepareEffect: (function(kind: integer, id: integer, params: string): (boolean, string?))?
+
+    --- Optional. Reads and resets every strip's meter.
+    meters: (function(): {MeterReading})?
 
     --- Read-only. Stops everything and closes the output. Calling it twice is
     --- harmless.
@@ -354,7 +452,66 @@ export const CLEAR_PLACEMENT: integer = 10
 --- Scales the whole output.
 export const SET_MASTER_GAIN: integer = 11
 
+--- Sets how a voice reads between source frames, reading the `NEAREST` flag.
+export const SET_RESAMPLE: integer = 12
+
 --- Marks a command that repeats forever.
+--- Delivers `data` to a voice's Decoder on the frame `at` names.
+export const EVENT: integer = 13
+
+--- Creates Track `target` routed to Bus `param`.
+export const TRACK_CREATE: integer = 14
+
+--- Destroys Track `target`; its voices move to the default Track.
+export const TRACK_DESTROY: integer = 15
+
+--- Sets a Track control `param` to `gain`, a position `x y z`, or Bus `data`.
+export const TRACK_SET: integer = 16
+
+--- Creates Bus `target` summing into Bus `param`, zero for Master.
+export const BUS_CREATE: integer = 17
+
+--- Destroys Bus `target`; what routed to it routes to its parent.
+export const BUS_DESTROY: integer = 18
+
+--- Sets a Bus control `param` to `gain`, or its parent to Bus `data`.
+export const BUS_SET: integer = 19
+
+--- Sets Track `target`'s post-fader send to Bus `param` to level `gain`.
+export const SEND: integer = 20
+
+--- Inserts prepared effect `data` into strip `target` at position `param`.
+export const EFFECT_INSERT: integer = 21
+
+--- Removes effect `data`.
+export const EFFECT_REMOVE: integer = 22
+
+--- Sets parameter `param` of effect `data` to `gain`.
+export const EFFECT_PARAM: integer = 23
+
+--- Moves voice `handle` onto Track `target`.
+export const SET_TRACK: integer = 24
+
+--- Track controls for `TRACK_SET`.
+export const TRACK_GAIN: integer = 1
+
+export const TRACK_MUTE: integer = 2
+export const TRACK_SOLO: integer = 3
+export const TRACK_BUS: integer = 4
+export const TRACK_POSITION: integer = 5
+export const TRACK_STEREO: integer = 6
+export const TRACK_UNPLACED: integer = 7
+
+--- Bus controls for `BUS_SET`.
+export const BUS_GAIN: integer = 1
+
+export const BUS_MUTE: integer = 2
+export const BUS_PAUSE: integer = 3
+export const BUS_PARENT: integer = 4
+
+--- Marks an `EFFECT_INSERT` as going on a Bus.
+export const ON_BUS: integer = 64
+
 export const LOOP: integer = 1
 
 --- Marks a command carrying a position.
@@ -366,6 +523,15 @@ export const STEREO: integer = 4
 --- Marks a `PLAY` that reads its input from the file rather than from held
 --- samples.
 export const STREAM: integer = 8
+
+--- Marks a `PLAY` whose input is the Playback a Decoder opened for the
+--- command's handle through `openDecoded`, rather than a clip.
+export const SYNTH: integer = 16
+
+--- Marks a `PLAY` or `SET_RESAMPLE` whose voice holds the source frame its
+--- read position is in, the integer part of the position, rather than
+--- interpolating linearly to the next one. Clear is linear, the default.
+export const NEAREST: integer = 32
 
 --- Creates one zeroed command, for a caller filling a reusable buffer.
 --- @return a command whose every field is at rest
@@ -382,21 +548,30 @@ export function newCommand(): Command
         loopStart = 0,
         x = 0,
         y = 0,
-        z = 0
+        z = 0,
+        at = 0,
+        target = 0,
+        param = 0,
+        data = 0
     )
 end
 
 --- Creates a backend that accepts everything and produces no sound.
 ---
---- What a machine with no output device gets, and what a headless test gets
+--- What a run without the native library gets, and what a headless test gets
 --- when it does not care about the command stream. Every call succeeds so that
---- a game needs no branch for the silent case.
+--- a game needs no branch for the silent case. Its clock reads zero, as an
+--- offline backend's does until something renders it, so a command scheduled
+--- against it is taken and dropped like any other. A machine with the library
+--- and no device gets a void output instead, whose clock moves.
 ---
+--- @param frequency the frequency it reports, so `n / frequency()` stays a
+---     number on it; omitted, zero, as a backend with no clock at all
 --- @return a backend reporting `available` as false
-export function silent(): Backend
+export function silent(frequency: integer?): Backend
     return new Backend(
         available = false,
-        frequency = 0,
+        frequency = frequency or 0,
         channels = 0,
         submit = function(_commands: {Command}, _count: integer): nil
         end,
@@ -424,6 +599,9 @@ export function silent(): Backend
         end,
         decoders = function(): {string}
             return {}
+        end,
+        now = function(): number
+            return 0
         end,
         close = function(): nil
         end

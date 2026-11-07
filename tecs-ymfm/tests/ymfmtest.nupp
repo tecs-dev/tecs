@@ -1,0 +1,609 @@
+local audio = require("tecs.audio")
+local audiobackend = require("tecs.platform.audiobackend")
+local fm = require("tecs.ymfm")
+local test = require("nupp.test")
+
+-- What the native library reports about each chip, to hold this module's
+-- own tables to it.
+cdef function tecs_ymfm_kind(name: cstring): uint32
+
+cdef function tecs_ymfm_rate(kind: uint32, clock: uint32): uint32
+
+cdef function tecs_ymfm_default_clock(kind: uint32): uint32
+
+cdef function tecs_ymfm_limits(kind: uint32): uint32
+
+cdef function tecs_ymfm_reads(kind: uint32, class: uint32): int32
+
+local suite = {}
+
+--- Event operations sit at bit 40 of an event's data, as `tecs-audio-abi`
+--- packs them.
+local OP: integer = 1099511627776
+
+--- The id the test backend hands every Decoder it registers.
+local DECODER: integer = 5
+
+--- One write the mixer submitted, decoded from its `EVENT` command.
+local record Sent
+    handle: integer
+    kind: string
+    a: integer
+    b: integer
+    at: number
+end
+
+--- One `openDecoded` call the backend received.
+local record Opened
+    decoder: integer
+    handle: integer
+    params: string
+    bytes: string
+end
+
+--- A backend that copies every command it is submitted and records every
+--- chip it is asked to open, on a clock the test moves.
+local record Harness
+    backend: audiobackend.Backend
+    commands: {audiobackend.Command}
+    opened: {Opened}
+    clock: {number}
+end
+
+--- Makes a harness. `decoders` false leaves the backend without the Decoder
+--- seam, as a backend with no native library has.
+local function newHarness(available: boolean, decoders: boolean): Harness
+    local commands: {audiobackend.Command} = {}
+    local opened: {Opened} = {}
+    local clock = {0.0}
+
+    local backend = audiobackend.silent()
+    backend.available = available
+    backend.submit = function(pending: {audiobackend.Command}, count: integer): nil
+        for index = 1, count do
+            local source = pending[index]
+            local copy = audiobackend.newCommand()
+            copy.kind = source.kind
+            copy.handle = source.handle
+            copy.clip = source.clip
+            copy.flags = source.flags
+            copy.gain = source.gain
+            copy.target = source.target
+            copy.param = source.param
+            copy.data = source.data
+            copy.at = source.at
+            copy.fade = source.fade
+            commands[#commands + 1] = copy
+        end
+    end
+    backend.now = function(): number
+        return clock[1]
+    end
+    if decoders then
+        backend.registerDecoder = function(_vtable: any): (integer?, string?)
+            return DECODER
+        end
+        backend.openDecoded = function(
+            decoder: integer,
+            handle: integer,
+            params: string,
+            bytes: string
+        ): (boolean, string?)
+            opened[#opened + 1] = new Opened(decoder = decoder, handle = handle, params = params, bytes = bytes)
+
+            return true
+        end
+    end
+
+    return new Harness(backend = backend, commands = commands, opened = opened, clock = clock)
+end
+
+local function lastCommand(harness: Harness, kind: integer): audiobackend.Command?
+    for index = #harness.commands, 1, -1 do
+        if harness.commands[index].kind == kind then
+            return harness.commands[index]
+        end
+    end
+
+    return nil
+end
+
+local function countOf(harness: Harness, kind: integer): integer
+    local count: integer = 0
+    for _, command in ipairs(harness.commands) do
+        if command.kind == kind then
+            count = count + 1
+        end
+    end
+
+    return count
+end
+
+--- Flushes the mixer and decodes every `EVENT` it has submitted, as the
+--- chip would read them: `"write"` with `a` the register and `b` the value,
+--- `"port"` with the offset and the byte, or `"reset"`.
+local function sentBy(harness: Harness, mixer: audio.Audio): {Sent}
+    mixer:flush()
+    local found: {Sent} = {}
+    for _, command in ipairs(harness.commands) do
+        if command.kind == audiobackend.EVENT then
+            local op = command.data // OP
+            local rest = command.data % OP
+            local kind = op == 0 and "write" or op == 2 and "reset" or op == 3 and "port" or "unknown"
+            found[#found + 1] = new Sent(
+                handle = command.handle,
+                kind = kind,
+                a = rest % 65536,
+                b = rest // 65536 % 256,
+                at = command.at
+            )
+        end
+    end
+
+    return found
+end
+
+--- Reads a little-endian u32 from `text` at byte `at`.
+local function u32(text: string, at: integer): integer
+    local a, b, c, d = string.byte(text, at, at + 3)
+
+    return (a as integer) + (b as integer) * 256 + (c as integer) * 65536 + (d as integer) * 16777216
+end
+
+--- Returns `value` as four little-endian bytes.
+local function le32(value: integer): string
+    return string.char(value % 256, value // 256 % 256, value // 65536 % 256, value // 16777216 % 256)
+end
+
+--- Returns the native chip index of a chip's name.
+local function kindOf(name: string): integer
+    return tecs_ymfm_kind(name) as integer
+end
+
+--- Reads the memory images a chip opened with, by class index.
+local function imagesOf(bytes: string): {[integer]: string}
+    local images: {[integer]: string} = {}
+    local at: integer = 1
+    while at <= #bytes do
+        local class = u32(bytes, at)
+        local length = u32(bytes, at + 4)
+        images[class] = string.sub(bytes, at + 8, at + 7 + length)
+        at = at + 8 + length
+    end
+
+    return images
+end
+
+local function made(harness: Harness, options: fm.Options?): (audio.Audio, fm.Fm)
+    local mixer = audio.newAudio({backend = harness.backend, maxVoices = 2})
+
+    return mixer, assert(fm.new(mixer, options))
+end
+
+function suite.startsTheChipAsOneVoiceOfTheMixerOnItsFirstWrite(): nil
+    local harness = newHarness(true, true)
+    local mixer, chip = made(harness, {chip = "opl3", group = "music", gain = 0.5})
+    test.equal(chip.rate, 49715, "the rate is the emulator's")
+    test.equal(chip.chip, "opl3")
+    test.equal(chip.clock, 14318180)
+    test.equal(chip.lastRegister, 0x1FF)
+    test.equal(chip.lastPort, 3)
+    test.equal(mixer:sounding(), 0, "the voice waits for the first write")
+    test.assert(not chip:playing())
+    test.assert(chip:write(0x105, 0x01))
+    test.equal(mixer:sounding(), 1)
+    test.assert(chip:playing())
+    mixer:update()
+    local play = assert(lastCommand(harness, audiobackend.PLAY))
+    test.equal(play.flags, audiobackend.SYNTH)
+    test.equal(play.gain, 0.5)
+    local bus = mixer:bus("music")
+    test.equal(play.target, bus:track().id, "a grouped chip plays on its Bus's Track")
+    -- The chip was opened for the voice that started, before the start
+    -- crossed, which is what hands it to the mixer.
+    test.equal(#harness.opened, 1)
+    local opened = harness.opened[1]
+    test.equal(opened.decoder, DECODER)
+    test.equal(opened.handle, play.handle)
+    test.equal(chip:handle(), play.handle)
+    -- `tecs_ymfm::Params`: the chip's index and its clock.
+    test.equal(opened.params, le32(kindOf("opl3")) .. le32(14318180))
+    test.equal(opened.bytes, "")
+
+    mixer:setGroupGain("music", 0.5)
+    mixer:update()
+    -- The group is a Bus, whose fader the backend applies.
+    local fader = assert(lastCommand(harness, audiobackend.BUS_SET))
+    test.equal(fader.param, audiobackend.BUS_GAIN)
+    test.equal(fader.gain, 0.5)
+    mixer:setGroupMuted("music", true)
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.BUS_SET)).param, audiobackend.BUS_MUTE)
+    mixer:setGroupMuted("music", false)
+    chip:setGain(1)
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.SET_GAIN)).gain, 1)
+    mixer:pauseGroup("music")
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.BUS_SET)).param, audiobackend.BUS_PAUSE)
+    test.assert(mixer:paused(play.handle))
+
+    chip:destroy()
+    chip:destroy()
+    mixer:update()
+    test.equal(countOf(harness, audiobackend.STOP), 1, "a second destroy does nothing")
+    test.equal(assert(lastCommand(harness, audiobackend.STOP)).handle, play.handle)
+    test.equal(mixer:sounding(), 0)
+end
+
+function suite.makesAnOpl2WhenNoChipIsNamed(): nil
+    local harness = newHarness(true, true)
+    local _mixer, chip = made(harness)
+    test.equal(chip.chip, "opl2")
+    test.assert(chip:handle() ~= 0)
+    test.equal(u32(harness.opened[1].params, 1), kindOf("opl2"))
+    test.equal(u32(harness.opened[1].params, 5), 3579545)
+end
+
+function suite.countsAgainstTheVoiceCeiling(): nil
+    local harness = newHarness(true, true)
+    local mixer = audio.newAudio({backend = harness.backend, maxVoices = 1})
+    local first = assert(fm.new(mixer))
+    local second = assert(fm.new(mixer), "a chip is made before it takes a voice")
+    test.assert(first:write(0xB0, 0x20))
+    test.assert(not second:write(0xB0, 0x20), "every voice is busy")
+    test.assert(not second:playing())
+    test.equal(#harness.opened, 1)
+    first:destroy()
+    local third = assert(fm.new(mixer))
+    test.assert(third:write(0xB0, 0x20))
+end
+
+function suite.carriesWritesBatchesAndResetsAsTimedEvents(): nil
+    local harness = newHarness(true, true)
+    local mixer, chip = made(harness, {chip = "opl3"})
+    test.assert(chip:write(0x105, 0x01))
+    test.assert(chip:write(0x1B0, 0x32, 0.25))
+    test.assert(chip:writes({0xA0, 0x41, 0xB0, 0x32}, 1.5))
+    test.assert(chip:writes({}))
+    test.assert(chip:reset())
+    test.assert(chip:reset(3))
+    local sent = sentBy(harness, mixer)
+    test.equal(#sent, 6, "a batch is its writes, and an empty one is nothing")
+    test.equal(sent[1].kind, "write")
+    test.equal(sent[1].a, 0x105)
+    test.equal(sent[1].b, 0x01)
+    test.equal(sent[1].at, 0)
+    test.equal(sent[2].a, 0x1B0)
+    test.equal(sent[2].b, 0x32)
+    test.equal(sent[2].at, 0.25)
+    test.equal(sent[3].a, 0xA0)
+    test.equal(sent[4].a, 0xB0)
+    test.equal(sent[4].b, 0x32)
+    test.equal(sent[4].at, 1.5)
+    test.equal(sent[5].kind, "reset")
+    test.equal(sent[5].at, 0)
+    test.equal(sent[6].at, 3)
+    test.equal(assert(lastCommand(harness, audiobackend.EVENT)).data, 2 * OP)
+    -- There is one clock, and it is the mixer's.
+    harness.clock[1] = 2.5
+    test.equal(chip:now(), 2.5)
+    test.equal(chip:now(), mixer:now())
+end
+
+function suite.takesABatchOfAnySizeAndNothingOnceDestroyed(): nil
+    local harness = newHarness(true, true)
+    local mixer, chip = made(harness)
+    local huge: {integer} = {}
+    for index = 1, 4097 do
+        huge[2 * index - 1] = 0xA0
+        huge[2 * index] = index % 256
+    end
+    test.assert(chip:writes(huge), "there is no queue for a batch to outgrow")
+    test.equal(#sentBy(harness, mixer), 4097)
+
+    chip:destroy()
+    test.assert(not chip:write(0xB0, 0x20), "a destroyed chip sends nothing")
+    test.assert(not chip:writes({0xB0, 0x20}))
+    test.assert(not chip:writePort(0, 0xB0))
+    test.assert(not chip:reset())
+    test.equal(#sentBy(harness, mixer), 4097)
+end
+
+function suite.raisesForARegisterOrValueOutsideItsRange(): nil
+    local harness = newHarness(true, true)
+    local mixer, opl2 = made(harness)
+    local opl3 = assert(fm.new(mixer, {chip = "opl3"}))
+    test.raises(
+        function(): nil
+            opl2:write(0x100, 0)
+        end,
+        "opl2 register must be from 0x00 to 0xFF, got 0x100"
+    )
+    test.raises(
+        function(): nil
+            opl3:write(0x200, 0)
+        end,
+        "0x1FF"
+    )
+    test.raises(
+        function(): nil
+            opl2:write(-1, 0)
+        end,
+        "register"
+    )
+    test.raises(
+        function(): nil
+            opl2:write(0xB0, 256)
+        end,
+        "value must be from 0 to 255"
+    )
+    test.raises(
+        function(): nil
+            opl2:writes({0xB0})
+        end,
+        "alternate register and value"
+    )
+    -- One bad pair refuses the whole batch before any of it is sent.
+    test.raises(
+        function(): nil
+            opl3:writes({0xA0, 0x41, 0x1B0, 0x300})
+        end,
+        "value"
+    )
+    test.equal(#sentBy(harness, mixer), 0)
+    test.equal(#harness.opened, 0, "a refused write starts no voice")
+    test.assert(opl3:write(0x1FF, 0xFF))
+    test.raises(
+        function(): nil
+            fm.new(mixer, {chip = "opl4" as fm.Chip})
+        end,
+        "chip must be"
+    )
+end
+
+function suite.makesAVoicelessChipWithoutAnOutput(): nil
+    -- A mixer with no output takes no voice. Its chip is still made and
+    -- answers every call without raising, reporting that nothing sounds.
+    local mixer = audio.newAudio({backend = audiobackend.silent()})
+    local chip = assert(fm.new(mixer, {chip = "opl3"}))
+    test.equal(mixer:sounding(), 0)
+    test.assert(not chip:write(0xB0, 0x20, 0.5))
+    test.assert(not chip:writes({0xA0, 0x41}))
+    test.assert(not chip:reset())
+    test.assert(not chip:playing())
+    test.equal(chip:now(), 0)
+    chip:setGain(0.5)
+    chip:setStereo(1, 0)
+    chip:pause()
+    chip:destroy()
+end
+
+function suite.takesAVoiceOnABackendWithNoDecoders(): nil
+    local harness = newHarness(true, false)
+    local mixer, chip = made(harness)
+    test.assert(chip:write(0xB0, 0x20))
+    test.equal(mixer:sounding(), 1)
+    test.equal(#harness.opened, 0)
+    test.equal(#sentBy(harness, mixer), 1, "the writes still reach the backend")
+end
+
+function suite.makesAnyChipByNameOnItsOwnClockOrAGivenOne(): nil
+    local harness = newHarness(true, true)
+    local mixer = audio.newAudio({backend = harness.backend, maxVoices = 4})
+    local genesis = assert(fm.new(mixer, {chip = "ym2612"}))
+    test.equal(genesis.clock, 7670453)
+    test.equal(genesis.lastRegister, 0x1FF)
+    test.assert(genesis:write(0x28, 0))
+    test.equal(harness.opened[1].params, le32(kindOf("ym2612")) .. le32(7670453))
+    local opl4 = assert(fm.new(mixer, {chip = "ymf278b", clock = 33868800}))
+    test.equal(opl4.lastRegister, 0x2FF)
+    test.equal(opl4.lastPort, 5)
+    local opq = assert(fm.new(mixer, {chip = "ym3806"}))
+    test.equal(opq.lastRegister, 0x11F)
+    test.assert(opq:write(0x11F, 1))
+    local ssg = assert(fm.new(mixer, {chip = "ym2149", clock = 2000000}))
+    test.equal(ssg.lastPort, 3)
+    test.assert(ssg:write(0, 0))
+    test.equal(u32(harness.opened[3].params, 5), 2000000)
+    test.raises(
+        function(): nil
+            fm.new(mixer, {chip = "ym2151", clock = 99999})
+        end,
+        "clock must be a whole number of hertz"
+    )
+    test.raises(
+        function(): nil
+            fm.new(mixer, {chip = "sn76489" as fm.Chip})
+        end,
+        "ymfm.chips"
+    )
+end
+
+function suite.namesEveryChipWithItsClockRateAndMemory(): nil
+    local names = fm.chips()
+    test.equal(#names, 26)
+    test.equal(names[1], "ym3526")
+    test.equal(names[26], "opl3")
+    test.equal(fm.rate("opl2"), 49715)
+    test.equal(fm.rate("opl3"), 49715)
+    test.equal(fm.rate("ym2612"), 53267)
+    -- Rendered at three times its FM rate, then averaged three to a frame.
+    test.equal(fm.rate("ym2203"), 55466)
+    test.equal(fm.rate("ymf288"), 55466)
+    test.equal(fm.rate("ym2151", 4000000), 62500)
+    test.equal(fm.defaultClock("ym2149"), 1789772)
+    test.equal(#fm.memoryClasses("ym2612"), 0)
+    test.equal(fm.memoryClasses("ym2610")[1], "adpcmA")
+    test.equal(fm.memoryClasses("ym2610")[2], "adpcmB")
+    test.equal(fm.memoryClasses("y8950")[1], "adpcmB")
+    test.equal(fm.memoryClasses("ymf278b")[1], "pcm")
+end
+
+function suite.agreesWithTheNativeChipAboutEveryChip(): nil
+    -- This module works out each chip's rate, clock, range and memory
+    -- without asking the library, so a table here that drifted from
+    -- `tecs_ymfm::Kind` would mistime every `at`.
+    local classes: {[string]: integer} = {adpcmA = 0, adpcmB = 1, pcm = 2}
+    local mixer = audio.newAudio({backend = audiobackend.silent()})
+    for _, chip in ipairs(fm.chips()) do
+        local kind = tecs_ymfm_kind(chip)
+        test.assert(kind as integer ~= 4294967295, chip .. " is a native chip")
+        test.equal(tecs_ymfm_default_clock(kind) as integer, fm.defaultClock(chip), chip)
+        test.equal(tecs_ymfm_rate(kind, 0) as integer, fm.rate(chip), chip)
+        test.equal(tecs_ymfm_rate(kind, 4000000) as integer, fm.rate(chip, 4000000), chip)
+        local limits = tecs_ymfm_limits(kind) as integer
+        local made = assert(fm.new(mixer, {chip = chip}))
+        test.equal(limits % 65536, made.lastRegister, chip .. " register")
+        test.equal(limits // 65536, made.lastPort, chip .. " port")
+        local reads: {[integer]: boolean} = {}
+        for _, class in ipairs(fm.memoryClasses(chip)) do
+            reads[assert(classes[class])] = true
+        end
+        for class = 0, 2 do
+            test.equal(tecs_ymfm_reads(kind, class) as integer == 1, reads[class] == true, chip .. " memory")
+        end
+    end
+    test.equal(tecs_ymfm_kind("sn76489") as integer, 4294967295)
+end
+
+function suite.writesPortsAndChecksTheirRange(): nil
+    local harness = newHarness(true, true)
+    local mixer, chip = made(harness, {chip = "ym2612"})
+    test.assert(chip:writePort(2, 0x2A, 0.5))
+    test.assert(chip:writePorts({0, 0x28, 1, 0xF0}, 1))
+    test.assert(chip:writePorts({}))
+    local sent = sentBy(harness, mixer)
+    test.equal(#sent, 3)
+    test.equal(sent[1].kind, "port")
+    test.equal(sent[1].a, 2)
+    test.equal(sent[1].b, 0x2A)
+    test.equal(sent[1].at, 0.5)
+    test.equal(sent[3].kind, "port")
+    test.equal(sent[3].a, 1)
+    test.equal(sent[3].b, 0xF0)
+    test.equal(sent[3].at, 1)
+    test.raises(
+        function(): nil
+            chip:writePort(4, 0)
+        end,
+        "ym2612 port must be from 0x00 to 0x3, got 0x4"
+    )
+    test.raises(
+        function(): nil
+            chip:writePorts({0, 1, 2})
+        end,
+        "alternate port and value"
+    )
+end
+
+function suite.opensWithItsMemoryImagesAndRestartsForANewOne(): nil
+    local harness = newHarness(true, true)
+    local mixer, chip = made(harness, {chip = "ym2610"})
+    test.assert(chip:setMemory("adpcmA", "\1\2\3"))
+    test.equal(#harness.opened, 0, "an image waits for the chip to open")
+    test.assert(chip:write(0x10, 0))
+    test.equal(harness.opened[1].bytes, le32(0) .. le32(3) .. "\1\2\3")
+    local first = harness.opened[1].handle
+    test.raises(
+        function(): nil
+            chip:setMemory("pcm", "x")
+        end,
+        "the ym2610 reads no pcm memory"
+    )
+    -- An image for a playing chip restarts it with every image set so far.
+    test.assert(chip:setMemory("adpcmB", "\9"))
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.STOP)).handle, first)
+    test.assert(chip:write(0x10, 0))
+    test.equal(#harness.opened, 2)
+    local images = imagesOf(harness.opened[2].bytes)
+    test.equal(images[0], "\1\2\3")
+    test.equal(images[1], "\9")
+    test.assert(harness.opened[2].handle ~= first)
+    chip:destroy()
+    test.assert(not chip:setMemory("adpcmB", "x"), "a destroyed chip loads nothing")
+end
+
+function suite.pausesPlacesAndFadesTheVoice(): nil
+    local harness = newHarness(true, true)
+    local mixer, chip = made(harness)
+    local handle = chip:handle()
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.PLAY)).handle, handle)
+    chip:pause()
+    test.assert(chip:paused())
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.PAUSE)).handle, handle)
+    chip:resume()
+    test.assert(not chip:paused())
+    chip:setStereo(1, 0)
+    mixer:update()
+    test.equal(assert(lastCommand(harness, audiobackend.RESUME)).handle, handle)
+    test.equal(assert(lastCommand(harness, audiobackend.SET_STEREO)).handle, handle)
+    chip:destroy(0.25)
+    mixer:update()
+    local stop = assert(lastCommand(harness, audiobackend.STOP))
+    test.equal(stop.handle, handle)
+    test.equal(stop.fade, 0.25)
+end
+
+--- Returns the native binding, or skips when `libtecsaudio` is not staged.
+local function binding(): {[string]: any}
+    local ok, loaded = pcall(require, "tecs.platform.audionative")
+    if not ok then
+        test.skip("libtecsaudio is not on the loader path: " .. tostring(loaded))
+    end
+
+    return loaded as {[string]: any}
+end
+
+function suite.opensEveryChipThroughTheNativeDecoder(): nil
+    binding()
+    local mixer = audio.newAudio({output = "memory", maxVoices = 32, limiter = false})
+    test.assert(mixer.available)
+    for _, name in ipairs(fm.chips()) do
+        local chip = assert(fm.new(mixer, {chip = name}))
+        test.assert(chip:handle() ~= 0, name .. " opens")
+        test.assert(chip:playing(), name)
+        chip:destroy()
+        local other = assert(fm.new(mixer, {chip = name, clock = 4000000}))
+        test.assert(other:handle() ~= 0, name .. " opens on another clock")
+        other:destroy()
+        mixer:update()
+    end
+    local ym2610 = assert(fm.new(mixer, {chip = "ym2610", clock = 8000000}))
+    test.assert(ym2610:setMemory("adpcmA", string.rep("\x12", 512)))
+    test.assert(ym2610:setMemory("adpcmB", ""))
+    test.assert(ym2610:handle() ~= 0, "a chip opens with its images")
+    ym2610:destroy()
+    mixer:destroy()
+end
+
+function suite.rendersAHeldSineOnTheMixerClock(): nil
+    binding()
+    local mixer = audio.newAudio({output = "memory", maxVoices = 4, limiter = false})
+    local chip = assert(fm.new(mixer, {chip = "opl2"}))
+    test.assert(mixer:listen(0.5))
+    -- The module's own example: a held sine on channel 0 at 440 Hz, keyed on
+    -- a tenth of a second ahead.
+    test.assert(chip:writes({
+        0x20, 0x01, 0x23, 0x21,
+        0x40, 0x3F, 0x43, 0x00,
+        0x63, 0xF0, 0x83, 0x0F,
+        0xA0, 0x41, 0xB0, 0x32,
+    }, 0.1))
+    test.equal(mixer:step(0.5), 0.5)
+    test.equal(chip:now(), 0.5)
+    local heard = assert(mixer:listening())
+    test.assert(heard.peak > 0.01, "the chip sounds, peaking at " .. tostring(heard.peak))
+    test.assert(#heard.onsets >= 1, "the note has an onset")
+    test.assert(
+        math.abs(heard.onsets[1] - 0.1) < 0.02,
+        "the note starts on the mixer's clock, got " .. tostring(heard.onsets[1])
+    )
+    chip:destroy()
+    mixer:destroy()
+end
+
+return suite

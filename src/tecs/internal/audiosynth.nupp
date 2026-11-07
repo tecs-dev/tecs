@@ -1,0 +1,11 @@
+module tecs.internal.audiosynth
+
+--[[
+What `tecs.audio` shares with the sequencers and timelines that run inside its
+`update`: a per-mixer list of functions `Audio.update` calls each frame, which
+drops one once it answers false. `tecs.audio.sequencer` and
+`tecs.audio.timeline` register in it, and so may an extension's sequencer.
+]]
+
+--- The functions each mixer's `update` runs, keyed weakly by mixer.
+export const updates: {[any]: {function(): boolean}} = setmetatable({}, {__mode = "k"})

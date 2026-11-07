@@ -206,6 +206,37 @@ function suite.audioInspectionUsesTheWorldMixer(): nil
     mcp.bind(nil)
 end
 
+function suite.audioToolsReportAndDriveTheConsoleOnAMemoryOutput(): nil
+    local loaded = pcall(require, "tecs.platform.audionative")
+    if not loaded then
+        test.skip("libtecsaudio is not on the loader path")
+    end
+    local world = ecs.newWorld()
+    mcp.bind(world)
+    local mixer = audio.install(world, {output = "memory"})
+    mixer:bus("sfx")
+    local line = mixer:timeline({tempo = 90})
+    local snapshot = content("audio_snapshot")
+    test.equal(snapshot.output.state, "offline")
+    test.equal(#snapshot.buses, 2, "Master and sfx")
+    test.equal(snapshot.buses[1].name, "master")
+    test.equal(snapshot.buses[1].effects[1].name, "limiter")
+    test.equal(snapshot.timelines[1].tempo, 90)
+    test.equal(content("audio_control", {bus = "sfx", gain = 0.5, muted = true}).gain, 0.5)
+    test.assert(mixer:bus("sfx"):muted())
+    test.equal(content("audio_timeline", {index = 1, action = "pause"}).paused, true)
+    test.assert(line:paused())
+    test.equal(content("audio_step", {seconds = 0.25}).rendered, 0.25)
+    test.equal(content("audio_listen", {seconds = 0.1}).listening, true)
+    content("audio_step", {seconds = 0.1})
+    test.equal(content("audio_listening").frames, 4800)
+    test.equal(call("audio_play", {path = "never-loaded.wav"}).isError, true)
+    test.equal(#content("audio_events").events, 0)
+    mixer:destroy()
+    world:shutdown()
+    mcp.bind(nil)
+end
+
 function suite.profileToolsWriteAReportAndCanStartAgain(): nil
     content("profile_start", {intervalMs = 1, zone = "test-never-entered"})
     test.equal(call("profile_start").isError, true)
