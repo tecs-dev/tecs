@@ -18,10 +18,10 @@ local descriptions = {
 -- a game opts into them, and nothing in the default build or test run
 -- reaches them.
 developmentTasks.extensions = {
-    description = "Build the tecs-gm and tecs-ymfm audio extensions' native libraries",
-    argv = { "cargo", "build", "--locked", "-p", "tecs-gm", "-p", "tecs-ymfm" },
+    description = "Build the tecs-pcm, tecs-gm and tecs-ymfm audio extensions' native libraries",
+    argv = { "cargo", "build", "--locked", "-p", "tecs-pcm", "-p", "tecs-gm", "-p", "tecs-ymfm" },
 }
-for _, extension in ipairs({ "gm", "ymfm" }) do
+for _, extension in ipairs({ "pcm", "gm", "ymfm" }) do
     developmentTasks["test-" .. extension] = {
         description = "Run the tecs-" .. extension .. " extension's tests (after nupp task extensions)",
         cwd = "tecs-" .. extension,

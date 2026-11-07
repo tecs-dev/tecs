@@ -109,24 +109,11 @@ local function silentBackend(): audiobackend.Backend
         drain = function(_out: {integer}): integer
             return 0
         end,
-        loadClip = function(
-            _path: string,
-            _clip: integer,
-            _mode: audiobackend.LoadMode,
-            _streamSeconds: number
-        ): (audiobackend.ClipInfo?, string?)
-            return nil, "the compatibility suite loads no clips"
-        end,
-        releaseClip = function(_clip: integer): nil
-        end,
         position = function(_handle: integer): number?
             return nil
         end,
         seek = function(_handle: integer, _seconds: number): boolean
             return false
-        end,
-        decoders = function(): {string}
-            return {}
         end,
         close = function(): nil
         end

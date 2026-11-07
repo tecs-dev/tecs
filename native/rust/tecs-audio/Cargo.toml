@@ -12,4 +12,3 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 tecs-audio-abi = { path = "../tecs-audio-abi" }
 cpal.workspace = true
-symphonia.workspace = true

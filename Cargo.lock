@@ -3192,7 +3192,6 @@ name = "tecs-audio"
 version = "0.1.0"
 dependencies = [
  "cpal",
- "symphonia",
  "tecs-audio-abi",
 ]
 
@@ -3241,6 +3240,15 @@ name = "tecs-gm"
 version = "0.1.0"
 dependencies = [
  "rustysynth",
+ "tecs-audio-abi",
+]
+
+[[package]]
+name = "tecs-pcm"
+version = "0.1.0"
+dependencies = [
+ "symphonia",
+ "tecs-audio",
  "tecs-audio-abi",
 ]
 

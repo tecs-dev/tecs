@@ -25,28 +25,16 @@ const RATE: u32 = 48_000;
 
 /// One second of a quiet 440 Hz sine, stereo 16-bit, which loops without a seam
 /// because a second holds a whole number of its cycles.
-fn tone() -> Vec<u8> {
-    let frames = RATE;
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"RIFF");
-    bytes.extend_from_slice(&(36 + frames * 4).to_le_bytes());
-    bytes.extend_from_slice(b"WAVEfmt ");
-    bytes.extend_from_slice(&16u32.to_le_bytes());
-    bytes.extend_from_slice(&1u16.to_le_bytes());
-    bytes.extend_from_slice(&2u16.to_le_bytes());
-    bytes.extend_from_slice(&RATE.to_le_bytes());
-    bytes.extend_from_slice(&(RATE * 4).to_le_bytes());
-    bytes.extend_from_slice(&4u16.to_le_bytes());
-    bytes.extend_from_slice(&16u16.to_le_bytes());
-    bytes.extend_from_slice(b"data");
-    bytes.extend_from_slice(&(frames * 4).to_le_bytes());
-    for frame in 0..frames {
+/// A second of a quiet 440 Hz sine, stereo, as samples.
+fn tone() -> std::sync::Arc<[f32]> {
+    let mut samples = Vec::with_capacity(2 * RATE as usize);
+    for frame in 0..RATE {
         let phase = 2.0 * std::f64::consts::PI * 440.0 * frame as f64 / RATE as f64;
-        let sample = (phase.sin() * 0.15 * i16::MAX as f64) as i16;
-        bytes.extend_from_slice(&sample.to_le_bytes());
-        bytes.extend_from_slice(&sample.to_le_bytes());
+        let sample = (phase.sin() * 0.15) as f32;
+        samples.push(sample);
+        samples.push(sample);
     }
-    bytes
+    samples.into()
 }
 
 fn state_name(state: u32) -> &'static str {
@@ -90,14 +78,15 @@ fn main() {
         describe(&engine)
     );
 
-    engine
-        .load_clip_bytes("tone.wav", &tone(), 1)
-        .expect("the tone decodes");
+    engine.park_source(
+        65_537,
+        Box::new(tecsaudio::source::ResidentSource::new(tone(), 2, RATE)),
+    );
     engine.submit(&[Command {
         kind: command::PLAY,
         handle: 65_537,
         clip: 1,
-        flags: command::FLAG_LOOP,
+        flags: command::FLAG_LOOP | command::FLAG_SYNTH,
         gain,
         pitch: 1.0,
         start: 0.0,

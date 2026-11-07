@@ -10,6 +10,7 @@ members = [
     "native/rust/tecs-gamepad",
     "native/rust/winit-host",
     "tecs-gm",
+    "tecs-pcm",
     "tecs-ymfm",
 ]
 default-members = ["native/rust/winit-host"]

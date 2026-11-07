@@ -25,7 +25,6 @@ pub mod abi;
 pub mod capture;
 pub mod command;
 pub mod conform;
-pub mod decode;
 pub mod device;
 pub mod effects;
 pub mod engine;
@@ -33,11 +32,9 @@ pub mod enumerate;
 pub mod listen;
 pub mod mixer;
 pub mod output;
-pub mod pcm;
 pub mod queue;
 pub mod render;
 pub mod source;
-pub mod stream;
 
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::sync::Mutex;
@@ -46,19 +43,6 @@ use capture::Capture;
 use command::{Command, Event};
 use engine::Engine;
 use enumerate::DeviceList;
-
-/// What a call answers when it worked.
-const STATUS_OK: i32 = 0;
-
-/// What a call answers when it did not, with the reason left for
-/// `tecs_audio_last_error`.
-const STATUS_FAILED: i32 = 1;
-
-/// The decoder names this build linked, joined by commas.
-///
-/// Built once and kept, because the binding reads it as a borrowed C string and
-/// the answer cannot change while the process runs.
-static DECODERS: Mutex<Option<CString>> = Mutex::new(None);
 
 /// The reason the most recent failing enumeration or microphone open gave.
 ///
@@ -73,18 +57,6 @@ fn set_open_error(reason: &str) {
     if let Ok(mut slot) = OPEN_ERROR.lock() {
         *slot = CString::new(reason).ok();
     }
-}
-
-/// What a load settled on.
-///
-/// The layout matches `cdef struct tecsAudioClipInfo` in
-/// `src/tecs/platform/audionative.nupp`.
-#[repr(C)]
-pub struct ClipInfo {
-    /// The audio duration in seconds, and zero when the input cannot say.
-    pub duration: f32,
-    /// Nonzero when decoded samples stay in memory.
-    pub resident: i32,
 }
 
 /// Borrows the engine a device pointer names.
@@ -679,112 +651,6 @@ pub unsafe extern "C" fn tecs_audio_drain(
     value.drain(out) as u32
 }
 
-/// Reads a file and holds it under `clip`.
-///
-/// # Safety
-///
-/// `path` must be a NUL-terminated string, `info` must be writable, and the
-/// device must be live.
-///
-/// @return zero when the clip loaded, and one with the reason left for
-///     `tecs_audio_last_error` when it did not
-#[no_mangle]
-pub unsafe extern "C" fn tecs_audio_load_clip(
-    device: *mut Engine,
-    path: *const c_char,
-    clip: u32,
-    mode: u32,
-    stream_seconds: f32,
-    info: *mut ClipInfo,
-) -> i32 {
-    let value = match unsafe { engine(device) } {
-        None => return STATUS_FAILED,
-        Some(value) => value,
-    };
-    if path.is_null() || info.is_null() {
-        return STATUS_FAILED;
-    }
-    let text = match unsafe { CStr::from_ptr(path) }.to_str() {
-        Err(_) => return STATUS_FAILED,
-        Ok(text) => text,
-    };
-    match value.load_clip(text, clip, mode, stream_seconds) {
-        Err(_) => STATUS_FAILED,
-        Ok(loaded) => {
-            unsafe {
-                (*info).duration = loaded.duration as f32;
-                (*info).resident = i32::from(loaded.resident);
-            }
-            STATUS_OK
-        }
-    }
-}
-
-/// Decodes the bytes of a whole encoded file held in memory and holds the
-/// result under `clip`, always resident.
-///
-/// `name` stands where a path would for `tecs_audio_load_clip`: every reason
-/// names it, and its extension hints the probe. The bytes are borrowed for the
-/// call only and nothing of them is kept.
-///
-/// # Safety
-///
-/// `name` must be a NUL-terminated string, `bytes` must address `length`
-/// readable bytes when `length` is nonzero, `info` must be writable, and the
-/// device must be live.
-///
-/// @return zero when the clip loaded, and one with the reason left for
-///     `tecs_audio_last_error` when it did not
-#[no_mangle]
-pub unsafe extern "C" fn tecs_audio_load_clip_bytes(
-    device: *mut Engine,
-    name: *const c_char,
-    bytes: *const u8,
-    length: u64,
-    clip: u32,
-    info: *mut ClipInfo,
-) -> i32 {
-    let value = match unsafe { engine(device) } {
-        None => return STATUS_FAILED,
-        Some(value) => value,
-    };
-    if name.is_null() || info.is_null() {
-        return STATUS_FAILED;
-    }
-    let text = match unsafe { CStr::from_ptr(name) }.to_str() {
-        Err(_) => return STATUS_FAILED,
-        Ok(text) => text,
-    };
-    let span: &[u8] = if bytes.is_null() || length == 0 {
-        &[]
-    } else {
-        // SAFETY: the caller guarantees this readable range for the call.
-        unsafe { std::slice::from_raw_parts(bytes, length as usize) }
-    };
-    match value.load_clip_bytes(text, span, clip) {
-        Err(_) => STATUS_FAILED,
-        Ok(loaded) => {
-            unsafe {
-                (*info).duration = loaded.duration as f32;
-                (*info).resident = i32::from(loaded.resident);
-            }
-            STATUS_OK
-        }
-    }
-}
-
-/// Drops whatever a clip index holds.
-///
-/// # Safety
-///
-/// The pointer must name a live device.
-#[no_mangle]
-pub unsafe extern "C" fn tecs_audio_release_clip(device: *mut Engine, clip: u32) {
-    if let Some(value) = unsafe { engine(device) } {
-        value.release_clip(clip);
-    }
-}
-
 /// Reports a voice's read position.
 ///
 /// # Safety
@@ -860,9 +726,6 @@ pub const LAYOUT_COMMAND: u32 = 0;
 /// Selects the event struct in `tecs_audio_layout`.
 pub const LAYOUT_EVENT: u32 = 1;
 
-/// Selects the clip-info struct in `tecs_audio_layout`.
-pub const LAYOUT_CLIP_INFO: u32 = 2;
-
 /// Selects `MeterRecord` for `tecs_audio_layout`.
 pub const LAYOUT_METER: u32 = 4;
 
@@ -896,32 +759,10 @@ pub extern "C" fn tecs_audio_layout(kind: u32) -> u32 {
     let size = match kind {
         LAYOUT_COMMAND => std::mem::size_of::<Command>(),
         LAYOUT_EVENT => std::mem::size_of::<Event>(),
-        LAYOUT_CLIP_INFO => std::mem::size_of::<ClipInfo>(),
         LAYOUT_METER => std::mem::size_of::<MeterRecord>(),
         _ => 0,
     };
     size as u32
-}
-
-/// Returns the decoder names this build linked, joined by commas.
-///
-/// # Safety
-///
-/// The returned pointer stays valid for the life of the process.
-#[no_mangle]
-pub unsafe extern "C" fn tecs_audio_decoders(_device: *mut Engine) -> *const c_char {
-    let mut slot = match DECODERS.lock() {
-        Err(_) => return std::ptr::null(),
-        Ok(value) => value,
-    };
-    if slot.is_none() {
-        let joined = decode::decoder_names().join(",");
-        *slot = CString::new(joined).ok();
-    }
-    match slot.as_ref() {
-        None => std::ptr::null(),
-        Some(value) => value.as_ptr(),
-    }
 }
 
 /// Returns the reason the most recent failing call gave.
@@ -1339,7 +1180,6 @@ pub unsafe extern "C" fn tecs_audio_microphone_last_error(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::CString;
 
     #[test]
     fn reads_the_output_clock_across_the_seam() {
@@ -1397,95 +1237,6 @@ mod tests {
     }
 
     #[test]
-    fn reports_a_load_failure_through_the_status_and_the_reason() {
-        let device = tecs_audio_open_offline(48_000, 2, 8);
-        let path = CString::new("no/such/file.ogg").expect("the literal has no NUL");
-        let mut info = ClipInfo {
-            duration: 0.0,
-            resident: 0,
-        };
-        unsafe {
-            let status =
-                tecs_audio_load_clip(device, path.as_ptr(), 1, engine::MODE_AUTO, 10.0, &mut info);
-            assert_eq!(status, STATUS_FAILED);
-            let reason = tecs_audio_last_error(device);
-            assert!(!reason.is_null());
-            assert!(!CStr::from_ptr(reason).to_bytes().is_empty());
-            tecs_audio_close(device);
-        }
-    }
-
-    #[test]
-    fn crosses_a_clip_held_in_memory_and_reports_one_that_is_not_audio() {
-        let device = tecs_audio_open_offline(48_000, 2, 8);
-        let name = CString::new("sound.wav").expect("the literal has no NUL");
-        let mut info = ClipInfo {
-            duration: 0.0,
-            resident: 0,
-        };
-        // A mono 8-bit WAV of 4800 frames at 48 kHz: a tenth of a second.
-        let frames: u32 = 4_800;
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"RIFF");
-        bytes.extend_from_slice(&(36 + frames).to_le_bytes());
-        bytes.extend_from_slice(b"WAVEfmt ");
-        bytes.extend_from_slice(&16u32.to_le_bytes());
-        bytes.extend_from_slice(&1u16.to_le_bytes());
-        bytes.extend_from_slice(&1u16.to_le_bytes());
-        bytes.extend_from_slice(&48_000u32.to_le_bytes());
-        bytes.extend_from_slice(&48_000u32.to_le_bytes());
-        bytes.extend_from_slice(&1u16.to_le_bytes());
-        bytes.extend_from_slice(&8u16.to_le_bytes());
-        bytes.extend_from_slice(b"data");
-        bytes.extend_from_slice(&frames.to_le_bytes());
-        bytes.resize(bytes.len() + frames as usize, 128);
-        unsafe {
-            let status = tecs_audio_load_clip_bytes(
-                device,
-                name.as_ptr(),
-                bytes.as_ptr(),
-                bytes.len() as u64,
-                1,
-                &mut info,
-            );
-            assert_eq!(status, STATUS_OK);
-            assert_eq!(info.resident, 1);
-            assert!((info.duration - 0.1).abs() < 1.0e-6);
-
-            let junk = b"not audio";
-            let status = tecs_audio_load_clip_bytes(
-                device,
-                name.as_ptr(),
-                junk.as_ptr(),
-                junk.len() as u64,
-                2,
-                &mut info,
-            );
-            assert_eq!(status, STATUS_FAILED);
-            let reason = CStr::from_ptr(tecs_audio_last_error(device))
-                .to_str()
-                .expect("the reason is UTF-8");
-            assert!(reason.contains("sound.wav"), "got {reason}");
-
-            let status = tecs_audio_load_clip_bytes(
-                device,
-                name.as_ptr(),
-                std::ptr::null(),
-                0,
-                3,
-                &mut info,
-            );
-            assert_eq!(status, STATUS_FAILED);
-
-            let null: *mut Engine = std::ptr::null_mut();
-            let status =
-                tecs_audio_load_clip_bytes(null, name.as_ptr(), bytes.as_ptr(), 1, 4, &mut info);
-            assert_eq!(status, STATUS_FAILED);
-            tecs_audio_close(device);
-        }
-    }
-
-    #[test]
     fn tolerates_a_null_device_on_every_entry_point() {
         let null: *mut Engine = std::ptr::null_mut();
         unsafe {
@@ -1498,7 +1249,6 @@ mod tests {
             assert_eq!(tecs_audio_render(null, std::ptr::null_mut(), 0), 0);
             assert!(tecs_audio_last_error(null).is_null());
             tecs_audio_submit(null, std::ptr::null(), 0);
-            tecs_audio_release_clip(null, 1);
             tecs_audio_close(null);
         }
     }
@@ -1507,7 +1257,6 @@ mod tests {
     fn reports_the_size_of_every_struct_crossing_the_seam() {
         assert_eq!(tecs_audio_layout(LAYOUT_COMMAND), 72);
         assert_eq!(tecs_audio_layout(LAYOUT_EVENT), 8);
-        assert_eq!(tecs_audio_layout(LAYOUT_CLIP_INFO), 8);
         assert_eq!(tecs_audio_layout(LAYOUT_METER), 24);
         assert_eq!(tecs_audio_layout(99), 0);
     }
@@ -1598,22 +1347,5 @@ mod tests {
             .to_str()
             .expect("the reason is UTF-8");
         assert!(text.contains("channels"), "got {text}");
-    }
-
-    #[test]
-    fn names_the_decoders_this_build_linked() {
-        let device = tecs_audio_open_offline(48_000, 2, 8);
-        unsafe {
-            let names = tecs_audio_decoders(device);
-            assert!(!names.is_null());
-            let text = CStr::from_ptr(names).to_str().expect("the names are UTF-8");
-            // Codec names rather than container names, because that is what the
-            // decoder registry can be asked. The pin is on the feature set this
-            // crate selects rather than on the whole list.
-            assert!(text.contains("flac"), "got {text}");
-            assert!(text.contains("vorbis"), "got {text}");
-            assert!(text.contains("pcm_s16le"), "got {text}");
-            tecs_audio_close(device);
-        }
     }
 }

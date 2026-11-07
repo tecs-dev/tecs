@@ -1,25 +1,29 @@
 module tecs.audio
 
 --[[
-Clips, voices, groups, keyed limits, and entity-owned sound.
+The mixing console: voices on Tracks, Buses, effects, one clock, and
+entity-owned sound.
 
 Tecs decides what should sound and a backend makes the noise. Voice slots,
 group settings, admission limits and every handle a game holds live here; the
 backend under `tecs.platform.audiobackend` receives one array of commands per
 frame and hands back the voices it has finished with. A machine with no output
-device still gets a working object: `available` reports false, `play` answers
-zero, and nothing raises.
+device still gets a working object: it keeps time on a void output, and on a
+build with no native audio library `play` answers zero, and nothing raises.
 
-## Playback
+## Sounds come from extensions
 
-`load` reads a file and returns one shared clip per path. Clips shorter than
-`streamSeconds` hold decoded samples that every voice reading them shares, and
-longer clips stream separately for each voice. `LoadOptions.stream` overrides
-that choice.
+The core holds no codec and no format. What plays is a
+[`Sound`](tecs.audio.Sound), which an extension makes and the mixer plays
+through that extension's Decoder: `tecs.pcm` for encoded audio files, `tecs.gm`
+for General MIDI, `tecs.ymfm` for the FM chips, or a game's own. A game that
+plays no recorded sound brings no codec.
 
 ```nupp
+local pcm <const> = require("tecs.pcm")
+
 local mixer <const> = tecs.audio.newAudio()
-local step <const> = assert(mixer:load("assets/sfx/step.ogg"))
+local step <const> = assert(pcm.load("assets/sfx/step.ogg"))
 mixer:setLimit("footstep", {voices = 3, cooldown = 0.05})
 
 local voice <const> = mixer:play(step, {gain = 0.7, group = "sfx", key = "footstep", pitchVariance = 0.1})
@@ -28,27 +32,12 @@ if voice ~= 0 then
 end
 ```
 
-## Clips from memory
-
-`loadBytes` decodes a clip from the bytes of a whole encoded file a game already
-holds, in any format `load` reads from disk. A game that unpacks its own
-archives hands over each file as it found it; one that holds raw samples puts a
-container around them first, which for PCM is a 44-byte WAV header.
-
-```nupp
-local bytes <const> = assert(nupp.io.files.read("assets/sounds.pak")):sub(1025, 9216)
-local chime <const> = assert(mixer:loadBytes("sounds.pak/chime.wav", bytes))
-mixer:play(chime)
-```
-
-The name is the clip's identity exactly as a path is for `load`, and the two
-share one namespace: a [`Sound`](tecs.audio.Sound) row and a snapshot carry the
-name, and loading it again returns the clip already held. A memory clip is
-always resident and keeps no copy of the bytes, so it has no file for `reload`
-to re-read; a game that wants new bytes loads them under a new name.
+A Sound's name is its identity: a [`Sound`](tecs.audio.Emitter) component row
+names it by `soundId`, and a snapshot carries the name. A mixer knows the
+Sounds it played or `addSound` added, which is how a row finds its Sound.
 
 Units, in one place, because none of them is in a signature. Time is seconds
-everywhere on this surface: a fade, a seek, a loop point, a cooldown, a clip's
+everywhere on this surface: a fade, a seek, a loop point, a cooldown, a Sound's
 duration. Every fade is a duration to run for rather than a moment to finish
 at, so calling one twice restarts it. Gain is linear amplitude rather than
 decibels, where zero is silence and one is the sound as recorded, and the level
@@ -230,11 +219,6 @@ local DEFAULT_CHANNELS: integer = 2
 --- is harder to explain than one that never started.
 local DEFAULT_MAX_VOICES: integer = 32
 
---- Seconds past which a clip streams rather than staying resident. Ten is long
---- enough that no sound effect reaches it and short enough that no piece of
---- music misses it.
-local DEFAULT_STREAM_SECONDS: number = 10
-
 --- Frames per second a microphone captures at unless configured otherwise.
 local DEFAULT_CAPTURE_FREQUENCY: integer = 48000
 
@@ -260,47 +244,64 @@ local MAX_GENERATION: integer = 32767
 --- one-shot would restart on the frame after it ended, forever.
 local FINISHED: integer = -1
 
---- A clip's path is its identity, for the same reason an image's name is: an
+--- A Sound's name is its identity, for the same reason an image's name is: an
 --- index is assigned in load order, and load order is not something a snapshot
 --- can rely on reproducing.
-local clipIds: {[string]: integer} = {}
+local soundIds: {[string]: integer} = {}
 
-local clipPaths: {[integer]: string} = {}
-local clipCount: integer = 0
+local soundNames: {[integer]: string} = {}
+local soundCount: integer = 0
 
---- A group's name is its identity, on the same terms as a clip's path.
+--- A group's name is its identity, on the same terms as a Sound's name.
 local groupIds: {[string]: integer} = {}
 
 local groupNames: {[integer]: string} = {}
 local groupCount: integer = 0
 
---- Returns the index of a clip path, assigning one the first time it is seen.
+--- Returns the index of a Sound's name, assigning one the first time it is
+--- seen. A `Sound` component row names its Sound by this index.
 ---
---- @param path the non-empty path, which is not checked against the filesystem
+--- @param name the non-empty name, a path for a Sound loaded from a file
 --- @return an index from one up, shared by every mixer in the process and
----     meaningless in a file, which is why `Sound` serializes the path
+---     meaningless in a file, which is why the component serializes the name
+--- @raises string when the name is empty
+export function soundId(name: string): integer
+    if name == "" then
+        error("tecs.audio.soundId: a Sound's name cannot be empty", 2)
+    end
+    local existing = soundIds[name]
+    if existing ~= nil then
+        return existing
+    end
+    soundCount = soundCount + 1
+    soundIds[name] = soundCount
+    soundNames[soundCount] = name
+
+    return soundCount
+end
+
+--- Returns the name a Sound index represents.
+---
+--- @param id the index, where zero is the index of no Sound at all
+--- @return the name, or nil for zero and for an index never handed out
+export function soundName(id: integer): string?
+    return soundNames[id]
+end
+
+--- Deprecated: the old name of `soundId`, from when every Sound was a clip.
+---
 --- @raises string when the path is empty
 export function clipId(path: string): integer
     if path == "" then
         error("tecs.audio.clipId: a clip path cannot be empty", 2)
     end
-    local existing = clipIds[path]
-    if existing ~= nil then
-        return existing
-    end
-    clipCount = clipCount + 1
-    clipIds[path] = clipCount
-    clipPaths[clipCount] = path
 
-    return clipCount
+    return soundId(path)
 end
 
---- Returns the path a clip index represents.
----
---- @param id the index, where zero is the index of no clip at all
---- @return the path, or nil for zero and for an index never handed out
+--- Deprecated: the old name of `soundName`.
 export function clipPath(id: integer): string?
-    return clipPaths[id]
+    return soundNames[id]
 end
 
 --- Returns the index of a group name, assigning one the first time it is seen.
@@ -355,8 +356,8 @@ end
 ---
 --- Disabling an entity silences its sound and re-enabling starts it again.
 @derive(nupp.derive.Debug)
-export struct Sound
-    --- Caller-writable. Selects a clip by its `clipId` index. Zero plays
+export struct Emitter
+    --- Caller-writable. Selects a Sound by its `soundId` index. Zero plays
     --- nothing.
     clip: integer
 
@@ -407,7 +408,7 @@ end
 --- carrying one would name whatever the next run interned in its place. The
 --- voice is not saved: a snapshot records that an entity has a sound, not how
 --- far through it the backend had got, so it starts again.
-export const SoundComponent: ecs.ComponentDefinition<Sound> = ecs.newComponent(Sound, {
+export const SoundComponent: ecs.ComponentDefinition<Emitter> = ecs.newComponent(Emitter, {
     -- This persisted component name is a compatibility surface.
     name = "Sound",
     construct = function(
@@ -421,8 +422,8 @@ export const SoundComponent: ecs.ComponentDefinition<Sound> = ecs.newComponent(S
         y: number?,
         z: number?,
         group: integer?
-    ): Sound
-        return new Sound(
+    ): Emitter
+        return new Emitter(
             clip or 0,
             playing ~= false,
             gain or 1,
@@ -436,14 +437,14 @@ export const SoundComponent: ecs.ComponentDefinition<Sound> = ecs.newComponent(S
             0
         )
     end,
-    default = function(): Sound
-        return new Sound(0, true, 1, false, 1, false, 0, 0, 0, 0, 0)
+    default = function(): Emitter
+        return new Emitter(0, true, 1, false, 1, false, 0, 0, 0, 0, 0)
     end,
-    save = function(value: Sound): any
+    save = function(value: Emitter): any
         -- These saved keys are a compatibility surface: a file written by an
         -- earlier build names them, so they do not move when their module does.
         return {
-            clip = clipPaths[value.clip],
+            clip = soundNames[value.clip],
             playing = value.playing,
             gain = value.gain,
             loop = value.loop,
@@ -455,12 +456,12 @@ export const SoundComponent: ecs.ComponentDefinition<Sound> = ecs.newComponent(S
             group = groupNames[value.group],
         }
     end,
-    load = function(value: any): Sound
+    load = function(value: any): Emitter
         local saved = value as {[string]: any}
         local path = saved.clip as string?
         local clip: integer = 0
         if path ~= nil and path ~= "" then
-            clip = clipId(path)
+            clip = soundId(path)
         end
         local name = saved.group as string?
         local group: integer = 0
@@ -471,7 +472,7 @@ export const SoundComponent: ecs.ComponentDefinition<Sound> = ecs.newComponent(S
         -- A file written before `playing` existed carries no answer, and the
         -- one that matches what it recorded is that the sound was on.
 
-        return new Sound(
+        return new Emitter(
             clip,
             saved.playing ~= false,
             (saved.gain as number?) or 1,
@@ -492,7 +493,7 @@ export const SoundComponent: ecs.ComponentDefinition<Sound> = ecs.newComponent(S
 --- its own, placed from the row's position, and sent to every `ReverbZone`
 --- it is inside. `SoundComponent` stays as an alias, and the component keeps
 --- its persisted name, `"Sound"`.
-export const TrackComponent: ecs.ComponentDefinition<Sound> = SoundComponent
+export const TrackComponent: ecs.ComponentDefinition<Emitter> = SoundComponent
 
 --- Marks the entity the mixer listens from.
 ---
@@ -680,8 +681,8 @@ export record Event
     --- Read-only. The group the voice played in.
     group: string?
 
-    --- Read-only. Why a start was refused: `"unavailable"`, `"limit"` or
-    --- `"voices"`.
+    --- Read-only. Why a start was refused: `"unavailable"`, `"limit"`,
+    --- `"voices"`, `"polyphony"`, `"track"` or `"decoder"`.
     reason: string?
 end
 
@@ -750,10 +751,6 @@ export type Config = {
     --- to 32.
     maxVoices: integer?,
 
-    --- Caller-writable. Sets the duration in seconds past which a clip streams
-    --- instead of staying resident, and defaults to ten.
-    streamSeconds: number?,
-
     --- Caller-writable. Chooses the output the native backend opens.
     --- `"device"`, the default, opens the platform's default output, and on a
     --- machine with none a void output that opens a device once one appears.
@@ -778,15 +775,6 @@ export type Config = {
     backend: audiobackend.Backend?
 }
 
---- Configures `Audio.load` and `Audio.loadBytes`.
-export type LoadOptions = {
-    --- Caller-writable. Forces streaming when true and residency when false.
-    --- Left unset, the clip's duration decides against `streamSeconds`.
-    --- `loadBytes` raises on true, because a clip from memory has no file to
-    --- stream from, and is resident either way.
-    stream: boolean?
-}
-
 --- Names how a voice reads between the frames of its clip.
 ---
 --- `"linear"` interpolates between the two source frames either side of the
@@ -797,91 +785,45 @@ export type LoadOptions = {
 --- frame for that frame's own span before it ends.
 export type Resample = "linear" | "nearest"
 
---- A Sound of encoded audio, loaded through `tecs.assets`.
+--- A Sound: an immutable asset an extension makes, which the mixer plays
+--- through that extension's Decoder.
 ---
---- What `PCM` and `PCM_STREAM` produce: an immutable asset, shared by every
---- mixer that plays it. A resident one holds the file's bytes, which a mixer
---- decodes the first time it plays it; a streamed one holds only its path,
---- which the mixer reads from as it plays. A reload through
---- `Assets.reload` yields a new one, which the next `play` decodes afresh.
-export record PcmSound
-    --- Read-only. The path it was loaded from.
-    path: string
+--- The core knows no codec and no format. `tecs.pcm` makes Sounds of encoded
+--- audio files, `tecs.gm` and `tecs.ymfm` play sequenced music, and a game can
+--- make its own over a Decoder of its own. A Sound says which Decoder plays it,
+--- registering that Decoder with a mixer the first time it plays there, and
+--- carries what the Decoder opens a Playback from.
+export record Sound
+    --- Read-only. Its identity: a path for one loaded from a file. Two Sounds
+    --- with one name are one Sound to a mixer and to a snapshot.
+    name: string
 
-    --- Read-only. The encoded bytes, nil for a streamed Sound.
-    bytes: string?
+    --- Read-only. Its length in seconds, or nil for one that does not say,
+    --- such as a stream or an instrument.
+    duration: number?
 
-    --- Read-only. Whether the mixer streams it from its file.
-    stream: boolean
+    --- Read-only. The name of the Decoder that plays it, which a mixer
+    --- registers the first time a Sound naming it plays there.
+    decoder: string
 
-    --- Engine-owned. Tells two loads of one path apart.
-    serial: integer
+    --- Read-only. Returns that Decoder's vtable, the address its library
+    --- exports, for the mixer to register.
+    vtable: function(): any
+
+    --- Read-only. What the Decoder opens a Playback from: its parameters, and
+    --- the Sound's bytes when it carries them.
+    params: string
+
+    bytes: string
+
+    --- Read-only. Re-reads the Sound from where it came from, for
+    --- `Audio.reload`, or nil for one that cannot be.
+    reload: (function(): (boolean, string?))?
 end
 
---- What `play` takes: a clip this mixer loaded, a Sound asset, or the handle
---- a Sound was requested under, which follows the handle's reloads.
-export type Playable = Clip | PcmSound | assets.Handle
-
---- Counts PcmSounds made, so a reloaded one names a clip of its own.
-local nextSerial: integer = 0
-
---- Makes the PcmSound a kind's job answers.
-local function pcmSound(path: string, bytes: string?): PcmSound
-    nextSerial = nextSerial + 1
-
-    return new PcmSound(path = path, bytes = bytes, stream = bytes == nil, serial = nextSerial)
-end
-
---- The asset kind that loads a Sound resident: the whole file's bytes, decoded
---- by the mixer that first plays it.
----
---- ```nupp
---- local step <const> = assert(app.assets:request(tecs.audio.PCM, "sounds/step.wav"))
---- mixer:play(step, {pitch = 1.05})
---- ```
-export const PCM: assets.Kind = new assets.Kind(
-    name = assets.SOUND,
-    open = function(path: string): (assets.Job?, string?)
-        local read, reason = assets.readJob(path)
-        if read == nil then
-            return nil, reason
-        end
-        local job = assert(read)
-
-        return new assets.Job(
-            poll = function(): (assets.Status, any?, string?)
-                local status, value, failure = job.poll()
-                if status == "ready" then
-                    return "ready", pcmSound(path, value as string), nil
-                else
-                    return status, nil, failure
-                end
-            end,
-            cancel = job.cancel
-        )
-    end,
-    release = nil
-)
-
---- The asset kind that streams a Sound from its file as it plays, for music
---- and anything too long to hold decoded.
-export const PCM_STREAM: assets.Kind = new assets.Kind(
-    name = assets.SOUND .. ".stream",
-    open = function(path: string): (assets.Job?, string?)
-        if path == "" then
-            return nil, "a streamed sound needs a path"
-        end
-
-        return new assets.Job(
-            poll = function(): (assets.Status, any?, string?)
-                return "ready", pcmSound(path, nil), nil
-            end,
-            cancel = function(): nil
-            end
-        )
-    end,
-    release = nil
-)
+--- What `play` takes: a Sound, or the asset handle one was requested under,
+--- which follows the handle's reloads.
+export type Playable = Sound | assets.Handle
 
 --- Configures `Audio.play`.
 ---
@@ -985,46 +927,12 @@ export type Limit = {
     cooldown: number?
 }
 
---- Reports one shared playable sound after its load.
-export record Clip
-    --- Read-only. Reports the path the clip was loaded from, or the name
-    --- `loadBytes` was given, exactly as given. This is a clip's identity, so
-    --- two spellings of one file are two clips.
-    path: string
-
-    --- Read-only. Reports the index a [`Sound`](tecs.audio.Sound) carries.
-    id: integer
-
-    --- Read-only. Reports `"ready"`, `"failed"` or `"released"`. These words
-    --- reach an agent through the debug server's clip list, so they are a
-    --- compatibility surface rather than identifiers this tree renames.
-    --- `"released"` means the load succeeded and the owning mixer later
-    --- returned its samples.
-    status: string
-
-    --- Read-only. Reports the reason when loading failed, and nil otherwise.
-    error: string?
-
-    --- Read-only. Reports the audio duration in seconds, and zero when the
-    --- input cannot say.
-    duration: number
-
-    --- Read-only. Reports whether decoded audio stays in memory. False
-    --- identifies a clip each voice reads from the file for itself.
-    resident: boolean
-
-    --- Read-only. Reports whether the clip was decoded from bytes `loadBytes`
-    --- was given rather than read from a file. Such a clip has no file, so
-    --- `reload` reports false for it.
-    memory: boolean
-end
-
 --- Describes one sounding voice for inspection.
 export record VoiceInfo
     --- Read-only. Reports the handle `playing` and `stop` accept.
     handle: integer
 
-    --- Read-only. Reports the clip path, or nil after release.
+    --- Read-only. Reports the Sound's name, or nil once it is gone.
     clip: string?
 
     --- Read-only. Reports the gain the voice requested, before group and
@@ -1215,7 +1123,6 @@ export record Audio
     available: boolean
 
     @private backend: audiobackend.Backend
-    @private streamSeconds: number
     @private voices: {Voice}
     @private free: {integer}
     @private live: integer
@@ -1226,7 +1133,9 @@ export record Audio
     @private groupPausedFlags: {[string]: boolean}
     @private limits: {[string]: Limit}
     @private buckets: {[string]: Bucket}
-    @private clipsById: {[integer]: Clip}
+    @private soundsById: {[integer]: Sound}
+    @private decoderNames: {[integer]: string}
+    @private decoderIds: {[string]: integer}
     @private variance: random.Xoshiro128
     @private elapsed: number
     @private pending: {audiobackend.Command}
@@ -1253,7 +1162,6 @@ export record Audio
     @private defaultPolyphony: integer
     @private clockline: timelines.Timeline?
     @private registry: integer
-    @private soundClips: {[PcmSound]: Clip}
     @private zones: {Zone}
     @private timelineList: {timelines.Timeline}
 
@@ -1263,11 +1171,10 @@ export record Audio
     destroy: function(exclusive self: Audio): nil
     decoders: function(borrows self: Audio): {string}
     output: function(borrows self: Audio): audiobackend.OutputStatus
-    load: function(exclusive self: Audio, path: string, options: LoadOptions?): (Clip?, string?)
-    loadBytes: function(exclusive self: Audio, name: string, bytes: string, options: LoadOptions?): (Clip?, string?)
-    clip: function(borrows self: Audio, id: integer): Clip?
-    clips: function(borrows self: Audio): {Clip}
-    reload: function(exclusive self: Audio, path: string): (boolean, string?)
+    addSound: function(exclusive self: Audio, sound: Sound): integer
+    sound: function(borrows self: Audio, name: string): Sound?
+    sounds: function(borrows self: Audio): {Sound}
+    reload: function(exclusive self: Audio, name: string): (boolean, string?)
     play: function(exclusive self: Audio, sound: Playable?, options: PlayOptions?): integer
     stop: function(exclusive self: Audio, handle: integer, fadeOut: number?, at: number?): nil
     stopAll: function(exclusive self: Audio, fadeOut: number?): nil
@@ -1325,7 +1232,7 @@ export record Audio
     timeline: function(exclusive self: Audio, options: timelines.Options?): timelines.Timeline
     defaultTimeline: function(exclusive self: Audio): timelines.Timeline
     timelines: function(borrows self: Audio): {timelines.Timeline}
-    registerDecoder: function(exclusive self: Audio, vtable: any): (integer?, string?)
+    registerDecoder: function(exclusive self: Audio, vtable: any, name: string?): (integer?, string?)
     registerEffect: function(exclusive self: Audio, vtable: any): (integer?, string?)
     playDecoded: function(
         exclusive self: Audio,
@@ -1765,13 +1672,13 @@ local function record(
     local sequence = self.sequence + 1
     self.sequence = sequence
     local time = (at ~= nil and at > 0) and at or self:now()
-    local known = self.clipsById[clip]
+    local known = soundNames[clip]
     local entry = new Event(
         sequence = sequence,
         time = time,
         event = event,
         handle = handle,
-        sound = known and known.path or nil,
+        sound = known,
         group = group,
         reason = reason
     )
@@ -1974,45 +1881,69 @@ local function claim(
     return handle
 end
 
---- Returns the clip a Playable plays as on this mixer: a clip as it is, a
---- Sound decoded or opened the first time, a handle's current Sound.
-local function clipOf(exclusive self: Audio, sound: Playable?): Clip?
+--- Returns the Sound a Playable names: a Sound as it is, a handle's current
+--- one. Either joins this mixer's Sounds, so a `Sound` component row and a
+--- reload can find it by name.
+local function soundOf(exclusive self: Audio, sound: Playable?): Sound?
     local found: any = sound
     if found is assets.Handle then
         found = found:value()
     end
-    if found is PcmSound then
-        local known = self.soundClips[found]
-        if known ~= nil then
-            return known
-        end
-        local clip: Clip? = nil
-        local bytes = found.bytes
-        if bytes ~= nil then
-            clip = self:loadBytes(found.path .. "#" .. tostring(found.serial), bytes)
-        else
-            clip = self:load(found.path, {stream = true})
-        end
-        if clip ~= nil then
-            self.soundClips[found] = clip
-        end
+    if found is Sound then
+        self.soundsById[soundId(found.name)] = found
 
-        return clip
-    end
-    if found is Clip then
         return found
     end
 
     return nil
 end
 
---- Starts a clip on a free slot and returns its handle, or zero.
-local function start(exclusive self: Audio, clip: Clip?, options: PlayOptions, owned: boolean): integer
-    if clip == nil or clip.status ~= "ready" then
+--- Returns the id a Sound's Decoder has on this mixer, registering it the
+--- first time a Sound naming it plays here.
+local function decoderFor(exclusive self: Audio, sound: Sound): (integer?, string?)
+    local known = self.decoderIds[sound.decoder]
+    if known ~= nil then
+        return known
+    end
+    local id, why = self:registerDecoder(sound.vtable(), sound.decoder)
+    if id ~= nil then
+        self.decoderIds[sound.decoder] = id
+    end
+
+    return id, why
+end
+
+--- Starts a Sound on a free slot, through its Decoder, and returns its
+--- handle, or zero.
+local function start(exclusive self: Audio, sound: Sound?, options: PlayOptions, owned: boolean): integer
+    if sound == nil then
+        return 0
+    end
+    local id = soundId(sound.name)
+    local decoder, why = decoderFor(self, sound)
+    if decoder == nil then
+        LOGGER:warn("no decoder plays %s: %s", sound.name, tostring(why))
+
+        return refuse(self, id, options, "decoder")
+    end
+    local handle = claim(self, id, audiobackend.SYNTH, options, owned)
+    if handle == 0 then
+        return 0
+    end
+    local open = self.backend.openDecoded
+    if open == nil then
+        -- A backend with no Decoders takes the start and plays nothing.
+        return handle
+    end
+    local opened, failure = open(decoder, handle, sound.params, sound.bytes)
+    if not opened then
+        LOGGER:warn("%s did not open: %s", sound.name, tostring(failure))
+        self:stop(handle)
+
         return 0
     end
 
-    return claim(self, clip.id, clip.resident and 0 or audiobackend.STREAM, options, owned)
+    return handle
 end
 
 --- Makes a Bus handle without telling the backend, which `Audio.bus` does.
@@ -2725,7 +2656,6 @@ export function newAudio(config: Config?): Audio
         closed = false,
         available = backend.available,
         backend = backend,
-        streamSeconds = (config and config.streamSeconds) or DEFAULT_STREAM_SECONDS,
         voices = voices,
         free = free,
         live = 0,
@@ -2736,7 +2666,9 @@ export function newAudio(config: Config?): Audio
         groupPausedFlags = {},
         limits = {},
         buckets = {},
-        clipsById = {},
+        soundsById = {},
+        decoderNames = {},
+        decoderIds = {},
         variance = new random.Xoshiro128(),
         elapsed = 0,
         pending = {},
@@ -2764,7 +2696,6 @@ export function newAudio(config: Config?): Audio
         defaultPolyphony = (config and config.polyphony) or DEFAULT_POLYPHONY,
         clockline = nil,
         registry = 0,
-        soundClips = setmetatable({}, {__mode = "k"}),
         zones = {},
         timelineList = {}
     )
@@ -2853,14 +2784,7 @@ function Audio.destroy(exclusive self: Audio): nil
     self:flush()
     self.buckets = {}
 
-    for id, clip in pairs(self.clipsById) do
-        if clip.status == "ready" then
-            self.backend.releaseClip(id)
-        end
-        clip.resident = false
-        clip.status = "released"
-    end
-    self.clipsById = {}
+    self.soundsById = {}
 
     self.backend.close()
     self.available = false
@@ -2876,16 +2800,24 @@ function Audio.destroy(exclusive self: Audio): nil
     end
 end
 
---- Returns the decoder names this build linked.
----
---- What a build asked for and what it got are different questions, and this
---- answers the second.
+--- Returns the names of the Decoders registered with this mixer, in the
+--- order they were, which is what the extensions a game brought add up to.
 ---
 --- @param self the mixer to ask
---- @return the names in the backend's own order rather than sorted, and empty
----     when no output opened. A fresh table each call.
+--- @return a fresh table, empty before any Sound played or any extension
+---     installed
 function Audio.decoders(borrows self: Audio): {string}
-    return self.backend.decoders()
+    local names: {string} = {}
+    local ids: {integer} = {}
+    for id in pairs(self.decoderNames) do
+        ids[#ids + 1] = id
+    end
+    table.sort(ids)
+    for _, id in ipairs(ids) do
+        names[#names + 1] = assert(self.decoderNames[id])
+    end
+
+    return names
 end
 
 --- Reports what became of the output device.
@@ -2926,223 +2858,63 @@ function Audio.output(borrows self: Audio): audiobackend.OutputStatus
     )
 end
 
---- Loads a sound and returns its cached clip.
+--- Adds a Sound to this mixer's, so a `Sound` component row naming it by
+--- `soundId` plays it. `play` adds what it plays, so this is for a row that
+--- names a Sound nothing has played yet.
 ---
---- Loading the same path twice returns the same clip: a clip is the file, and
---- playing it twice is two voices reading one clip. `options.stream` overrides
---- the duration threshold that otherwise decides whether it stays in memory.
----
---- @param self the mixer that holds the clip
---- @param path the non-empty file path, which is also the clip's identity
---- @param options the residency override, read only by the first call for a path
---- @return the cached clip, or nil when the file could not be read
---- @return the reason, when the first return is nil
---- @raises string when the path is empty
-function Audio.load(exclusive self: Audio, path: string, options: LoadOptions?): (Clip?, string?)
-    local id = clipId(path)
-    local existing = self.clipsById[id]
-    if existing ~= nil then
-        if existing.status == "ready" then
-            return existing
-        end
+--- @param self the mixer
+--- @param sound the Sound
+--- @return the index its rows name it by
+function Audio.addSound(exclusive self: Audio, sound: Sound): integer
+    local id = soundId(sound.name)
+    self.soundsById[id] = sound
 
-        return nil, existing.error or ("cannot load " .. path)
-    end
-
-    local mode: audiobackend.LoadMode = "auto"
-    local stream = options and options.stream
-    if stream == true then
-        mode = "stream"
-    elseif stream == false then
-        mode = "resident"
-    end
-
-    local info, failure = self.backend.loadClip(path, id, mode, self.streamSeconds)
-    if info == nil then
-        local reason = failure or ("cannot load " .. path)
-        self.clipsById[
-            id
-        ] = new Clip(
-            path = path,
-            id = id,
-            status = "failed",
-            error = reason,
-            duration = 0,
-            resident = false,
-            memory = false
-        )
-        LOGGER:error("cannot load '%s': %s", path, reason)
-
-        return nil, reason
-    end
-
-    local clip = new Clip(
-        path = path,
-        id = id,
-        status = "ready",
-        error = nil,
-        duration = info.duration,
-        resident = info.resident,
-        memory = false
-    )
-    self.clipsById[id] = clip
-
-    return clip
+    return id
 end
 
---- Decodes a sound from the bytes of a whole encoded file and returns its
---- cached clip.
+--- Returns the Sound this mixer knows by a name.
 ---
---- The bytes are what the file would hold on disk, container and all, in any
---- format `load` reads. A caller holding raw samples builds the container
---- itself. The clip is always resident and keeps decoded samples rather than
---- the bytes, which the caller may drop once this returns.
----
---- `name` is the clip's identity on the same terms as a path is for `load`,
---- and shares its namespace: loading a name already loaded, from bytes or from
---- a file, returns that clip without reading `bytes`, and a failure is cached
---- the same way. A [`Sound`](tecs.audio.Sound) row and a snapshot carry the
---- name, so a restored row starts once this mixer has loaded it again.
----
---- @param self the mixer that holds the clip
---- @param name the non-empty identity, which is not a path and touches no file.
----     Its extension, when it has one, may hint the format to the decoder,
----     which reads the content either way.
---- @param bytes the whole encoded file, which may contain zero bytes
---- @param options the residency override, where only an unset or false
----     `stream` is accepted
---- @return the cached clip, or nil when the bytes could not be decoded
---- @return the reason, when the first return is nil
---- @raises string when the name is empty
---- @raises string when `options.stream` is true
-function Audio.loadBytes(exclusive self: Audio, name: string, bytes: string, options: LoadOptions?): (Clip?, string?)
-    if name == "" then
-        error("tecs.audio.loadBytes: a clip name cannot be empty", 2)
-    end
-    if options ~= nil and options.stream == true then
-        error("tecs.audio.loadBytes: a clip from memory cannot stream, because there is no file to read from", 2)
-    end
-    local id = clipId(name)
-    local existing = self.clipsById[id]
-    if existing ~= nil then
-        if existing.status == "ready" then
-            return existing
-        end
+--- @param self the mixer
+--- @param name the Sound's name
+--- @return the Sound, or nil when nothing has added or played it here
+function Audio.sound(borrows self: Audio, name: string): Sound?
+    local id = soundIds[name]
 
-        return nil, existing.error or ("cannot decode " .. name)
-    end
-
-    local info: audiobackend.ClipInfo? = nil
-    local failure: string? = nil
-    local decode = self.backend.loadClipBytes
-    if decode == nil then
-        failure = "this audio backend cannot decode a clip from memory"
-    else
-        info, failure = decode(name, bytes, id)
-    end
-    if info == nil then
-        local reason = failure or ("cannot decode " .. name)
-        self.clipsById[
-            id
-        ] = new Clip(
-            path = name,
-            id = id,
-            status = "failed",
-            error = reason,
-            duration = 0,
-            resident = false,
-            memory = true
-        )
-        LOGGER:error("cannot decode '%s': %s", name, reason)
-
-        return nil, reason
-    end
-
-    local clip = new Clip(
-        path = name,
-        id = id,
-        status = "ready",
-        error = nil,
-        duration = info.duration,
-        resident = info.resident,
-        memory = true
-    )
-    self.clipsById[id] = clip
-
-    return clip
+    return id ~= nil and self.soundsById[id] or nil
 end
 
---- Returns the clip an index names.
----
---- @param self the mixer to read
---- @param id an index from `clipId` or from a `Sound.clip` field
---- @return the clip, or nil when this mixer has not loaded it. Every mixer
----     shares clip indices but not clips.
-function Audio.clip(borrows self: Audio, id: integer): Clip?
-    return self.clipsById[id]
+--- Returns every Sound this mixer knows, by name, a fresh list.
+function Audio.sounds(borrows self: Audio): {Sound}
+    local names: {string} = {}
+    for id in pairs(self.soundsById) do
+        names[#names + 1] = assert(soundNames[id])
+    end
+    table.sort(names)
+    local out: {Sound} = {}
+    for _, name in ipairs(names) do
+        out[#out + 1] = assert(self.soundsById[assert(soundIds[name])])
+    end
+
+    return out
 end
 
---- Returns every loaded clip in index order.
+--- Re-reads a Sound from where it came from, through the extension that made
+--- it. Voices playing it keep what they have; the next start plays the new.
 ---
---- For introspection: it builds a list per call, so nothing on a frame's path
---- should read it.
----
---- @param self the mixer to read
---- @return a fresh list each call, holding the live clip records rather than
----     copies, so their `status` moves under a caller that keeps one
-function Audio.clips(borrows self: Audio): {Clip}
-    local ids: {integer} = {}
-    for id in pairs(self.clipsById) do
-        ids[#ids + 1] = id
+--- @param self the mixer
+--- @param name the Sound's name
+--- @return whether it was re-read, and the reason when it was not
+function Audio.reload(exclusive self: Audio, name: string): (boolean, string?)
+    local found = self:sound(name)
+    if found == nil then
+        return false, "nothing has played or added '" .. name .. "' here"
     end
-    table.sort(ids)
-    local list: {Clip} = {}
-    for index = 1, #ids do
-        list[index] = assert(self.clipsById[ids[index]])
+    local reload = found.reload
+    if reload == nil then
+        return false, "'" .. name .. "' cannot be re-read"
     end
 
-    return list
-end
-
---- Re-reads a clip's file over the clip already loaded from it.
----
---- A clip's index is its path's, so an edited file comes back under the index
---- every [`Sound`](tecs.audio.Sound) row already carries and nothing in the
---- world is touched. A streamed clip holds nothing to replace, so this reports
---- success and the next voice to start reads what is on disk now. A clip
---- `loadBytes` decoded has no file and kept no bytes, so this reports false
---- for it and leaves it as it was.
----
---- Blocking, like every other reload: it is a debug operation, and answering
---- before the file has been read would report a success that had not happened.
----
---- @param self the mixer holding the clip
---- @param path the path originally used to load the clip
---- @return whether the clip was re-read
---- @return the reason, when it was not
-function Audio.reload(exclusive self: Audio, path: string): (boolean, string?)
-    local id = clipIds[path]
-    local clip = id ~= nil and self.clipsById[id] or nil
-    if clip == nil then
-        return false, "nothing has loaded '" .. path .. "', so there is no clip to re-read"
-    end
-    if clip.memory then
-        return false, "'" .. path .. "' was decoded from bytes in memory, so there is no file to re-read"
-    end
-    if not clip.resident then
-        return true
-    end
-
-    local info, failure = self.backend.loadClip(path, clip.id, "resident", self.streamSeconds)
-    if info == nil then
-        return false, "'" .. path .. "' did not load: " .. (failure or "no reason given")
-    end
-    clip.duration = info.duration
-    clip.resident = info.resident
-    clip.status = "ready"
-    clip.error = nil
-
-    return true
+    return reload()
 end
 
 --- Plays a clip and returns a handle, or zero when nothing started.
@@ -3155,16 +2927,16 @@ end
 --- the same reasoning a full voice pool follows.
 ---
 --- @param self the mixer that starts the voice
---- @param sound a clip this mixer loaded, a `PcmSound` asset, or the handle
----     one was requested under, whose current Sound plays. Nil, a clip still
----     loading, a failed one and a Sound that does not decode start nothing.
+--- @param sound a Sound, or the asset handle one was requested under, whose
+---     current Sound plays. Nil, a Sound still loading, a failed one and a
+---     Sound whose Decoder the backend refuses start nothing.
 --- @param options read once, with no later change followed
 --- @return the handle the voice methods take, or zero when nothing started. It
 ---     stays valid while the voice sounds, goes inert for good once it does
 ---     not, is never reissued, and requires no release.
 function Audio.play(exclusive self: Audio, sound: Playable?, options: PlayOptions?): integer
     checkAt(options and options.at, "play")
-    return start(self, clipOf(self, sound), options or {}, false)
+    return start(self, soundOf(self, sound), options or {}, false)
 end
 
 --- Stops a voice. A handle to one that has already ended does nothing.
@@ -3822,7 +3594,7 @@ function Audio.voiceList(borrows self: Audio): {VoiceInfo}
                 #list + 1
             ] = new VoiceInfo(
                 handle = handleOf(self, slot),
-                clip = clipPaths[voice.clip],
+                clip = soundNames[voice.clip],
                 gain = voice.gain,
                 applied = voice.applied,
                 pitch = voice.pitch,
@@ -4304,7 +4076,7 @@ function Audio.timeline(exclusive self: Audio, options: timelines.Options?): tim
         function(sound: any, given: any, _at: number): integer
             local mixer = mixerOf(id)
 
-            return mixer:play(sound as Clip?, given as PlayOptions)
+            return mixer:play(sound as Playable?, given as PlayOptions)
         end
     )
     local updates = audiosynth.updates[self]
@@ -4349,13 +4121,17 @@ end
 --- its vtable, and returns the id a Sound of that kind plays through.
 ---
 --- @return the id, or nil and the reason the backend refused it
-function Audio.registerDecoder(exclusive self: Audio, vtable: any): (integer?, string?)
+function Audio.registerDecoder(exclusive self: Audio, vtable: any, name: string?): (integer?, string?)
     local register = self.backend.registerDecoder
     if self.closed or register == nil then
         return nil, "this backend takes no decoders"
     end
+    local id, why = register(vtable)
+    if id ~= nil then
+        self.decoderNames[id] = name or ("decoder " .. tostring(id))
+    end
 
-    return register(vtable)
+    return id, why
 end
 
 --- Starts a Playback rendered by a registered Decoder, as `play` starts a
@@ -4366,8 +4142,7 @@ end
 --- polyphony for General MIDI, a chip and its memory images for FM.
 ---
 --- @param self the mixer
---- @param decoder what `registerDecoder` returned; one is the built-in PCM
----     Decoder, which reads the bytes of an encoded file
+--- @param decoder what `registerDecoder` returned
 --- @param params the Decoder's parameters
 --- @param bytes the Sound's bytes, or empty
 --- @param options as for `play`; `start`, `loop` and `loopStart` apply only
@@ -4469,7 +4244,7 @@ local function hush(hushed: ecs.Query): nil
             local rows = source:get(SoundComponent)
             local total = length or 0
             if rows ~= nil then
-                local mutable: Sound[?]? = nil
+                local mutable: Emitter[?]? = nil
                 for row = 1, total do
                     if rows[row].voice > 0 then
                         if mutable == nil then
@@ -4567,7 +4342,7 @@ local function listen(
                 local rows = source:get(SoundComponent)
                 local total = length or 0
                 if rows ~= nil then
-                    local mutable: Sound[?]? = nil
+                    local mutable: Emitter[?]? = nil
                     for row = 1, total do
                         local entry = rows[row]
                         if entry.spatial then
@@ -4645,7 +4420,7 @@ local function reconcile(exclusive self: Audio, sounds: ecs.Query, hushed: ecs.Q
                 -- Taken mutable on the first row that actually changes and not at
                 -- all otherwise, because taking it up front would mark the column
                 -- dirty every frame for every archetype holding a sound.
-                local mutable: Sound[?]? = nil
+                local mutable: Emitter[?]? = nil
 
                 for row = 1, total do
                     local entry = rows[row]
@@ -4690,7 +4465,7 @@ local function reconcile(exclusive self: Audio, sounds: ecs.Query, hushed: ecs.Q
                             rowOptions.track = made
                             strip = made
                         end
-                        local started = start(self, self.clipsById[entry.clip], rowOptions, true)
+                        local started = start(self, self.soundsById[entry.clip], rowOptions, true)
                         if started ~= 0 then
                             if mutable == nil then
                                 mutable = source:getMut(SoundComponent)
