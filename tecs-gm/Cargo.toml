@@ -1,0 +1,15 @@
+[package]
+name = "tecs-gm"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "General MIDI for tecs: a SoundFont synthesizer behind the Decoder ABI"
+
+[lib]
+name = "tecs_gm"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rustysynth.workspace = true
+tecs-audio-abi = { path = "../native/rust/tecs-audio-abi" }

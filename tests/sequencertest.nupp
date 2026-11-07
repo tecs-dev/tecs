@@ -1,0 +1,210 @@
+local audio = require("tecs.audio")
+local audiobackend = require("tecs.platform.audiobackend")
+local sequencer = require("tecs.audio.sequencer")
+local test = require("nupp.test")
+
+local suite = {}
+
+--- What a hand-written driver was asked to do, in order.
+local record Call
+    what: string
+    song: number
+    at: number
+end
+
+--- A driver over a list of event times, on a clock the test moves.
+local record Fake
+    driver: sequencer.Driver
+    calls: {Call}
+    clock: {number}
+end
+
+--- Makes a driver whose song is an event at each of `times`, `duration`
+--- seconds long, logging each event it sends as a `"send"` with the event's
+--- song time and the clock time it was sent for.
+local function fake(times: {number}, duration: number): Fake
+    local calls: {Call} = {}
+    local clock = {0.0}
+    local index: integer = 1
+
+    local function log(what: string, song: number, at: number): nil
+        calls[#calls + 1] = new Call(what = what, song = song, at = at)
+    end
+
+    local function locate(target: number): integer
+        local found: integer = #times + 1
+        for position, time in ipairs(times) do
+            if time >= target then
+                found = position
+                break
+            end
+        end
+
+        return found
+    end
+
+    local driver = new sequencer.Driver(
+        duration = duration,
+        loopStart = nil,
+        loopEnd = nil,
+        tail = 0.5,
+        now = function(): number
+            return clock[1]
+        end,
+        schedule = function(to: number, song: number, start: number, tempo: number): number
+            while index <= #times and times[index] < to do
+                log("send", times[index], start + (times[index] - song) / tempo)
+                index = index + 1
+            end
+
+            return to
+        end,
+        pending = function(): number?
+            return times[index]
+        end,
+        jump = function(target: number, at: number): nil
+            log("jump", target, at)
+            index = locate(target)
+        end,
+        seek = function(target: number, at: number): nil
+            log("seek", target, at)
+            index = locate(target)
+        end,
+        reload = function(_payload: any): (boolean, string?)
+            return false, "this driver reloads nothing"
+        end,
+        pause = function(): nil
+            log("pause", 0, clock[1])
+        end,
+        resume = function(): nil
+            log("resume", 0, clock[1])
+        end,
+        setGain = function(_gain: number): nil
+        end,
+        setMuted = function(_index: integer, _muted: boolean): nil
+        end,
+        stop = function(_fadeOut: number?): nil
+            log("stop", 0, clock[1])
+        end
+    )
+
+    return new Fake(driver = driver, calls = calls, clock = clock)
+end
+
+--- Returns the calls of `what` made so far.
+local function callsOf(made: Fake, what: string): {Call}
+    local found: {Call} = {}
+    for _, call in ipairs(made.calls) do
+        if call.what == what then
+            found[#found + 1] = call
+        end
+    end
+
+    return found
+end
+
+local function near(actual: number, expected: number, what: string?): nil
+    test.assert(
+        math.abs(actual - expected) < 1e-9,
+        (what or "") .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual)
+    )
+end
+
+local function mixer(): audio.Audio
+    return audio.newAudio({backend = audiobackend.silent()})
+end
+
+function suite.schedulesAheadAndStopsTheDriverAfterTheTail(): nil
+    local made = fake({0, 0.5, 1}, 1.5)
+    local owner = mixer()
+    local player = sequencer.newPlayer(owner, made.driver, nil, {loop = false})
+    local sent = callsOf(made, "send")
+    test.equal(#sent, 1, "the first event is due within the lookahead")
+    near(sent[1].at, 0.01, "a start lands a little ahead")
+    made.clock[1] = 0.48
+    owner:update()
+    sent = callsOf(made, "send")
+    test.equal(#sent, 2)
+    near(sent[2].at, 0.51)
+    for step = 10, 30 do
+        made.clock[1] = step * 0.05
+        owner:update()
+    end
+    test.equal(#callsOf(made, "send"), 3)
+    test.assert(player:finished())
+    test.equal(player:status(), "finished")
+    test.equal(#callsOf(made, "stop"), 0, "the tail still rings")
+    made.clock[1] = 2.1
+    owner:update()
+    test.equal(player:status(), "stopped")
+    test.equal(#callsOf(made, "stop"), 1)
+end
+
+function suite.pausesSchedulingAndResumesWhereItPaused(): nil
+    local made = fake({0, 0.5, 1, 1.5}, 2)
+    local owner = mixer()
+    local player = sequencer.newPlayer(owner, made.driver, nil, nil)
+    made.clock[1] = 0.48
+    owner:update()
+    test.equal(#callsOf(made, "send"), 2)
+    made.clock[1] = 0.71
+    player:pause()
+    test.assert(player:paused())
+    test.equal(#callsOf(made, "pause"), 1, "the voices pause with the song")
+    -- However long the pause, nothing more is scheduled.
+    made.clock[1] = 3
+    owner:update()
+    test.equal(#callsOf(made, "send"), 2)
+    player:resume()
+    test.assert(player:playing())
+    test.equal(#callsOf(made, "resume"), 1)
+    -- Resuming seeks back to where the song stood, which chases its state,
+    -- and plays on from there on the clock as it now stands.
+    local seeks = callsOf(made, "seek")
+    test.equal(#seeks, 1)
+    near(seeks[1].song, 0.7, "the paused position")
+    near(seeks[1].at, 3.01, "the seek lands a little ahead")
+    made.clock[1] = 3.3
+    owner:update()
+    local sent = callsOf(made, "send")
+    test.equal(#sent, 3)
+    near(sent[3].song, 1)
+    near(sent[3].at, 3.31, "the next event keeps its distance from the pause")
+    player:stop()
+end
+
+function suite.followsATimelinesPauseAndTempo(): nil
+    local made = fake({0, 0.5, 1, 1.5, 2, 2.5}, 3)
+    local owner = mixer()
+    local timeline = owner:timeline()
+    local player = sequencer.newPlayer(owner, made.driver, nil, {timeline = timeline})
+    timeline:pause()
+    owner:update()
+    test.assert(player:paused(), "a paused Timeline pauses the song")
+    test.equal(#callsOf(made, "pause"), 1)
+    made.clock[1] = 1
+    owner:update()
+    test.equal(#callsOf(made, "send"), 1, "nothing is scheduled while it holds")
+    timeline:resume()
+    owner:update()
+    test.assert(player:playing(), "and resuming it resumes the song")
+    test.equal(#callsOf(made, "resume"), 1)
+    -- Twice the Timeline's tempo is twice the song's speed, while the
+    -- player's own scale stays what it was.
+    timeline:setTempo(120)
+    owner:update()
+    test.equal(player:tempo(), 1)
+    local before = #callsOf(made, "send")
+    for step = 21, 40 do
+        made.clock[1] = step * 0.05
+        owner:update()
+    end
+    local sent = callsOf(made, "send")
+    test.assert(#sent >= before + 2, "the song plays on")
+    local last = sent[#sent]
+    local previous = sent[#sent - 1]
+    near(last.at - previous.at, 0.25, "half a second of song in a quarter of one")
+    player:stop()
+end
+
+return suite

@@ -286,6 +286,123 @@ export const added: {
     [string]: any
 } = {
     ["clock_info"] = {["properties"] = json.EMPTY_OBJECT, ["type"] = "object", ["additionalProperties"] = false},
+    ["audio_snapshot"] = {["properties"] = json.EMPTY_OBJECT, ["type"] = "object", ["additionalProperties"] = false},
+    [
+        "audio_control"
+    ] = {
+        [
+            "properties"
+        ] = {
+            ["bus"] = {["type"] = "string", ["description"] = "A Bus name; master is Master."},
+            ["track"] = {["type"] = "number", ["description"] = "A Track id from audio_snapshot."},
+            ["gain"] = {["type"] = "number", ["description"] = "The fader, linear.", ["minimum"] = 0, ["maximum"] = 16},
+            ["muted"] = {["type"] = "boolean", ["description"] = "Mutes or unmutes."},
+            ["solo"] = {["type"] = "boolean", ["description"] = "Solos a Track."},
+            ["paused"] = {["type"] = "boolean", ["description"] = "Pauses or resumes a Bus."}
+        },
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    [
+        "audio_play"
+    ] = {
+        [
+            "properties"
+        ] = {
+            ["path"] = {["type"] = "string", ["description"] = "The path a loaded clip came from."},
+            ["bus"] = {["type"] = "string", ["description"] = "The Bus whose default Track plays it."},
+            ["track"] = {["type"] = "number", ["description"] = "A Track id to play it on."},
+            ["gain"] = {["type"] = "number", ["description"] = "The voice's gain.", ["minimum"] = 0, ["maximum"] = 16},
+            ["at"] = {["type"] = "number", ["description"] = "Seconds on the audio clock.", ["minimum"] = 0}
+        },
+        ["required"] = {"path"},
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    [
+        "audio_timeline"
+    ] = {
+        [
+            "properties"
+        ] = {
+            [
+                "index"
+            ] = {["type"] = "number", ["description"] = "The Timeline's index in audio_snapshot.", ["minimum"] = 1},
+            ["action"] = {["type"] = "string", ["description"] = "pause, resume, seek or tempo."},
+            ["beat"] = {["type"] = "number", ["description"] = "Where to seek, in beats."},
+            ["tempo"] = {["type"] = "number", ["description"] = "Beats a minute.", ["minimum"] = 1, ["maximum"] = 1000}
+        },
+        ["required"] = {"index", "action"},
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    [
+        "audio_events"
+    ] = {
+        [
+            "properties"
+        ] = {
+            [
+                "after"
+            ] = {["type"] = "number", ["description"] = "The sequence of the last entry already seen.", ["minimum"] = 0}
+        },
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    [
+        "audio_listen"
+    ] = {
+        [
+            "properties"
+        ] = {
+            [
+                "seconds"
+            ] = {
+                ["type"] = "number",
+                ["description"] = "How much of the mix to record, in seconds.",
+                ["minimum"] = 0.001,
+                ["maximum"] = 600
+            }
+        },
+        ["required"] = {"seconds"},
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    [
+        "audio_listening"
+    ] = {
+        [
+            "properties"
+        ] = {
+            [
+                "save"
+            ] = {
+                ["type"] = "string",
+                ["description"] = "A WAV file name under the writable root to write the recording to."
+            }
+        },
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
+    [
+        "audio_step"
+    ] = {
+        [
+            "properties"
+        ] = {
+            [
+                "seconds"
+            ] = {
+                ["type"] = "number",
+                ["description"] = "How far to move the audio clock.",
+                ["minimum"] = 0,
+                ["maximum"] = 600
+            }
+        },
+        ["required"] = {"seconds"},
+        ["type"] = "object",
+        ["additionalProperties"] = false
+    },
     ["clock_pause"] = {["properties"] = json.EMPTY_OBJECT, ["type"] = "object", ["additionalProperties"] = false},
     ["clock_resume"] = {["properties"] = json.EMPTY_OBJECT, ["type"] = "object", ["additionalProperties"] = false},
     [

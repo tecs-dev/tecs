@@ -103,9 +103,11 @@ fn main() {
         start: 0.0,
         fade: 0.0,
         loop_start: 0.0,
+        at: 0.0,
         x: 0.0,
         y: 0.0,
         z: 0.0,
+        ..Default::default()
     }]);
 
     // A second host, asked directly, so the log shows what the device reports

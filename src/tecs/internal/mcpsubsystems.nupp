@@ -429,6 +429,326 @@ register(
 )
 
 -------------------------------------------------------------------------------
+-- Audio for agents
+--
+-- An agent cannot hear, so the console is reported as data: a snapshot, the
+-- event log, and recordings summarized as numbers. A memory output, or a void
+-- one held by `clock_pause`, makes all of it deterministic.
+-------------------------------------------------------------------------------
+
+local function requireMixer(): audio.Audio
+    return assert(audio.of(bindings.requireWorld()), "no audio mixer installed")
+end
+
+--- Returns a table of numbers or nested tables JSON can carry as an array.
+local function arrayOf(values: {any}): any
+    return #values == 0 and json.EMPTY_ARRAY or values
+end
+
+register(
+    "audio_snapshot",
+    "Report the audio console as data: the output clock and status, master, groups, sounding voices and counters.",
+    function(_args: {[string]: any}): {[string]: any}
+        local mixer = requireMixer()
+        local status = mixer:output()
+        local groups: {any} = {}
+        for _, name in ipairs(mixer:groups()) do
+            groups[
+                #groups + 1
+            ] = {
+                name = name,
+                gain = mixer:groupGain(name),
+                muted = mixer:groupMuted(name),
+                paused = mixer:groupPaused(name)
+            }
+        end
+        local voices: {any} = {}
+        for _, info in ipairs(mixer:voiceList()) do
+            voices[
+                #voices + 1
+            ] = {
+                handle = info.handle,
+                sound = info.clip,
+                gain = info.gain,
+                pitch = info.pitch,
+                group = info.group,
+                paused = info.paused,
+                stopping = info.stopping,
+                loop = info.loop
+            }
+        end
+        local stats = mixer:stats()
+        local meters = mixer:meters()
+
+        local function meter(reading: audio.Meter?): any
+            if reading == nil then
+                return nil
+            end
+
+            return {peak = reading.peak, rms = reading.rms, clipped = reading.clipped}
+        end
+
+        local function chain(effects: {audio.Effect}): any
+            local names: {any} = {}
+            for _, effect in ipairs(effects) do
+                names[#names + 1] = {id = effect.id, name = effect.name}
+            end
+
+            return arrayOf(names)
+        end
+
+        local buses: {any} = {}
+        for _, bus in ipairs(mixer:buses()) do
+            buses[
+                #buses + 1
+            ] = {
+                name = bus.name,
+                id = bus.id,
+                parent = bus:parent(),
+                gain = bus:gain(),
+                muted = bus:muted(),
+                paused = bus:paused(),
+                effects = chain(bus:effects()),
+                meter = bus.id == 0 and meter(meters.master) or meter(meters.buses[bus.name])
+            }
+        end
+        local tracks: {any} = {}
+        for _, track in ipairs(mixer:tracks()) do
+            local x, y, z = track:position()
+            tracks[
+                #tracks + 1
+            ] = {
+                id = track.id,
+                bus = track:bus(),
+                gain = track:gain(),
+                muted = track:muted(),
+                solo = track:solo(),
+                sounding = track:sounding(),
+                polyphony = track:polyphony(),
+                position = x ~= nil and {x, y, z} or nil,
+                sends = track:sends(),
+                effects = chain(track:effects()),
+                meter = meter(meters.tracks[track.id])
+            }
+        end
+        local lines: {any} = {}
+        for index, line in ipairs(mixer:timelines()) do
+            lines[
+                #lines + 1
+            ] = {
+                index = index,
+                now = line:now(),
+                tempo = line:tempo(),
+                paused = line:paused(),
+                pending = line:pending(),
+                upcoming = arrayOf(line:upcoming(8))
+            }
+        end
+
+        return {
+            buses = arrayOf(buses),
+            tracks = arrayOf(tracks),
+            timelines = arrayOf(lines),
+            now = mixer:now(),
+            frequency = mixer:frequency(),
+            output = {state = status.state, drops = status.drops, reopens = status.reopens, reason = status.reason},
+            available = mixer.available,
+            master = {gain = mixer:masterGain(), muted = mixer:muted()},
+            groups = arrayOf(groups),
+            voices = arrayOf(voices),
+            stats = stats
+        }
+    end
+)
+register(
+    "audio_events",
+    "Return the audio event log: starts, refusals, stops and finishes with their output-clock time. Pass the last "
+    .. "sequence seen as `after` to get only newer entries.",
+    function(args: {[string]: any}): {[string]: any}
+        local mixer = requireMixer()
+        local entries: {any} = {}
+        for _, entry in ipairs(mixer:events(args.after and integer(args.after) or nil)) do
+            entries[
+                #entries + 1
+            ] = {
+                sequence = entry.sequence,
+                time = entry.time,
+                event = entry.event,
+                handle = entry.handle,
+                sound = entry.sound,
+                group = entry.group,
+                reason = entry.reason
+            }
+        end
+
+        return {events = arrayOf(entries)}
+    end
+)
+register(
+    "audio_listen",
+    "Start recording the next `seconds` of the mix. On a memory output, or a void one held by clock_pause, the "
+    .. "recording fills as clock_step grants frames; on a device, as it plays.",
+    function(args: {[string]: any}): {[string]: any}
+        local mixer = requireMixer()
+        local started = mixer:listen(args.seconds)
+        assert(started, "this audio backend cannot record")
+
+        return {listening = true, seconds = args.seconds, now = mixer:now()}
+    end,
+    true
+)
+register(
+    "audio_listening",
+    "Summarize the recording audio_listen started: peak, RMS, LUFS, clipped samples, silent spans and onset times. "
+    .. "`save` names a WAV file under the writable root to write it to.",
+    function(args: {[string]: any}): {[string]: any}
+        local mixer = requireMixer()
+        local summary = mixer:listening()
+        assert(summary ~= nil, "nothing is being recorded; call audio_listen first")
+        local saved: string? = nil
+        if args.save ~= nil then
+            local target = artifact(args.save)
+            local ok, reason = mixer:saveListening(target)
+            assert(ok, reason)
+            saved = target
+        end
+        local silent: {any} = {}
+        for _, span in ipairs(summary.silent) do
+            silent[#silent + 1] = span
+        end
+
+        return {
+            frames = summary.frames,
+            seconds = summary.seconds,
+            started = summary.started,
+            peak = summary.peak,
+            peakDbfs = summary.peakDbfs,
+            rms = summary.rms,
+            rmsDbfs = summary.rmsDbfs,
+            lufs = summary.lufs,
+            clipped = summary.clipped,
+            silent = arrayOf(silent),
+            onsets = arrayOf(summary.onsets),
+            saved = saved
+        }
+    end,
+    true
+)
+register(
+    "audio_step",
+    "Render `seconds` of the mix on a memory output, or a void one held by clock_pause, without running a frame.",
+    function(args: {[string]: any}): {[string]: any}
+        local mixer = requireMixer()
+        local rendered = mixer:step(args.seconds)
+
+        return {rendered = rendered, now = mixer:now()}
+    end,
+    true
+)
+
+register(
+    "audio_control",
+    "Set a Bus or a Track's controls: `bus` names a Bus (\"master\" is Master), `track` gives a Track id; then any of "
+    .. "`gain`, `muted`, `solo` (Track), `paused` (Bus).",
+    function(args: {[string]: any}): {[string]: any}
+        local mixer = requireMixer()
+        if args.bus ~= nil then
+            local bus = mixer:bus(args.bus)
+            if args.gain ~= nil then
+                bus:setGain(args.gain)
+            end
+            if args.muted ~= nil then
+                bus:setMuted(args.muted)
+            end
+            if args.paused == true then
+                bus:pause()
+            elseif args.paused == false then
+                bus:resume()
+            end
+            mixer:flush()
+
+            return {bus = bus.name, gain = bus:gain(), muted = bus:muted(), paused = bus:paused()}
+        end
+        assert(args.track ~= nil, "give a bus name or a track id")
+        local found: audio.Track? = nil
+        for _, track in ipairs(mixer:tracks()) do
+            if track.id == integer(args.track) then
+                found = track
+            end
+        end
+        local track = assert(found, "no track has that id")
+        if args.gain ~= nil then
+            track:setGain(args.gain)
+        end
+        if args.muted ~= nil then
+            track:setMuted(args.muted)
+        end
+        if args.solo ~= nil then
+            track:setSolo(args.solo)
+        end
+        mixer:flush()
+
+        return {track = track.id, gain = track:gain(), muted = track:muted(), solo = track:solo()}
+    end,
+    true
+)
+register(
+    "audio_play",
+    "Play a loaded clip, by the path it was loaded from, on a Bus's default Track or a Track id, optionally at a "
+    .. "time on the audio clock.",
+    function(args: {[string]: any}): {[string]: any}
+        local mixer = requireMixer()
+        local found: audio.Clip? = nil
+        for _, clip in ipairs(mixer:clips()) do
+            if clip.path == args.path then
+                found = clip
+            end
+        end
+        local clip = assert(found, "no clip was loaded from that path")
+        local options: audio.PlayOptions = {gain = args.gain, at = args.at}
+        if args.track ~= nil then
+            for _, track in ipairs(mixer:tracks()) do
+                if track.id == integer(args.track) then
+                    options.track = track
+                end
+            end
+            assert(options.track ~= nil, "no track has that id")
+        elseif args.bus ~= nil and args.bus ~= "master" then
+            options.group = args.bus
+        end
+        local handle = mixer:play(clip, options)
+        mixer:flush()
+
+        return {handle = handle, started = handle ~= 0, now = mixer:now()}
+    end,
+    true
+)
+register(
+    "audio_timeline",
+    "Pause, resume, seek (to `beat`) or retempo (`tempo` in bpm) one of the mixer's Timelines, by its index in "
+    .. "audio_snapshot.",
+    function(args: {[string]: any}): {[string]: any}
+        local mixer = requireMixer()
+        local line = assert(mixer:timelines()[integer(args.index)], "no timeline has that index")
+        local action = args.action
+        if action == "pause" then
+            line:pause()
+        elseif action == "resume" then
+            line:resume()
+        elseif action == "seek" then
+            line:seek(assert(args.beat, "seek needs a beat"))
+        elseif action == "tempo" then
+            line:setTempo(assert(args.tempo, "tempo needs a tempo"))
+        else
+            error("action must be pause, resume, seek or tempo", 0)
+        end
+
+        return {now = line:now(), tempo = line:tempo(), paused = line:paused(), pending = line:pending()}
+    end,
+    true
+)
+
+-------------------------------------------------------------------------------
 -- The simulation clock
 --
 -- `clock_pause`, `clock_step`, `clock_resume` and `clock_info` reach the
@@ -436,6 +756,16 @@ register(
 -- while a frame is parked and after a crash. A harness polls `clock_info` until
 -- `settled` rather than retrying a refused world tool.
 -------------------------------------------------------------------------------
+
+--- Holds or releases the bound world's audio clock, when there is one: a void
+--- or memory output then moves only with the frames the clock grants.
+local function holdAudio(held: boolean): nil
+    local world = bindings.world()
+    local mixer = world and audio.of(world)
+    if mixer ~= nil then
+        mixer:hold(held)
+    end
+end
 
 local function clockInfo(): {[string]: any}
     local app = bindings.requireApplication()
@@ -471,6 +801,9 @@ register(
     function(_args: {[string]: any}): {[string]: any}
         local app = bindings.requireApplication()
         app:pause()
+        -- A void or memory output's clock follows the granted frames too.
+        holdAudio(true)
+
         return clockInfo()
     end,
     true,
@@ -497,6 +830,7 @@ register(
     function(_args: {[string]: any}): {[string]: any}
         local app = bindings.requireApplication()
         app:resume()
+        holdAudio(false)
         return clockInfo()
     end,
     true,

@@ -1,6 +1,7 @@
 local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
 local test = require("nupp.test")
+local time = require("nupp.time")
 
 local suite = {}
 
@@ -171,6 +172,257 @@ function suite.fallsBackToSilenceWhenTheLibraryIsAbsent(): nil
     test.assert(not mixer.available)
     test.equal(mixer:maxVoices(), 4)
     test.equal(mixer:sounding(), 0)
+    mixer:destroy()
+end
+
+function suite.carriesACommandsTimeAcrossTheSeam(): nil
+    local backend = opened()
+    test.equal(assert(backend.now)(), 0)
+    -- A tenth of a second of silence at the output rate.
+    local bytes = unsignedWav(48000, string.rep(string.char(128), 4800))
+    assert(assert(backend.loadClipBytes)("TIMED.WAV", bytes, 1))
+    local commands: {audiobackend.Command} = {audiobackend.newCommand(), audiobackend.newCommand()}
+    commands[1].kind = audiobackend.PLAY
+    commands[1].handle = 65537
+    commands[1].clip = 1
+    commands[1].flags = audiobackend.NEAREST
+    commands[2].kind = audiobackend.PLAY
+    commands[2].handle = 65538
+    commands[2].clip = 1
+    -- Due once the clock reaches a second, which nothing renders here: the
+    -- voice waits in the schedule and the library knows nothing under it yet.
+    commands[2].at = 1
+    backend.submit(commands, 2)
+    test.equal(backend.position(65537), 0)
+    test.equal(backend.position(65538), nil)
+    -- The control: the same start with no time sounds at once.
+    commands[2].at = 0
+    commands[2].handle = 65539
+    backend.submit({commands[2]}, 1)
+    test.equal(backend.position(65539), 0)
+    test.equal(assert(backend.now)(), 0)
+    backend.close()
+    test.equal(assert(backend.now)(), 0)
+end
+
+--- Opens a native void output, skipping when the library refused.
+---
+--- A void output never touches a device, so it is as safe in a headless suite
+--- as the offline opener, and unlike it, it is available and keeps time.
+local function voided(): audiobackend.Backend
+    local native = binding()
+    local backend, reason = native.openVoid(48000, 2, 8)
+    if backend == nil then
+        test.skip("libtecsaudio did not open a void output: " .. tostring(reason))
+    end
+
+    return backend as audiobackend.Backend
+end
+
+function suite.keepsTimeOnAVoidOutputAndFinishesATimedVoice(): nil
+    local backend = voided()
+    test.assert(backend.available)
+    test.equal(assert(backend.output)().state, "void")
+    local mixer = audio.newAudio({backend = backend, maxVoices = 4})
+    test.assert(mixer.available)
+    -- A twentieth of a second of silence, due a twentieth from now.
+    local bytes = unsignedWav(48000, string.rep(string.char(128), 2400))
+    local clip = assert(mixer:loadBytes("tests/memory/void.wav", bytes))
+    local handle = mixer:play(clip, {at = mixer:now() + 0.05})
+    test.assert(handle ~= 0, "a void output takes a start")
+    mixer:flush()
+    local started = time.now()
+    while mixer:playing(handle) do
+        test.assert(time.now() - started < 5000, "the voice never finished on the void clock")
+        time.sleep(10)
+        mixer:update(0.01)
+    end
+    test.assert(mixer:now() >= 0.1, "the clock ran past the voice's end")
+    mixer:destroy()
+end
+
+function suite.cancelsAStartStillWaitingWhenItIsStoppedOverTheNativeMixer(): nil
+    local backend = voided()
+    local mixer = audio.newAudio({backend = backend, maxVoices = 1})
+    local bytes = unsignedWav(48000, string.rep(string.char(128), 48000))
+    local clip = assert(mixer:loadBytes("tests/memory/loop.wav", bytes))
+    -- A looping voice due a minute from now, stopped before it starts. The
+    -- slot comes back at once, and the start never sounds under a handle no
+    -- one holds.
+    local handle = mixer:play(clip, {loop = true, at = mixer:now() + 60})
+    test.assert(handle ~= 0)
+    mixer:stop(handle)
+    test.equal(mixer:sounding(), 0)
+    mixer:update(0)
+    test.equal(assert(backend.position)(handle), nil)
+    local next = mixer:play(clip)
+    test.assert(next ~= 0, "the one slot is free again")
+    mixer:destroy()
+end
+
+--- A mono 8-bit square wave at 500 Hz, `seconds` long, at 48 kHz.
+local function squareWav(seconds: number, level: integer): string
+    local frames = math.floor(48000 * seconds)
+    local high = string.char(128 + level)
+    local low = string.char(128 - level)
+    local period = string.rep(high, 48) .. string.rep(low, 48)
+
+    return unsignedWav(48000, string.rep(period, frames // 96))
+end
+
+function suite.rendersAndHearsAMemoryOutputDeterministically(): nil
+    binding()
+    local mixer = audio.newAudio({output = "memory", maxVoices = 4})
+    test.assert(mixer.available)
+    test.equal(mixer:output().state, "offline")
+    local clip = assert(mixer:loadBytes("tests/memory/square.wav", squareWav(0.25, 64)))
+    test.assert(mixer:listen(0.5))
+    local handle = mixer:play(clip, {at = 0.1})
+    test.assert(handle ~= 0)
+    test.equal(mixer:now(), 0, "nothing moves a memory clock but step")
+    test.equal(mixer:step(0.5), 0.5)
+    test.equal(mixer:now(), 0.5)
+    test.assert(not mixer:playing(handle), "the step reaped the finished voice")
+
+    local heard = assert(mixer:listening())
+    test.equal(heard.frames, 24000)
+    test.assert(math.abs(heard.peak - 0.5) < 0.01, "a half-scale square peaks at half")
+    test.assert(heard.lufs ~= nil)
+    test.equal(heard.clipped, 0)
+    test.assert(#heard.onsets >= 1)
+    test.assert(math.abs(heard.onsets[1] - 0.1) < 0.011, "the onset is the timed start")
+    test.assert(#heard.silent >= 2, "silence before the start and after the end")
+
+    local events = mixer:events()
+    test.equal(events[1].event, "start")
+    test.equal(events[1].time, 0.1)
+    test.equal(events[1].sound, "tests/memory/square.wav")
+    test.equal(events[#events].event, "finish")
+    test.equal(#mixer:events(events[#events].sequence), 0)
+    mixer:destroy()
+end
+
+function suite.stepsAHeldVoidOutputAndLetsItRunAgain(): nil
+    local backend = voided()
+    local mixer = audio.newAudio({backend = backend})
+    test.equal(mixer:step(0.1), 0, "a running void output is not stepped")
+    test.assert(mixer:hold(true))
+    local before = mixer:now()
+    test.equal(mixer:step(0.25), 0.25)
+    test.assert(math.abs(mixer:now() - before - 0.25) < 0.02)
+    -- Held, the application's tick steps it by the frame's delta.
+    mixer:tick(0.05)
+    test.assert(math.abs(mixer:now() - before - 0.3) < 0.02)
+    test.assert(not mixer:hold(false))
+    mixer:destroy()
+end
+
+local effects = require("tecs.audio.effects")
+
+--- A memory mixer and a long half-scale square clip on it.
+local function console(): (audio.Audio, audio.Clip)
+    binding()
+    local mixer = audio.newAudio({output = "memory", maxVoices = 8, limiter = false})
+    local clip = assert(mixer:loadBytes("tests/memory/console.wav", squareWav(1, 64)))
+
+    return mixer, clip
+end
+
+function suite.multipliesATracksFaderByItsBussesOnTheWayToMaster(): nil
+    local mixer, clip = console()
+    local sfx = mixer:bus("sfx", {gain = 0.5})
+    local track = mixer:track({bus = "sfx", gain = 0.5})
+    test.equal(track:bus(), "sfx")
+    track:play(clip)
+    mixer:step(0.1)
+    local meters = mixer:meters()
+    test.assert(math.abs(meters.master.peak - 0.125) < 0.005, "0.5 x 0.5 x 0.5: " .. tostring(meters.master.peak))
+    test.assert(math.abs(assert(meters.buses.sfx).peak - 0.125) < 0.005)
+    test.assert(math.abs(assert(meters.tracks[track.id]).peak - 0.25) < 0.005)
+    sfx:setMuted(true)
+    -- A mute glides over a few milliseconds rather than click; read past it.
+    mixer:step(0.05)
+    mixer:meters()
+    mixer:step(0.1)
+    test.assert(mixer:meters().master.peak < 0.01, "a muted Bus silences what routes to it")
+    mixer:destroy()
+end
+
+function suite.ringsAReturnBusReverbAfterTheSendStops(): nil
+    local mixer, clip = console()
+    mixer:bus("room", {effects = {effects.reverb({size = 0.8})}})
+    local track = mixer:track({sends = {room = 0.5}})
+    track:setMuted(true)
+    test.equal(track:sends().room, 0.5)
+    local handle = track:play(clip)
+    mixer:step(0.2)
+    mixer:stop(handle)
+    mixer:step(0.05)
+    test.assert(mixer:listen(0.3))
+    mixer:step(0.3)
+    local heard = assert(mixer:listening())
+    -- The dry Track is muted, so all of this is the room still ringing.
+    test.assert(heard.peak > 0.001, "the reverb tail rings: " .. tostring(heard.peak))
+    mixer:destroy()
+end
+
+function suite.limitsMasterByDefault(): nil
+    binding()
+    local mixer = audio.newAudio({output = "memory", maxVoices = 8})
+    local master = mixer:masterBus()
+    test.equal(#master:effects(), 1)
+    test.equal(master:effects()[1].name, "limiter")
+    local clip = assert(mixer:loadBytes("tests/memory/loud.wav", squareWav(0.5, 127)))
+    -- Three full-scale voices would sum to three; the limiter holds -1 dBFS.
+    for _ = 1, 3 do
+        mixer:play(clip)
+    end
+    mixer:listen(0.4)
+    mixer:step(0.4)
+    local heard = assert(mixer:listening())
+    test.equal(heard.clipped, 0)
+    test.assert(heard.peak <= 0.8913, "held under the ceiling: " .. tostring(heard.peak))
+    mixer:destroy()
+end
+
+function suite.playsOnATimelineBeatAndHoldsWhilePaused(): nil
+    local mixer, clip = console()
+    local song = mixer:timeline({tempo = 120})
+    test.equal(song:tempo(), 120)
+    -- Beat two at 120 bpm is one second from now.
+    local cue = song:play(clip, {at = 2})
+    test.equal(cue.handle, 0)
+    test.assert(mixer:listen(1.5))
+    for _ = 1, 30 do
+        mixer:step(0.05)
+    end
+    test.assert(cue.handle ~= 0, "the cue was sent")
+    local heard = assert(mixer:listening())
+    test.assert(#heard.onsets >= 1)
+    test.assert(math.abs(heard.onsets[1] - 1.0) < 0.011, "lands on the beat: " .. tostring(heard.onsets[1]))
+
+    local paused = mixer:timeline()
+    local later = paused:play(clip, {at = paused:now() + 0.2})
+    paused:pause()
+    for _ = 1, 10 do
+        mixer:step(0.05)
+    end
+    test.equal(later.handle, 0, "a paused timeline sends nothing")
+    paused:resume()
+    for _ = 1, 10 do
+        mixer:step(0.05)
+    end
+    test.assert(later.handle ~= 0, "resumed, it sends")
+    mixer:destroy()
+end
+
+function suite.mapsTheDefaultTimelineOntoTheClock(): nil
+    local mixer, _ = console()
+    mixer:step(0.25)
+    local clock = mixer:defaultTimeline()
+    test.assert(math.abs(clock:now() - mixer:now()) < 1e-9)
+    test.assert(math.abs(clock:toClock(3) - 3) < 1e-9)
+    test.equal(mixer:defaultTimeline(), clock)
     mixer:destroy()
 end
 
