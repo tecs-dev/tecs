@@ -10,10 +10,8 @@ The schema slow path is cached by saved fingerprint and projects named fields.
 ]]
 
 local ffi = require("ffi")
--- `serde.native` is required before `bytes` on purpose: in the other order a whole-
--- project `nupp check` currently resolves `bytes` to unknown in this module.
-local native = require("serde.native")
 local bytes = require("bytes")
+local native = require("serde.native")
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
 local events = require("tecs.internal.events")
