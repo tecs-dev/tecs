@@ -1,7 +1,6 @@
 local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
 local gm = require("tecs.gm")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -174,12 +173,12 @@ end
 
 function suite.refusesAMissingSoundFontAndAnEmptyPath(): nil
     local missing, reason = gm.loadSoundFont("tests/no-such-font.sf2")
-    test.equal(missing, nil)
-    test.assert(#assert(reason) > 0, "the library says why")
+    assert.eq(missing, nil)
+    assert(#assert(reason) > 0, "the library says why")
     local junk, junkReason = gm.loadSoundFontBytes("junk.sf2", "these bytes are not a SoundFont")
-    test.equal(junk, nil)
-    test.assert(#assert(junkReason) > 0)
-    test.raises(
+    assert.eq(junk, nil)
+    assert(#assert(junkReason) > 0)
+    assert.raises(
         function(): nil
             gm.loadSoundFont("")
         end,
@@ -190,62 +189,62 @@ end
 function suite.startsTheSynthAsOneVoiceOfTheMixer(): nil
     local harness = newHarness(true, true)
     local mixer, music = made(harness, {group = "music", gain = 0.5})
-    test.equal(mixer:sounding(), 1)
+    assert.eq(mixer:sounding(), 1)
     mixer:update()
     local play = assert(lastCommand(harness, audiobackend.PLAY))
-    test.equal(play.flags, audiobackend.SYNTH)
-    test.equal(play.gain, 0.5)
-    test.equal(play.handle, music.voice)
+    assert.eq(play.flags, audiobackend.SYNTH)
+    assert.eq(play.gain, 0.5)
+    assert.eq(play.handle, music.voice)
     local bus = mixer:bus("music")
-    test.equal(play.target, bus:track().id, "a grouped synth plays on its Bus's Track")
+    assert.eq(play.target, bus:track().id, "a grouped synth plays on its Bus's Track")
     -- The synthesizer was opened for the voice that started, before the
     -- start crossed, which is what hands it to the mixer.
-    test.equal(#harness.opened, 1)
+    assert.eq(#harness.opened, 1)
     local opened = harness.opened[1]
-    test.equal(opened.decoder, DECODER)
-    test.equal(opened.handle, play.handle)
+    assert.eq(opened.decoder, DECODER)
+    assert.eq(opened.handle, play.handle)
     -- `tecs_gm::Params`: the font id, the polyphony, the effects flag.
-    test.equal(opened.params, littleEndian(1, 8) .. littleEndian(64, 4) .. littleEndian(1, 4))
-    test.equal(opened.bytes, "")
+    assert.eq(opened.params, littleEndian(1, 8) .. littleEndian(64, 4) .. littleEndian(1, 4))
+    assert.eq(opened.bytes, "")
 
     mixer:setGroupGain("music", 0.5)
     mixer:update()
     -- The group is a Bus, whose fader the backend applies.
     local fader = assert(lastCommand(harness, audiobackend.BUS_SET))
-    test.equal(fader.param, audiobackend.BUS_GAIN)
-    test.equal(fader.gain, 0.5)
+    assert.eq(fader.param, audiobackend.BUS_GAIN)
+    assert.eq(fader.gain, 0.5)
     mixer:setGroupMuted("music", true)
     mixer:update()
-    test.equal(assert(lastCommand(harness, audiobackend.BUS_SET)).param, audiobackend.BUS_MUTE)
+    assert.eq(assert(lastCommand(harness, audiobackend.BUS_SET)).param, audiobackend.BUS_MUTE)
     mixer:setGroupMuted("music", false)
     music:setGain(1)
     mixer:update()
-    test.equal(assert(lastCommand(harness, audiobackend.SET_GAIN)).gain, 1)
+    assert.eq(assert(lastCommand(harness, audiobackend.SET_GAIN)).gain, 1)
     mixer:pauseGroup("music")
     mixer:update()
-    test.equal(assert(lastCommand(harness, audiobackend.BUS_SET)).param, audiobackend.BUS_PAUSE)
-    test.assert(mixer:paused(play.handle))
-    test.assert(music:paused(), "a synth on a paused Bus is held")
+    assert.eq(assert(lastCommand(harness, audiobackend.BUS_SET)).param, audiobackend.BUS_PAUSE)
+    assert(mixer:paused(play.handle))
+    assert(music:paused(), "a synth on a paused Bus is held")
 
     music:destroy()
     music:destroy()
     mixer:update()
-    test.equal(countOf(harness, audiobackend.STOP), 1, "a second destroy does nothing")
-    test.equal(assert(lastCommand(harness, audiobackend.STOP)).handle, play.handle)
-    test.equal(mixer:sounding(), 0)
-    test.assert(not music:playing())
+    assert.eq(countOf(harness, audiobackend.STOP), 1, "a second destroy does nothing")
+    assert.eq(assert(lastCommand(harness, audiobackend.STOP)).handle, play.handle)
+    assert.eq(mixer:sounding(), 0)
+    assert(not music:playing())
 end
 
 function suite.registersItsDecoderOncePerMixer(): nil
     local harness = newHarness(true, true)
     local mixer = audio.newAudio({backend = harness.backend, maxVoices = 4})
-    test.equal(gm.install(mixer), DECODER)
+    assert.eq(gm.install(mixer), DECODER)
     assert(gm.new(mixer, font()))
     assert(gm.new(mixer, font()))
-    test.equal(harness.registered[1], 1)
+    assert.eq(harness.registered[1], 1)
     local other = audio.newAudio({backend = harness.backend, maxVoices = 4})
     assert(gm.new(other, font()))
-    test.equal(harness.registered[1], 2, "another mixer registers its own")
+    assert.eq(harness.registered[1], 2, "another mixer registers its own")
 end
 
 function suite.passesPolyphonyEffectsAndTrackToTheVoice(): nil
@@ -255,8 +254,8 @@ function suite.passesPolyphonyEffectsAndTrackToTheVoice(): nil
     local track = bus:track()
     local music = assert(gm.new(mixer, font(), {polyphony = 128, effects = false, track = track, priority = 3}))
     mixer:update()
-    test.equal(harness.opened[1].params, littleEndian(1, 8) .. littleEndian(128, 4) .. littleEndian(0, 4))
-    test.equal(assert(lastCommand(harness, audiobackend.PLAY)).target, track.id)
+    assert.eq(harness.opened[1].params, littleEndian(1, 8) .. littleEndian(128, 4) .. littleEndian(0, 4))
+    assert.eq(assert(lastCommand(harness, audiobackend.PLAY)).target, track.id)
     music:destroy()
 end
 
@@ -266,18 +265,18 @@ function suite.pausesTheVoiceAndFadesItOut(): nil
     mixer:update()
     local handle = assert(lastCommand(harness, audiobackend.PLAY)).handle
     music:pause()
-    test.assert(music:paused())
+    assert(music:paused())
     mixer:update()
-    test.equal(assert(lastCommand(harness, audiobackend.PAUSE)).handle, handle)
+    assert.eq(assert(lastCommand(harness, audiobackend.PAUSE)).handle, handle)
     music:resume()
-    test.assert(not music:paused())
+    assert(not music:paused())
     mixer:update()
-    test.equal(assert(lastCommand(harness, audiobackend.RESUME)).handle, handle)
+    assert.eq(assert(lastCommand(harness, audiobackend.RESUME)).handle, handle)
     music:destroy(0.75)
     mixer:update()
     local stop = assert(lastCommand(harness, audiobackend.STOP))
-    test.equal(stop.handle, handle)
-    test.equal(stop.fade, 0.75)
+    assert.eq(stop.handle, handle)
+    assert.eq(stop.fade, 0.75)
 end
 
 function suite.countsAgainstTheVoiceCeiling(): nil
@@ -285,11 +284,11 @@ function suite.countsAgainstTheVoiceCeiling(): nil
     local mixer = audio.newAudio({backend = harness.backend, maxVoices = 1})
     local first = assert(gm.new(mixer, font()))
     local second, reason = gm.new(mixer, font())
-    test.equal(second, nil)
-    test.assert(reason ~= nil)
-    test.equal(#harness.opened, 1, "a refused start opens nothing")
+    assert.eq(second, nil)
+    assert(reason ~= nil)
+    assert.eq(#harness.opened, 1, "a refused start opens nothing")
     first:destroy()
-    test.assert(gm.new(mixer, font()) ~= nil)
+    assert(gm.new(mixer, font()) ~= nil)
 end
 
 function suite.reportsADecoderThatRefusesTheSynth(): nil
@@ -297,21 +296,21 @@ function suite.reportsADecoderThatRefusesTheSynth(): nil
     local mixer = audio.newAudio({backend = harness.backend, maxVoices = 2})
     harness.refusal[1] = "font 1 is not loaded"
     local music, reason = gm.new(mixer, font())
-    test.equal(music, nil)
-    test.equal(reason, "font 1 is not loaded")
-    test.equal(mixer:sounding(), 0, "the slot it claimed is given back")
+    assert.eq(music, nil)
+    assert.eq(reason, "font 1 is not loaded")
+    assert.eq(mixer:sounding(), 0, "the slot it claimed is given back")
 end
 
 function suite.sendsEveryHelperAsTheShortMessageItNames(): nil
     local harness = newHarness(true, true)
     local mixer, music = made(harness)
-    test.assert(music:noteOn(2, 60, 100, 0.25))
-    test.assert(music:noteOff(2, 60))
-    test.assert(music:controlChange(9, 7, 90, 1))
-    test.assert(music:programChange(15, 40))
-    test.assert(music:pitchBend(0, 8192))
-    test.assert(music:pitchBend(0, 16383))
-    test.assert(music:send(0xF8, 0, 0))
+    assert(music:noteOn(2, 60, 100, 0.25))
+    assert(music:noteOff(2, 60))
+    assert(music:controlChange(9, 7, 90, 1))
+    assert(music:programChange(15, 40))
+    assert(music:pitchBend(0, 8192))
+    assert(music:pitchBend(0, 16383))
+    assert(music:send(0xF8, 0, 0))
     local expected: {
         {number}
     } = {
@@ -324,96 +323,96 @@ function suite.sendsEveryHelperAsTheShortMessageItNames(): nil
         {0xF8, 0, 0, 0},
     }
     local sent = sentBy(harness, mixer)
-    test.equal(#sent, #expected)
+    assert.eq(#sent, #expected)
     for index = 1, #expected do
         local event = sent[index]
-        test.equal(event.handle, music.voice)
-        test.equal(event.kind, "message")
-        test.equal(event.status, expected[index][1])
-        test.equal(event.data1, expected[index][2])
-        test.equal(event.data2, expected[index][3])
-        test.equal(event.at, expected[index][4])
+        assert.eq(event.handle, music.voice)
+        assert.eq(event.kind, "message")
+        assert.eq(event.status, expected[index][1])
+        assert.eq(event.data1, expected[index][2])
+        assert.eq(event.data2, expected[index][3])
+        assert.eq(event.at, expected[index][4])
     end
     -- There is one clock, and it is the mixer's.
     harness.clock[1] = 1.5
-    test.equal(music:now(), 1.5)
-    test.equal(music:now(), mixer:now())
+    assert.eq(music:now(), 1.5)
+    assert.eq(music:now(), mixer:now())
 end
 
 function suite.carriesNotesOffAndResetAsDecoderOperations(): nil
     local harness = newHarness(true, true)
     local mixer, music = made(harness)
-    test.assert(music:allNotesOff())
-    test.assert(music:allNotesOff(3, true, 0.5))
-    test.assert(music:reset())
+    assert(music:allNotesOff())
+    assert(music:allNotesOff(3, true, 0.5))
+    assert(music:reset())
     local sent = sentBy(harness, mixer)
-    test.equal(#sent, 3)
-    test.equal(sent[1].kind, "notesOff")
-    test.equal(sent[1].data1, 0xFF, "no channel is every channel")
-    test.equal(sent[1].status, 0, "released rather than cut")
-    test.equal(sent[2].data1, 3)
-    test.equal(sent[2].status, 1)
-    test.equal(sent[2].at, 0.5)
-    test.equal(sent[3].kind, "reset")
-    test.equal(assert(lastCommand(harness, audiobackend.EVENT)).data, 2 * OP)
+    assert.eq(#sent, 3)
+    assert.eq(sent[1].kind, "notesOff")
+    assert.eq(sent[1].data1, 0xFF, "no channel is every channel")
+    assert.eq(sent[1].status, 0, "released rather than cut")
+    assert.eq(sent[2].data1, 3)
+    assert.eq(sent[2].status, 1)
+    assert.eq(sent[2].at, 0.5)
+    assert.eq(sent[3].kind, "reset")
+    assert.eq(assert(lastCommand(harness, audiobackend.EVENT)).data, 2 * OP)
 end
 
 function suite.refusesEventsOnceDestroyed(): nil
     local harness = newHarness(true, true)
     local mixer, music = made(harness)
     music:destroy()
-    test.assert(not music:noteOn(0, 60, 100), "a destroyed synth sends nothing")
-    test.assert(not music:allNotesOff())
-    test.assert(not music:reset())
-    test.equal(#sentBy(harness, mixer), 0)
+    assert(not music:noteOn(0, 60, 100), "a destroyed synth sends nothing")
+    assert(not music:allNotesOff())
+    assert(not music:reset())
+    assert.eq(#sentBy(harness, mixer), 0)
 end
 
 function suite.raisesForAValueOutsideItsRange(): nil
     local harness = newHarness(true, true)
     local mixer, music = made(harness)
-    test.raises(
+    assert.raises(
         function(): nil
             music:noteOn(16, 60, 100)
         end,
         "channel must be from 0 to 15"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             music:noteOn(0, 128, 100)
         end,
         "key"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             music:send(0x7F, 0, 0)
         end,
         "status"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             music:pitchBend(0, 16384)
         end,
         "value"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             music:allNotesOff(-1)
         end,
         "channel"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             gm.new(mixer, font(), {polyphony = 4})
         end,
         "polyphony"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             gm.new(mixer, font(), {polyphony = 257})
         end,
         "polyphony"
     )
-    test.equal(#sentBy(harness, mixer), 0)
+    assert.eq(#sentBy(harness, mixer), 0)
 end
 
 function suite.makesAVoicelessSynthWithoutAnOutput(): nil
@@ -422,11 +421,11 @@ function suite.makesAVoicelessSynthWithoutAnOutput(): nil
     -- nothing sounds.
     local mixer = audio.newAudio({backend = audiobackend.silent()})
     local music = assert(gm.new(mixer, font()))
-    test.equal(mixer:sounding(), 0)
-    test.assert(music:noteOn(0, 60, 100, 0.5))
-    test.assert(music:allNotesOff())
-    test.assert(not music:playing())
-    test.equal(music:now(), 0)
+    assert.eq(mixer:sounding(), 0)
+    assert(music:noteOn(0, 60, 100, 0.5))
+    assert(music:allNotesOff())
+    assert(not music:playing())
+    assert.eq(music:now(), 0)
     music:pause()
     music:destroy()
 end
@@ -434,19 +433,19 @@ end
 function suite.takesAVoiceOnABackendWithNoDecoders(): nil
     local harness = newHarness(true, false)
     local mixer, music = made(harness)
-    test.equal(mixer:sounding(), 1)
-    test.assert(music:noteOn(0, 60, 100))
+    assert.eq(mixer:sounding(), 1)
+    assert(music:noteOn(0, 60, 100))
     mixer:update()
-    test.equal(assert(lastCommand(harness, audiobackend.PLAY)).flags, audiobackend.SYNTH)
-    test.equal(#harness.opened, 0)
-    test.equal(#sentBy(harness, mixer), 1, "the events still reach the backend")
+    assert.eq(assert(lastCommand(harness, audiobackend.PLAY)).flags, audiobackend.SYNTH)
+    assert.eq(#harness.opened, 0)
+    assert.eq(#sentBy(harness, mixer), 1, "the events still reach the backend")
 end
 
 --- Returns the native binding, or skips when `libtecsaudio` is not staged.
 local function binding(): {[string]: any}
     local ok, loaded = pcall(require, "tecs.platform.audionative")
     if not ok then
-        test.skip("libtecsaudio is not on the loader path: " .. tostring(loaded))
+        assert.suite.skip("libtecsaudio is not on the loader path: " .. tostring(loaded))
     end
 
     return loaded as {[string]: any}
@@ -457,7 +456,7 @@ end
 local function soundFontPath(): string
     local path = os.getenv("TECS_TEST_SOUNDFONT")
     if path == nil or path == "" then
-        test.skip("TECS_TEST_SOUNDFONT names no SoundFont")
+        assert.suite.skip("TECS_TEST_SOUNDFONT names no SoundFont")
     end
 
     return assert(path)
@@ -466,30 +465,30 @@ end
 function suite.loadsARealSoundFontOncePerPath(): nil
     local path = soundFontPath()
     local first = assert(gm.loadSoundFont(path))
-    test.equal(first.path, path)
-    test.assert(first.id ~= 0)
-    test.equal(gm.loadSoundFont(path), first)
+    assert.eq(first.path, path)
+    assert(first.id ~= 0)
+    assert.eq(gm.loadSoundFont(path), first)
 end
 
 function suite.rendersANoteFromARealSoundFontOnTheMixerClock(): nil
     local path = soundFontPath()
     binding()
     local mixer = audio.newAudio({output = "memory", maxVoices = 4, limiter = false})
-    test.assert(mixer.available)
+    assert(mixer.available)
     local loaded = assert(gm.loadSoundFont(path))
     local music = assert(gm.new(mixer, loaded, {effects = false}))
-    test.assert(music:playing())
-    test.assert(mixer:listen(1))
-    test.assert(music:programChange(0, 0))
-    test.assert(music:noteOn(0, 60, 110, 0.25))
-    test.assert(music:noteOff(0, 60, 0.75))
-    test.equal(mixer:step(1), 1)
-    test.equal(music:now(), 1)
+    assert(music:playing())
+    assert(mixer:listen(1))
+    assert(music:programChange(0, 0))
+    assert(music:noteOn(0, 60, 110, 0.25))
+    assert(music:noteOff(0, 60, 0.75))
+    assert.eq(mixer:step(1), 1)
+    assert.eq(music:now(), 1)
     local heard = assert(mixer:listening())
-    test.assert(heard.peak > 0.01, "the note sounds, peaking at " .. tostring(heard.peak))
-    test.assert(#heard.onsets >= 1, "the note has an onset")
+    assert(heard.peak > 0.01, "the note sounds, peaking at " .. tostring(heard.peak))
+    assert(#heard.onsets >= 1, "the note has an onset")
     -- Within the synthesizer's eight-frame block, and the detector's window.
-    test.assert(
+    assert(
         math.abs(heard.onsets[1] - 0.25) < 0.02,
         "the note starts on the mixer's clock, got " .. tostring(heard.onsets[1])
     )

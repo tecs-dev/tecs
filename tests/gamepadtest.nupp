@@ -2,7 +2,6 @@ local ecs = require("tecs.ecs")
 local gamepadbackend = require("tecs.platform.gamepadbackend")
 local input = require("tecs.input")
 local platformevents = require("tecs.platform.events")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -126,33 +125,33 @@ function suite.readsNoDeviceUntilItIsGivenASource(): nil
     -- controller in.
     local state = input.newInput()
     state:beginFrame()
-    test.equal(#state:pollDevices(), 0)
+    assert.eq(#state:pollDevices(), 0)
     state:refreshDevices()
-    test.equal(#state:gamepads(), 0)
+    assert.eq(#state:gamepads(), 0)
 end
 
 function suite.behavesWithNoDeviceAttached(): nil
     local state = input.newInput(gamepadbackend.none())
     state:beginFrame()
     local produced = state:pollDevices()
-    test.equal(#produced, 0)
-    test.equal(#state:gamepads(), 0)
-    test.assert(state:gamepad(1) == nil)
-    test.assert(state:gamepadById(7) == nil)
+    assert.eq(#produced, 0)
+    assert.eq(#state:gamepads(), 0)
+    assert(state:gamepad(1) == nil)
+    assert(state:gamepadById(7) == nil)
     state:refreshDevices()
-    test.equal(#state:gamepads(), 0)
+    assert.eq(#state:gamepads(), 0)
 end
 
 function suite.opensADeviceTheBackendReports(): nil
     local fake = newFake()
     local state = withPad(fake)
     local pad = state:gamepad(1)
-    test.assert(pad ~= nil)
-    test.equal(assert(pad).id, 1)
-    test.assert(assert(pad).connected)
-    test.equal(assert(pad).name, "Fake Pad 1")
-    test.equal(assert(pad).guid, "00000000000000000000000000000001")
-    test.assert(state:gamepadById(1) == pad)
+    assert(pad ~= nil)
+    assert.eq(assert(pad).id, 1)
+    assert(assert(pad).connected)
+    assert.eq(assert(pad).name, "Fake Pad 1")
+    assert.eq(assert(pad).guid, "00000000000000000000000000000001")
+    assert(state:gamepadById(1) == pad)
 end
 
 function suite.translatesEveryObservationIntoAPlatformEvent(): nil
@@ -171,22 +170,22 @@ function suite.translatesEveryObservationIntoAPlatformEvent(): nil
         local event = produced[index]
         if event is platformevents.GamepadDeviceEvent then
             seen[index] = event.kind
-            test.equal(event.which, 3)
+            assert.eq(event.which, 3)
         elseif event is platformevents.GamepadButtonEvent then
             seen[index] = event.kind
-            test.equal(event.button, 1)
+            assert.eq(event.button, 1)
         elseif event is platformevents.GamepadAxisEvent then
             seen[index] = event.kind
-            test.equal(event.axis, 2)
-            test.equal(event.value, -0.75)
+            assert.eq(event.axis, 2)
+            assert.eq(event.value, -0.75)
         end
     end
-    test.equal(#seen, 5)
-    test.equal(seen[1], "gamepadAdded")
-    test.equal(seen[2], "gamepadButtonDown")
-    test.equal(seen[3], "gamepadButtonUp")
-    test.equal(seen[4], "gamepadAxis")
-    test.equal(seen[5], "gamepadRemoved")
+    assert.eq(#seen, 5)
+    assert.eq(seen[1], "gamepadAdded")
+    assert.eq(seen[2], "gamepadButtonDown")
+    assert.eq(seen[3], "gamepadButtonUp")
+    assert.eq(seen[4], "gamepadAxis")
+    assert.eq(seen[5], "gamepadRemoved")
 end
 
 function suite.foldsButtonPressAndReleaseEdges(): nil
@@ -197,20 +196,20 @@ function suite.foldsButtonPressAndReleaseEdges(): nil
     fake.push(gamepadbackend.KIND_BUTTON_DOWN, 1, 1)
     state:beginFrame()
     state:pollDevices()
-    test.assert(pad:buttonDown("south"))
-    test.assert(pad:buttonPressed("south"))
-    test.assert(not pad:buttonReleased("south"))
+    assert(pad:buttonDown("south"))
+    assert(pad:buttonPressed("south"))
+    assert(not pad:buttonReleased("south"))
 
     state:beginFrame()
     state:pollDevices()
-    test.assert(pad:buttonDown("south"))
-    test.assert(not pad:buttonPressed("south"))
+    assert(pad:buttonDown("south"))
+    assert(not pad:buttonPressed("south"))
 
     fake.push(gamepadbackend.KIND_BUTTON_UP, 1, 1)
     state:beginFrame()
     state:pollDevices()
-    test.assert(not pad:buttonDown("south"))
-    test.assert(pad:buttonReleased("south"))
+    assert(not pad:buttonDown("south"))
+    assert(pad:buttonReleased("south"))
 end
 
 function suite.latchesGamepadEdgesUntilAFixedStep(): nil
@@ -224,16 +223,16 @@ function suite.latchesGamepadEdgesUntilAFixedStep(): nil
     fake.push(gamepadbackend.KIND_BUTTON_UP, 1, 7)
     state:beginFrame()
     state:pollDevices()
-    test.assert(not pad:buttonPressed("start"))
+    assert(not pad:buttonPressed("start"))
 
     state:enterFixedPhase()
-    test.assert(pad:buttonPressed("start"))
-    test.assert(pad:buttonReleased("start"))
+    assert(pad:buttonPressed("start"))
+    assert(pad:buttonReleased("start"))
     state:exitFixedPhase()
 
     state:enterFixedPhase()
-    test.assert(not pad:buttonPressed("start"))
-    test.assert(not pad:buttonReleased("start"))
+    assert(not pad:buttonPressed("start"))
+    assert(not pad:buttonReleased("start"))
     state:exitFixedPhase()
 end
 
@@ -245,14 +244,14 @@ function suite.appliesTheDeadzoneAndAnOverride(): nil
     fake.push(gamepadbackend.KIND_AXIS, 1, 1, 0.1)
     state:beginFrame()
     state:pollDevices()
-    test.equal(pad:axis("leftX"), 0)
-    test.equal(pad:axis("leftX", 0.05), 0.1)
+    assert.eq(pad:axis("leftX"), 0)
+    assert.eq(pad:axis("leftX", 0.05), 0.1)
 
     fake.push(gamepadbackend.KIND_AXIS, 1, 1, -0.5)
     state:beginFrame()
     state:pollDevices()
-    test.equal(pad:axis("leftX"), -0.5)
-    test.equal(pad:axis("rightY"), 0)
+    assert.eq(pad:axis("leftX"), -0.5)
+    assert.eq(pad:axis("rightY"), 0)
 end
 
 function suite.hidesGamepadsBehindABlockingLayer(): nil
@@ -263,18 +262,18 @@ function suite.hidesGamepadsBehindABlockingLayer(): nil
     fake.push(gamepadbackend.KIND_BUTTON_DOWN, 1, 12)
     state:beginFrame()
     state:pollDevices()
-    test.assert(pad:buttonDown("dpadUp"))
+    assert(pad:buttonDown("dpadUp"))
 
     local overlay = state:pushLayer("menu")
-    test.assert(not pad:buttonDown("dpadUp"))
-    test.assert(pad:buttonDown("dpadUp", overlay))
+    assert(not pad:buttonDown("dpadUp"))
+    assert(pad:buttonDown("dpadUp", overlay))
     -- Pushing a blocking layer clears pending edges without inventing a
     -- release for a button still physically held.
-    test.assert(not pad:buttonPressed("dpadUp", overlay))
-    test.assert(not pad:buttonReleased("dpadUp", overlay))
+    assert(not pad:buttonPressed("dpadUp", overlay))
+    assert(not pad:buttonReleased("dpadUp", overlay))
 
     state:popLayer()
-    test.assert(pad:buttonDown("dpadUp"))
+    assert(pad:buttonDown("dpadUp"))
 end
 
 function suite.retiresADeviceAndLeavesItsReferenceHarmless(): nil
@@ -285,23 +284,23 @@ function suite.retiresADeviceAndLeavesItsReferenceHarmless(): nil
     fake.push(gamepadbackend.KIND_BUTTON_DOWN, 1, 1)
     state:beginFrame()
     state:pollDevices()
-    test.assert(pad:buttonDown("south"))
+    assert(pad:buttonDown("south"))
 
     fake.detach(1)
     fake.push(gamepadbackend.KIND_REMOVED, 1, 0)
     state:beginFrame()
     state:pollDevices()
 
-    test.equal(#state:gamepads(), 0)
-    test.assert(state:gamepadById(1) == nil)
-    test.assert(not pad.connected)
-    test.assert(not pad:buttonDown("south"))
-    test.equal(pad:axis("leftX"), 0)
-    test.assert(not pad:hasButton("south"))
-    test.assert(not pad:rumble(1, 1, 0.2))
+    assert.eq(#state:gamepads(), 0)
+    assert(state:gamepadById(1) == nil)
+    assert(not pad.connected)
+    assert(not pad:buttonDown("south"))
+    assert.eq(pad:axis("leftX"), 0)
+    assert(not pad:hasButton("south"))
+    assert(not pad:rumble(1, 1, 0.2))
     local level, percent = pad:power()
-    test.equal(level, "unknown")
-    test.equal(percent, -1)
+    assert.eq(level, "unknown")
+    assert.eq(percent, -1)
 end
 
 function suite.reconnectingUnderOneIdentifierCreatesANewGamepad(): nil
@@ -314,10 +313,10 @@ function suite.reconnectingUnderOneIdentifierCreatesANewGamepad(): nil
     state:pollDevices()
 
     local second = assert(state:gamepad(1))
-    test.assert(second ~= first)
-    test.assert(not first.connected)
-    test.assert(second.connected)
-    test.equal(#state:gamepads(), 1)
+    assert(second ~= first)
+    assert(not first.connected)
+    assert(second.connected)
+    assert.eq(#state:gamepads(), 1)
 end
 
 function suite.reconcilesTheDeviceListAgainstThePlatform(): nil
@@ -326,15 +325,15 @@ function suite.reconcilesTheDeviceListAgainstThePlatform(): nil
     fake.attach(4)
     fake.attach(9)
     state:refreshDevices()
-    test.equal(#state:gamepads(), 2)
-    test.assert(state:gamepadById(4) ~= nil)
-    test.assert(state:gamepadById(9) ~= nil)
+    assert.eq(#state:gamepads(), 2)
+    assert(state:gamepadById(4) ~= nil)
+    assert(state:gamepadById(9) ~= nil)
 
     fake.detach(4)
     state:refreshDevices()
-    test.equal(#state:gamepads(), 1)
-    test.assert(state:gamepadById(4) == nil)
-    test.assert(state:gamepadById(9) ~= nil)
+    assert.eq(#state:gamepads(), 1)
+    assert(state:gamepadById(4) == nil)
+    assert(state:gamepadById(9) ~= nil)
 end
 
 function suite.releasesEveryHeldControlWhenTheWindowLosesFocus(): nil
@@ -346,12 +345,12 @@ function suite.releasesEveryHeldControlWhenTheWindowLosesFocus(): nil
     fake.push(gamepadbackend.KIND_AXIS, 1, 1, 0.9)
     state:beginFrame()
     state:pollDevices()
-    test.assert(pad:buttonDown("south"))
+    assert(pad:buttonDown("south"))
 
     state:handleEvent(platformevents.focused(false))
-    test.assert(not pad:buttonDown("south"))
-    test.assert(pad:buttonReleased("south"))
-    test.equal(pad:axis("leftX"), 0)
+    assert(not pad:buttonDown("south"))
+    assert(pad:buttonReleased("south"))
+    assert.eq(pad:axis("leftX"), 0)
 end
 
 function suite.reportsCapabilitiesPowerAndRumbleThroughTheBackend(): nil
@@ -359,17 +358,17 @@ function suite.reportsCapabilitiesPowerAndRumbleThroughTheBackend(): nil
     local state = withPad(fake)
     local pad = assert(state:gamepad(1))
 
-    test.assert(pad:hasButton("south"))
-    test.assert(not pad:hasButton("north"))
-    test.assert(pad:hasAxis("leftX"))
-    test.assert(not pad:hasAxis("rightX"))
+    assert(pad:hasButton("south"))
+    assert(not pad:hasButton("north"))
+    assert(pad:hasAxis("leftX"))
+    assert(not pad:hasAxis("rightX"))
 
     local level, percent = pad:power()
-    test.equal(level, "onBattery")
-    test.equal(percent, 42)
+    assert.eq(level, "onBattery")
+    assert.eq(percent, 42)
 
-    test.assert(pad:rumble(0.5, 1, 0.25))
-    test.equal(fake.rumbles(), 1)
+    assert(pad:rumble(0.5, 1, 0.25))
+    assert.eq(fake.rumbles(), 1)
 end
 
 function suite.raisesForAControlNameItDoesNotDeclare(): nil
@@ -377,19 +376,19 @@ function suite.raisesForAControlNameItDoesNotDeclare(): nil
     local state = withPad(fake)
     local pad = assert(state:gamepad(1))
 
-    test.raises(
+    assert.raises(
         function(): nil
             local _ = pad:buttonDown("triangle" as input.GamepadButton)
         end,
         "unknown gamepad button"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             local _ = pad:axis("throttle" as input.GamepadAxis)
         end,
         "unknown gamepad axis"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             local _ = pad:buttonDown(0)
         end,
@@ -414,8 +413,8 @@ function suite.pollsGamepadsThroughTheInstalledSystem(): nil
     world:update(0)
 
     local pad = assert(state:gamepad(1))
-    test.assert(pad:buttonDown("north"))
-    test.equal(observed, 4)
+    assert(pad:buttonDown("north"))
+    assert.eq(observed, 4)
 end
 
 function suite.forgetsEveryDeviceOnShutdown(): nil
@@ -424,9 +423,9 @@ function suite.forgetsEveryDeviceOnShutdown(): nil
     local pad = assert(state:gamepad(1))
 
     state:destroy()
-    test.equal(#state:gamepads(), 0)
-    test.assert(state:gamepadById(1) == nil)
-    test.assert(not pad.connected)
+    assert.eq(#state:gamepads(), 0)
+    assert(state:gamepadById(1) == nil)
+    assert(not pad.connected)
 end
 
 return suite

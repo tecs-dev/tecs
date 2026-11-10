@@ -2,7 +2,6 @@ local application = require("tecs.application")
 local ecs = require("tecs.ecs")
 local input = require("tecs.input")
 local platformevents = require("tecs.platform.events")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -14,16 +13,16 @@ function suite.keepsHeldStateAcrossFrameEdges(): nil
     local state = input.newInput()
     state:beginFrame()
     state:handleEvent(key(true))
-    test.assert(state:keyDown("Space"))
-    test.assert(state:keyPressed("Space"))
-    test.assert(not state:keyReleased("Space"))
+    assert(state:keyDown("Space"))
+    assert(state:keyPressed("Space"))
+    assert(not state:keyReleased("Space"))
 
     state:beginFrame()
-    test.assert(state:keyDown("Space"))
-    test.assert(not state:keyPressed("Space"))
+    assert(state:keyDown("Space"))
+    assert(not state:keyPressed("Space"))
     state:handleEvent(key(false))
-    test.assert(not state:keyDown("Space"))
-    test.assert(state:keyReleased("Space"))
+    assert(not state:keyDown("Space"))
+    assert(state:keyReleased("Space"))
 end
 
 function suite.doesNotTurnKeyRepeatsIntoPresses(): nil
@@ -33,8 +32,8 @@ function suite.doesNotTurnKeyRepeatsIntoPresses(): nil
     state:beginFrame()
     state:handleEvent(key(true, true))
 
-    test.assert(state:keyDown("Space"))
-    test.assert(not state:keyPressed("Space"))
+    assert(state:keyDown("Space"))
+    assert(not state:keyPressed("Space"))
 end
 
 function suite.latchesEdgesAcrossFramesUntilAFixedStep(): nil
@@ -43,16 +42,16 @@ function suite.latchesEdgesAcrossFramesUntilAFixedStep(): nil
     state:handleEvent(key(true))
     state:beginFrame()
     state:handleEvent(key(false))
-    test.assert(not state:keyPressed("Space"))
+    assert(not state:keyPressed("Space"))
 
     state:enterFixedPhase()
-    test.assert(state:keyPressed("Space"))
-    test.assert(state:keyReleased("Space"))
+    assert(state:keyPressed("Space"))
+    assert(state:keyReleased("Space"))
     state:exitFixedPhase()
 
     state:enterFixedPhase()
-    test.assert(not state:keyPressed("Space"))
-    test.assert(not state:keyReleased("Space"))
+    assert(not state:keyPressed("Space"))
+    assert(not state:keyReleased("Space"))
     state:exitFixedPhase()
 end
 
@@ -65,32 +64,32 @@ function suite.accumulatesPointerWheelAndTextForOneFrame(): nil
     state:handleEvent(platformevents.text("nu"))
     state:handleEvent(platformevents.text("pp"))
 
-    test.equal(state.mouseX, 14)
-    test.equal(state.mouseY, 25)
-    test.equal(state.mouseDeltaX, 6)
-    test.equal(state.mouseDeltaY, 8)
-    test.equal(state.wheelY, -1)
-    test.equal(state.wheelTicksY, -1)
-    test.equal(state.text, "nupp")
+    assert.eq(state.mouseX, 14)
+    assert.eq(state.mouseY, 25)
+    assert.eq(state.mouseDeltaX, 6)
+    assert.eq(state.mouseDeltaY, 8)
+    assert.eq(state.wheelY, -1)
+    assert.eq(state.wheelTicksY, -1)
+    assert.eq(state.text, "nupp")
 
     state:beginFrame()
-    test.equal(state.mouseX, 14)
-    test.equal(state.mouseDeltaX, 0)
-    test.equal(state.wheelY, 0)
-    test.equal(state.text, "")
+    assert.eq(state.mouseX, 14)
+    assert.eq(state.mouseDeltaX, 0)
+    assert.eq(state.wheelY, 0)
+    assert.eq(state.text, "")
 end
 
 function suite.tracksPointerButtonsByNameOrNumber(): nil
     local state = input.newInput()
     state:beginFrame()
     state:handleEvent(platformevents.pointerButton(true, 1, 4, 5))
-    test.assert(state:mouseDown("left"))
-    test.assert(state:mousePressed(1))
+    assert(state:mouseDown("left"))
+    assert(state:mousePressed(1))
 
     state:beginFrame()
     state:handleEvent(platformevents.pointerButton(false, 1, 4, 5))
-    test.assert(not state:mouseDown("left"))
-    test.assert(state:mouseReleased("left"))
+    assert(not state:mouseDown("left"))
+    assert(state:mouseReleased("left"))
 end
 
 function suite.releasesHeldControlsWhenFocusIsLost(): nil
@@ -102,10 +101,10 @@ function suite.releasesHeldControlsWhenFocusIsLost(): nil
 
     state:handleEvent(platformevents.focused(false))
 
-    test.assert(not state:keyDown("Space"))
-    test.assert(state:keyReleased("Space"))
-    test.assert(not state:mouseDown("left"))
-    test.assert(state:mouseReleased("left"))
+    assert(not state:keyDown("Space"))
+    assert(state:keyReleased("Space"))
+    assert(not state:mouseDown("left"))
+    assert(state:mouseReleased("left"))
 end
 
 function suite.movesCaptureAtBlockingLayerBoundaries(): nil
@@ -114,13 +113,13 @@ function suite.movesCaptureAtBlockingLayerBoundaries(): nil
     state:handleEvent(key(true))
 
     local menu = state:pushLayer("menu")
-    test.assert(state:keyDown("Space", menu))
-    test.assert(not state:keyDown("Space"))
-    test.assert(not state:keyPressed("Space", menu))
+    assert(state:keyDown("Space", menu))
+    assert(not state:keyDown("Space"))
+    assert(not state:keyPressed("Space", menu))
 
     state:popLayer()
-    test.assert(state:keyDown("Space"))
-    test.assert(not state:keyPressed("Space"))
+    assert(state:keyDown("Space"))
+    assert(not state:keyPressed("Space"))
 end
 
 function suite.keepsEdgesAcrossNonblockingLayers(): nil
@@ -130,10 +129,10 @@ function suite.keepsEdgesAcrossNonblockingLayers(): nil
 
     local overlay = state:pushLayer("overlay", false)
 
-    test.assert(state:keyPressed("Space"))
-    test.assert(state:keyPressed("Space", overlay))
+    assert(state:keyPressed("Space"))
+    assert(state:keyPressed("Space", overlay))
     state:popLayer()
-    test.assert(state:keyPressed("Space"))
+    assert(state:keyPressed("Space"))
 end
 
 function suite.applicationFoldsInputBeforeObserversAndFixedSystems(): nil
@@ -162,9 +161,9 @@ function suite.applicationFoldsInputBeforeObserversAndFixedSystems(): nil
     app:iterate(0.05, {key(true)})
     app:iterate(0.05, {key(false)})
 
-    test.assert(observerSawHeld)
-    test.assert(fixedSawPress)
-    test.assert(fixedSawRelease)
+    assert(observerSawHeld)
+    assert(fixedSawPress)
+    assert(fixedSawRelease)
 end
 
 local function finger(
@@ -183,24 +182,24 @@ function suite.tracksAFingerFromDownThroughMotionToUp(): nil
     state:handleEvent(finger("fingerDown", "1", 10, 20))
 
     local held = state:touches()
-    test.equal(#held, 1)
-    test.equal(held[1].device, "screen")
-    test.equal(held[1].finger, "1")
-    test.equal(held[1].x, 10)
-    test.equal(held[1].normalY, 0.2)
-    test.equal(held[1].pressure, 0.5)
+    assert.eq(#held, 1)
+    assert.eq(held[1].device, "screen")
+    assert.eq(held[1].finger, "1")
+    assert.eq(held[1].x, 10)
+    assert.eq(held[1].normalY, 0.2)
+    assert.eq(held[1].pressure, 0.5)
 
     state:handleEvent(finger("fingerMotion", "1", 30, 40))
-    test.equal(#state:touches(), 1)
-    test.equal(state:touches()[1].y, 40)
+    assert.eq(#state:touches(), 1)
+    assert.eq(state:touches()[1].y, 40)
 
     -- A finger survives the frame boundary, because it is live state rather
     -- than an edge.
     state:beginFrame()
-    test.equal(#state:touches(), 1)
+    assert.eq(#state:touches(), 1)
 
     state:handleEvent(finger("fingerUp", "1", 30, 40))
-    test.equal(#state:touches(), 0)
+    assert.eq(#state:touches(), 0)
 end
 
 function suite.forgetsAFingerTheSurfaceCancels(): nil
@@ -208,7 +207,7 @@ function suite.forgetsAFingerTheSurfaceCancels(): nil
     state:beginFrame()
     state:handleEvent(finger("fingerDown", "2", 1, 1))
     state:handleEvent(finger("fingerCanceled", "2", 1, 1))
-    test.equal(#state:touches(), 0)
+    assert.eq(#state:touches(), 0)
 end
 
 function suite.keepsTheSameFingerNumberOnTwoSurfacesApart(): nil
@@ -216,12 +215,12 @@ function suite.keepsTheSameFingerNumberOnTwoSurfacesApart(): nil
     state:beginFrame()
     state:handleEvent(finger("fingerDown", "1", 5, 5, "screen"))
     state:handleEvent(finger("fingerDown", "1", 9, 9, "tablet"))
-    test.equal(#state:touches(), 2)
+    assert.eq(#state:touches(), 2)
 
     state:handleEvent(finger("fingerUp", "1", 5, 5, "screen"))
     local left = state:touches()
-    test.equal(#left, 1)
-    test.equal(left[1].device, "tablet")
+    assert.eq(#left, 1)
+    assert.eq(left[1].device, "tablet")
 end
 
 function suite.hidesTouchesBehindABlockingLayer(): nil
@@ -230,11 +229,11 @@ function suite.hidesTouchesBehindABlockingLayer(): nil
     state:handleEvent(finger("fingerDown", "1", 5, 5))
 
     local menu = state:pushLayer("menu")
-    test.equal(#state:touches(), 0)
-    test.equal(#state:touches(menu), 1)
+    assert.eq(#state:touches(), 0)
+    assert.eq(#state:touches(menu), 1)
 
     state:popLayer()
-    test.equal(#state:touches(), 1)
+    assert.eq(#state:touches(), 1)
 end
 
 function suite.dropsEveryFingerWhenFocusIsLost(): nil
@@ -242,11 +241,11 @@ function suite.dropsEveryFingerWhenFocusIsLost(): nil
     state:beginFrame()
     state:handleEvent(finger("fingerDown", "1", 5, 5))
     state:handleEvent(platformevents.focused(false))
-    test.equal(#state:touches(), 0)
+    assert.eq(#state:touches(), 0)
 end
 
 function suite.raisesForATouchWithNoFingerIdentity(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             local _ = platformevents.touch("fingerDown", "screen", "", 0, 0)
         end,

@@ -3,7 +3,6 @@ const {type Phase} = require("tecs.ecs")
 const ecs = require("tecs.ecs")
 const {type Scope} = require("nupp.tasks")
 
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -41,17 +40,17 @@ function suite.ordersDependenciesWithRegistrationOrderTies(): nil
     register("B", nil, {"A"})
     register("C", {"A"})
     register("D")
-    test.equal(names(world, ecs.phases.Update), "C,A,B,D")
+    assert.eq(names(world, ecs.phases.Update), "C,A,B,D")
     world:update(0)
     world:update(0)
-    test.equal(table.concat(calls, ","), "C,A,B,D,C,A,B,D")
+    assert.eq(table.concat(calls, ","), "C,A,B,D,C,A,B,D")
 end
 
 function suite.deduplicatesEdgesAndKeepsSharedBodiesDistinct(): nil
     const world = ecs.newWorld()
     world:addSystem({name = "B", phase = ecs.phases.Update, after = {"A", "A", "B"}, run = noop})
     world:addSystem({name = "A", phase = ecs.phases.Update, before = {"B", "B", "A"}, run = noop})
-    test.equal(names(world, ecs.phases.Update), "A,B")
+    assert.eq(names(world, ecs.phases.Update), "A,B")
     world:update(0)
 end
 
@@ -62,12 +61,12 @@ function suite.copiesConstraintsAndResolvesLateOptionalSystems(): nil
     world:update(0)
     after[1] = "missing"
     world:addSystem({name = "optional", phase = ecs.phases.Update, run = noop})
-    test.equal(names(world, ecs.phases.Update), "optional,consumer")
+    assert.eq(names(world, ecs.phases.Update), "optional,consumer")
     world:update(0)
     world:removeSystem("optional")
-    test.equal(names(world, ecs.phases.Update), "consumer")
+    assert.eq(names(world, ecs.phases.Update), "consumer")
     world:addSystem({name = "optional", phase = ecs.phases.Update, run = noop})
-    test.equal(names(world, ecs.phases.Update), "optional,consumer")
+    assert.eq(names(world, ecs.phases.Update), "optional,consumer")
 end
 
 function suite.ignoresCrossPhaseConstraints(): nil
@@ -90,7 +89,7 @@ function suite.ignoresCrossPhaseConstraints(): nil
         end
     })
     world:update(0)
-    test.equal(table.concat(calls, ","), "early,late")
+    assert.eq(table.concat(calls, ","), "early,late")
 end
 
 function suite.rejectsCyclesBeforeAnySystemOrInitialCommit(): nil
@@ -106,24 +105,24 @@ function suite.rejectsCyclesBeforeAnySystemOrInitialCommit(): nil
         end
     })
     const staged = world:spawn()
-    test.raises(
+    assert.raises(
         function(): nil
             world:update(0)
         end,
         "Cycle detected in system dependencies in phase Update"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             world:listSystems()
         end,
         "A, B"
     )
-    test.equal(calls, 0)
-    test.assert(not world:isAlive(staged))
+    assert.eq(calls, 0)
+    assert(not world:isAlive(staged))
     world:removeSystem("B")
     world:update(0)
-    test.equal(calls, 1)
-    test.assert(world:isAlive(staged))
+    assert.eq(calls, 1)
+    assert(world:isAlive(staged))
 end
 
 function suite.disabledSystemsKeepTheirDependencyEdges(): nil
@@ -147,10 +146,10 @@ function suite.disabledSystemsKeepTheirDependencyEdges(): nil
     })
     world:setSystemEnabled("B", false)
     world:update(0)
-    test.equal(names(world, ecs.phases.Update), "A,B,C")
-    test.equal(table.concat(calls, ","), "A,C")
+    assert.eq(names(world, ecs.phases.Update), "A,B,C")
+    assert.eq(table.concat(calls, ","), "A,C")
     world:removeSystem("B")
-    test.equal(names(world, ecs.phases.Update), "C,A")
+    assert.eq(names(world, ecs.phases.Update), "C,A")
 end
 
 function suite.defersAdditionsButHonorsRemovalsDuringDispatch(): nil
@@ -178,7 +177,7 @@ function suite.defersAdditionsButHonorsRemovalsDuringDispatch(): nil
                 end
             })
             -- Inspection during dispatch must not replace its captured schedule.
-            test.equal(names(value, ecs.phases.Update), "victim")
+            assert.eq(names(value, ecs.phases.Update), "victim")
         end
     })
     world:addSystem({
@@ -189,9 +188,9 @@ function suite.defersAdditionsButHonorsRemovalsDuringDispatch(): nil
         end
     })
     world:update(0)
-    test.equal(#calls, 0)
+    assert.eq(#calls, 0)
     world:update(0)
-    test.equal(table.concat(calls, ","), "new,later")
+    assert.eq(table.concat(calls, ","), "new,later")
 end
 
 function suite.ordersFixedStepsAndPreservesDeclaredBarriers(): nil
@@ -205,9 +204,9 @@ function suite.ordersFixedStepsAndPreservesDeclaredBarriers(): nil
         after = {"produce"},
         commitBefore = true,
         run = function(dt: number): nil
-            test.equal(dt, 0.125)
+            assert.eq(dt, 0.125)
             consumed = consumed + 1
-            test.equal(query:count(), consumed)
+            assert.eq(query:count(), consumed)
         end
     })
     world:addSystem({
@@ -218,7 +217,7 @@ function suite.ordersFixedStepsAndPreservesDeclaredBarriers(): nil
         end
     })
     world:update(0.375)
-    test.equal(consumed, 3)
+    assert.eq(consumed, 3)
 end
 
 function suite.ordersLifecycleAndExplicitPhaseDispatch(): nil
@@ -246,7 +245,7 @@ function suite.ordersLifecycleAndExplicitPhaseDispatch(): nil
     world:startup()
     world:runPhase(ecs.phases.Render)
     world:shutdown()
-    test.equal(table.concat(calls, ","), "StartupA,StartupB,RenderA,RenderB,ShutdownA,ShutdownB")
+    assert.eq(table.concat(calls, ","), "StartupA,StartupB,RenderA,RenderB,ShutdownA,ShutdownB")
 end
 
 function suite.preservesDependencyOrderAcrossTaskWaits(): nil
@@ -272,7 +271,7 @@ function suite.preservesDependencyOrderAcrossTaskWaits(): nil
         end
     })
     world:update(0)
-    test.equal(table.concat(calls, ","), "start,finish,consumer")
+    assert.eq(table.concat(calls, ","), "start,finish,consumer")
 end
 
 function suite.validatesDisabledPhasesAndRecoversFromBodyFailure(): nil
@@ -280,7 +279,7 @@ function suite.validatesDisabledPhasesAndRecoversFromBodyFailure(): nil
     world:addSystem({name = "A", phase = ecs.phases.Update, before = {"B"}, run = noop})
     world:addSystem({name = "B", phase = ecs.phases.Update, before = {"A"}, run = noop})
     world:disablePhase(ecs.phases.AllGroups)
-    test.raises(
+    assert.raises(
         function(): nil
             world:startup()
         end,
@@ -296,7 +295,7 @@ function suite.validatesDisabledPhasesAndRecoversFromBodyFailure(): nil
             error("scheduled failure")
         end
     })
-    test.raises(
+    assert.raises(
         function(): nil
             world:update(0)
         end,
@@ -304,7 +303,7 @@ function suite.validatesDisabledPhasesAndRecoversFromBodyFailure(): nil
     )
     world:removeSystem("failure")
     world:update(0)
-    test.equal(names(world, ecs.phases.Update), "A")
+    assert.eq(names(world, ecs.phases.Update), "A")
 end
 
 function suite.honorsRemovalFromABeforeBarrierCallback(): nil
@@ -334,7 +333,7 @@ function suite.honorsRemovalFromABeforeBarrierCallback(): nil
         end
     })
     world:update(0)
-    test.equal(calls, 0)
+    assert.eq(calls, 0)
 end
 
 return suite

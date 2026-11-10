@@ -1,6 +1,5 @@
 local files = require("tecs.files")
 local paths = require("nupp.io.path")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -17,39 +16,39 @@ end
 function suite.resolvesTheAssetRootFromAnOverrideAndJoinsWithoutChecking(): nil
     restore()
     files.setAssetRoot("/tmp/tecs-assets")
-    test.equal(files.assetRoot(), "/tmp/tecs-assets" .. SEPARATOR)
-    test.equal(files.assetPath("levels/one.json"), "/tmp/tecs-assets" .. SEPARATOR .. "levels/one.json")
+    assert.eq(files.assetRoot(), "/tmp/tecs-assets" .. SEPARATOR)
+    assert.eq(files.assetPath("levels/one.json"), "/tmp/tecs-assets" .. SEPARATOR .. "levels/one.json")
 
     -- A root that already ends in a separator does not collect a second one.
     files.setAssetRoot("/tmp/tecs-assets/")
-    test.equal(files.assetRoot(), "/tmp/tecs-assets/")
+    assert.eq(files.assetRoot(), "/tmp/tecs-assets/")
     restore()
 end
 
 function suite.refusesAnEmptyRelativePath(): nil
     restore()
     files.setAssetRoot("/tmp/tecs-assets")
-    test.assert(not pcall(files.assetPath, ""))
-    test.assert(not pcall(files.setAssetRoot, ""))
+    assert(not pcall(files.assetPath, ""))
+    assert(not pcall(files.setAssetRoot, ""))
     restore()
 end
 
 function suite.forgetsTheCachedAssetRootOnReset(): nil
     restore()
     files.setAssetRoot("/tmp/first")
-    test.equal(files.assetRoot(), "/tmp/first" .. SEPARATOR)
+    assert.eq(files.assetRoot(), "/tmp/first" .. SEPARATOR)
     files.reset()
 
     -- Nothing set the override back, so the root falls through to wherever the
     -- executable running this suite was loaded from.
-    test.assert(files.assetRoot() ~= "/tmp/first" .. SEPARATOR)
+    assert(files.assetRoot() ~= "/tmp/first" .. SEPARATOR)
     restore()
 end
 
 function suite.fallsBackToTheDirectoryTheExecutableWasLoadedFrom(): nil
     restore()
     if os.getenv(files.ASSET_ROOT_VARIABLE) then
-        test.skip("TECS_ASSETS names a root in this environment, and it wins")
+        assert.suite.skip("TECS_ASSETS names a root in this environment, and it wins")
     end
     local root = files.assetRoot()
 
@@ -58,8 +57,8 @@ function suite.fallsBackToTheDirectoryTheExecutableWasLoadedFrom(): nil
     -- directory. An empty answer means the platform declined to say.
     if root ~= "" then
         local last = root:sub(-1)
-        test.assert(last == "/" or last == "\\")
-        test.equal(files.assetPath("levels/one.json"), root .. "levels/one.json")
+        assert(last == "/" or last == "\\")
+        assert.eq(files.assetPath("levels/one.json"), root .. "levels/one.json")
     end
     restore()
 end
@@ -67,12 +66,12 @@ end
 function suite.readsTheContentGlobalAHostSet(): nil
     restore()
     if os.getenv(files.ASSET_ROOT_VARIABLE) then
-        test.skip("TECS_ASSETS names a root in this environment, and it wins")
+        assert.suite.skip("TECS_ASSETS names a root in this environment, and it wins")
     end
     local globals = _G as {[string]: any}
     local previous = globals[files.CONTENT_GLOBAL]
     globals[files.CONTENT_GLOBAL] = "/tmp/tecs-installed"
-    test.equal(files.assetRoot(), "/tmp/tecs-installed" .. SEPARATOR)
+    assert.eq(files.assetRoot(), "/tmp/tecs-installed" .. SEPARATOR)
     globals[files.CONTENT_GLOBAL] = previous
     restore()
 end

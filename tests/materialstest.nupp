@@ -3,7 +3,6 @@ const files = require("nupp.io.files")
 local ecs = require("tecs.ecs")
 local gfx = require("tecs.gfx")
 local materials = require("tecs.gpu.materials")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -12,33 +11,33 @@ function suite.numbersTheBuiltInsFromSortedOrder(): nil
     -- `textured` holds zero because an instance with no `Material` writes a
     -- zero, and every other name follows alphabetically. These names are a
     -- compatibility surface: a snapshot stores one and resolves it again.
-    test.equal(materials.id("textured"), 0)
-    test.equal(
+    assert.eq(materials.id("textured"), 0)
+    assert.eq(
         table.concat(materials.names(), ","),
         "textured,capsule,circle,ellipse,emissive,frame,glyph,glyphalpha,line,pie,ring,rounded,star,triangle"
     )
-    test.equal(materials.count(), 14)
-    test.equal(materials.name(0), "textured")
-    test.equal(materials.name(materials.id("ring")), "ring")
-    test.equal(materials.name(99), nil)
-    test.equal(materials.find("nothing"), nil)
+    assert.eq(materials.count(), 14)
+    assert.eq(materials.name(0), "textured")
+    assert.eq(materials.name(materials.id("ring")), "ring")
+    assert.eq(materials.name(99), nil)
+    assert.eq(materials.find("nothing"), nil)
 end
 
 function suite.raisesOnANameTheBuildHasNot(): nil
     materials.reset()
-    test.raises(
+    assert.raises(
         function(): nil
             materials.id("nothing")
         end,
         "no material named 'nothing'"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             materials.addRoot("")
         end,
         "root path cannot be empty"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             materials.define("")
         end,
@@ -53,12 +52,12 @@ function suite.renumbersWhenADefinitionJoinsTheSet(): nil
     materials.define("materialstest.zigzag")
     -- The new name sorts between `line` and `pie`, so every id after it moves
     -- and every id before it stays. That is why a snapshot stores the name.
-    test.equal(materials.id("capsule"), capsule)
-    test.equal(materials.id("ring"), ring + 1)
-    test.equal(materials.count(), 15)
+    assert.eq(materials.id("capsule"), capsule)
+    assert.eq(materials.id("ring"), ring + 1)
+    assert.eq(materials.count(), 15)
     materials.reset()
-    test.equal(materials.id("ring"), ring)
-    test.equal(materials.find("materialstest.zigzag"), nil)
+    assert.eq(materials.id("ring"), ring)
+    assert.eq(materials.find("materialstest.zigzag"), nil)
 end
 
 function suite.readsMaterialFilesFromAddedRoots(): nil
@@ -71,9 +70,9 @@ function suite.readsMaterialFilesFromAddedRoots(): nil
     assert(files.write(root .. "/notes.txt", "ignored"))
 
     materials.addRoot(root)
-    test.equal(materials.count(), 15)
-    test.equal(materials.name(materials.id("materialstest.zigzag")), "materialstest.zigzag")
-    test.equal(materials.find("notes"), nil)
+    assert.eq(materials.count(), 15)
+    assert.eq(materials.name(materials.id("materialstest.zigzag")), "materialstest.zigzag")
+    assert.eq(materials.find("notes"), nil)
 
     materials.reset()
     nupp.drop(directory)
@@ -89,8 +88,8 @@ function suite.storesTheNameRatherThanTheNumber(): nil
     local snapshot = world:saveSnapshot()
     world:loadSnapshot(snapshot)
     local restored: gfx.Material = assert(world:get(entity, gfx.Material))
-    test.equal(restored.id, ring)
-    test.equal(restored.param, 0.75)
+    assert.eq(restored.id, ring)
+    assert.eq(restored.param, 0.75)
 
     -- The snapshot writes the name rather than the number, so a build whose
     -- material set renumbered still resolves the same material.
@@ -100,7 +99,7 @@ function suite.storesTheNameRatherThanTheNumber(): nil
             wrote = true
         end
     end
-    test.assert(wrote, "the component is stored under its established name")
+    assert(wrote, "the component is stored under its established name")
 end
 
 function suite.defaultsAnEntityWithNoMaterial(): nil
@@ -110,8 +109,8 @@ function suite.defaultsAnEntityWithNoMaterial(): nil
     world:commit()
 
     local value: gfx.Material = assert(world:get(entity, gfx.Material))
-    test.equal(value.id, 0)
-    test.equal(value.param, 0.25)
+    assert.eq(value.id, 0)
+    assert.eq(value.param, 0.25)
 end
 
 return suite

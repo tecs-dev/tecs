@@ -8,14 +8,13 @@ installing anything is the property under test.
 ]]
 
 local ecs = require("tecs.ecs")
-local test = require("nupp.test")
 
 local suite = {}
 
 --- Asserts that two lengths agree to within a tolerance composition can produce.
 local function near(actual: number, expected: number, message: string?): nil
     const drift = actual - expected
-    test.assert(
+    assert(
         drift < 1e-9 and drift > -1e-9,
         (message or "value") .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual)
     )
@@ -38,12 +37,12 @@ function suite.readsAndRewritesAnEntityName(): nil
     const entity = world:spawn(ecs.Name("player"))
     world:commit()
 
-    test.equal(world:get(entity, ecs.Name), "player")
+    assert.eq(world:get(entity, ecs.Name), "player")
 
     world:set(entity, ecs.Name("player two"))
     world:commit()
 
-    test.equal(world:get(entity, ecs.Name), "player two")
+    assert.eq(world:get(entity, ecs.Name), "player two")
 end
 
 function suite.letsTwoEntitiesShareOneName(): nil
@@ -63,7 +62,7 @@ function suite.letsTwoEntitiesShareOneName(): nil
         end
     end
 
-    test.equal(found, 2)
+    assert.eq(found, 2)
 end
 
 -------------------------------------------------------------------------------
@@ -77,11 +76,11 @@ function suite.reportsAParentAndItsChildren(): nil
     const second = world:spawn(ecs.ChildOf(parent))
     world:commit()
 
-    test.equal(assert(world:get(first, ecs.ChildOf)).target, parent)
+    assert.eq(assert(world:get(first, ecs.ChildOf)).target, parent)
     const children = world:relationshipSources(ecs.ChildOf, parent)
-    test.equal(#children, 2)
-    test.assert(children[1] == first or children[2] == first)
-    test.assert(children[1] == second or children[2] == second)
+    assert.eq(#children, 2)
+    assert(children[1] == first or children[2] == first)
+    assert(children[1] == second or children[2] == second)
 end
 
 function suite.cascadesADespawnThroughAGrandchild(): nil
@@ -94,10 +93,10 @@ function suite.cascadesADespawnThroughAGrandchild(): nil
     world:despawn(parent)
     world:commit()
 
-    test.assert(not world:isAlive(parent))
-    test.assert(not world:isAlive(child))
-    test.assert(not world:isAlive(grandchild))
-    test.equal(world.liveCount, 0)
+    assert(not world:isAlive(parent))
+    assert(not world:isAlive(child))
+    assert(not world:isAlive(grandchild))
+    assert.eq(world.liveCount, 0)
 end
 
 function suite.reparentsAChildAtTheNextBarrier(): nil
@@ -108,17 +107,17 @@ function suite.reparentsAChildAtTheNextBarrier(): nil
     world:commit()
 
     world:set(child, ecs.ChildOf(second))
-    test.equal(assert(world:get(child, ecs.ChildOf)).target, first)
+    assert.eq(assert(world:get(child, ecs.ChildOf)).target, first)
     world:commit()
 
-    test.equal(assert(world:get(child, ecs.ChildOf)).target, second)
-    test.equal(#world:relationshipSources(ecs.ChildOf, first), 0)
-    test.equal(world:relationshipSources(ecs.ChildOf, second)[1], child)
+    assert.eq(assert(world:get(child, ecs.ChildOf)).target, second)
+    assert.eq(#world:relationshipSources(ecs.ChildOf, first), 0)
+    assert.eq(world:relationshipSources(ecs.ChildOf, second)[1], child)
 
     -- A reparented child no longer follows the parent it left.
     world:despawn(first)
     world:commit()
-    test.assert(world:isAlive(child))
+    assert(world:isAlive(child))
 end
 
 -------------------------------------------------------------------------------
@@ -131,14 +130,14 @@ function suite.despawnsAnEntityWhoseLifetimeRunsOut(): nil
     world:commit()
 
     world:update(0.1)
-    test.assert(world:isAlive(entity))
+    assert(world:isAlive(entity))
     near(assert(world:get(entity, ecs.TTL)).remaining, 0.15, "remaining")
 
     world:update(0.1)
-    test.assert(world:isAlive(entity))
+    assert(world:isAlive(entity))
 
     world:update(0.1)
-    test.assert(not world:isAlive(entity))
+    assert(not world:isAlive(entity))
 end
 
 function suite.keepsAnEntityWhoseLifetimeIsRefreshed(): nil
@@ -153,7 +152,7 @@ function suite.keepsAnEntityWhoseLifetimeIsRefreshed(): nil
     world:update(0.1)
     world:update(0.1)
 
-    test.assert(world:isAlive(entity))
+    assert(world:isAlive(entity))
     near(assert(world:get(entity, ecs.TTL)).remaining, 0.7, "refreshed remaining")
 end
 
@@ -166,7 +165,7 @@ function suite.holdsTheLifetimeOfAPausedEntity(): nil
     world:update(0.1)
     world:update(0.1)
 
-    test.assert(world:isAlive(entity))
+    assert(world:isAlive(entity))
     near(assert(world:get(entity, ecs.TTL)).remaining, 0.25, "paused remaining")
 end
 
@@ -189,13 +188,13 @@ function suite.reportsCompletionAtBothEnds(): nil
 end
 
 function suite.refusesALifetimeThatCannotCountDown(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             ecs.TTL(0)
         end,
         "greater than zero"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             ecs.TTL(4, 2)
         end,
@@ -252,7 +251,7 @@ function suite.turnsAndScalesAChildWithItsParent(): nil
     near(composed.scaleX, 1, "scaleX")
     near(composed.scaleY, 1, "scaleY")
     -- The layer comes from the parent, so a whole tree draws together.
-    test.equal(composed.layer, 3)
+    assert.eq(composed.layer, 3)
 end
 
 function suite.followsAParentThatMovesAndMarksTheChildDirty(): nil
@@ -268,7 +267,7 @@ function suite.followsAParentThatMovesAndMarksTheChildDirty(): nil
     -- the gate closes rather than recomputing every frame forever.
     world:runPhase(ecs.phases.PostUpdate)
     for candidate in composed:iter() do
-        test.assert(not assert(candidate):isComponentDirty(ecs.Transform2D), "an idle hierarchy marked a column")
+        assert(not assert(candidate):isComponentDirty(ecs.Transform2D), "an idle hierarchy marked a column")
     end
 
     assert(world:getMut(root, ecs.Transform2D)).x = 110
@@ -283,7 +282,7 @@ function suite.followsAParentThatMovesAndMarksTheChildDirty(): nil
             marked = marked + 1
         end
     end
-    test.assert(marked > 0, "a moved parent left its children unmarked")
+    assert(marked > 0, "a moved parent left its children unmarked")
 end
 
 function suite.leavesAnEntityWithNoParentAlone(): nil
@@ -305,7 +304,7 @@ function suite.reportsAParentCycleRatherThanRecursingForever(): nil
     world:set(first, ecs.ChildOf(second))
     world:commit()
 
-    test.raises(
+    assert.raises(
         function(): nil
             world:update(0)
         end,
@@ -332,10 +331,10 @@ function suite.carriesEveryBuiltinThroughASnapshot(): nil
     const restored = ecs.newWorld({maxEntities = 64})
     restored:loadSnapshot(source:saveSnapshot())
 
-    test.equal(restored:get(parent, ecs.Name), "root")
-    test.equal(restored:get(child, ecs.Name), "limb")
-    test.equal(assert(restored:get(child, ecs.ChildOf)).target, parent)
-    test.equal(restored:relationshipSources(ecs.ChildOf, parent)[1], child)
+    assert.eq(restored:get(parent, ecs.Name), "root")
+    assert.eq(restored:get(child, ecs.Name), "limb")
+    assert.eq(assert(restored:get(child, ecs.ChildOf)).target, parent)
+    assert.eq(restored:relationshipSources(ecs.ChildOf, parent)[1], child)
 
     const offset = assert(restored:get(child, ecs.RelativeTransform2D))
     near(offset.x, 2, "restored offset x")
@@ -356,9 +355,9 @@ function suite.spawningARelativeTransformAddsTheLocalOne(): nil
     local world = ecs.newWorld({maxEntities = 8})
     local entity = world:spawn(ecs.RelativeTransform2D(5, 7))
     world:commit()
-    test.assert(world:has(entity, ecs.Transform2D), "the local transform was not added")
+    assert(world:has(entity, ecs.Transform2D), "the local transform was not added")
     local local2D = assert(world:get(entity, ecs.Transform2D))
-    test.equal(local2D.x, 0)
+    assert.eq(local2D.x, 0)
 end
 
 function suite.addingARelativeTransformLaterAddsTheLocalOne(): nil
@@ -367,7 +366,7 @@ function suite.addingARelativeTransformLaterAddsTheLocalOne(): nil
     world:commit()
     world:set(entity, ecs.RelativeTransform2D(3, 4))
     world:commit()
-    test.assert(world:has(entity, ecs.Transform2D), "the local transform was not added by set")
+    assert(world:has(entity, ecs.Transform2D), "the local transform was not added by set")
 end
 
 function suite.aSuppliedRequirementKeepsItsValue(): nil
@@ -375,8 +374,8 @@ function suite.aSuppliedRequirementKeepsItsValue(): nil
     local entity = world:spawn(ecs.Transform2D(11, 22), ecs.RelativeTransform2D(1, 2))
     world:commit()
     local local2D = assert(world:get(entity, ecs.Transform2D))
-    test.equal(local2D.x, 11)
-    test.equal(local2D.y, 22)
+    assert.eq(local2D.x, 11)
+    assert.eq(local2D.y, 22)
 end
 
 function suite.aRequiredComponentComposesThroughTheHierarchy(): nil
@@ -388,8 +387,8 @@ function suite.aRequiredComponentComposesThroughTheHierarchy(): nil
     world:commit()
     world:update(0)
     local composed = assert(world:get(child, ecs.Transform2D))
-    test.equal(composed.x, 110)
-    test.equal(composed.y, 220)
+    assert.eq(composed.x, 110)
+    assert.eq(composed.y, 220)
 end
 
 return suite

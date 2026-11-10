@@ -1,4 +1,3 @@
-local test = require("nupp.test")
 local inverseindex = require("tecs.internal.inverseindex")
 local suite = {}
 
@@ -21,13 +20,13 @@ function suite.linksSourcesIdempotently(): nil
     index:link(10, 100)
     index:link(20, 100)
     local found = collect(index, 100)
-    test.equal(found[10], true)
-    test.equal(found[20], true)
+    assert.eq(found[10], true)
+    assert.eq(found[20], true)
     local count = 0
     for _ in pairs(found) do
         count = count + 1
     end
-    test.equal(count, 2)
+    assert.eq(count, 2)
 end
 
 function suite.unlinksOneEdge(): nil
@@ -36,8 +35,8 @@ function suite.unlinksOneEdge(): nil
     index:link(20, 100)
     index:unlink(10, 100)
     local found = collect(index, 100)
-    test.equal(found[10], nil)
-    test.equal(found[20], true)
+    assert.eq(found[10], nil)
+    assert.eq(found[20], true)
 end
 
 function suite.reportsTargetLifetime(): nil
@@ -53,14 +52,14 @@ function suite.reportsTargetLifetime(): nil
 
     index:link(10, 100)
     index:link(20, 100)
-    test.equal(#added, 1)
-    test.equal(added[1], 100)
+    assert.eq(#added, 1)
+    assert.eq(added[1], 100)
 
     index:unlink(10, 100)
-    test.equal(#removed, 0)
+    assert.eq(#removed, 0)
     index:unlink(20, 100)
-    test.equal(#removed, 1)
-    test.equal(removed[1], 100)
+    assert.eq(#removed, 1)
+    assert.eq(removed[1], 100)
 end
 
 function suite.removesWholeTarget(): nil
@@ -68,9 +67,9 @@ function suite.removesWholeTarget(): nil
     index:link(10, 100)
     index:link(20, 100)
     local sources = index:removeTarget(100)
-    test.equal(sources[10], true)
-    test.equal(sources[20], true)
-    test.equal(next(collect(index, 100)), nil)
+    assert.eq(sources[10], true)
+    assert.eq(sources[20], true)
+    assert.eq(next(collect(index, 100)), nil)
 end
 
 function suite.removesSourceFromKnownTargets(): nil
@@ -79,15 +78,15 @@ function suite.removesSourceFromKnownTargets(): nil
     index:link(10, 200)
     index:link(20, 200)
     index:unlinkSourceFromTargets(10, {100, 200})
-    test.equal(next(collect(index, 100)), nil)
+    assert.eq(next(collect(index, 100)), nil)
     local found = collect(index, 200)
-    test.equal(found[10], nil)
-    test.equal(found[20], true)
+    assert.eq(found[10], nil)
+    assert.eq(found[20], true)
 end
 
 function suite.absentTargetUsesEmptySentinel(): nil
     local index = inverseindex.new()
-    test.equal(next(index:removeTarget(999)), nil)
+    assert.eq(next(index:removeTarget(999)), nil)
 end
 
 return suite

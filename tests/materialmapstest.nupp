@@ -1,4 +1,3 @@
-local test = require("nupp.test")
 local images = require("tecs.gfx.images")
 local suite = {}
 
@@ -8,18 +7,18 @@ function suite.queuesMaterialMapsAfterTheirUploads(): nil
     local normal = images.upload({name = "test/maps/normal", width = 1, height = 1, pixels = "rgba"})
     images.setMaterialMaps(base, {normalMap = normal})
     local commands = images.drain()
-    test.equal(#commands, 3)
+    assert.eq(#commands, 3)
     const command = commands[3] as images.MaterialMapsCommand
-    test.equal(command.kind, "setMaterialMaps")
-    test.equal(command.normalMap, normal)
-    test.equal(command.emissionMap, 0)
-    test.equal(command.ormMap, 0)
+    assert.eq(command.kind, "setMaterialMaps")
+    assert.eq(command.normalMap, normal)
+    assert.eq(command.emissionMap, 0)
+    assert.eq(command.ormMap, 0)
     for _, value in ipairs(commands) do
         images.complete(value.image, value.serial, true, nil)
     end
-    test.equal(images.stateOf(base), "resident")
+    assert.eq(images.stateOf(base), "resident")
     images.complete(base, command.serial, false, "map upload failed")
-    test.equal(images.failureOf(base), "map upload failed")
+    assert.eq(images.failureOf(base), "map upload failed")
 end
 
 function suite.rejectsMismatchedMaterialMapDimensions(): nil
@@ -28,7 +27,7 @@ function suite.rejectsMismatchedMaterialMapDimensions(): nil
     const ok = pcall(function(): nil
         images.setMaterialMaps(base, {ormMap = map})
     end)
-    test.equal(ok, false)
+    assert.eq(ok, false)
     images.drain()
 end
 

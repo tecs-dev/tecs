@@ -4,7 +4,6 @@ const gfx = require("tecs.gfx")
 const images = require("tecs.gfx.images")
 const clips = require("tecs.gfx.clips")
 
-local test = require("nupp.test")
 local framepacket = require("tecs.internal.framepacket")
 local ranges = require("tecs.internal.dirtyranges")
 local ecs = require("tecs.ecs")
@@ -67,21 +66,21 @@ function suite.cleanAndCameraFramesCarryNoInstanceOrBatchBytes(): nil
     const world, extractor, actor, camera = fixture()
     const first = extractor:frame(640, 360, 0)
     const revision = word(first, 76)
-    test.equal(#body(first), 11 * 80)
+    assert.eq(#body(first), 11 * 80)
     world:update(0)
     const clean = extractor:frame(640, 360, revision)
-    test.equal(word(clean, 12), framepacket.FRAME_RETAINED)
-    test.equal(#clean, base(clean))
-    test.equal(word(clean, 76), revision)
+    assert.eq(word(clean, 12), framepacket.FRAME_RETAINED)
+    assert.eq(#clean, base(clean))
+    assert.eq(word(clean, 76), revision)
     const eye = assert(world:getMut(camera, gfx.Camera2D))
     eye.x, eye.zoom = 999, 2
     const moved = extractor:frame(640, 360, revision)
-    test.equal(word(moved, 12), framepacket.FRAME_RETAINED)
-    test.equal(#moved, base(moved))
-    test.notEqual(moved, clean)
+    assert.eq(word(moved, 12), framepacket.FRAME_RETAINED)
+    assert.eq(#moved, base(moved))
+    assert.ne(moved, clean)
     world:set(actor, Other(1))
     world:commit()
-    test.equal(word(extractor:frame(640, 360, revision), 12), framepacket.FRAME_RETAINED)
+    assert.eq(word(extractor:frame(640, 360, revision), 12), framepacket.FRAME_RETAINED)
 end
 
 function suite.writesOneDirtyRunAfterFrameDirtyBitsAreCleared(): nil
@@ -90,12 +89,12 @@ function suite.writesOneDirtyRunAfterFrameDirtyBitsAreCleared(): nil
     assert(world:getMut(actor, gfx.Tint)).r = 0.25
     world:update(0)
     const patch = extractor:frame(640, 360, word(first, 76))
-    test.equal(word(patch, 12), framepacket.FRAME_DELTA)
-    test.equal(word(patch, base(patch) + 4), 1)
-    test.equal(word(patch, base(patch) + 8), 10 * 80)
-    test.equal(word(patch, base(patch) + 12), 80)
-    test.equal(#patch, base(patch) + 16 + 80)
-    test.equal(apply(body(first), patch), body(extractor:packet(640, 360)))
+    assert.eq(word(patch, 12), framepacket.FRAME_DELTA)
+    assert.eq(word(patch, base(patch) + 4), 1)
+    assert.eq(word(patch, base(patch) + 8), 10 * 80)
+    assert.eq(word(patch, base(patch) + 12), 80)
+    assert.eq(#patch, base(patch) + 16 + 80)
+    assert.eq(apply(body(first), patch), body(extractor:packet(640, 360)))
 end
 
 function suite.movingOneRunPreservesTheCleanInstances(): nil
@@ -103,26 +102,26 @@ function suite.movingOneRunPreservesTheCleanInstances(): nil
     const first = extractor:frame(640, 360, 0)
     assert(world:getMut(actor, ecs.Transform2D)).x = 123
     const patch = extractor:frame(640, 360, word(first, 76))
-    test.equal(word(patch, 12), framepacket.FRAME_DELTA)
-    test.equal(apply(body(first), patch), body(extractor:packet(640, 360)))
+    assert.eq(word(patch, 12), framepacket.FRAME_DELTA)
+    assert.eq(apply(body(first), patch), body(extractor:packet(640, 360)))
 end
 
 function suite.rebuildsAfterRelayoutOrAReceiverRestart(): nil
     const world, extractor = fixture()
     const first = extractor:frame(640, 360, 0)
     const restarted = extractor:frame(640, 360, 0)
-    test.equal(word(restarted, 12), 0)
-    test.equal(body(restarted), body(first))
+    assert.eq(word(restarted, 12), 0)
+    assert.eq(body(restarted), body(first))
     world:spawn(ecs.Transform2D(), gfx.Tint(), gfx.Renderable2D)
     world:commit()
     const changed = extractor:frame(640, 360, word(first, 76))
-    test.equal(word(changed, 12), 0)
-    test.equal(word(changed, 36), 12)
-    test.equal(#body(changed), 12 * 80)
+    assert.eq(word(changed, 12), 0)
+    assert.eq(word(changed, 36), 12)
+    assert.eq(#body(changed), 12 * 80)
     world:clearEntities()
     const cleared = extractor:frame(640, 360, word(changed, 76))
-    test.equal(word(cleared, 36), 0)
-    test.equal(#body(cleared), 0)
+    assert.eq(word(cleared, 36), 0)
+    assert.eq(#body(cleared), 0)
 end
 
 function suite.rebuildsWhenAlphaChangesTheBatchLane(): nil
@@ -130,9 +129,9 @@ function suite.rebuildsWhenAlphaChangesTheBatchLane(): nil
     const first = extractor:frame(640, 360, 0)
     assert(world:getMut(actor, gfx.Tint)).a = 0.5
     const changed = extractor:frame(640, 360, word(first, 76))
-    test.equal(word(changed, 12), 0)
-    test.equal(word(changed, 28), 2)
-    test.equal(body(changed), body(extractor:packet(640, 360)))
+    assert.eq(word(changed, 12), 0)
+    assert.eq(word(changed, 28), 2)
+    assert.eq(body(changed), body(extractor:packet(640, 360)))
 end
 
 function suite.imageCompletionInvalidatesUnchangedSpriteComponents(): nil
@@ -143,16 +142,16 @@ function suite.imageCompletionInvalidatesUnchangedSpriteComponents(): nil
     world:commit()
     const extractor = framepacket.new(world)
     const pending = extractor:frame(640, 360, 0)
-    test.equal(word(pending, base(pending)), 0)
+    assert.eq(word(pending, base(pending)), 0)
     for _, command in ipairs(commands) do
         images.complete(command.image, command.serial, true, nil)
     end
     const ready = extractor:frame(640, 360, word(pending, 76))
-    test.equal(word(ready, 12), 0)
-    test.equal(word(ready, base(ready)), image)
+    assert.eq(word(ready, 12), 0)
+    assert.eq(word(ready, base(ready)), image)
     images.release("retained-test")
     const released = extractor:frame(640, 360, word(ready, 76))
-    test.equal(word(released, base(released)), 0)
+    assert.eq(word(released, base(released)), 0)
 end
 
 function suite.screenSpaceGeometryTracksCameraAndClipChanges(): nil
@@ -166,12 +165,12 @@ function suite.screenSpaceGeometryTracksCameraAndClipChanges(): nil
     const patch = extractor:frame(640, 360, word(first, 76))
     assert(world:getMut(camera, gfx.Camera2D)).zoom = 2
     const moved = extractor:frame(640, 360, word(patch, 76))
-    test.equal(word(moved, 12), 0)
-    test.notEqual(body(moved), body(first))
+    assert.eq(word(moved, 12), 0)
+    assert.ne(body(moved), body(first))
     clips.setRegion(249, {x = 10, y = 0, width = 100, height = 100})
     const clipped = extractor:frame(640, 360, word(moved, 76))
-    test.equal(word(clipped, 12), 0)
-    test.notEqual(body(clipped), body(moved))
+    assert.eq(word(clipped, 12), 0)
+    assert.ne(body(clipped), body(moved))
 end
 
 function suite.rebuildsAfterDepthReorderingAndDespawn(): nil
@@ -179,14 +178,14 @@ function suite.rebuildsAfterDepthReorderingAndDespawn(): nil
     const first = extractor:frame(640, 360, 0)
     assert(world:getMut(actor, ecs.Transform2D)).z = 10
     const reordered = extractor:frame(640, 360, word(first, 76))
-    test.equal(word(reordered, 12), 0)
-    test.notEqual(body(reordered), body(first))
+    assert.eq(word(reordered, 12), 0)
+    assert.ne(body(reordered), body(first))
     world:despawn(actor)
     world:commit()
     const removed = extractor:frame(640, 360, word(reordered, 76))
-    test.equal(word(removed, 12), 0)
-    test.equal(word(removed, 36), 10)
-    test.equal(body(removed), body(extractor:packet(640, 360)))
+    assert.eq(word(removed, 12), 0)
+    assert.eq(word(removed, 36), 10)
+    assert.eq(body(removed), body(extractor:packet(640, 360)))
 end
 
 function suite.interpolationAdvancesWithoutComponentWrites(): nil
@@ -198,32 +197,32 @@ function suite.interpolationAdvancesWithoutComponentWrites(): nil
     const first = extractor:frame(640, 360, 0)
     world:update(0.0625)
     const patch = extractor:frame(640, 360, word(first, 76))
-    test.equal(word(patch, 12), framepacket.FRAME_DELTA)
-    test.equal(word(patch, base(patch) + 12), 80)
-    test.notEqual(apply(body(first), patch), body(first))
-    test.equal(apply(body(first), patch), body(extractor:packet(640, 360)))
+    assert.eq(word(patch, 12), framepacket.FRAME_DELTA)
+    assert.eq(word(patch, base(patch) + 12), 80)
+    assert.ne(apply(body(first), patch), body(first))
+    assert.eq(apply(body(first), patch), body(extractor:packet(640, 360)))
 end
 
 function suite.coalescesAndBoundsThePortedDirtyRanges(): nil
     const list = ranges.new()
     list:mark(80, 80)
     list:mark(160, 80)
-    test.equal(list.count, 1)
-    test.equal(select(2, list:at(0)), 160)
+    assert.eq(list.count, 1)
+    assert.eq(select(2, list:at(0)), 160)
     list:mark(0, 80)
     list:sort()
-    test.equal(list.count, 1)
-    test.equal(select(1, list:at(0)), 0)
-    test.equal(select(2, list:at(0)), 240)
+    assert.eq(list.count, 1)
+    assert.eq(select(1, list:at(0)), 0)
+    assert.eq(select(2, list:at(0)), 240)
     list:clear()
     for index = 0, 64 do
         list:mark(index * 160, 80)
     end
-    test.equal(list.count, 1)
-    test.equal(select(2, list:at(0)), 64 * 160 + 80)
+    assert.eq(list.count, 1)
+    assert.eq(select(2, list:at(0)), 64 * 160 + 80)
     list:clear()
-    test.equal(list.count, 0)
-    test.equal(list.bytes, 0)
+    assert.eq(list.count, 0)
+    assert.eq(list.bytes, 0)
 end
 
 function suite.tileChunksRetainAndPatchIndependentlyWithinOneArchetype(): nil
@@ -234,24 +233,24 @@ function suite.tileChunksRetainAndPatchIndependentlyWithinOneArchetype(): nil
     world:commit()
     const extractor = framepacket.new(world)
     local full = extractor:frame(640, 360, 0)
-    test.equal(word(full, 36), 2)
-    test.equal(world.liveCount, 2)
+    assert.eq(word(full, 36), 2)
+    assert.eq(world.liveCount, 2)
     -- Consume the compatibility dirty tags and stabilize membership.
     world:commit()
     full = extractor:frame(640, 360, word(full, 76))
     const revision = word(full, 76)
     const clean = extractor:frame(640, 360, revision)
-    test.equal(word(clean, 12), framepacket.FRAME_RETAINED)
-    test.equal(#clean, base(clean))
+    assert.eq(word(clean, 12), framepacket.FRAME_RETAINED)
+    assert.eq(#clean, base(clean))
     @unsafe do
         const chunk1 = assert(world:getMut(first, gfx.TileChunk))
         chunk1.tiles[1] = 2
     end
     const patch = extractor:frame(640, 360, revision)
-    test.equal(word(patch, 12), framepacket.FRAME_DELTA)
-    test.equal(word(patch, 124), 1)
-    test.equal(word(patch, base(patch) + 4), 1)
-    test.equal(word(patch, base(patch) + 12), 80)
+    assert.eq(word(patch, 12), framepacket.FRAME_DELTA)
+    assert.eq(word(patch, 124), 1)
+    assert.eq(word(patch, base(patch) + 4), 1)
+    assert.eq(word(patch, base(patch) + 12), 80)
     -- A shared nested edit can request synchronization through the old tag.
     @unsafe do
         const chunk2 = assert(world:get(first, gfx.TileChunk))
@@ -260,14 +259,14 @@ function suite.tileChunksRetainAndPatchIndependentlyWithinOneArchetype(): nil
     world:set(first, gfx.DirtyTileChunk)
     world:commit()
     const marked = extractor:frame(640, 360, word(patch, 76))
-    test.notEqual(word(marked, 12), framepacket.FRAME_RETAINED)
+    assert.ne(word(marked, 12), framepacket.FRAME_RETAINED)
     const snapshot = extractor:packet(640, 360)
-    test.equal(word(snapshot, 36), 2)
+    assert.eq(word(snapshot, 36), 2)
     @unsafe do
         const chunk3 = assert(world:getMut(first, gfx.TileChunk))
         chunk3.tiles[1] = 0
     end
-    test.equal(word(extractor:packet(640, 360), 36), 2)
+    assert.eq(word(extractor:packet(640, 360), 36), 2)
     world:shutdown()
 end
 
@@ -296,28 +295,28 @@ function suite.tileChunksPreservePackedAtlasGeometryAndEveryFlip(): nil
     world:commit()
     const extractor = framepacket.new(world)
     const packet = extractor:packet(640, 360)
-    test.equal(word(packet, 36), 1)
-    test.equal(word(packet, 124), 1)
+    assert.eq(word(packet, 36), 1)
+    assert.eq(word(packet, 124), 1)
     const start = word(packet, 8) + word(packet, 132) + word(packet, 136) + word(packet, 20) + word(packet, 68) * 32
-    test.equal(word(packet, start), 0)
+    assert.eq(word(packet, start), 0)
     local reader = io2.newScalarReader(packet)
     reader:skip(start + 4)
     for _, expected in ipairs({16, 8, 3, 1, 2, 12, 20, 3, -2, 1, 1, 0}) do
-        test.equal(reader:readFloat32(), expected)
+        assert.eq(reader:readFloat32(), expected)
     end
     for index = 1, 8 do
-        test.equal(reader:readUint32(), tiles[index])
+        assert.eq(reader:readUint32(), tiles[index])
     end
     nupp.drop(reader)
     const saved = world:saveSnapshot()
     world:loadSnapshot(saved)
     @unsafe do
         const restoredChunk = assert(world:get(id, gfx.TileChunk))
-        test.equal(restoredChunk.tiles[8], tiles[8])
+        assert.eq(restoredChunk.tiles[8], tiles[8])
     end
     const restoredExtractor = framepacket.new(world)
     const restored = restoredExtractor:packet(640, 360)
-    test.equal(body(restored), body(packet))
+    assert.eq(body(restored), body(packet))
     world:shutdown()
 end
 
@@ -328,11 +327,11 @@ function suite.sparseTileChunksPreserveTheirLastCellAndEmptyChunksDrawNothing():
     world:commit()
     const extractor = framepacket.new(world)
     const bytes = extractor:packet(640, 640)
-    test.equal(word(bytes, 36), 1)
-    test.equal(word(bytes, base(bytes) - 4), 1)
+    assert.eq(word(bytes, 36), 1)
+    assert.eq(word(bytes, base(bytes) - 4), 1)
     const reader = io2.newScalarReader(body(bytes))
-    test.equal(reader:readFloat32(), 0)
-    test.equal(reader:readFloat32(), 0)
+    assert.eq(reader:readFloat32(), 0)
+    assert.eq(reader:readFloat32(), 0)
     nupp.drop(reader)
     world:shutdown()
 end

@@ -1,38 +1,37 @@
 local ecs = require("tecs.ecs")
-local test = require("nupp.test")
 local suite = {}
 
 function suite.pushesPopsAndCopiesTheStack(): nil
     local world = ecs.newWorld()
     world:createState("test.state.base")
     world:createState("test.state.pause")
-    test.assert(world:peekState() == nil)
+    assert(world:peekState() == nil)
     world:pushState("test.state.base")
     world:pushState("test.state.pause")
-    test.equal(world:peekState() as string, "test.state.pause")
+    assert.eq(world:peekState() as string, "test.state.pause")
     local snapshot = world:listStates()
     world:popState()
-    test.equal(world:peekState() as string, "test.state.base")
-    test.equal(#snapshot, 2)
-    test.equal(snapshot[2], "test.state.pause")
+    assert.eq(world:peekState() as string, "test.state.base")
+    assert.eq(#snapshot, 2)
+    assert.eq(snapshot[2], "test.state.pause")
 end
 
 function suite.rejectsDuplicateUnknownAndEmptyTransitions(): nil
     local world = ecs.newWorld()
     world:createState("test.state.known")
-    test.raises(
+    assert.raises(
         function(): nil
             world:createState("test.state.known")
         end,
         "already exists"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             world:pushState("test.state.unknown")
         end,
         "not found"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             world:popState()
         end,
@@ -46,11 +45,11 @@ function suite.autoTagsSpawnsAndDespawnsThemOnExit(): nil
     world:pushState("test.state.autotag")
     local entity = world:spawn()
     world:commit()
-    test.assert(world:has(entity, state))
+    assert(world:has(entity, state))
     world:popState()
-    test.assert(world:isAlive(entity))
+    assert(world:isAlive(entity))
     world:commit()
-    test.assert(not world:isAlive(entity))
+    assert(not world:isAlive(entity))
 end
 
 function suite.appliesPauseResumeAndCompoundPolicies(): nil
@@ -71,11 +70,11 @@ function suite.appliesPauseResumeAndCompoundPolicies(): nil
     world:commit()
     world:pushState("test.state.overlay")
     world:commit()
-    test.assert(world:has(entity, ecs.Paused))
+    assert(world:has(entity, ecs.Paused))
     world:popState()
     world:commit()
-    test.assert(not world:has(entity, ecs.Paused))
-    test.assert(focused)
+    assert(not world:has(entity, ecs.Paused))
+    assert(focused)
 end
 
 function suite.emitsTypedStateTransitions(): nil
@@ -98,7 +97,7 @@ function suite.emitsTypedStateTransitions(): nil
     world:pushState("test.state.events.base")
     world:pushState("test.state.events.top")
     world:popState()
-    test.equal(
+    assert.eq(
         table.concat(seen, ","),
         "enter:test.state.events.base,blur:test.state.events.base:test.state.events.top,"
         .. "enter:test.state.events.top,exit:test.state.events.top,"
@@ -111,7 +110,7 @@ function suite.reusesStateTagIdentityAcrossWorlds(): nil
     local second = ecs.newWorld()
     local left = first:createState("test.state.shared")
     local right = second:createState("test.state.shared")
-    test.assert(left == right)
+    assert(left == right)
 end
 
 return suite

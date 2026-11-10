@@ -3,7 +3,6 @@ const ecs = require("tecs.ecs")
 const gfx = require("tecs.gfx")
 const materials = require("tecs.gpu.materials")
 const {type Transform2D} = require("tecs.ecs")
-const test = require("nupp.test")
 const {type Material} = require("tecs.gfx")
 
 local suite = {}
@@ -34,10 +33,10 @@ function suite.usesQualifiedValuesTypesAndNestedModulesWithoutImports(): nil
     })
     world:update(0.1)
     local pose: Transform2D = assert(world:get(square, ecs.Transform2D))
-    test.equal(pose.x, 83)
+    assert.eq(pose.x, 83)
     local material: Material = assert(world:get(circle, gfx.Material))
-    test.equal(materials.name(material.id), "circle")
-    test.equal(world.liveCount, 2)
+    assert.eq(materials.name(material.id), "circle")
+    assert.eq(world.liveCount, 2)
 end
 
 return suite

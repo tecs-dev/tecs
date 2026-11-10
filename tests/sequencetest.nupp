@@ -1,6 +1,5 @@
 local ecs = require("tecs.ecs")
 local sequence = require("tecs.sequence")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -52,13 +51,13 @@ function suite.runsStepsInOrderOnTheTickAfterPlay(): nil
     local handle = sequence.play(world, program)
 
     -- The first instruction runs on the next tick, never inside `play`.
-    test.equal(#log, 0)
+    assert.eq(#log, 0)
     step(world)
-    test.equal(table.concat(log, ","), "first")
+    assert.eq(table.concat(log, ","), "first")
     step(world)
-    test.equal(table.concat(log, ","), "first,second")
+    assert.eq(table.concat(log, ","), "first,second")
     local status = assert(sequence.status(world, handle))
-    test.equal(status.state, "completed")
+    assert.eq(status.state, "completed")
 end
 
 function suite.convertsSecondsToWholeFixedSteps(): nil
@@ -76,9 +75,9 @@ function suite.convertsSecondsToWholeFixedSteps(): nil
 
     -- Half a second is four eighth-second steps, and `play` costs one more.
     step(world, 4)
-    test.assert(not ran)
+    assert(not ran)
     step(world)
-    test.assert(ran)
+    assert(ran)
 end
 
 function suite.resolvesBindingsWhenTheInstructionRuns(): nil
@@ -97,7 +96,7 @@ function suite.resolvesBindingsWhenTheInstructionRuns(): nil
     sequence.play(world, program, {bindings = {actor = actor}})
     step(world)
 
-    test.equal(seen, actor)
+    assert.eq(seen, actor)
 end
 
 function suite.repeatsALoopItsCountedNumberOfTimes(): nil
@@ -119,7 +118,7 @@ function suite.repeatsALoopItsCountedNumberOfTimes(): nil
     sequence.play(world, program)
     step(world, 6)
 
-    test.equal(runs, 3)
+    assert.eq(runs, 3)
 end
 
 function suite.faultsALoopThatNeverWaits(): nil
@@ -131,15 +130,15 @@ function suite.faultsALoopThatNeverWaits(): nil
     step(world)
 
     local status = assert(sequence.status(world, handle))
-    test.equal(status.state, "running")
+    assert.eq(status.state, "running")
 
     local runaway = sequence.define(uniqueName("test.runaway."), {sequence.loop(nil, {sequence.join()})})
     local hot = sequence.play(world, runaway)
     step(world)
 
     local hotStatus = assert(sequence.status(world, hot))
-    test.equal(hotStatus.state, "faulted")
-    test.equal(hotStatus.fault, "budgetExceeded")
+    assert.eq(hotStatus.state, "faulted")
+    assert.eq(hotStatus.fault, "budgetExceeded")
 end
 
 function suite.forksBranchesAndJoinsThemInTheSameTick(): nil
@@ -162,8 +161,8 @@ function suite.forksBranchesAndJoinsThemInTheSameTick(): nil
     local handle = sequence.play(world, program)
     step(world)
 
-    test.equal(table.concat(log, ","), "left,right,after")
-    test.equal(assert(sequence.status(world, handle)).state, "completed")
+    assert.eq(table.concat(log, ","), "left,right,after")
+    assert.eq(assert(sequence.status(world, handle)).state, "completed")
 end
 
 function suite.wakesASignalWaiterOnTheNextFixedStep(): nil
@@ -182,14 +181,14 @@ function suite.wakesASignalWaiterOnTheNextFixedStep(): nil
 
     sequence.play(world, program)
     step(world)
-    test.equal(sequence.waitingOn(world, "test.go"), 1)
+    assert.eq(sequence.waitingOn(world, "test.go"), 1)
 
-    test.equal(sequence.signal(world, "test.go"), 1)
-    test.assert(not woke)
+    assert.eq(sequence.signal(world, "test.go"), 1)
+    assert(not woke)
     step(world)
 
-    test.assert(woke)
-    test.equal(sequence.waitingOn(world, "test.go"), 0)
+    assert(woke)
+    assert.eq(sequence.waitingOn(world, "test.go"), 0)
 end
 
 function suite.resumesAQueryWaitWhoseConditionAlreadyHolds(): nil
@@ -210,13 +209,13 @@ function suite.resumesAQueryWaitWhoseConditionAlreadyHolds(): nil
 
     sequence.play(world, program)
     step(world)
-    test.assert(not resumed)
+    assert(not resumed)
 
     world:spawn(marker)
     world:commit()
     step(world, 2)
 
-    test.assert(resumed)
+    assert(resumed)
 end
 
 function suite.cancelsAPlaybackMidSequenceAndTakesItsBranches(): nil
@@ -239,15 +238,15 @@ function suite.cancelsAPlaybackMidSequenceAndTakesItsBranches(): nil
 
     local handle = sequence.play(world, program)
     step(world)
-    test.equal(sequence.activeCount(world), 2)
+    assert.eq(sequence.activeCount(world), 2)
 
-    test.assert(sequence.cancel(world, handle))
-    test.equal(sequence.activeCount(world), 0)
+    assert(sequence.cancel(world, handle))
+    assert.eq(sequence.activeCount(world), 0)
     step(world, 8)
 
-    test.assert(not reached)
-    test.equal(assert(sequence.status(world, handle)).state, "canceled")
-    test.assert(not sequence.cancel(world, handle))
+    assert(not reached)
+    assert.eq(assert(sequence.status(world, handle)).state, "canceled")
+    assert(not sequence.cancel(world, handle))
 end
 
 function suite.cancelsEveryPlaybackWhenItsOwnerDespawns(): nil
@@ -257,13 +256,13 @@ function suite.cancelsEveryPlaybackWhenItsOwnerDespawns(): nil
     local program = sequence.define(uniqueName("test.owned."), {sequence.waitSteps(20)})
     local handle = sequence.play(world, program, {owner = owner})
     step(world)
-    test.equal(sequence.activeCount(world), 1)
+    assert.eq(sequence.activeCount(world), 1)
 
     world:despawn(owner)
     world:commit()
 
-    test.equal(sequence.activeCount(world), 0)
-    test.equal(assert(sequence.status(world, handle)).state, "canceled")
+    assert.eq(sequence.activeCount(world), 0)
+    assert.eq(assert(sequence.status(world, handle)).state, "canceled")
 end
 
 function suite.replacesAChannelHolderOnTheSameOwner(): nil
@@ -275,8 +274,8 @@ function suite.replacesAChannelHolderOnTheSameOwner(): nil
     local first = sequence.play(world, program, {owner = owner, channel = "move"})
     local second = sequence.play(world, program, {owner = owner, channel = "move"})
 
-    test.equal(assert(sequence.status(world, first)).state, "canceled")
-    test.equal(assert(sequence.status(world, second)).state, "running")
+    assert.eq(assert(sequence.status(world, first)).state, "canceled")
+    assert.eq(assert(sequence.status(world, second)).state, "running")
 end
 
 function suite.holdsAPauseUntilEveryHolderReleasesIt(): nil
@@ -295,18 +294,18 @@ function suite.holdsAPauseUntilEveryHolderReleasesIt(): nil
     local handle = sequence.play(world, program)
     step(world)
 
-    test.assert(sequence.pause(world, handle, "menu"))
-    test.assert(not sequence.pause(world, handle, "focus"))
+    assert(sequence.pause(world, handle, "menu"))
+    assert(not sequence.pause(world, handle, "focus"))
     step(world, 3)
-    test.assert(not ran)
+    assert(not ran)
 
-    test.assert(not sequence.resume(world, handle, "menu"))
+    assert(not sequence.resume(world, handle, "menu"))
     step(world)
-    test.assert(not ran)
+    assert(not ran)
 
-    test.assert(sequence.resume(world, handle, "focus"))
+    assert(sequence.resume(world, handle, "focus"))
     step(world, 2)
-    test.assert(ran)
+    assert(ran)
 end
 
 function suite.emitsSequenceEventsAtAddressZero(): nil
@@ -320,7 +319,7 @@ function suite.emitsSequenceEventsAtAddressZero(): nil
     sequence.play(world, program)
     step(world)
 
-    test.equal(table.concat(seen, ","), "boss.ready:7")
+    assert.eq(table.concat(seen, ","), "boss.ready:7")
 end
 
 function suite.faultsOnAnUnregisteredActionAndReportsWhy(): nil
@@ -331,9 +330,9 @@ function suite.faultsOnAnUnregisteredActionAndReportsWhy(): nil
     step(world)
 
     local status = assert(sequence.status(world, handle))
-    test.equal(status.state, "faulted")
-    test.equal(status.fault, "unregisteredAction")
-    test.matches(assert(status.faultMessage), "neverRegistered")
+    assert.eq(status.state, "faulted")
+    assert.eq(status.fault, "unregisteredAction")
+    assert.matches(assert(status.faultMessage), "neverRegistered")
 end
 
 function suite.publishesANewVersionAndLeavesRunningPlaybacksOnTheOld(): nil
@@ -345,10 +344,10 @@ function suite.publishesANewVersionAndLeavesRunningPlaybacksOnTheOld(): nil
 
     local second = sequence.define(name, {sequence.waitSteps(1)})
 
-    test.equal(first.version, 1)
-    test.equal(second.version, 2)
-    test.equal(assert(sequence.program(name)).version, 2)
-    test.equal(assert(sequence.status(world, handle)).version, 1)
+    assert.eq(first.version, 1)
+    assert.eq(second.version, 2)
+    assert.eq(assert(sequence.program(name)).version, 2)
+    assert.eq(assert(sequence.status(world, handle)).version, 1)
 end
 
 function suite.reportsUpcomingCallsAndTheirTiming(): nil
@@ -368,12 +367,12 @@ function suite.reportsUpcomingCallsAndTheirTiming(): nil
     local handle = sequence.play(world, program)
     local ahead = sequence.upcoming(world, handle)
 
-    test.equal(#ahead, 2)
-    test.equal(ahead[1].kind, "call")
-    test.equal(ahead[1].name, "test.noop")
-    test.equal(ahead[1].ticks, 3)
-    test.equal(ahead[2].kind, "emit")
-    test.equal(ahead[2].ticks, 6)
+    assert.eq(#ahead, 2)
+    assert.eq(ahead[1].kind, "call")
+    assert.eq(ahead[1].name, "test.noop")
+    assert.eq(ahead[1].ticks, 3)
+    assert.eq(ahead[2].kind, "emit")
+    assert.eq(ahead[2].ticks, 6)
 end
 
 function suite.disassemblesAProgramAndMarksAnAddress(): nil
@@ -382,44 +381,44 @@ function suite.disassemblesAProgramAndMarksAnAddress(): nil
 
     local listing = sequence.disassemble(program, 1)
 
-    test.matches(listing, name)
-    test.matches(listing, "WAIT")
-    test.matches(listing, "EMIT")
-    test.matches(listing, "%-> +1")
+    assert.matches(listing, name)
+    assert.matches(listing, "WAIT")
+    assert.matches(listing, "EMIT")
+    assert.matches(listing, "%-> +1")
 end
 
 function suite.rejectsInvalidAuthoringArguments(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             sequence.bind("")
         end,
         "binding name"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sequence.wait(-1)
         end,
         "non%-negative"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sequence.loop(0, {sequence.join()})
         end,
         "positive whole number"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sequence.fork({})
         end,
         "non%-empty block"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sequence.define("", {})
         end,
         "program name"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sequence.define("test.badClock", {}, {clock = "wall" as sequence.ClockId})
         end,
@@ -453,9 +452,9 @@ function suite.advancesTheFrameClockOncePerFrameWhateverTheFixedStepsAre(): nil
     world:update(0.1)
     world:update(0.1)
 
-    test.equal(runs, 2)
-    test.equal(sequence.currentStep(world, "frame"), 2)
-    test.equal(sequence.currentStep(world, "fixed"), 20)
+    assert.eq(runs, 2)
+    assert.eq(sequence.currentStep(world, "frame"), 2)
+    assert.eq(sequence.currentStep(world, "fixed"), 20)
 end
 
 return suite

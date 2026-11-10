@@ -2,7 +2,6 @@ const ecs = require("tecs.ecs")
 const {type World} = require("tecs.ecs")
 const {type Scope} = require("nupp.tasks")
 
-local test = require("nupp.test")
 
 const tag = ecs.newTagComponent({name = "test.ConditionalBarrier"})
 local suite = {}
@@ -10,13 +9,13 @@ local suite = {}
 function suite.publishesSynchronouslyOutsideSystems(): nil
     const world = ecs.newWorld()
     const id = world:spawn(tag)
-    test.assert(not world:isAlive(id))
+    assert(not world:isAlive(id))
     world:enqueueCommit()
-    test.assert(world:isAlive(id))
+    assert(world:isAlive(id))
     world:enqueueCommit()
     world:despawn(id)
     world:enqueueCommit()
-    test.assert(not world:isAlive(id))
+    assert(not world:isAlive(id))
 end
 
 function suite.coalescesRequestsUntilTheSystemReturns(): nil
@@ -27,7 +26,7 @@ function suite.coalescesRequestsUntilTheSystemReturns(): nil
     world:newQuery({
         include = {tag},
         onEntitiesAdded = function(): nil
-            test.assert(returned)
+            assert(returned)
             notifications = notifications + 1
         end
     })
@@ -38,15 +37,15 @@ function suite.coalescesRequestsUntilTheSystemReturns(): nil
             world:spawn(tag)
             world:enqueueCommit()
             world:enqueueCommit()
-            test.equal(query:count(), 0)
+            assert.eq(query:count(), 0)
             returned = true
         end
     })
     world:addSystem({
         phase = ecs.phases.Update,
         run = function(): nil
-            test.equal(query:count(), 1)
-            test.equal(notifications, 1)
+            assert.eq(query:count(), 1)
+            assert.eq(notifications, 1)
         end
     })
     world:update(0)
@@ -68,11 +67,11 @@ function suite.onlyIntroducesRequestedBoundaries(): nil
     world:addSystem({
         phase = ecs.phases.Update,
         run = function(): nil
-            test.equal(query:count(), request and 2 or 0)
+            assert.eq(query:count(), request and 2 or 0)
         end
     })
     world:update(0)
-    test.equal(query:count(), 1)
+    assert.eq(query:count(), 1)
     request = true
     world:update(0)
 end
@@ -87,20 +86,20 @@ function suite.defersTrueAndFalsePredicateRequests(): nil
             runIf = function(): boolean
                 world:spawn(tag)
                 world:enqueueCommit()
-                test.equal(query:count(), 0)
+                assert.eq(query:count(), 0)
                 return allowed
             end,
             run = function(): nil
                 bodyRan = true
-                test.equal(query:count(), 0)
+                assert.eq(query:count(), 0)
                 world:enqueueCommit()
             end
         })
         world:addSystem({
             phase = ecs.phases.Update,
             run = function(): nil
-                test.equal(bodyRan, allowed)
-                test.equal(query:count(), 1)
+                assert.eq(bodyRan, allowed)
+                assert.eq(query:count(), 1)
             end
         })
         world:update(0)
@@ -124,20 +123,20 @@ function suite.keepsTheViewStableAcrossIterationAndSuspension(): nil
                     visited = visited + 1
                 end
             end
-            test.equal(visited, 3)
+            assert.eq(visited, 3)
             const child = scope:spawn(function(): integer
-                test.equal(query:count(), 3)
+                assert.eq(query:count(), 3)
                 world:enqueueCommit()
                 return 42
             end)
-            test.equal(child:await(), 42)
-            test.equal(query:count(), 3)
+            assert.eq(child:await(), 42)
+            assert.eq(query:count(), 3)
         end
     })
     world:addSystem({
         phase = ecs.phases.Update,
         run = function(): nil
-            test.equal(query:count(), 0)
+            assert.eq(query:count(), 0)
         end
     })
     world:update(0)
@@ -151,7 +150,7 @@ function suite.explicitCommitRemainsSynchronousInsideSystems(): nil
             const id = world:spawn(tag)
             world:enqueueCommit()
             world:commit()
-            test.assert(world:isAlive(id))
+            assert(world:isAlive(id))
         end
     })
     world:update(0)
@@ -166,13 +165,13 @@ function suite.publishesChildWorkSettlingAfterDispatch(): nil
             scope:spawn(function(): nil
                 const id = world:spawn(tag)
                 world:enqueueCommit()
-                test.assert(world:isAlive(id))
+                assert(world:isAlive(id))
                 finished = true
             end)
         end
     })
     world:update(0)
-    test.assert(finished)
+    assert(finished)
 end
 
 function suite.clearsRequestsAfterAnAwaitedChildFailure(): nil
@@ -189,15 +188,15 @@ function suite.clearsRequestsAfterAnAwaitedChildFailure(): nil
             child:await()
         end
     })
-    test.raises(
+    assert.raises(
         function(): nil
             world:update(0)
         end,
         "conditional child failure"
     )
-    test.equal(query:count(), 0)
+    assert.eq(query:count(), 0)
     world:enqueueCommit()
-    test.equal(query:count(), 1)
+    assert.eq(query:count(), 1)
 end
 
 function suite.drainsObserverRequestsWithoutRecursing(): nil
@@ -207,21 +206,21 @@ function suite.drainsObserverRequestsWithoutRecursing(): nil
     world:newQuery({
         include = {tag},
         onEntitiesAdded = function(): nil
-            test.assert(not inside)
+            assert(not inside)
             inside = true
             notifications = notifications + 1
             if notifications == 1 then
                 const nextId = world:spawn(tag)
                 world:enqueueCommit()
                 world:enqueueCommit()
-                test.assert(not world:isAlive(nextId))
+                assert(not world:isAlive(nextId))
             end
             inside = false
         end
     })
     world:spawn(tag)
     world:enqueueCommit()
-    test.equal(notifications, 2)
+    assert.eq(notifications, 2)
 end
 
 local function dispatch(exclusive world: World, entry: string): nil
@@ -273,28 +272,28 @@ function suite.recoversEveryDispatchAfterBodyAndPredicateFailures(): nil
                     end
                     world:spawn(tag)
                     world:enqueueCommit()
-                    test.equal(query:count(), 1)
+                    assert.eq(query:count(), 1)
                 end
             })
             world:addSystem({
                 phase = phase,
                 run = function(): nil
                     consumed = true
-                    test.equal(query:count(), 2)
+                    assert.eq(query:count(), 2)
                 end
             })
-            test.raises(
+            assert.raises(
                 function(): nil
                     dispatch(world, entry)
                 end,
                 "conditional barrier failure"
             )
-            test.equal(query:count(), 0)
-            test.assert(not consumed)
+            assert.eq(query:count(), 0)
+            assert(not consumed)
             world:enqueueCommit()
-            test.equal(query:count(), 1)
+            assert.eq(query:count(), 1)
             dispatch(world, entry)
-            test.assert(consumed)
+            assert(consumed)
         end
     end
 end
@@ -320,7 +319,7 @@ function suite.recoversAfterPublicationFailure(): nil
             world:enqueueCommit()
         end
     })
-    test.raises(
+    assert.raises(
         function(): nil
             world:update(0)
         end,
@@ -328,9 +327,9 @@ function suite.recoversAfterPublicationFailure(): nil
     )
     const id = world:spawn(tag)
     world:enqueueCommit()
-    test.assert(world:isAlive(id))
+    assert(world:isAlive(id))
     world:update(0)
-    test.equal(world:newQuery({include = {tag}}):count(), 3)
+    assert.eq(world:newQuery({include = {tag}}):count(), 3)
 end
 
 return suite

@@ -1,5 +1,4 @@
 local ecs = require("tecs.ecs")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -14,14 +13,14 @@ function suite.disablesAndEnablesOneLeaf(): nil
     })
 
     value:disablePhase(ecs.phases.Update)
-    test.assert(not value:isPhaseEnabled(ecs.phases.Update))
+    assert(not value:isPhaseEnabled(ecs.phases.Update))
     value:update(0)
-    test.equal(calls, 0)
+    assert.eq(calls, 0)
 
     value:enablePhase(ecs.phases.Update)
-    test.assert(value:isPhaseEnabled(ecs.phases.Update))
+    assert(value:isPhaseEnabled(ecs.phases.Update))
     value:update(0)
-    test.equal(calls, 1)
+    assert.eq(calls, 1)
 end
 
 function suite.controlsEveryLeafInAGroup(): nil
@@ -29,12 +28,12 @@ function suite.controlsEveryLeafInAGroup(): nil
 
     value:disablePhase(ecs.phases.RenderGroup)
 
-    test.assert(not value:isPhaseEnabled(ecs.phases.RenderFirst))
-    test.assert(not value:isPhaseEnabled(ecs.phases.PreRender))
-    test.assert(not value:isPhaseEnabled(ecs.phases.Render))
-    test.assert(not value:isPhaseEnabled(ecs.phases.PostRender))
-    test.assert(not value:isPhaseEnabled(ecs.phases.RenderLast))
-    test.assert(value:isPhaseEnabled(ecs.phases.Update))
+    assert(not value:isPhaseEnabled(ecs.phases.RenderFirst))
+    assert(not value:isPhaseEnabled(ecs.phases.PreRender))
+    assert(not value:isPhaseEnabled(ecs.phases.Render))
+    assert(not value:isPhaseEnabled(ecs.phases.PostRender))
+    assert(not value:isPhaseEnabled(ecs.phases.RenderLast))
+    assert(value:isPhaseEnabled(ecs.phases.Update))
 end
 
 function suite.advancesFixedTimeWhileFixedDispatchIsDisabled(): nil
@@ -49,13 +48,13 @@ function suite.advancesFixedTimeWhileFixedDispatchIsDisabled(): nil
 
     value:disablePhase(ecs.phases.FixedUpdateGroup)
     value:update(0.125)
-    test.equal(calls, 0)
-    test.equal(value:fixedStepCount(), 1)
+    assert.eq(calls, 0)
+    assert.eq(value:fixedStepCount(), 1)
 
     value:enablePhase(ecs.phases.FixedUpdate)
     value:update(0.125)
-    test.equal(calls, 1)
-    test.equal(value:fixedStepCount(), 2)
+    assert.eq(calls, 1)
+    assert.eq(value:fixedStepCount(), 2)
 end
 
 function suite.runsARequestedGroupWithoutAdvancingItsClock(): nil
@@ -73,7 +72,7 @@ function suite.runsARequestedGroupWithoutAdvancingItsClock(): nil
         value:addSystem({
             phase = phase,
             run = function(dt: number, exclusive _world: ecs.World): nil
-                test.equal(dt, 0.5)
+                assert.eq(dt, 0.5)
                 order[#order + 1] = phase
             end,
         })
@@ -81,8 +80,8 @@ function suite.runsARequestedGroupWithoutAdvancingItsClock(): nil
 
     value:runPhase(ecs.phases.FixedUpdateGroup, 0.5)
 
-    test.equal(table.concat(order, ","), table.concat(fixed, ","))
-    test.equal(value:fixedStepCount(), 0)
+    assert.eq(table.concat(order, ","), table.concat(fixed, ","))
+    assert.eq(value:fixedStepCount(), 0)
 end
 
 function suite.controlsTheWholeBuiltInLifecycle(): nil
@@ -105,12 +104,12 @@ function suite.controlsTheWholeBuiltInLifecycle(): nil
     value:disablePhase(ecs.phases.AllGroups)
     value:startup()
     value:update(0)
-    test.equal(startupCalls, 0)
-    test.equal(updateCalls, 0)
+    assert.eq(startupCalls, 0)
+    assert.eq(updateCalls, 0)
 
     value:enablePhase(ecs.phases.Startup)
     value:startup()
-    test.equal(startupCalls, 1)
+    assert.eq(startupCalls, 1)
 end
 
 return suite

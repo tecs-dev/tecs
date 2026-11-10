@@ -2,7 +2,6 @@ local ecs = require("tecs.ecs")
 local gfx = require("tecs.gfx")
 local sequence = require("tecs.sequence")
 local tweeneval = require("tecs.internal.tweeneval")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -35,7 +34,7 @@ local function positionOf(borrows world: ecs.World, actor: integer): number
 end
 
 local function near(actual: number, expected: number): nil
-    test.assert(math.abs(actual - expected) < 1e-9, actual, expected)
+    assert(math.abs(actual - expected) < 1e-9, actual, expected)
 end
 
 function suite.holdsTheStartValueAtTheFirstTick(): nil
@@ -65,7 +64,7 @@ function suite.landsExactlyOnTheDestinationAtTheEnd(): nil
     -- past it, because the advance snaps to the boundary before evaluating.
     world:update(0.9)
     near(positionOf(world, actor), 100)
-    test.equal(assert(sequence.status(world, handle)).state, "completed")
+    assert.eq(assert(sequence.status(world, handle)).state, "completed")
 end
 
 function suite.startsFromWhereTheEntityIsRatherThanFromCompileTime(): nil
@@ -158,22 +157,22 @@ function suite.mapsEveryBuiltInEasingCurveThroughItsEndpoints(): nil
         "bounceInOut",
         "bounceOutIn",
     }
-    test.equal(#names, 37)
+    assert.eq(#names, 37)
     for index = 1, #names do
         local curve = assert(sequence.easing(names[index] as sequence.EasingName), names[index])
-        test.assert(math.abs(curve(0)) < 1e-6, names[index])
-        test.assert(math.abs(curve(1) - 1) < 1e-6, names[index])
+        assert(math.abs(curve(0)) < 1e-6, names[index])
+        assert(math.abs(curve(1) - 1) < 1e-6, names[index])
     end
 end
 
 function suite.rejectsACurveItCannotName(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             sequence.tweenTo(1, "notACurve" as sequence.EasingName, "transform.x", 1)
         end,
         "unknown easing"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sequence.tweenTo(
                 1,
@@ -206,10 +205,10 @@ function suite.runsParallelBranchesFromASharedStart(): nil
     near(transform.x, 10)
     near(transform.y, 10)
     -- The block ends with the longest branch, so the playback is still going.
-    test.equal(assert(sequence.status(world, handle)).state, "running")
+    assert.eq(assert(sequence.status(world, handle)).state, "running")
 
     world:update(1)
-    test.equal(assert(sequence.status(world, handle)).state, "completed")
+    assert.eq(assert(sequence.status(world, handle)).state, "completed")
 end
 
 function suite.repeatsALoopedTimelineItsCountedNumberOfTimes(): nil
@@ -220,11 +219,11 @@ function suite.repeatsALoopedTimelineItsCountedNumberOfTimes(): nil
     local handle = sequence.play(world, pulse, {owner = actor, params = {mode = "loop", count = 2}})
     world:update(0)
     world:update(1)
-    test.equal(assert(sequence.status(world, handle)).state, "running")
+    assert.eq(assert(sequence.status(world, handle)).state, "running")
 
     world:update(1)
     near(positionOf(world, actor), 10)
-    test.equal(assert(sequence.status(world, handle)).state, "completed")
+    assert.eq(assert(sequence.status(world, handle)).state, "completed")
 end
 
 function suite.returnsToTheStartOnAPingPongLeg(): nil
@@ -274,17 +273,17 @@ function suite.firesTimelineEmitsAsTheCursorPassesThemGoingForward(): nil
     -- The tick a playback activates on runs the evaluating instruction after
     -- the active walk, so the first evaluation is the tick after it.
     world:update(0)
-    test.equal(#seen, 0)
+    assert.eq(#seen, 0)
 
     world:update(0)
-    test.equal(table.concat(seen, ","), "start")
+    assert.eq(table.concat(seen, ","), "start")
 
     world:update(1)
-    test.equal(table.concat(seen, ","), "start,finish")
+    assert.eq(table.concat(seen, ","), "start,finish")
 
     -- The return leg passes both points again and fires neither.
     world:update(1)
-    test.equal(table.concat(seen, ","), "start,finish")
+    assert.eq(table.concat(seen, ","), "start,finish")
 end
 
 function suite.completesOnItsFirstTickWithoutAnOwner(): nil
@@ -295,7 +294,7 @@ function suite.completesOnItsFirstTickWithoutAnOwner(): nil
     world:update(0)
     world:update(0)
 
-    test.equal(assert(sequence.status(world, handle)).state, "completed")
+    assert.eq(assert(sequence.status(world, handle)).state, "completed")
 end
 
 function suite.chasesATrackedSourceWhileItKeepsMoving(): nil
@@ -342,15 +341,15 @@ function suite.playsATimelineFromASequenceAndWaitsForIt(): nil
 
     local handle = sequence.play(world, script, {bindings = {actor = actor}})
     world:update(1)
-    test.assert(not done)
+    assert(not done)
 
     world:update(1)
     near(positionOf(world, actor), 10)
-    test.assert(not done)
+    assert(not done)
 
     world:update(1)
-    test.assert(done)
-    test.equal(assert(sequence.status(world, handle)).tweenOutcome, "completed")
+    assert(done)
+    assert.eq(assert(sequence.status(world, handle)).tweenOutcome, "completed")
 end
 
 function suite.reportsTargetLostWhenTheBindingIsGone(): nil
@@ -365,8 +364,8 @@ function suite.reportsTargetLostWhenTheBindingIsGone(): nil
     world:update(1)
 
     local status = assert(sequence.status(world, handle))
-    test.equal(status.state, "completed")
-    test.equal(status.tweenOutcome, "targetLost")
+    assert.eq(status.state, "completed")
+    assert.eq(status.tweenOutcome, "targetLost")
 end
 
 function suite.faultsAnUndefinedTimelineName(): nil
@@ -380,8 +379,8 @@ function suite.faultsAnUndefinedTimelineName(): nil
     world:update(1)
 
     local status = assert(sequence.status(world, handle))
-    test.equal(status.state, "faulted")
-    test.equal(status.fault, "unregisteredTween")
+    assert.eq(status.state, "faulted")
+    assert.eq(status.fault, "unregisteredTween")
 end
 
 function suite.roundTripsACompiledTimelineThroughItsPlainDataForm(): nil
@@ -393,39 +392,39 @@ function suite.roundTripsACompiledTimelineThroughItsPlainDataForm(): nil
 
     local restored = tweeneval.deserializeTimeline(tweeneval.serializeTimeline(compiled))
 
-    test.equal(restored.totalDuration, compiled.totalDuration)
-    test.equal(restored.stateSize, compiled.stateSize)
-    test.equal(#restored.slots, 1)
-    test.equal(restored.slots[1].easingName, "quadOut")
-    test.equal(restored.slots[1].target.id, "transform.xy")
-    test.equal(restored.slots[1].t2, 4)
-    test.equal(#restored.emits, 1)
-    test.equal(restored.emits[1].name, "half")
-    test.equal(#restored.runs, 1)
-    test.equal(restored.runs[1].passCount, 2)
-    test.equal(restored.runs[1].timeline.slots[1].target.id, "color.a")
+    assert.eq(restored.totalDuration, compiled.totalDuration)
+    assert.eq(restored.stateSize, compiled.stateSize)
+    assert.eq(#restored.slots, 1)
+    assert.eq(restored.slots[1].easingName, "quadOut")
+    assert.eq(restored.slots[1].target.id, "transform.xy")
+    assert.eq(restored.slots[1].t2, 4)
+    assert.eq(#restored.emits, 1)
+    assert.eq(restored.emits[1].name, "half")
+    assert.eq(#restored.runs, 1)
+    assert.eq(restored.runs[1].passCount, 2)
+    assert.eq(restored.runs[1].timeline.slots[1].target.id, "color.a")
 end
 
 function suite.rejectsInvalidTimelineOperations(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             tweeneval.compile({tweeneval.to(0, "linear", "transform.x", 1)})
         end,
         "greater than zero"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             tweeneval.compile({tweeneval.wait(-1)})
         end,
         "at least zero"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             tweeneval.compile({tweeneval.run({tweeneval.wait(1)}, "loop")})
         end,
         "finite count"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sequence.timeline("test.badTimelineClock", {}, {clock = "frame"})
         end,

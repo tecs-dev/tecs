@@ -1,6 +1,5 @@
 local ecs = require("tecs.ecs")
 local idallocator = require("tecs.internal.idallocator")
-local test = require("nupp.test")
 local suite = {}
 
 local record SnapshotPosition
@@ -35,15 +34,15 @@ function suite.roundTripsIdsComponentsRelationshipsAndStates(): nil
     world:clearEntities()
     local prelude = world:loadSnapshot(snapshot)
 
-    test.equal(prelude.version, 1)
-    test.equal(prelude.entityCount, 2)
-    test.assert(world:isAlive(root))
-    test.assert(world:isAlive(child))
-    test.equal(assert(world:get(child, position)).label, "child")
-    test.assert(world:has(child, marker))
-    test.equal(assert(world:get(child, parent)).target, root)
-    test.assert(world:has(root, state))
-    test.equal(world:peekState() as string, "test.snapshot.state")
+    assert.eq(prelude.version, 1)
+    assert.eq(prelude.entityCount, 2)
+    assert(world:isAlive(root))
+    assert(world:isAlive(child))
+    assert.eq(assert(world:get(child, position)).label, "child")
+    assert(world:has(child, marker))
+    assert.eq(assert(world:get(child, parent)).target, root)
+    assert(world:has(root, state))
+    assert.eq(world:peekState() as string, "test.snapshot.state")
 end
 
 function suite.detachesSavedRecordValuesFromTheWorld(): nil
@@ -59,8 +58,8 @@ function suite.detachesSavedRecordValuesFromTheWorld(): nil
     world:loadSnapshot(snapshot)
 
     local restored = assert(world:get(entity, position))
-    test.equal(restored.x, 7)
-    test.equal(restored.label, "saved")
+    assert.eq(restored.x, 7)
+    assert.eq(restored.label, "saved")
 end
 
 function suite.omitsTransientComponentsButKeepsTheirEntities(): nil
@@ -73,11 +72,11 @@ function suite.omitsTransientComponentsButKeepsTheirEntities(): nil
 
     world:loadSnapshot(snapshot)
 
-    test.assert(world:isAlive(entity))
-    test.equal(world:get(entity, health) as number, 5)
-    test.assert(not world:has(entity, temporary))
+    assert(world:isAlive(entity))
+    assert.eq(world:get(entity, health) as number, 5)
+    assert(not world:has(entity, temporary))
     for index = 1, #snapshot.componentTable do
-        test.assert(snapshot.componentTable[index].name ~= temporary.componentName)
+        assert(snapshot.componentTable[index].name ~= temporary.componentName)
     end
 end
 
@@ -108,8 +107,8 @@ function suite.usesCustomComponentSnapshotHooks(): nil
     local snapshot = world:saveSnapshot()
     world:loadSnapshot(snapshot)
     local restored = assert(world:get(entity, position))
-    test.equal(restored.x, 12)
-    test.equal(restored.label, "custom")
+    assert.eq(restored.x, 12)
+    assert.eq(restored.label, "custom")
 end
 
 function suite.savesLoadsAndFinishesNamedHandlerData(): nil
@@ -134,9 +133,9 @@ function suite.savesLoadsAndFinishesNamedHandlerData(): nil
 
     world:loadSnapshot(snapshot)
 
-    test.equal(loaded, 41)
-    test.assert(finished)
-    test.equal(#snapshot.data, 2)
+    assert.eq(loaded, 41)
+    assert(finished)
+    assert.eq(#snapshot.data, 2)
 end
 
 function suite.rejectsInvalidSnapshotsBeforeClearingTheWorld(): nil
@@ -148,13 +147,13 @@ function suite.rejectsInvalidSnapshotsBeforeClearingTheWorld(): nil
     snapshot.archetypes[1].components[1] = "test.SnapshotUnknown"
     snapshot.componentTable[1].name = "test.SnapshotUnknown"
 
-    test.raises(
+    assert.raises(
         function(): nil
             world:loadSnapshot(snapshot)
         end,
         "unknown component"
     )
-    test.assert(world:isAlive(entity))
+    assert(world:isAlive(entity))
 end
 
 function suite.rebuildsAllocatorHolesAfterLoading(): nil
@@ -170,9 +169,9 @@ function suite.rebuildsAllocatorHolesAfterLoading(): nil
 
     local replacement = world:spawn()
 
-    test.equal(idallocator.slotOf(replacement), idallocator.slotOf(hole))
-    test.assert(world:isAlive(first))
-    test.assert(world:isAlive(third))
+    assert.eq(idallocator.slotOf(replacement), idallocator.slotOf(hole))
+    assert(world:isAlive(first))
+    assert(world:isAlive(third))
 end
 
 function suite.commitsPendingWorkBeforeSaving(): nil
@@ -180,15 +179,15 @@ function suite.commitsPendingWorkBeforeSaving(): nil
     local world = ecs.newWorld()
     local entity = world:spawn(marker)
     local snapshot = world:saveSnapshot()
-    test.assert(world:isAlive(entity))
-    test.equal(snapshot.entityCount, 1)
+    assert(world:isAlive(entity))
+    assert.eq(snapshot.entityCount, 1)
 end
 
 function suite.rejectsCyclesAndDuplicateDataKeys(): nil
     local world = ecs.newWorld()
     local cyclic: {[string]: any} = {}
     cyclic.self = cyclic
-    test.raises(
+    assert.raises(
         function(): nil
             world:saveSnapshot({customData = {cycle = cyclic}})
         end,
@@ -200,7 +199,7 @@ function suite.rejectsCyclesAndDuplicateDataKeys(): nil
             return 1
         end,
     })
-    test.raises(
+    assert.raises(
         function(): nil
             world:saveSnapshot({customData = {duplicate = 2}})
         end,

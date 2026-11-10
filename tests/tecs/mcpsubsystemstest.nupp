@@ -14,7 +14,6 @@ local schemas = require("tecs.internal.mcpschemas")
 local entityworld = require("tecs.internal.world")
 local json = require("nupp.codec.json")
 local files = require("nupp.io.files")
-local test = require("nupp.test")
 local suite = {}
 
 -- The snapshot tools write under the application data root, which
@@ -42,21 +41,21 @@ end
 
 local function content(name: string, arguments: {[string]: any}?): any
     local result = call(name, arguments)
-    test.assert(result.isError == nil, name .. ": " .. tostring(result.content[1].text))
+    assert(result.isError == nil, name .. ": " .. tostring(result.content[1].text))
     return result.structuredContent
 end
 
 local function equalTree(actual: any, expected: any): nil
-    test.equal(type(actual), type(expected))
+    assert.eq(type(actual), type(expected))
     if type(expected) ~= "table" then
-        test.equal(actual, expected)
+        assert.eq(actual, expected)
         return
     end
     for key, value in pairs(expected) do
         equalTree(actual[key], value)
     end
     for key in pairs(actual) do
-        test.assert(expected[key] ~= nil, "unexpected schema key: " .. tostring(key))
+        assert(expected[key] ~= nil, "unexpected schema key: " .. tostring(key))
     end
 end
 
@@ -72,9 +71,9 @@ function suite.restoredInputSchemasMatchTheHistoricalWireListing(): nil
             checked = checked + 1
         end
     end
-    test.equal(checked, 22)
+    assert.eq(checked, 22)
     for _, name in ipairs({"sample_pixels", "reload_shaders", "reload_image", "watch", "physics_debug"}) do
-        test.equal(registry.findTool(name), nil)
+        assert.eq(registry.findTool(name), nil)
     end
 end
 
@@ -88,20 +87,20 @@ function suite.inspectionReadsCommittedArchetypesAndAnonymousResources(): nil
     world.resources:set(anonymous, 4)
     mcp.bind(world)
     local listed = content("archetypes_list")
-    test.assert(listed.total > 0)
+    assert(listed.total > 0)
     local info = content("archetypes_info", {id = listed.archetypes[1].id})
-    test.assert(info.entities > 0)
+    assert(info.entities > 0)
     local resources = content("resources_list")
-    test.equal(resources.total, 2)
-    test.equal(content("resources_info", {name = "test.mcp.resource"}).present, true)
-    test.equal(content("resources_info", {name = "missing"}).present, false)
+    assert.eq(resources.total, 2)
+    assert.eq(content("resources_info", {name = "test.mcp.resource"}).present, true)
+    assert.eq(content("resources_info", {name = "missing"}).present, false)
     local detached = entityworld.inspectArchetypes(world)
     detached[1].components[1] = "changed"
-    test.assert(content("archetypes_list").archetypes[1].components[1] ~= "changed")
+    assert(content("archetypes_list").archetypes[1].components[1] ~= "changed")
     world:despawn(entity)
     world:commit()
-    test.equal(content("archetypes_list").total, 0)
-    test.assert(content("archetypes_list", {empty = true}).total > 0)
+    assert.eq(content("archetypes_list").total, 0)
+    assert(content("archetypes_list", {empty = true}).total > 0)
     mcp.bind(nil)
 end
 
@@ -112,28 +111,28 @@ function suite.cameraMovementUsesTheRenderersSelectedEntity(): nil
     world:spawn(gfx.Camera2D(30, 40), gfx.ActiveCamera)
     world:commit()
     mcp.bind(world)
-    test.equal(content("camera_info").entity, selected)
+    assert.eq(content("camera_info").entity, selected)
     local moved = content("camera_move", {x = 50, zoom = 3})
-    test.equal(moved.x, 50)
-    test.equal(moved.y, 20)
-    test.equal(moved.zoom, 3)
-    test.equal(call("camera_move", {zoom = 0}).isError, true)
-    test.equal(call("camera_move", {extra = true}).isError, true)
-    test.equal(content("render_info").observations.gpuCounters, false)
-    test.equal(content("layers_list").total, 16)
-    test.equal(content("layers_info", {layer = 1}).layer, 1)
-    test.equal(call("layers_info", {layer = 1.5}).isError, true)
+    assert.eq(moved.x, 50)
+    assert.eq(moved.y, 20)
+    assert.eq(moved.zoom, 3)
+    assert.eq(call("camera_move", {zoom = 0}).isError, true)
+    assert.eq(call("camera_move", {extra = true}).isError, true)
+    assert.eq(content("render_info").observations.gpuCounters, false)
+    assert.eq(content("layers_list").total, 16)
+    assert.eq(content("layers_info", {layer = 1}).layer, 1)
+    assert.eq(call("layers_info", {layer = 1.5}).isError, true)
     mcp.bind(nil)
 end
 
 function suite.discoveryDescribesFamiliesAndRemainsAvailableAfterCrash(): nil
     local contract = content("describe", {command = "snapshot"})
-    test.equal(#contract.verbs, 2)
-    test.equal(content("help", {command = "camera"}).command.name, "camera")
-    test.equal(content("capabilities").tools, #mcp.listTools())
+    assert.eq(#contract.verbs, 2)
+    assert.eq(content("help", {command = "camera"}).command.name, "camera")
+    assert.eq(content("capabilities").tools, #mcp.listTools())
     mcp.setCrashed("test failure")
-    test.assert(#content("help").sections > 0)
-    test.equal(call("physics_info").isError, true)
+    assert(#content("help").sections > 0)
+    assert.eq(call("physics_info").isError, true)
     mcp.setCrashed(nil)
 end
 
@@ -143,18 +142,18 @@ function suite.realPhysicsInspectionAndRaycast(): nil
     local body = world:spawn(ecs.Transform2D(20, 20), physics.Body(0), physics.Collider(0, 5, 5))
     world:update(1 / 60)
     mcp.bind(world)
-    test.equal(content("physics_info").bodies, 1)
+    assert.eq(content("physics_info").bodies, 1)
     local hit = content("physics_raycast", {x1 = 0, y1 = 20, x2 = 40, y2 = 20})
-    test.equal(hit.hit, true)
-    test.equal(hit.entity, body)
+    assert.eq(hit.hit, true)
+    assert.eq(hit.entity, body)
     local saved = content("snapshot_save", {name = "mcp-contract-rapier-test.bin"})
     world:despawn(body)
     world:update(1 / 60)
-    test.equal(content("physics_info").bodies, 0)
+    assert.eq(content("physics_info").bodies, 0)
     content("snapshot_load", {path = saved.path})
     world:update(1 / 60)
-    test.equal(content("physics_info").bodies, 1)
-    test.equal(content("physics_raycast", {x1 = 0, y1 = 20, x2 = 40, y2 = 20}).entity, body)
+    assert.eq(content("physics_info").bodies, 1)
+    assert.eq(content("physics_raycast", {x1 = 0, y1 = 20, x2 = 40, y2 = 20}).entity, body)
     assert(files.remove(saved.path))
     world:shutdown()
     mcp.bind(nil)
@@ -177,18 +176,18 @@ function suite.snapshotToolRoundTripPreservesBinaryHandlerDataAndNumericKeys(): 
     mcp.bind(world)
     local name = "mcp-contract-snapshot-test.bin"
     local saved = content("snapshot_save", {name = name})
-    test.equal(saved.format, "binary")
+    assert.eq(saved.format, "binary")
     world:despawn(entity)
     world:commit()
     local loaded = content("snapshot_load", {path = saved.path})
-    test.equal(loaded.entities, 1)
-    test.equal(restored[0], "\0\255\128")
-    test.equal(restored[4.5], false)
-    test.equal(world:get(entity, ecs.Name), "saved")
-    test.equal(call("snapshot_save", {name = "../escape.bin"}).isError, true)
+    assert.eq(loaded.entities, 1)
+    assert.eq(restored[0], "\0\255\128")
+    assert.eq(restored[4.5], false)
+    assert.eq(world:get(entity, ecs.Name), "saved")
+    assert.eq(call("snapshot_save", {name = "../escape.bin"}).isError, true)
     assert(files.write(saved.path, "invalid"))
-    test.equal(call("snapshot_load", {path = saved.path}).isError, true)
-    test.equal(world:getStats().entities, 1)
+    assert.eq(call("snapshot_load", {path = saved.path}).isError, true)
+    assert.eq(world:getStats().entities, 1)
     assert(files.remove(saved.path))
     mcp.bind(nil)
 end
@@ -196,11 +195,11 @@ end
 function suite.audioInspectionUsesTheWorldMixer(): nil
     local world = ecs.newWorld()
     mcp.bind(world)
-    test.equal(content("audio").installed, false)
+    assert.eq(content("audio").installed, false)
     local mixer = audio.install(world, {backend = audiobackend.silent()})
-    test.equal(content("audio").available, false)
-    test.equal(content("audio").installed, true)
-    test.equal(call("reload_sound", {path = "not-loaded.wav"}).isError, true)
+    assert.eq(content("audio").available, false)
+    assert.eq(content("audio").installed, true)
+    assert.eq(call("reload_sound", {path = "not-loaded.wav"}).isError, true)
     mixer:destroy()
     world:shutdown()
     mcp.bind(nil)
@@ -215,7 +214,7 @@ function suite.audioToolsPlayAndReloadASoundTheMixerKnows(): nil
         return 3
     end
     local mixer = audio.install(world, {backend = backend})
-    test.equal(#content("audio").decoders, 0)
+    assert.eq(#content("audio").decoders, 0)
     local reloads = {0}
     local sound = audio.Sound(
         name = "mcp/known.wav",
@@ -232,14 +231,14 @@ function suite.audioToolsPlayAndReloadASoundTheMixerKnows(): nil
             return true
         end
     )
-    test.equal(call("audio_play", {path = sound.name}).isError, true, "nothing has added it yet")
+    assert.eq(call("audio_play", {path = sound.name}).isError, true, "nothing has added it yet")
     mixer:addSound(sound)
-    test.equal(content("audio_play", {path = sound.name}).started, true)
+    assert.eq(content("audio_play", {path = sound.name}).started, true)
     local report = content("audio")
-    test.equal(#report.decoders, 1)
-    test.equal(report.decoders[1], "test")
-    test.equal(content("reload_sound", {path = sound.name}).reloaded, true)
-    test.equal(reloads[1], 1)
+    assert.eq(#report.decoders, 1)
+    assert.eq(report.decoders[1], "test")
+    assert.eq(content("reload_sound", {path = sound.name}).reloaded, true)
+    assert.eq(reloads[1], 1)
     mixer:destroy()
     world:shutdown()
     mcp.bind(nil)
@@ -248,7 +247,7 @@ end
 function suite.audioToolsReportAndDriveTheConsoleOnAMemoryOutput(): nil
     local loaded = pcall(require, "tecs.platform.audionative")
     if not loaded then
-        test.skip("libtecsaudio is not on the loader path")
+        assert.suite.skip("libtecsaudio is not on the loader path")
     end
     local world = ecs.newWorld()
     mcp.bind(world)
@@ -256,21 +255,21 @@ function suite.audioToolsReportAndDriveTheConsoleOnAMemoryOutput(): nil
     mixer:bus("sfx")
     local line = mixer:timeline({tempo = 90})
     local snapshot = content("audio_snapshot")
-    test.equal(snapshot.output.state, "offline")
-    test.equal(#snapshot.buses, 2, "Master and sfx")
-    test.equal(snapshot.buses[1].name, "master")
-    test.equal(snapshot.buses[1].effects[1].name, "limiter")
-    test.equal(snapshot.timelines[1].tempo, 90)
-    test.equal(content("audio_control", {bus = "sfx", gain = 0.5, muted = true}).gain, 0.5)
-    test.assert(mixer:bus("sfx"):muted())
-    test.equal(content("audio_timeline", {index = 1, action = "pause"}).paused, true)
-    test.assert(line:paused())
-    test.equal(content("audio_step", {seconds = 0.25}).rendered, 0.25)
-    test.equal(content("audio_listen", {seconds = 0.1}).listening, true)
+    assert.eq(snapshot.output.state, "offline")
+    assert.eq(#snapshot.buses, 2, "Master and sfx")
+    assert.eq(snapshot.buses[1].name, "master")
+    assert.eq(snapshot.buses[1].effects[1].name, "limiter")
+    assert.eq(snapshot.timelines[1].tempo, 90)
+    assert.eq(content("audio_control", {bus = "sfx", gain = 0.5, muted = true}).gain, 0.5)
+    assert(mixer:bus("sfx"):muted())
+    assert.eq(content("audio_timeline", {index = 1, action = "pause"}).paused, true)
+    assert(line:paused())
+    assert.eq(content("audio_step", {seconds = 0.25}).rendered, 0.25)
+    assert.eq(content("audio_listen", {seconds = 0.1}).listening, true)
     content("audio_step", {seconds = 0.1})
-    test.equal(content("audio_listening").frames, 4800)
-    test.equal(call("audio_play", {path = "never-loaded.wav"}).isError, true)
-    test.equal(#content("audio_events").events, 0)
+    assert.eq(content("audio_listening").frames, 4800)
+    assert.eq(call("audio_play", {path = "never-loaded.wav"}).isError, true)
+    assert.eq(#content("audio_events").events, 0)
     mixer:destroy()
     world:shutdown()
     mcp.bind(nil)
@@ -278,12 +277,12 @@ end
 
 function suite.profileToolsWriteAReportAndCanStartAgain(): nil
     content("profile_start", {intervalMs = 1, zone = "test-never-entered"})
-    test.equal(call("profile_start").isError, true)
+    assert.eq(call("profile_start").isError, true)
     local report = content("profile_stop", {name = "mcp-contract-profile-test.collapsed"})
-    test.equal(report.samples, 0)
-    test.equal(assert(files.read(report.path)), "")
+    assert.eq(report.samples, 0)
+    assert.eq(assert(files.read(report.path)), "")
     assert(files.remove(report.path))
-    test.equal(call("profile_stop").isError, true)
+    assert.eq(call("profile_stop").isError, true)
 end
 
 --- Builds a bound application whose Update system counts frames and records
@@ -315,46 +314,46 @@ function suite.clockToolsPauseStepAndResumeTheSimulation(): nil
     app:iterate(0.5, nil)
 
     local info = content("clock_info")
-    test.equal(info.paused, false)
-    test.equal(info.settled, false)
-    test.equal(info.frame, 1)
-    test.equal(call("clock_step").isError, true)
+    assert.eq(info.paused, false)
+    assert.eq(info.settled, false)
+    assert.eq(info.frame, 1)
+    assert.eq(call("clock_step").isError, true)
 
-    test.equal(content("clock_pause").paused, true)
+    assert.eq(content("clock_pause").paused, true)
     content("send_event", {kind = "keyDown", physicalKey = "Space", logicalKey = " "})
     app:iterate(0.5, nil)
     app:iterate(0.5, nil)
-    test.equal(#deltas, 1)
+    assert.eq(#deltas, 1)
     info = content("clock_info")
-    test.equal(info.settled, true)
-    test.equal(info.pendingEvents, 1)
+    assert.eq(info.settled, true)
+    assert.eq(info.pendingEvents, 1)
 
     local stepped = content("clock_step", {frames = 2, dt = 0.125})
-    test.equal(stepped.pendingSteps, 2)
-    test.equal(stepped.stepDt, 0.125)
-    test.equal(stepped.settled, false)
+    assert.eq(stepped.pendingSteps, 2)
+    assert.eq(stepped.stepDt, 0.125)
+    assert.eq(stepped.settled, false)
     app:iterate(0.5, nil)
     app:iterate(0.5, nil)
     app:iterate(0.5, nil)
-    test.equal(#deltas, 3)
-    test.equal(deltas[2], 0.125)
-    test.equal(deltas[3], 0.125)
-    test.assert(pressed[2])
-    test.assert(not pressed[3])
+    assert.eq(#deltas, 3)
+    assert.eq(deltas[2], 0.125)
+    assert.eq(deltas[3], 0.125)
+    assert(pressed[2])
+    assert(not pressed[3])
     info = content("clock_info")
-    test.equal(info.frame, 3)
-    test.equal(info.elapsed, 0.75)
-    test.equal(info.settled, true)
+    assert.eq(info.frame, 3)
+    assert.eq(info.elapsed, 0.75)
+    assert.eq(info.settled, true)
 
-    test.equal(call("clock_step", {frames = 1.5}).isError, true)
-    test.equal(call("clock_step", {dt = 0}).isError, true)
-    test.equal(call("clock_step", {frames = 0}).isError, true)
+    assert.eq(call("clock_step", {frames = 1.5}).isError, true)
+    assert.eq(call("clock_step", {dt = 0}).isError, true)
+    assert.eq(call("clock_step", {frames = 0}).isError, true)
 
     content("clock_step", {frames = 4})
-    test.equal(content("clock_resume").paused, false)
-    test.equal(content("clock_info").pendingSteps, 0)
+    assert.eq(content("clock_resume").paused, false)
+    assert.eq(content("clock_info").pendingSteps, 0)
     app:iterate(0.5, nil)
-    test.equal(deltas[4], 0.5)
+    assert.eq(deltas[4], 0.5)
 
     mcp.bind(nil, nil)
     app:shutdown()
@@ -364,20 +363,20 @@ function suite.clockAndInputToolsAnswerWhileAFrameIsParked(): nil
     local app = steppedApplication()
     content("clock_pause")
     for _, name in ipairs({"clock_info", "clock_step", "send_event", "screenshot", "screenshot_info"}) do
-        test.equal(assert(registry.findTool(name)).whenParked, true)
+        assert.eq(assert(registry.findTool(name)).whenParked, true)
     end
     local parked = registry.callTool(assert(registry.findTool("clock_info")), {}, true)
-    test.equal(parked.structuredContent.parked, true)
-    test.equal(parked.structuredContent.settled, false)
+    assert.eq(parked.structuredContent.parked, true)
+    assert.eq(parked.structuredContent.settled, false)
     local sent = registry.callTool(
         assert(registry.findTool("send_event")),
         {kind = "keyDown", physicalKey = "KeyA"},
         true
     )
-    test.equal(sent.isError, nil)
-    test.equal(app:pendingEvents(), 1)
+    assert.eq(sent.isError, nil)
+    assert.eq(app:pendingEvents(), 1)
     -- A tool that touches the world still waits for the frame.
-    test.equal(registry.callTool(assert(registry.findTool("stats")), {}, true).isError, true)
+    assert.eq(registry.callTool(assert(registry.findTool("stats")), {}, true).isError, true)
 
     mcp.bind(nil, nil)
     app:shutdown()
@@ -387,9 +386,9 @@ function suite.screenshotToolWritesTheNextRenderedFrame(): nil
     local app = steppedApplication()
     screenshot.cancelPending()
     local requested = content("screenshot", {name = "mcp-screenshot-test.png"})
-    test.equal(requested.ready, false)
-    test.assert(requested.path:find("mcp-screenshot-test.png", 1, true) ~= nil)
-    test.equal(content("screenshot_info", {id = requested.id}).ready, false)
+    assert.eq(requested.ready, false)
+    assert(requested.path:find("mcp-screenshot-test.png", 1, true) ~= nil)
+    assert.eq(content("screenshot_info", {id = requested.id}).ready, false)
 
     -- What the host does after it renders: it consumes the request and
     -- answers with the frame.
@@ -397,27 +396,27 @@ function suite.screenshotToolWritesTheNextRenderedFrame(): nil
     screenshot.complete(id, 1, 1, "\1\2\3\255", "PNG-BYTES", nil)
     local server = assert(mcp.listen(0))
     mcp.poll(server)
-    test.equal(assert(files.read(requested.path)), "PNG-BYTES")
+    assert.eq(assert(files.read(requested.path)), "PNG-BYTES")
     local written = content("screenshot_info", {id = requested.id})
-    test.equal(written.ready, true)
-    test.equal(written.saved, true)
-    test.equal(written.width, 1)
-    test.equal(written.height, 1)
-    test.equal(written.bytes, 9)
+    assert.eq(written.ready, true)
+    assert.eq(written.saved, true)
+    assert.eq(written.width, 1)
+    assert.eq(written.height, 1)
+    assert.eq(written.bytes, 9)
     assert(files.remove(requested.path))
 
     -- A failed readback is reported rather than written.
     local failing = content("screenshot", {name = "mcp-screenshot-failed.png"})
     screenshot.complete(assert(screenshot.nextRequest()), 0, 0, "", "", "GPU readback failed")
     local failed = content("screenshot_info", {id = failing.id})
-    test.equal(failed.ready, true)
-    test.equal(failed.saved, false)
-    test.equal(failed.reason, "GPU readback failed")
+    assert.eq(failed.ready, true)
+    assert.eq(failed.saved, false)
+    assert.eq(failed.reason, "GPU readback failed")
 
-    test.equal(call("screenshot", {path = "relative.png"}).isError, true)
-    test.equal(call("screenshot_info", {id = 999999}).isError, true)
-    test.equal(content("describe", {command = "screenshot"}).action.name, "screenshot")
-    test.equal(#content("describe", {command = "clock"}).verbs, 4)
+    assert.eq(call("screenshot", {path = "relative.png"}).isError, true)
+    assert.eq(call("screenshot_info", {id = 999999}).isError, true)
+    assert.eq(content("describe", {command = "screenshot"}).action.name, "screenshot")
+    assert.eq(#content("describe", {command = "clock"}).verbs, 4)
 
     mcp.destroy(server)
     mcp.bind(nil, nil)

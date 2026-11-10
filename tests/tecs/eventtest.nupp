@@ -1,4 +1,3 @@
-local test = require("nupp.test")
 local components = require("tecs.internal.components")
 local ecs = require("tecs.ecs")
 local events = require("nupp.events")
@@ -19,17 +18,17 @@ function suite.constructsAndDeliversTypedAddressedEvents(): nil
         0,
         Message,
         function(event: Message): nil
-            test.equal(value.observers.count, 1)
+            assert.eq(value.observers.count, 1)
             seen = event.text
         end,
         "listener"
     )
     value:emit(0, Message, "hello")
-    test.equal(seen, "hello")
+    assert.eq(seen, "hello")
     value:emit(0, Message, text = "named")
-    test.equal(seen, "named")
-    test.equal(value.observers.count, 1)
-    test.equal(events.name(Message), "test.EventMessage")
+    assert.eq(seen, "named")
+    assert.eq(value.observers.count, 1)
+    assert.eq(events.name(Message), "test.EventMessage")
 end
 
 function suite.keepsAddressesIndependent(): nil
@@ -46,8 +45,8 @@ function suite.keepsAddressesIndependent(): nil
     end)
     value:emit(entity, Message, "entity")
     value:emit(0, Message, "world")
-    test.equal(worldCalls, 1)
-    test.equal(entityCalls, 1)
+    assert.eq(worldCalls, 1)
+    assert.eq(entityCalls, 1)
 end
 
 function suite.stopsAnObserverNotYetReachedDuringDelivery(): nil
@@ -76,9 +75,9 @@ function suite.stopsAnObserverNotYetReachedDuringDelivery(): nil
     )
     value:emit(0, Message, "one")
     value:emit(0, Message, "two")
-    test.equal(firstCalls, 2)
-    test.equal(secondCalls, 0)
-    test.equal(value.observers.count, 1)
+    assert.eq(firstCalls, 2)
+    assert.eq(secondCalls, 0)
+    assert.eq(value.observers.count, 1)
 end
 
 function suite.removesEveryRegistrationOfACallback(): nil
@@ -92,12 +91,12 @@ function suite.removesEveryRegistrationOfACallback(): nil
     value:observe(0, Message, count)
     value:observe(0, Message, count, "named")
     value:emit(0, Message, "twice")
-    test.equal(calls, 2)
-    test.assert(value:stopObserving(0, Message, count))
-    test.assert(not value:stopObserving(0, Message, count))
+    assert.eq(calls, 2)
+    assert(value:stopObserving(0, Message, count))
+    assert(not value:stopObserving(0, Message, count))
     value:emit(0, Message, "none")
-    test.equal(calls, 2)
-    test.equal(value.observers.count, 0)
+    assert.eq(calls, 2)
+    assert.eq(value.observers.count, 0)
 end
 
 function suite.consumesAOnceObserverBeforeItRuns(): nil
@@ -109,8 +108,8 @@ function suite.consumesAOnceObserverBeforeItRuns(): nil
     end)
     value:emit(0, Message, "first")
     value:emit(0, Message, "second")
-    test.equal(calls, 1)
-    test.assert(not value:hasObservers(0, Message))
+    assert.eq(calls, 1)
+    assert(not value:hasObservers(0, Message))
 end
 
 function suite.supportsNestedDelivery(): nil
@@ -123,7 +122,7 @@ function suite.supportsNestedDelivery(): nil
         end
     end)
     value:emit(0, Message, "outer")
-    test.equal(table.concat(seen, ","), "outer,inner")
+    assert.eq(table.concat(seen, ","), "outer,inner")
 end
 
 function suite.deliversAnInstanceTheCallerHoldsAndKeepsItsWrites(): nil
@@ -133,7 +132,7 @@ function suite.deliversAnInstanceTheCallerHoldsAndKeepsItsWrites(): nil
     end)
     local held = Message(text = "hello")
     value:deliver(0, Message, held)
-    test.equal(held.text, "hello!")
+    assert.eq(held.text, "hello!")
 end
 
 function suite.finishesCurrentDeliveryWhenItsAddressIsCleared(): nil
@@ -146,9 +145,9 @@ function suite.finishesCurrentDeliveryWhenItsAddressIsCleared(): nil
         secondRan = true
     end)
     value:emit(0, Message, "first")
-    test.assert(secondRan)
-    test.assert(not value:hasObservers(0, Message))
-    test.equal(value.observers.count, 0)
+    assert(secondRan)
+    assert(not value:hasObservers(0, Message))
+    assert.eq(value.observers.count, 0)
 end
 
 function suite.clearsEntityObserversButPreservesWorldObservers(): nil
@@ -161,9 +160,9 @@ function suite.clearsEntityObserversButPreservesWorldObservers(): nil
     end)
     value:despawn(entity)
     value:commit()
-    test.assert(value:hasObservers(0, Message))
-    test.assert(not value:hasObservers(entity, Message))
-    test.equal(value.observers.count, 1)
+    assert(value:hasObservers(0, Message))
+    assert(not value:hasObservers(entity, Message))
+    assert.eq(value.observers.count, 1)
 end
 
 function suite.clearingEveryEntityKeepsTheWorldsObservers(): nil
@@ -178,10 +177,10 @@ function suite.clearingEveryEntityKeepsTheWorldsObservers(): nil
     value:observe(second, Message, function(_event: Message): nil
     end)
     value:clearEntities()
-    test.assert(value:hasObservers(0, Message))
-    test.assert(not value:hasObservers(first, Message))
-    test.assert(not value:hasObservers(second, Message))
-    test.equal(value.observers.count, 1)
+    assert(value:hasObservers(0, Message))
+    assert(not value:hasObservers(first, Message))
+    assert(not value:hasObservers(second, Message))
+    assert.eq(value.observers.count, 1)
 end
 
 function suite.recoversEmitBookkeepingAfterAnObserverRaises(): nil
@@ -194,20 +193,20 @@ function suite.recoversEmitBookkeepingAfterAnObserverRaises(): nil
         end,
         "failing"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             value:emit(0, Message, "fail")
         end,
         "expected observer failure"
     )
-    test.assert(value:stopObserving(0, Message, "failing"))
-    test.equal(value.observers.count, 0)
+    assert(value:stopObserving(0, Message, "failing"))
+    assert.eq(value.observers.count, 0)
     local delivered: string = ""
     value:observe(0, Message, function(event: Message): nil
         delivered = event.text
     end)
     value:emit(0, Message, "after")
-    test.equal(delivered, "after")
+    assert.eq(delivered, "after")
 end
 
 function suite.emitsLifecycleEventsAtPublication(): nil
@@ -223,16 +222,16 @@ function suite.emitsLifecycleEventsAtPublication(): nil
     end)
     local entity = value:spawn(ecs.Name("alive"))
     value:observe(entity, ecs.OnDespawn, function(event: ecs.OnDespawn): nil
-        test.equal(event:get(ecs.Name), "alive")
+        assert.eq(event:get(ecs.Name), "alive")
         entityDespawn = event.entity
     end)
-    test.equal(spawned, 0)
+    assert.eq(spawned, 0)
     value:commit()
-    test.equal(spawned, entity)
+    assert.eq(spawned, entity)
     value:despawn(entity)
     value:commit()
-    test.equal(entityDespawn, entity)
-    test.equal(globalDespawn, entity)
+    assert.eq(entityDespawn, entity)
+    assert.eq(globalDespawn, entity)
 end
 
 function suite.drainsMutationsStagedByLifecycleObservers(): nil
@@ -244,7 +243,7 @@ function suite.drainsMutationsStagedByLifecycleObservers(): nil
     end)
     local entity = value:spawn()
     value:commit()
-    test.assert(value:has(entity, marked))
+    assert(value:has(entity, marked))
 end
 
 function suite.despawnObserversCanRequestDependentTeardown(): nil
@@ -257,8 +256,8 @@ function suite.despawnObserversCanRequestDependentTeardown(): nil
     end)
     value:despawn(owner)
     value:commit()
-    test.assert(not value:isAlive(owner))
-    test.assert(not value:isAlive(dependent))
+    assert(not value:isAlive(owner))
+    assert(not value:isAlive(dependent))
 end
 
 function suite.doesNotEmitSpawnForACancelledReservation(): nil
@@ -270,7 +269,7 @@ function suite.doesNotEmitSpawnForACancelledReservation(): nil
     local entity = value:spawn()
     value:despawn(entity)
     value:commit()
-    test.equal(calls, 0)
+    assert.eq(calls, 0)
 end
 
 return suite

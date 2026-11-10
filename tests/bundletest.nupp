@@ -1,5 +1,4 @@
 local ecs = require("tecs.ecs")
-local test = require("nupp.test")
 local suite = {}
 
 local record Position
@@ -15,9 +14,9 @@ function suite.spawnsEmptyAndRequiredBundles(): nil
     local bare = empty:spawn()
     local marked = required:spawn(tag)
     world:commit()
-    test.assert(world:isAlive(bare))
-    test.assert(world:has(marked, tag))
-    test.equal(required.required[1], tag.componentName)
+    assert(world:isAlive(bare))
+    assert(world:has(marked, tag))
+    assert.eq(required.required[1], tag.componentName)
 end
 
 function suite.callsDefaultFactoriesForEverySpawn(): nil
@@ -45,9 +44,9 @@ function suite.callsDefaultFactoriesForEverySpawn(): nil
     world:commit()
     local firstPosition = assert(world:get(first, position))
     local secondPosition = assert(world:get(second, position))
-    test.equal(firstPosition.x, 1)
-    test.equal(secondPosition.x, 2)
-    test.assert(firstPosition ~= secondPosition)
+    assert.eq(firstPosition.x, 1)
+    assert.eq(secondPosition.x, 2)
+    assert(firstPosition ~= secondPosition)
 end
 
 function suite.usesComponentDefaultsForTrueEntries(): nil
@@ -57,8 +56,8 @@ function suite.usesComponentDefaultsForTrueEntries(): nil
     local bundle = world:newBundle("test.bundle.defaults", {with = {[health] = true, [marker] = true}})
     local entity = bundle:spawn()
     world:commit()
-    test.equal(world:get(entity, health) as number, 100)
-    test.assert(world:has(entity, marker))
+    assert.eq(world:get(entity, health) as number, 100)
+    assert(world:has(entity, marker))
 end
 
 function suite.validatesRequiredInputs(): nil
@@ -66,19 +65,19 @@ function suite.validatesRequiredInputs(): nil
     local first = ecs.newTagComponent({name = "test.BundleFirst"})
     local second = ecs.newTagComponent({name = "test.BundleSecond"})
     local bundle = world:newBundle("test.bundle.validation", {required = {first, second}})
-    test.raises(
+    assert.raises(
         function(): nil
             bundle:spawn(first)
         end,
         "Required component missing: test.BundleSecond"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             bundle:spawn(second, first)
         end,
         "expected test.BundleFirst at position 1"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             bundle:spawn(first, second, first)
         end,
@@ -90,7 +89,7 @@ function suite.rejectsDuplicateAndIncorrectFactoryComponents(): nil
     local world = ecs.newWorld()
     local first = ecs.newTagComponent({name = "test.BundleDuplicate"})
     local second = ecs.newTagComponent({name = "test.BundleFactoryOther"})
-    test.raises(
+    assert.raises(
         function(): nil
             world:newBundle("test.bundle.duplicate", {required = {first}, with = {[first] = true}})
         end,
@@ -103,7 +102,7 @@ function suite.rejectsDuplicateAndIncorrectFactoryComponents(): nil
             end
         },
     })
-    test.raises(
+    assert.raises(
         function(): nil
             bundle:spawn()
         end,
@@ -117,11 +116,11 @@ function suite.supportsNamedSpawnAndCallerOwnedListings(): nil
     local bundle = world:newBundle("test.bundle.named", {required = {marker}})
     local listing = world:getBundles()
     listing["test.bundle.named"] = nil
-    test.assert(world:getBundle("test.bundle.named") == bundle)
+    assert(world:getBundle("test.bundle.named") == bundle)
     local entity = world:spawnBundle("test.bundle.named", marker)
     world:commit()
-    test.assert(world:has(entity, marker))
-    test.raises(
+    assert(world:has(entity, marker))
+    assert.raises(
         function(): nil
             world:spawnBundle("test.bundle.missing")
         end,
@@ -138,8 +137,8 @@ function suite.preservesBundlesAcrossEntityClears(): nil
     world:clearEntities()
     local second = bundle:spawn()
     world:commit()
-    test.assert(not world:isAlive(first))
-    test.assert(world:has(second, marker))
+    assert(not world:isAlive(first))
+    assert(world:has(second, marker))
 end
 
 function suite.composesWithActiveStateAutoTagging(): nil
@@ -149,7 +148,7 @@ function suite.composesWithActiveStateAutoTagging(): nil
     local bundle = world:newBundle("test.bundle.state.spawn")
     local entity = bundle:spawn()
     world:commit()
-    test.assert(world:has(entity, state))
+    assert(world:has(entity, state))
 end
 
 return suite

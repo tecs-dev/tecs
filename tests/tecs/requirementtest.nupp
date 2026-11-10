@@ -3,7 +3,6 @@ const {type World} = require("tecs.ecs")
 const {type Archetype} = require("tecs.ecs")
 const {type ComponentInput} = require("tecs.ecs")
 
-local test = require("nupp.test")
 local components = require("tecs.internal.components")
 
 local suite = {}
@@ -31,11 +30,11 @@ const marker = ecs.newTagComponent({name = "test.RequireMarker", requires = {sha
 const defaulted = ecs.newTagComponent({name = "test.RequireDefaulted", requires = {point}})
 
 local function check(borrows world: World, id: integer): nil
-    test.assert(world:has(id, marker))
-    test.assert(world:get(id, point) == shared.value)
-    test.equal(world:get(id, health), 42)
-    test.equal(world:get(id, flag), false)
-    test.equal(world:get(id, label), "required")
+    assert(world:has(id, marker))
+    assert(world:get(id, point) == shared.value)
+    assert.eq(world:get(id, health), 42)
+    assert.eq(world:get(id, flag), false)
+    assert.eq(world:get(id, label), "required")
 end
 
 function suite.expandsInstancesTransitivelyAtPublication(): nil
@@ -49,10 +48,10 @@ function suite.expandsInstancesTransitivelyAtPublication(): nil
         end
     })
     const id = world:spawn(marker)
-    test.assert(not world:isAlive(id))
+    assert(not world:isAlive(id))
     world:enqueueCommit()
     check(world, id)
-    test.equal(notifications, 1)
+    assert.eq(notifications, 1)
 end
 
 function suite.preservesExplicitAndAlreadyPresentValues(): nil
@@ -63,13 +62,13 @@ function suite.preservesExplicitAndAlreadyPresentValues(): nil
     world:commit()
     world:set(third, marker)
     world:commit()
-    test.equal(assert(world:get(first, point)).x, 91)
-    test.equal(world:get(first, health), 92)
-    test.equal(world:get(first, flag), true)
-    test.equal(assert(world:get(second, point)).x, 94)
-    test.equal(world:get(second, health), 93)
-    test.equal(assert(world:get(third, point)).x, 95)
-    test.equal(world:get(third, health), 96)
+    assert.eq(assert(world:get(first, point)).x, 91)
+    assert.eq(world:get(first, health), 92)
+    assert.eq(world:get(first, flag), true)
+    assert.eq(assert(world:get(second, point)).x, 94)
+    assert.eq(world:get(second, health), 93)
+    assert.eq(assert(world:get(third, point)).x, 95)
+    assert.eq(world:get(third, health), 96)
 end
 
 function suite.constructsIndependentDefaultsButSharesDeclaredInstances(): nil
@@ -79,9 +78,9 @@ function suite.constructsIndependentDefaultsButSharesDeclaredInstances(): nil
     const third = world:spawn(marker)
     const fourth = world:spawn(marker)
     world:commit()
-    test.assert(world:get(first, point) ~= world:get(second, point))
-    test.equal(assert(world:get(first, point)).x, 5)
-    test.assert(world:get(third, point) == world:get(fourth, point))
+    assert(world:get(first, point) ~= world:get(second, point))
+    assert.eq(assert(world:get(first, point)).x, 5)
+    assert(world:get(third, point) == world:get(fourth, point))
     check(world, third)
 end
 
@@ -105,14 +104,14 @@ function suite.appliesOnlyTheNewlyAddedComponentsRequirements(): nil
     world:set(id, unrelated)
     world:set(id, point(21))
     world:commit()
-    test.assert(not world:has(id, health))
+    assert(not world:has(id, health))
     world:remove(id, defaulted)
     world:commit()
-    test.assert(world:has(id, point))
+    assert(world:has(id, point))
     world:set(id, defaulted)
     world:commit()
-    test.equal(world:get(id, health), 42)
-    test.equal(assert(world:get(id, point)).x, 21)
+    assert.eq(world:get(id, health), 42)
+    assert.eq(assert(world:get(id, point)).x, 21)
 end
 
 function suite.handlesStagedRemoveAndReadd(): nil
@@ -121,7 +120,7 @@ function suite.handlesStagedRemoveAndReadd(): nil
     world:remove(id, health)
     world:set(id, unrelated)
     world:commit()
-    test.assert(not world:has(id, health))
+    assert(not world:has(id, health))
     world:remove(id, marker)
     world:set(id, marker)
     world:commit()
@@ -145,13 +144,13 @@ function suite.keepsBulkDefaultFactoriesPerEntity(): nil
     const world = ecs.newWorld()
     const first = assert(world:batchSpawn(2, {defaulted}))
     world:commit()
-    test.assert(world:get(first, point) ~= world:get(first + 1, point))
+    assert(world:get(first, point) ~= world:get(first + 1, point))
     const id = world:spawn(unrelated)
     world:commit()
     world:batchSet(world:newQuery({include = {unrelated}}), defaulted)
     world:commit()
-    test.equal(assert(world:get(id, point)).x, 5)
-    test.equal(world:get(id, health), 42)
+    assert.eq(assert(world:get(id, point)).x, 5)
+    assert.eq(world:get(id, health), 42)
 end
 
 function suite.expandsBulkSetBeforeItsWriterAndCallbacks(): nil
@@ -162,7 +161,7 @@ function suite.expandsBulkSetBeforeItsWriterAndCallbacks(): nil
     world:newQuery({
         include = {marker},
         onEntitiesAdded = function(): nil
-            test.assert(written)
+            assert(written)
             check(world, id)
         end
     })
@@ -171,7 +170,7 @@ function suite.expandsBulkSetBeforeItsWriterAndCallbacks(): nil
         written = true
     end)
     world:commit()
-    test.assert(written)
+    assert(written)
 end
 
 function suite.preservesBulkExistingAndStagedOverrides(): nil
@@ -182,10 +181,10 @@ function suite.preservesBulkExistingAndStagedOverrides(): nil
     world:set(second, health(101))
     world:batchSet(world:newQuery({include = {unrelated}}), marker)
     world:commit()
-    test.equal(world:get(first, health), 100)
-    test.equal(world:get(second, health), 101)
-    test.assert(world:get(first, point) == shared.value)
-    test.assert(world:get(second, point) == shared.value)
+    assert.eq(world:get(first, health), 100)
+    assert.eq(world:get(second, health), 101)
+    assert(world:get(first, point) == shared.value)
+    assert(world:get(second, point) == shared.value)
 end
 
 function suite.supportsDenseAndSparseRelationshipRequirements(): nil
@@ -211,7 +210,7 @@ function suite.supportsDenseAndSparseRelationshipRequirements(): nil
         world:remove(first, health)
         world:set(first, relation(third))
         world:commit()
-        test.assert(not world:has(first, health))
+        assert(not world:has(first, health))
     end
 end
 
@@ -246,10 +245,10 @@ function suite.supportsDataRelationshipsAndRequiredEdges(): nil
     world:commit()
     for _, id in ipairs({first, second}) do
         check(world, id)
-        test.assert(world:get(id, relation:targeting(target)) == requiredEdge.value)
+        assert(world:get(id, relation:targeting(target)) == requiredEdge.value)
     end
-    test.equal(world:newQuery({include = {relation:targeting(target)}}):count(), 2)
-    test.equal(#world:relationshipSources(relation, target), 2)
+    assert.eq(world:newQuery({include = {relation:targeting(target)}}):count(), 2)
+    assert.eq(#world:relationshipSources(relation, target), 2)
 end
 
 function suite.copiesListsAndDeterministicallyDeduplicatesDiamonds(): nil
@@ -261,7 +260,7 @@ function suite.copiesListsAndDeterministicallyDeduplicatesDiamonds(): nil
     const world = ecs.newWorld()
     const id = world:spawn(root)
     world:commit()
-    test.equal(world:get(id, health), 20)
+    assert.eq(world:get(id, health), 20)
 end
 
 function suite.terminatesCyclesAndInvalidatesAncestorCaches(): nil
@@ -272,13 +271,13 @@ function suite.terminatesCyclesAndInvalidatesAncestorCaches(): nil
     const world = ecs.newWorld()
     const id = world:spawn(second)
     world:commit()
-    test.assert(world:has(id, first))
-    test.equal(world:get(id, health), 77)
+    assert(world:has(id, first))
+    assert.eq(world:get(id, health), 77)
 end
 
 function suite.rejectsUntargetedRequirementsBeforeRegistration(): nil
     const relation = ecs.newRelationship({name = "test.RequireUntargeted"})
-    test.raises(
+    assert.raises(
         function(): nil
             ecs.newTagComponent({name = "test.RequireInvalid", requires = {relation}})
         end,
@@ -314,10 +313,10 @@ function suite.requiredEdgesParticipateInBulkPublicationAndCascade(): nil
         world:batchSet(world:newQuery({include = {unrelated}}), root)
         world:commit()
         check(world, added)
-        test.equal(#world:relationshipSources(relation, target), 4)
+        assert.eq(#world:relationshipSources(relation, target), 4)
         world:despawn(target)
         world:commit()
-        test.equal(world:newQuery({include = {root}}):count(), 0)
+        assert.eq(world:newQuery({include = {root}}):count(), 0)
     end
 end
 
@@ -334,8 +333,8 @@ function suite.restoresMissingTransientRequirementsFromDefaults(): nil
     world:commit()
     const restored = ecs.newWorld()
     restored:loadSnapshot(world:saveSnapshot())
-    test.assert(restored:has(id, durable))
-    test.equal(restored:get(id, transient), 6)
+    assert(restored:has(id, durable))
+    assert.eq(restored:get(id, transient), 6)
 end
 
 return suite

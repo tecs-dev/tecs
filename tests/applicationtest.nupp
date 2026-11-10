@@ -2,7 +2,6 @@ local application = require("tecs.application")
 local ecs = require("tecs.ecs")
 local files = require("nupp.io.files")
 local platformevents = require("tecs.platform.events")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -21,12 +20,12 @@ function suite.constructsInertThenRunsPluginBeforeStartup(): nil
         end,
     })
 
-    test.assert(not pluginCalled)
-    test.equal(app:getState(), "created")
-    test.assert(app:init())
+    assert(not pluginCalled)
+    assert.eq(app:getState(), "created")
+    assert(app:init())
 
-    test.assert(startupObserved)
-    test.equal(app:getState(), "running")
+    assert(startupObserved)
+    assert.eq(app:getState(), "running")
 end
 
 function suite.namesAnApplicationIdentityWithoutReplacingOne(): nil
@@ -36,15 +35,15 @@ function suite.namesAnApplicationIdentityWithoutReplacingOne(): nil
     files.setApplicationIdentity("Ex Nihilo", "Starfarer")
     application.newApplication()
     local organization, named = files.applicationIdentity()
-    test.equal(organization, "Ex Nihilo")
-    test.equal(named, "Starfarer")
+    assert.eq(organization, "Ex Nihilo")
+    assert.eq(named, "Starfarer")
 
     files.setApplicationIdentity(application.DEFAULT_IDENTITY, application.DEFAULT_IDENTITY)
     const root, reason = files.dataPath()
     if root == nil then
-        test.skip("this platform has no writable root: " .. tostring(reason))
+        assert.suite.skip("this platform has no writable root: " .. tostring(reason))
     end
-    test.assert((root as files.ApplicationPath):toString():find(application.DEFAULT_IDENTITY, 1, true) ~= nil)
+    assert((root as files.ApplicationPath):toString():find(application.DEFAULT_IDENTITY, 1, true) ~= nil)
 end
 
 function suite.deliversASealedEventBatchBeforeTheFrame(): nil
@@ -71,12 +70,12 @@ function suite.deliversASealedEventBatchBeforeTheFrame(): nil
 
     local continues = app:iterate(0.25, {platformevents.resized(1280, 720), platformevents.focused(true),})
 
-    test.assert(continues)
-    test.equal(table.concat(delivered, ","), "windowResized,windowFocusGained")
-    test.equal(resizeWidth, 1280)
-    test.equal(seenByUpdate, 2)
-    test.equal(app.elapsed, 0.25)
-    test.equal(app.frame, 1)
+    assert(continues)
+    assert.eq(table.concat(delivered, ","), "windowResized,windowFocusGained")
+    assert.eq(resizeWidth, 1280)
+    assert.eq(seenByUpdate, 2)
+    assert.eq(app.elapsed, 0.25)
+    assert.eq(app.frame, 1)
 end
 
 function suite.honorsQuitRequestsFromEvents(): nil
@@ -86,10 +85,10 @@ function suite.honorsQuitRequestsFromEvents(): nil
     })
     app:init()
 
-    test.assert(not app:iterate(0.1, {platformevents.closeRequested(1)}))
+    assert(not app:iterate(0.1, {platformevents.closeRequested(1)}))
 
-    test.equal(app.frame, 0)
-    test.equal(app.elapsed, 0)
+    assert.eq(app.frame, 0)
+    assert.eq(app.elapsed, 0)
 end
 
 function suite.pausesSimulationButNotHostIterations(): nil
@@ -97,11 +96,11 @@ function suite.pausesSimulationButNotHostIterations(): nil
     app:init()
     app:setSuspended(true)
 
-    test.assert(app:iterate(0.5))
+    assert(app:iterate(0.5))
 
-    test.equal(app.frame, 1)
-    test.equal(app.elapsed, 0)
-    test.equal(app.world:fixedStepCount(), 0)
+    assert.eq(app.frame, 1)
+    assert.eq(app.elapsed, 0)
+    assert.eq(app.world:fixedStepCount(), 0)
 end
 
 function suite.containsAFrameCrashAndResumesInDebugMode(): nil
@@ -123,15 +122,15 @@ function suite.containsAFrameCrashAndResumesInDebugMode(): nil
     })
     app:init()
 
-    test.assert(app:iterate(0.1))
-    test.assert(app:crashed() ~= nil)
-    test.assert(app:iterate(0.1))
-    test.equal(calls, 1)
+    assert(app:iterate(0.1))
+    assert(app:crashed() ~= nil)
+    assert(app:iterate(0.1))
+    assert.eq(calls, 1)
 
     shouldFail = false
-    test.assert(app:clearCrash())
-    test.assert(app:iterate(0.1))
-    test.equal(calls, 2)
+    assert(app:clearCrash())
+    assert(app:iterate(0.1))
+    assert.eq(calls, 2)
 end
 
 function suite.refusesCrashRecoveryOutsideDebugMode(): nil
@@ -144,17 +143,17 @@ function suite.refusesCrashRecoveryOutsideDebugMode(): nil
 
     local resumed, reason = app:clearCrash()
 
-    test.assert(not resumed)
-    test.equal(reason, "application debug mode is disabled")
+    assert(not resumed)
+    assert.eq(reason, "application debug mode is disabled")
 end
 
 function suite.stopsAtTheConfiguredFrameLimit(): nil
     local app = application.newApplication({debugMaxFrames = 2})
     app:init()
 
-    test.assert(app:iterate(0))
-    test.assert(not app:iterate(0))
-    test.equal(app.frame, 2)
+    assert(app:iterate(0))
+    assert(not app:iterate(0))
+    assert.eq(app.frame, 2)
 end
 
 function suite.runsShutdownOnceAfterAStartupFailure(): nil
@@ -172,35 +171,35 @@ function suite.runsShutdownOnceAfterAStartupFailure(): nil
     })
     app:init()
 
-    test.assert(app:shutdown())
-    test.assert(app:shutdown())
+    assert(app:shutdown())
+    assert(app:shutdown())
 
-    test.equal(shutdownCalls, 1)
-    test.equal(app:getState(), "stopped")
+    assert.eq(shutdownCalls, 1)
+    assert.eq(app:getState(), "stopped")
 end
 
 function suite.rejectsInvalidHostLifecycleCalls(): nil
     local app = application.newApplication()
-    test.raises(
+    assert.raises(
         function(): nil
             app:iterate(0)
         end,
         "created"
     )
     app:init()
-    test.raises(
+    assert.raises(
         function(): nil
             app:init()
         end,
         "already running"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             app:iterate(-1)
         end,
         "negative number"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             application.newApplication({debugMaxFrames = 0})
         end,
@@ -238,20 +237,20 @@ end
 function suite.deliversAQueuedEventAsAnEdgeOfTheNextFrame(): nil
     local app, _, pressed = recorder()
     app:queueEvent(space(true))
-    test.equal(app:pendingEvents(), 1)
-    test.assert(not app.input:keyDown("Space"))
+    assert.eq(app:pendingEvents(), 1)
+    assert(not app.input:keyDown("Space"))
 
     app:iterate(1 / 60, nil)
-    test.assert(pressed[1])
-    test.equal(app:pendingEvents(), 0)
+    assert(pressed[1])
+    assert.eq(app:pendingEvents(), 0)
 
     -- The edge lasts one frame, and the key stays down until it comes up.
     app:iterate(1 / 60, nil)
-    test.assert(not pressed[2])
-    test.assert(app.input:keyDown("Space"))
+    assert(not pressed[2])
+    assert(app.input:keyDown("Space"))
     app:queueEvent(space(false))
     app:iterate(1 / 60, nil)
-    test.assert(app.input:keyReleased("Space"))
+    assert(app.input:keyReleased("Space"))
     app:shutdown()
 end
 
@@ -265,89 +264,89 @@ function suite.deliversQueuedEventsAfterTheHostBatch(): nil
     app:init()
     app:queueEvent(platformevents.text("queued", 0))
     app:iterate(1 / 60, {platformevents.focused(true, 0)})
-    test.equal(#order, 2)
-    test.equal(order[1], "windowFocusGained")
-    test.equal(order[2], "textInput")
+    assert.eq(#order, 2)
+    assert.eq(order[1], "windowFocusGained")
+    assert.eq(order[2], "textInput")
     app:shutdown()
 end
 
 function suite.holdsAPausedSimulationAndRunsGrantedFramesOnAFixedDelta(): nil
     local app, deltas, pressed = recorder()
     app:iterate(0.5, nil)
-    test.equal(#deltas, 1)
+    assert.eq(#deltas, 1)
 
     app:pause()
-    test.assert(app.paused)
+    assert(app.paused)
     local frame, elapsed = app.frame, app.elapsed
     app:queueEvent(space(true))
     -- Held turns run nothing, advance nothing, and keep the events.
-    test.assert(app:iterate(0.5, {platformevents.focused(true, 0)}))
-    test.assert(app:iterate(0.5, nil))
-    test.equal(#deltas, 1)
-    test.equal(app.frame, frame)
-    test.equal(app.elapsed, elapsed)
-    test.equal(app:pendingEvents(), 2)
-    test.assert(not app.window:hasFocus())
+    assert(app:iterate(0.5, {platformevents.focused(true, 0)}))
+    assert(app:iterate(0.5, nil))
+    assert.eq(#deltas, 1)
+    assert.eq(app.frame, frame)
+    assert.eq(app.elapsed, elapsed)
+    assert.eq(app:pendingEvents(), 2)
+    assert(not app.window:hasFocus())
 
     app:step(2, 0.25)
-    test.equal(app:pendingSteps(), 2)
-    test.equal(app:stepDelta(), 0.25)
+    assert.eq(app:pendingSteps(), 2)
+    assert.eq(app:stepDelta(), 0.25)
     app:iterate(0.5, nil)
-    test.equal(#deltas, 2)
-    test.equal(deltas[2], 0.25)
-    test.assert(pressed[2])
-    test.assert(app.window:hasFocus())
+    assert.eq(#deltas, 2)
+    assert.eq(deltas[2], 0.25)
+    assert(pressed[2])
+    assert(app.window:hasFocus())
     app:iterate(9, nil)
-    test.equal(deltas[3], 0.25)
-    test.assert(not pressed[3])
-    test.equal(app.frame, frame + 2)
-    test.equal(app.elapsed, elapsed + 0.5)
-    test.equal(app:pendingSteps(), 0)
+    assert.eq(deltas[3], 0.25)
+    assert(not pressed[3])
+    assert.eq(app.frame, frame + 2)
+    assert.eq(app.elapsed, elapsed + 0.5)
+    assert.eq(app:pendingSteps(), 0)
 
     -- Granted frames used up, the clock holds again.
     app:iterate(0.5, nil)
-    test.equal(#deltas, 3)
+    assert.eq(#deltas, 3)
 
     -- Resuming discards a grant and returns to the host's delta.
     app:step(5, 0.1)
     app:resume()
-    test.assert(not app.paused)
-    test.equal(app:pendingSteps(), 0)
+    assert(not app.paused)
+    assert.eq(app:pendingSteps(), 0)
     app:iterate(0.5, nil)
-    test.equal(deltas[4], 0.5)
+    assert.eq(deltas[4], 0.5)
     app:shutdown()
 end
 
 function suite.honorsAQuitWhilePaused(): nil
     local app = recorder()
     app:pause()
-    test.assert(not app:iterate(1 / 60, {platformevents.quit(0)}))
-    test.assert(app.quitRequested)
+    assert(not app:iterate(1 / 60, {platformevents.quit(0)}))
+    assert(app.quitRequested)
     app:shutdown()
 end
 
 function suite.refusesToStepARunningClockOrAnInvalidGrant(): nil
     local app = recorder()
-    test.raises(
+    assert.raises(
         function(): nil
             app:step(1, 1 / 60)
         end,
         "not paused"
     )
     app:pause()
-    test.raises(
+    assert.raises(
         function(): nil
             app:step(0, 1 / 60)
         end,
         "positive integer"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             app:step(1, 0)
         end,
         "positive finite"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             app:step(1, math.huge)
         end,
@@ -364,7 +363,7 @@ function suite.boundsTheEventsAPausedApplicationHolds(): nil
         batch[index] = platformevents.text(tostring(index), 0)
     end
     app:iterate(1 / 60, batch)
-    test.equal(app:pendingEvents(), 1024)
+    assert.eq(app:pendingEvents(), 1024)
     app:shutdown()
 end
 

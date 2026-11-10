@@ -1,5 +1,4 @@
 local ecs = require("tecs.ecs")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -35,13 +34,13 @@ function suite.listsSystemsInExecutionOrder(): nil
 
     local listed = ownSystems(value)
 
-    test.equal(#listed, 3)
-    test.equal(listed[1].name, "first.first")
-    test.equal(listed[1].position, 1)
-    test.equal(listed[2].name, "update.second")
-    test.equal(listed[2].position, 1)
-    test.equal(listed[3].name, "update.first")
-    test.equal(listed[3].position, 2)
+    assert.eq(#listed, 3)
+    assert.eq(listed[1].name, "first.first")
+    assert.eq(listed[1].position, 1)
+    assert.eq(listed[2].name, "update.second")
+    assert.eq(listed[2].position, 1)
+    assert.eq(listed[3].name, "update.first")
+    assert.eq(listed[3].position, 2)
 end
 
 function suite.reportsGeneratedNamesAndGates(): nil
@@ -56,9 +55,9 @@ function suite.reportsGeneratedNamesAndGates(): nil
 
     local listed = ownSystems(value)
 
-    test.equal(listed[1].name, generated)
-    test.assert(listed[1].hasRunIf)
-    test.assert(listed[1].enabled)
+    assert.eq(listed[1].name, generated)
+    assert(listed[1].hasRunIf)
+    assert(listed[1].enabled)
 end
 
 function suite.disablesAndReenablesSystemsIdempotently(): nil
@@ -72,28 +71,28 @@ function suite.disablesAndReenablesSystemsIdempotently(): nil
         end,
     })
 
-    test.assert(value:setSystemEnabled("controlled", false))
-    test.assert(value:setSystemEnabled("controlled", false))
+    assert(value:setSystemEnabled("controlled", false))
+    assert(value:setSystemEnabled("controlled", false))
     value:update(0)
-    test.equal(calls, 0)
-    test.assert(not ownSystems(value)[1].enabled)
-    test.equal(value:getStats().systems, BUILTIN_SYSTEM_COUNT + 1)
+    assert.eq(calls, 0)
+    assert(not ownSystems(value)[1].enabled)
+    assert.eq(value:getStats().systems, BUILTIN_SYSTEM_COUNT + 1)
 
-    test.assert(value:setSystemEnabled("controlled", true))
-    test.assert(value:setSystemEnabled("controlled", true))
+    assert(value:setSystemEnabled("controlled", true))
+    assert(value:setSystemEnabled("controlled", true))
     value:update(0)
-    test.equal(calls, 1)
+    assert.eq(calls, 1)
 end
 
 function suite.removesADisabledSystem(): nil
     local value = ecs.newWorld()
     value:addSystem({name = "removed", phase = ecs.phases.Update, run = noop})
-    test.assert(value:setSystemEnabled("removed", false))
+    assert(value:setSystemEnabled("removed", false))
 
-    test.assert(value:removeSystem("removed"))
+    assert(value:removeSystem("removed"))
 
-    test.equal(#ownSystems(value), 0)
-    test.equal(value:getStats().systems, BUILTIN_SYSTEM_COUNT)
+    assert.eq(#ownSystems(value), 0)
+    assert.eq(value:getStats().systems, BUILTIN_SYSTEM_COUNT)
 end
 
 function suite.returnsAReasonForAnUnknownSystem(): nil
@@ -101,8 +100,8 @@ function suite.returnsAReasonForAnUnknownSystem(): nil
 
     local changed, reason = value:setSystemEnabled("missing", false)
 
-    test.assert(not changed)
-    test.equal(reason, "no system named 'missing' is registered")
+    assert(not changed)
+    assert.eq(reason, "no system named 'missing' is registered")
 end
 
 return suite

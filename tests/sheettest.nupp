@@ -1,5 +1,4 @@
 local sheet = require("tecs.gfx.sheet")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -10,7 +9,7 @@ local sequence = 0
 --- Compares two durations that were summed frame by frame, because a cycle is
 --- an accumulation of floats and no two of them land on the same bits.
 local function nearly(actual: number, expected: number, message: string): nil
-    test.assert(math.abs(actual - expected) < 1e-9, message)
+    assert(math.abs(actual - expected) < 1e-9, message)
 end
 
 local function uniqueName(prefix: string): string
@@ -27,26 +26,26 @@ function suite.cutsAGridIntoRowMajorFrames(): nil
         frameWidth = 32,
         frameHeight = 32,
     })
-    test.equal(built.count, 4)
+    assert.eq(built.count, 4)
 
     const x, y, w, h = built:rect(4)
-    test.equal(x, 32)
-    test.equal(y, 32)
-    test.equal(w, 32)
-    test.equal(h, 32)
+    assert.eq(x, 32)
+    assert.eq(y, 32)
+    assert.eq(w, 32)
+    assert.eq(h, 32)
 
     const secondX, secondY = built:rect(2)
-    test.equal(secondX, 32)
-    test.equal(secondY, 0)
+    assert.eq(secondX, 32)
+    assert.eq(secondY, 0)
 
     -- Unbound, a frame's region is its plain fraction of the image.
     const u0, v0, u1, v1 = built:uv(4)
-    test.equal(u0, 0.5)
-    test.equal(v0, 0.5)
-    test.equal(u1, 1)
-    test.equal(v1, 1)
+    assert.eq(u0, 0.5)
+    assert.eq(v0, 0.5)
+    assert.eq(u1, 1)
+    assert.eq(v1, 1)
 
-    test.equal(built:duration(1), sheet.DEFAULT_DURATION / 1000.0)
+    assert.eq(built:duration(1), sheet.DEFAULT_DURATION / 1000.0)
 end
 
 function suite.leavesTheMarginAndSpacingBetweenCells(): nil
@@ -59,14 +58,14 @@ function suite.leavesTheMarginAndSpacingBetweenCells(): nil
         margin = 2,
         spacing = 2,
     })
-    test.equal(built.count, 2)
+    assert.eq(built.count, 2)
 
     const firstX, firstY = built:rect(1)
-    test.equal(firstX, 2)
-    test.equal(firstY, 2)
+    assert.eq(firstX, 2)
+    assert.eq(firstY, 2)
 
     const secondX = built:rect(2)
-    test.equal(secondX, 36)
+    assert.eq(secondX, 36)
 end
 
 function suite.cutsAnExplicitFrameList(): nil
@@ -76,15 +75,15 @@ function suite.cutsAnExplicitFrameList(): nil
         imageHeight = 50,
         frames = {{x = 0, y = 0, w = 10, h = 20, duration = 250}, {x = 10, y = 0, w = 30, h = 20}},
     })
-    test.equal(built.count, 2)
-    test.equal(built:duration(1), 0.25)
-    test.equal(built:duration(2), 0.1)
+    assert.eq(built.count, 2)
+    assert.eq(built:duration(1), 0.25)
+    assert.eq(built:duration(2), 0.1)
 
     const left, top, w, h = built:rect(2)
-    test.equal(left, 10)
-    test.equal(top, 0)
-    test.equal(w, 30)
-    test.equal(h, 20)
+    assert.eq(left, 10)
+    assert.eq(top, 0)
+    assert.eq(w, 30)
+    assert.eq(h, 20)
 end
 
 function suite.walksATagInEachDirection(): nil
@@ -104,33 +103,33 @@ function suite.walksATagInEachDirection(): nil
 
     -- Ids follow the names in sorted order, so the same table produces the same
     -- ids on every run.
-    test.equal(built:tagId("ahead"), 1)
-    test.equal(built:tagId("back"), 2)
-    test.equal(built:tagId("there"), 3)
-    test.equal(built:tagCount(), 3)
+    assert.eq(built:tagId("ahead"), 1)
+    assert.eq(built:tagId("back"), 2)
+    assert.eq(built:tagId("there"), 3)
+    assert.eq(built:tagCount(), 3)
 
     const forward = built:tagId("ahead")
     nearly(built:cycle(forward), 0.3, "three frames of a tenth make a third of a second")
-    test.equal(built:frameAt(forward, 0.0), 1)
-    test.equal(built:frameAt(forward, 0.15), 2)
-    test.equal(built:frameAt(forward, 0.29), 3)
+    assert.eq(built:frameAt(forward, 0.0), 1)
+    assert.eq(built:frameAt(forward, 0.15), 2)
+    assert.eq(built:frameAt(forward, 0.29), 3)
 
     const reverse = built:tagId("back")
-    test.equal(built:frameAt(reverse, 0.0), 3)
-    test.equal(built:frameAt(reverse, 0.29), 1)
+    assert.eq(built:frameAt(reverse, 0.0), 3)
+    assert.eq(built:frameAt(reverse, 0.29), 1)
 
     -- Neither end is repeated, so a three-frame pingpong is 1, 2, 3, 2 and its
     -- cycle is four frames long rather than six.
     const pingpong = built:tagId("there")
     nearly(built:cycle(pingpong), 0.4, "a three-frame pingpong visits four frames")
-    test.equal(built:frameAt(pingpong, 0.0), 1)
-    test.equal(built:frameAt(pingpong, 0.15), 2)
-    test.equal(built:frameAt(pingpong, 0.25), 3)
-    test.equal(built:frameAt(pingpong, 0.35), 2)
+    assert.eq(built:frameAt(pingpong, 0.0), 1)
+    assert.eq(built:frameAt(pingpong, 0.15), 2)
+    assert.eq(built:frameAt(pingpong, 0.25), 3)
+    assert.eq(built:frameAt(pingpong, 0.35), 2)
 
     -- Outside the cycle this clamps rather than wrapping, because wrapping is
     -- the caller's decision about looping.
-    test.equal(built:frameAt(forward, 99.0), 3)
+    assert.eq(built:frameAt(forward, 99.0), 3)
 end
 
 function suite.playsTheWholeSheetUnderTagZero(): nil
@@ -141,12 +140,12 @@ function suite.playsTheWholeSheetUnderTagZero(): nil
         frameWidth = 32,
         frameHeight = 32,
     })
-    test.equal(built:tagId(nil), 0)
+    assert.eq(built:tagId(nil), 0)
     -- The empty string is what a snapshot stores for tag zero.
-    test.equal(built:tagId(""), 0)
-    test.equal(built:tagName(0), "")
+    assert.eq(built:tagId(""), 0)
+    assert.eq(built:tagName(0), "")
     nearly(built:cycle(0), 0.4, "the whole sheet is four frames of a tenth")
-    test.equal(built:frameAt(0, 0.35), 4)
+    assert.eq(built:frameAt(0, 0.35), 4)
 end
 
 function suite.answersTheWholeSheetForATagItDoesNotCarry(): nil
@@ -159,14 +158,14 @@ function suite.answersTheWholeSheetForATagItDoesNotCarry(): nil
         tags = {idle = {from = 1, to = 2}},
     })
 
-    test.assert(built:hasTag("idle"), "the sheet carries the tag it was built with")
-    test.assert(not built:hasTag("run"), "and not one it was not")
+    assert(built:hasTag("idle"), "the sheet carries the tag it was built with")
+    assert(not built:hasTag("run"), "and not one it was not")
 
     -- A misspelled tag is reported once and then read as the whole sheet, which
     -- is why `tag` raises and this does not.
-    test.equal(built:tagId("run"), 0)
-    test.equal(built:tagId("run"), 0)
-    test.raises(
+    assert.eq(built:tagId("run"), 0)
+    assert.eq(built:tagId("run"), 0)
+    assert.raises(
         function(): nil
             built:tag("run")
         end,
@@ -186,34 +185,34 @@ function suite.readsAPivotOutOfASliceThatMoves(): nil
         :finish()
 
     const hand = built:sliceId("hand")
-    test.equal(hand, 1)
-    test.equal(built:sliceName(hand), "hand")
-    test.equal(assert(built:slice("hand")).data, "right")
+    assert.eq(hand, 1)
+    assert.eq(built:sliceName(hand), "hand")
+    assert.eq(assert(built:slice("hand")).data, "right")
 
     -- The pivot is a fraction of the frame, so nothing downstream has to know
     -- the sheet's pixel sizes.
     const x, y = built:pivotOf(hand, 1)
-    test.equal(x, 12 / 32)
-    test.equal(y, 12 / 32)
+    assert.eq(x, 12 / 32)
+    assert.eq(y, 12 / 32)
 
     -- A slice holds its key until the next one, so frame two reads the second.
     const movedX, movedY = built:pivotOf(hand, 2)
-    test.equal(movedX, 0.5)
-    test.equal(movedY, 0.25)
+    assert.eq(movedX, 0.5)
+    assert.eq(movedY, 0.25)
 
     -- A slice naming no pivot answers the middle of its own rectangle.
     const foot = built:sliceId("foot")
     const footX, footY = built:pivotOf(foot, 1)
-    test.equal(footX, 4 / 32)
-    test.equal(footY, 28 / 32)
+    assert.eq(footX, 4 / 32)
+    assert.eq(footY, 28 / 32)
 
     -- A slice the sheet does not carry answers the middle of the frame, which
     -- is where a quad sits with no pivot at all.
     const missingX, missingY = built:pivotOf(built:sliceId("nose"), 1)
-    test.equal(missingX, 0.5)
-    test.equal(missingY, 0.5)
-    test.equal(built:sliceName(0), "")
-    test.assert(built:slice("nose") == nil, "an absent slice is nil rather than an error")
+    assert.eq(missingX, 0.5)
+    assert.eq(missingY, 0.5)
+    assert.eq(built:sliceName(0), "")
+    assert(built:slice("nose") == nil, "an absent slice is nil rather than an error")
 end
 
 function suite.takesANineSliceCenterAsItsPivot(): nil
@@ -222,8 +221,8 @@ function suite.takesANineSliceCenterAsItsPivot(): nil
     }):finish()
 
     const x, y = built:pivotOf(built:sliceId("panel"), 1)
-    test.equal(x, 0.5)
-    test.equal(y, 0.5)
+    assert.eq(x, 0.5)
+    assert.eq(y, 0.5)
 end
 
 function suite.resolvesFramesAgainstABoundImage(): nil
@@ -234,33 +233,33 @@ function suite.resolvesFramesAgainstABoundImage(): nil
         frameWidth = 32,
         frameHeight = 32,
     })
-    test.equal(built:boundImage(), 0)
+    assert.eq(built:boundImage(), 0)
 
     built:bind(9)
-    test.equal(built:boundImage(), 9)
+    assert.eq(built:boundImage(), 9)
     const u0, v0, u1, v1 = built:uv(1)
-    test.equal(u0, 0)
-    test.equal(v0, 0)
-    test.equal(u1, 0.5)
-    test.equal(v1, 0.5)
+    assert.eq(u0, 0)
+    assert.eq(v0, 0)
+    assert.eq(u1, 0.5)
+    assert.eq(v1, 0.5)
 
     const spawned = built:sprite(4)
-    test.equal(spawned.value.image, 9)
-    test.equal(spawned.value.u0, 0.5)
-    test.equal(spawned.value.v1, 1)
+    assert.eq(spawned.value.image, 9)
+    assert.eq(spawned.value.u0, 0.5)
+    assert.eq(spawned.value.v1, 1)
 
     -- A region names the part of the image the sheet occupies, and binding
     -- again rescales from the pixel rectangles rather than from the previous
     -- result, so nothing accumulates.
     built:bind(9, 0.5, 0.0, 1.0, 0.5)
     const regionU0, regionV0, regionU1, regionV1 = built:uv(1)
-    test.equal(regionU0, 0.5)
-    test.equal(regionV0, 0)
-    test.equal(regionU1, 0.75)
-    test.equal(regionV1, 0.25)
+    assert.eq(regionU0, 0.5)
+    assert.eq(regionV0, 0)
+    assert.eq(regionU1, 0.75)
+    assert.eq(regionV1, 0.25)
 
     built:bind(9)
-    test.equal(built:uv(1), 0)
+    assert.eq(built:uv(1), 0)
 end
 
 function suite.reportsAFrameRevision(): nil
@@ -273,19 +272,19 @@ function suite.reportsAFrameRevision(): nil
         frameHeight = 32,
     })
     const afterBuild = sheet.revision()
-    test.assert(afterBuild > before, "registration moves the revision")
+    assert(afterBuild > before, "registration moves the revision")
     built:bind(3)
-    test.assert(sheet.revision() > afterBuild, "binding moves the revision")
+    assert(sheet.revision() > afterBuild, "binding moves the revision")
 end
 
 function suite.findsARegisteredSheetByIdAndByName(): nil
     const name = uniqueName("registry")
     const built = sheet.grid({name = name, imageWidth = 32, imageHeight = 32, frameWidth = 32, frameHeight = 32,})
-    test.assert(built.id > 0, "registration hands out an id")
-    test.equal(assert(sheet.byId(built.id)).name, name)
-    test.equal(assert(sheet.byName(name)).id, built.id)
-    test.assert(sheet.byId(0) == nil, "zero names no sheet")
-    test.assert(sheet.byName("test.nothing.registered") == nil, "an unknown name is nil")
+    assert(built.id > 0, "registration hands out an id")
+    assert.eq(assert(sheet.byId(built.id)).name, name)
+    assert.eq(assert(sheet.byName(name)).id, built.id)
+    assert(sheet.byId(0) == nil, "zero names no sheet")
+    assert(sheet.byName("test.nothing.registered") == nil, "an unknown name is nil")
 end
 
 function suite.foldsAReExportIntoTheSheetAlreadyRegistered(): nil
@@ -311,17 +310,17 @@ function suite.foldsAReExportIntoTheSheetAlreadyRegistered(): nil
         tags = {idle = {from = 1, to = 4}},
     })
     const folded, reason = sheet.replace(rebuilt)
-    test.assert(reason == nil, "the fold was accepted")
-    test.equal(assert(folded).id, liveId)
-    test.equal(live.count, 4)
+    assert(reason == nil, "the fold was accepted")
+    assert.eq(assert(folded).id, liveId)
+    assert.eq(live.count, 4)
     -- The live sheet's bind is kept, so the new frames are already resolved.
-    test.equal(live:boundImage(), 4)
-    test.equal(live:uv(1), 0)
+    assert.eq(live:boundImage(), 4)
+    assert.eq(live:uv(1), 0)
     const secondU0 = live:uv(2)
-    test.equal(secondU0, 0.25)
+    assert.eq(secondU0, 0.25)
     -- The build is spent: its id now resolves to the sheet its frames ended up
     -- in.
-    test.equal(assert(sheet.byId(rebuilt.id)).id, liveId)
+    assert.eq(assert(sheet.byId(rebuilt.id)).id, liveId)
 end
 
 function suite.refusesAReExportThatWouldRenumberTags(): nil
@@ -344,12 +343,12 @@ function suite.refusesAReExportThatWouldRenumberTags(): nil
         tags = {idle = {from = 1, to = 2}, attack = {from = 1, to = 1}},
     })
     const folded, reason = sheet.replace(rebuilt)
-    test.assert(folded == nil, "the fold was refused")
-    test.matches(assert(reason), "renumber its tags")
+    assert(folded == nil, "the fold was refused")
+    assert.matches(assert(reason), "renumber its tags")
 
     -- A refusal leaves the live sheet exactly as it was.
-    test.equal(assert(sheet.byName(name)).id, live.id)
-    test.equal(live:tagCount(), 1)
+    assert.eq(assert(sheet.byName(name)).id, live.id)
+    assert.eq(live:tagCount(), 1)
 
     -- Replacing a sheet nothing displaced has nothing to fold into.
     const alone = sheet.grid({
@@ -360,24 +359,24 @@ function suite.refusesAReExportThatWouldRenumberTags(): nil
         frameHeight = 32,
     })
     const nothing, why = sheet.replace(alone)
-    test.assert(nothing == nil, "there was nothing to replace")
-    test.matches(assert(why), "nothing to replace")
+    assert(nothing == nil, "there was nothing to replace")
+    assert.matches(assert(why), "nothing to replace")
 end
 
 function suite.rejectsASheetItCannotCut(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             sheet.grid({name = "", imageWidth = 32, imageHeight = 32, frameWidth = 32, frameHeight = 32,})
         end,
         "needs a name"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sheet.grid({name = uniqueName("bad"), imageWidth = 0, imageHeight = 32, frameWidth = 32, frameHeight = 32,})
         end,
         "pixel size"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sheet.grid({
                 name = uniqueName("bad"),
@@ -389,7 +388,7 @@ function suite.rejectsASheetItCannotCut(): nil
         end,
         "fits no"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sheet.grid({
                 name = uniqueName("bad"),
@@ -402,13 +401,13 @@ function suite.rejectsASheetItCannotCut(): nil
         end,
         "asks for"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sheet.rects({name = uniqueName("bad"), imageWidth = 32, imageHeight = 32, frames = {}})
         end,
         "lists no frames"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sheet.rects({
                 name = uniqueName("bad"),
@@ -419,7 +418,7 @@ function suite.rejectsASheetItCannotCut(): nil
         end,
         "positive size"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sheet.grid({
                 name = uniqueName("bad"),
@@ -432,7 +431,7 @@ function suite.rejectsASheetItCannotCut(): nil
         end,
         "outside its"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sheet.grid({
                 name = uniqueName("bad"),
@@ -445,13 +444,13 @@ function suite.rejectsASheetItCannotCut(): nil
         end,
         "no direction"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sheet.build(uniqueName("bad"), 32, 32):finish()
         end,
         "no frames"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             sheet.build(uniqueName("bad"), 32, 32):frame(0, 0, 0, 8)
         end,
@@ -467,25 +466,25 @@ function suite.raisesOnAFrameIndexTheSheetHasNot(): nil
         frameWidth = 32,
         frameHeight = 32,
     })
-    test.raises(
+    assert.raises(
         function(): nil
             built:rect(2)
         end,
         "has no frame"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             built:uv(0)
         end,
         "has no frame"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             built:duration(7)
         end,
         "has no frame"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             built:sprite(3)
         end,
@@ -506,25 +505,25 @@ function suite.readsAnAsepriteArrayExport(): nil
         .. '{"frame":0,"bounds":{"x":2,"y":3,"w":4,"h":5},"pivot":{"x":1,"y":1}}]}]}}',
     })
 
-    test.equal(built.name, name)
-    test.equal(built.count, 2)
-    test.equal(built.imageWidth, 32)
-    test.equal(built.imageHeight, 16)
-    test.equal(built:duration(1), 0.05)
-    test.equal(built:duration(2), 0.15)
+    assert.eq(built.name, name)
+    assert.eq(built.count, 2)
+    assert.eq(built.imageWidth, 32)
+    assert.eq(built.imageHeight, 16)
+    assert.eq(built:duration(1), 0.05)
+    assert.eq(built:duration(2), 0.15)
 
     -- Aseprite counts frames from zero and this model counts from one, so the
     -- span moves by one at the boundary and nowhere else.
     const from, to, direction = built:tag("idle")
-    test.equal(from, 1)
-    test.equal(to, 2)
-    test.equal(direction, "pingpong")
+    assert.eq(from, 1)
+    assert.eq(to, 2)
+    assert.eq(direction, "pingpong")
 
     const hand = built:sliceId("hand")
-    test.equal(assert(built:sliceKeyAt(hand, 1)).frame, 1)
+    assert.eq(assert(built:sliceKeyAt(hand, 1)).frame, 1)
     const x, y = built:pivotOf(hand, 1)
-    test.equal(x, 3 / 16)
-    test.equal(y, 4 / 16)
+    assert.eq(x, 3 / 16)
+    assert.eq(y, 4 / 16)
 end
 
 function suite.readsAnAsepriteObjectExportInFrameOrder(): nil
@@ -539,20 +538,20 @@ function suite.readsAnAsepriteObjectExportInFrameOrder(): nil
 
     -- The frame names carry the frame number, so sorting them is what puts the
     -- object's frames back in order.
-    test.equal(built.name, "test.aseprite.object")
-    test.equal(built.count, 2)
-    test.equal(built:rect(1), 0)
-    test.equal(built:rect(2), 16)
+    assert.eq(built.name, "test.aseprite.object")
+    assert.eq(built.count, 2)
+    assert.eq(built:rect(1), 0)
+    assert.eq(built:rect(2), 16)
 end
 
 function suite.refusesAMalformedAsepriteExport(): nil
     -- Not JSON at all.
-    test.raises(function(): nil
+    assert.raises(function(): nil
         sheet.fromAseprite({name = uniqueName("broken"), json = "{this is not json"})
     end)
 
     -- Valid JSON that is not an export.
-    test.raises(
+    assert.raises(
         function(): nil
             sheet.fromAseprite({name = uniqueName("broken"), json = '{"meta":{"size":{"w":32,"h":32}}}'})
         end,
@@ -560,7 +559,7 @@ function suite.refusesAMalformedAsepriteExport(): nil
     )
 
     -- An export naming no image, with no name of its own to fall back on.
-    test.raises(
+    assert.raises(
         function(): nil
             sheet.fromAseprite({json = '{"frames":[],"meta":{"size":{"w":32,"h":32}}}'})
         end,
@@ -568,7 +567,7 @@ function suite.refusesAMalformedAsepriteExport(): nil
     )
 
     -- A frame carrying no rectangle.
-    test.raises(
+    assert.raises(
         function(): nil
             sheet.fromAseprite({
                 name = uniqueName("broken"),
@@ -579,7 +578,7 @@ function suite.refusesAMalformedAsepriteExport(): nil
     )
 
     -- A frame tag carrying no span.
-    test.raises(
+    assert.raises(
         function(): nil
             sheet.fromAseprite({
                 name = uniqueName("broken"),

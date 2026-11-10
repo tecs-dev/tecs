@@ -5,7 +5,6 @@ local effects = require("tecs.audio.effects")
 local files = require("nupp.io.files")
 local hostpump = require("nupp.host.pump")
 local pcm = require("tecs.pcm")
-local test = require("nupp.test")
 local time = require("nupp.time")
 
 local suite = {}
@@ -78,11 +77,11 @@ end
 local function offline(): audiobackend.Backend
     local ok, native = pcall(require, "tecs.platform.audionative")
     if not ok then
-        test.skip("libtecsaudio is not on the loader path: " .. tostring(native))
+        assert.suite.skip("libtecsaudio is not on the loader path: " .. tostring(native))
     end
     local backend, reason = (native as {[string]: any}).openOffline(48000, 2, 8)
     if backend == nil then
-        test.skip("libtecsaudio did not open: " .. tostring(reason))
+        assert.suite.skip("libtecsaudio did not open: " .. tostring(reason))
     end
 
     return backend as audiobackend.Backend
@@ -92,11 +91,11 @@ end
 local function voided(): audiobackend.Backend
     local ok, native = pcall(require, "tecs.platform.audionative")
     if not ok then
-        test.skip("libtecsaudio is not on the loader path: " .. tostring(native))
+        assert.suite.skip("libtecsaudio is not on the loader path: " .. tostring(native))
     end
     local backend, reason = (native as {[string]: any}).openVoid(48000, 2, 8)
     if backend == nil then
-        test.skip("libtecsaudio did not open a void output: " .. tostring(reason))
+        assert.suite.skip("libtecsaudio did not open a void output: " .. tostring(reason))
     end
 
     return backend as audiobackend.Backend
@@ -128,22 +127,22 @@ end
 function suite.loadsAFileOnceAndReportsAMissingOne(): nil
     temporary(silenceWav(0.5), function(path: string): nil
         local sound = assert(pcm.load(path))
-        test.equal(sound.name, path)
-        test.equal(sound.decoder, pcm.DECODER)
-        test.equal(sound.decoder, "pcm")
-        test.equal(#sound.params, 8, "an eight-byte clip id")
-        test.equal(sound.bytes, "")
-        test.assert(math.abs(assert(sound.duration) - 0.5) < 1e-6)
-        test.equal(pcm.resident(sound), true)
-        test.assert(sound.reload ~= nil, "a file Sound can be re-read")
+        assert.eq(sound.name, path)
+        assert.eq(sound.decoder, pcm.DECODER)
+        assert.eq(sound.decoder, "pcm")
+        assert.eq(#sound.params, 8, "an eight-byte clip id")
+        assert.eq(sound.bytes, "")
+        assert(math.abs(assert(sound.duration) - 0.5) < 1e-6)
+        assert.eq(pcm.resident(sound), true)
+        assert(sound.reload ~= nil, "a file Sound can be re-read")
         -- Once for the whole process: loading it again is the same Sound.
-        test.equal(pcm.load(path), sound)
+        assert.eq(pcm.load(path), sound)
         pcm.release(sound)
     end)
 
     local missing, reason = pcm.load("tests/audio/no-such-file.ogg")
-    test.equal(missing, nil)
-    test.assert(#assert(reason) > 0)
+    assert.eq(missing, nil)
+    assert(#assert(reason) > 0)
 end
 
 function suite.decodesBytesOnceUnderAName(): nil
@@ -151,28 +150,28 @@ function suite.decodesBytesOnceUnderAName(): nil
     local bytes = unsignedWav(10989, string.rep(string.char(128), 1099))
     local name = freshName()
     local sound = assert(pcm.loadBytes(name, bytes))
-    test.equal(sound.name, name)
-    test.assert(math.abs(assert(sound.duration) - 1099 / 10989) < 1e-6)
-    test.equal(pcm.resident(sound), true)
-    test.equal(sound.reload, nil, "bytes have no file to re-read")
+    assert.eq(sound.name, name)
+    assert(math.abs(assert(sound.duration) - 1099 / 10989) < 1e-6)
+    assert.eq(pcm.resident(sound), true)
+    assert.eq(sound.reload, nil, "bytes have no file to re-read")
     -- A second load of the name returns the Sound it already is, without
     -- decoding the new bytes, and names and paths share one namespace.
-    test.equal(pcm.loadBytes(name, "other bytes"), sound)
-    test.equal(pcm.load(name), sound)
+    assert.eq(pcm.loadBytes(name, "other bytes"), sound)
+    assert.eq(pcm.load(name), sound)
 
     local junk, junkReason = pcm.loadBytes("tests/memory/junk.wav", "these bytes are not audio")
-    test.equal(junk, nil)
-    test.matches(assert(junkReason), "junk.wav")
+    assert.eq(junk, nil)
+    assert.matches(assert(junkReason), "junk.wav")
 end
 
 function suite.raisesOnAnEmptyNameOrPath(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             pcm.loadBytes("", silenceWav(0.01))
         end,
         "name cannot be empty"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             pcm.load("")
         end,
@@ -183,16 +182,16 @@ end
 function suite.streamsAFilePastTheThresholdOrWhenTold(): nil
     temporary(silenceWav(0.5), function(path: string): nil
         local streamed = assert(pcm.load(path, {streamSeconds = 0.25}))
-        test.assert(streamedSound(streamed))
+        assert(streamedSound(streamed))
         pcm.release(streamed)
         local told = assert(pcm.load(path, {stream = true}))
-        test.assert(streamedSound(told))
+        assert(streamedSound(told))
         pcm.release(told)
         local held = assert(pcm.load(path, {stream = false, streamSeconds = 0.25}))
-        test.equal(pcm.resident(held), true)
+        assert.eq(pcm.resident(held), true)
         pcm.release(held)
         local short = assert(pcm.load(path))
-        test.equal(pcm.resident(short), true, "under the default ten seconds")
+        assert.eq(pcm.resident(short), true, "under the default ten seconds")
         pcm.release(short)
     end)
 end
@@ -201,12 +200,12 @@ function suite.releasesASoundSoTheNextLoadReadsAgain(): nil
     temporary(silenceWav(0.1), function(path: string): nil
         local sound = assert(pcm.load(path))
         pcm.release(sound)
-        test.equal(pcm.resident(sound), nil, "no longer this module's")
+        assert.eq(pcm.resident(sound), nil, "no longer this module's")
         local again = assert(pcm.load(path))
-        test.notEqual(again, sound)
+        assert.ne(again, sound)
         -- Releasing a stale Sound leaves the live one alone.
         pcm.release(sound)
-        test.equal(pcm.resident(again), true)
+        assert.eq(pcm.resident(again), true)
         pcm.release(again)
     end)
 end
@@ -220,42 +219,42 @@ function suite.reReadsAFileSoundInPlaceThroughTheMixer(): nil
         assert(files.write(path, silenceWav(0.2)))
 
         local ok, reason = mixer:reload(path)
-        test.assert(ok)
-        test.equal(reason, nil)
-        test.assert(math.abs(assert(sound.duration) - 0.2) < 1e-6)
-        test.notEqual(sound.params, params, "a new clip under the same Sound")
-        test.equal(id, audio.soundId(path), "under the index rows already carry")
-        test.equal(mixer:sound(path), sound)
+        assert(ok)
+        assert.eq(reason, nil)
+        assert(math.abs(assert(sound.duration) - 0.2) < 1e-6)
+        assert.ne(sound.params, params, "a new clip under the same Sound")
+        assert.eq(id, audio.soundId(path), "under the index rows already carry")
+        assert.eq(mixer:sound(path), sound)
 
         -- A file that no longer decodes leaves the Sound as it was.
         assert(files.write(path, "not audio any more"))
         local failed, why = mixer:reload(path)
-        test.assert(not failed)
-        test.assert(#assert(why) > 0)
-        test.assert(math.abs(assert(sound.duration) - 0.2) < 1e-6)
+        assert(not failed)
+        assert(#assert(why) > 0)
+        assert(math.abs(assert(sound.duration) - 0.2) < 1e-6)
         pcm.release(sound)
     end)
 
     local bytes = assert(pcm.loadBytes(freshName(), silenceWav(0.01)))
     mixer:addSound(bytes)
     local refused, refusedReason = mixer:reload(bytes.name)
-    test.assert(not refused)
-    test.matches(assert(refusedReason), "cannot be re%-read")
+    assert(not refused)
+    assert.matches(assert(refusedReason), "cannot be re%-read")
     mixer:destroy()
 end
 
 function suite.namesTheCodecsTheLibraryLinked(): nil
     local codecs = pcm.codecs()
-    test.assert(#codecs > 0)
-    test.notEqual(pcm.codecs(), codecs, "a fresh list")
+    assert(#codecs > 0)
+    assert.ne(pcm.codecs(), codecs, "a fresh list")
 end
 
 function suite.loadsThroughTheAssetKinds(): nil
-    test.equal(pcm.PCM.name, assets.SOUND)
-    test.equal(pcm.PCM_STREAM.name, assets.SOUND .. ".stream")
+    assert.eq(pcm.PCM.name, assets.SOUND)
+    assert.eq(pcm.PCM_STREAM.name, assets.SOUND .. ".stream")
     local missing, reason = pcm.PCM.open("")
-    test.equal(missing, nil)
-    test.assert(#assert(reason) > 0)
+    assert.eq(missing, nil)
+    assert(#assert(reason) > 0)
 
     temporary(silenceWav(0.1), function(path: string): nil
         local loader = assets.newAssets()
@@ -274,8 +273,8 @@ function suite.loadsThroughTheAssetKinds(): nil
         end
         local handle = assert(resident)
         local sound = assert(handle:value()) as audio.Sound
-        test.equal(sound.name, path)
-        test.equal(pcm.resident(sound), true)
+        assert.eq(sound.name, path)
+        assert.eq(pcm.resident(sound), true)
         pcm.release(sound)
 
         state = pump:start(function(): boolean
@@ -289,12 +288,12 @@ function suite.loadsThroughTheAssetKinds(): nil
             state = pump:poll()
         end
         local stream = assert(assert(streamed):value()) as audio.Sound
-        test.assert(streamedSound(stream))
+        assert(streamedSound(stream))
 
         -- A mixer plays the handle's Sound and comes to know it.
         local mixer = memory()
-        test.assert(mixer:play(assert(streamed)) ~= 0)
-        test.equal(mixer:sound(path), stream)
+        assert(mixer:play(assert(streamed)) ~= 0)
+        assert.eq(mixer:sound(path), stream)
         mixer:destroy()
         pcm.release(stream)
         loader:shutdown()
@@ -307,19 +306,19 @@ end
 
 function suite.registersTheDecoderOnTheFirstPlay(): nil
     local mixer = memory()
-    test.equal(#mixer:decoders(), 0)
+    assert.eq(#mixer:decoders(), 0)
     local sound = assert(pcm.loadBytes(freshName(), silenceWav(0.05)))
-    test.assert(mixer:play(sound) ~= 0)
-    test.assert(mixer:play(sound) ~= 0)
-    test.equal(#mixer:decoders(), 1)
-    test.equal(mixer:decoders()[1], pcm.DECODER)
-    test.equal(mixer:sound(sound.name), sound)
+    assert(mixer:play(sound) ~= 0)
+    assert(mixer:play(sound) ~= 0)
+    assert.eq(#mixer:decoders(), 1)
+    assert.eq(mixer:decoders()[1], pcm.DECODER)
+    assert.eq(mixer:sound(sound.name), sound)
     mixer:destroy()
 end
 
 function suite.carriesACommandsTimeAcrossTheSeam(): nil
     local backend = offline()
-    test.equal(assert(backend.now)(), 0)
+    assert.eq(assert(backend.now)(), 0)
     -- A tenth of a second of silence at the output rate.
     local sound = assert(pcm.loadBytes(freshName(), silenceWav(0.1)))
     local decoder = assert(assert(backend.registerDecoder)(sound.vtable()))
@@ -336,37 +335,37 @@ function suite.carriesACommandsTimeAcrossTheSeam(): nil
     -- voice waits in the schedule and the library knows nothing under it yet.
     commands[2].at = 1
     backend.submit(commands, 2)
-    test.equal(backend.position(65537), 0)
-    test.equal(backend.position(65538), nil)
+    assert.eq(backend.position(65537), 0)
+    assert.eq(backend.position(65538), nil)
     -- The control: the same start with no time sounds at once.
     assert(open(decoder, 65539, sound.params, sound.bytes))
     commands[2].at = 0
     commands[2].handle = 65539
     backend.submit({commands[2]}, 1)
-    test.equal(backend.position(65539), 0)
-    test.equal(assert(backend.now)(), 0)
+    assert.eq(backend.position(65539), 0)
+    assert.eq(assert(backend.now)(), 0)
     backend.close()
-    test.equal(assert(backend.now)(), 0)
+    assert.eq(assert(backend.now)(), 0)
 end
 
 function suite.keepsTimeOnAVoidOutputAndFinishesATimedVoice(): nil
     local backend = voided()
-    test.assert(backend.available)
-    test.equal(assert(backend.output)().state, "void")
+    assert(backend.available)
+    assert.eq(assert(backend.output)().state, "void")
     local mixer = audio.newAudio({backend = backend, maxVoices = 4})
-    test.assert(mixer.available)
+    assert(mixer.available)
     -- A twentieth of a second of silence, due a twentieth from now.
     local sound = assert(pcm.loadBytes(freshName(), silenceWav(0.05)))
     local handle = mixer:play(sound, {at = mixer:now() + 0.05})
-    test.assert(handle ~= 0, "a void output takes a start")
+    assert(handle ~= 0, "a void output takes a start")
     mixer:flush()
     local started = time.now()
     while mixer:playing(handle) do
-        test.assert(time.now() - started < 5000, "the voice never finished on the void clock")
+        assert(time.now() - started < 5000, "the voice never finished on the void clock")
         time.sleep(10)
         mixer:update(0.01)
     end
-    test.assert(mixer:now() >= 0.1, "the clock ran past the voice's end")
+    assert(mixer:now() >= 0.1, "the clock ran past the voice's end")
     mixer:destroy()
 end
 
@@ -378,44 +377,44 @@ function suite.cancelsAStartStillWaitingWhenItIsStoppedOverTheNativeMixer(): nil
     -- slot comes back at once, and the start never sounds under a handle no
     -- one holds.
     local handle = mixer:play(sound, {loop = true, at = mixer:now() + 60})
-    test.assert(handle ~= 0)
+    assert(handle ~= 0)
     mixer:stop(handle)
-    test.equal(mixer:sounding(), 0)
+    assert.eq(mixer:sounding(), 0)
     mixer:update(0)
-    test.equal(assert(backend.position)(handle), nil)
+    assert.eq(assert(backend.position)(handle), nil)
     local next = mixer:play(sound)
-    test.assert(next ~= 0, "the one slot is free again")
+    assert(next ~= 0, "the one slot is free again")
     mixer:destroy()
 end
 
 function suite.rendersAndHearsAMemoryOutputDeterministically(): nil
     local mixer = memory({maxVoices = 4})
-    test.assert(mixer.available)
-    test.equal(mixer:output().state, "offline")
+    assert(mixer.available)
+    assert.eq(mixer:output().state, "offline")
     local sound = assert(pcm.loadBytes("tests/memory/square.wav", squareWav(0.25, 64)))
-    test.assert(mixer:listen(0.5))
+    assert(mixer:listen(0.5))
     local handle = mixer:play(sound, {at = 0.1})
-    test.assert(handle ~= 0)
-    test.equal(mixer:now(), 0, "nothing moves a memory clock but step")
-    test.equal(mixer:step(0.5), 0.5)
-    test.equal(mixer:now(), 0.5)
-    test.assert(not mixer:playing(handle), "the step reaped the finished voice")
+    assert(handle ~= 0)
+    assert.eq(mixer:now(), 0, "nothing moves a memory clock but step")
+    assert.eq(mixer:step(0.5), 0.5)
+    assert.eq(mixer:now(), 0.5)
+    assert(not mixer:playing(handle), "the step reaped the finished voice")
 
     local heard = assert(mixer:listening())
-    test.equal(heard.frames, 24000)
-    test.assert(math.abs(heard.peak - 0.5) < 0.01, "a half-scale square peaks at half")
-    test.assert(heard.lufs ~= nil)
-    test.equal(heard.clipped, 0)
-    test.assert(#heard.onsets >= 1)
-    test.assert(math.abs(heard.onsets[1] - 0.1) < 0.011, "the onset is the timed start")
-    test.assert(#heard.silent >= 2, "silence before the start and after the end")
+    assert.eq(heard.frames, 24000)
+    assert(math.abs(heard.peak - 0.5) < 0.01, "a half-scale square peaks at half")
+    assert(heard.lufs ~= nil)
+    assert.eq(heard.clipped, 0)
+    assert(#heard.onsets >= 1)
+    assert(math.abs(heard.onsets[1] - 0.1) < 0.011, "the onset is the timed start")
+    assert(#heard.silent >= 2, "silence before the start and after the end")
 
     local events = mixer:events()
-    test.equal(events[1].event, "start")
-    test.equal(events[1].time, 0.1)
-    test.equal(events[1].sound, "tests/memory/square.wav")
-    test.equal(events[#events].event, "finish")
-    test.equal(#mixer:events(events[#events].sequence), 0)
+    assert.eq(events[1].event, "start")
+    assert.eq(events[1].time, 0.1)
+    assert.eq(events[1].sound, "tests/memory/square.wav")
+    assert.eq(events[#events].event, "finish")
+    assert.eq(#mixer:events(events[#events].sequence), 0)
     mixer:destroy()
 end
 
@@ -423,14 +422,14 @@ function suite.playsOneSoundOnTwoMixers(): nil
     local sound = assert(pcm.loadBytes(freshName(), squareWav(0.25, 64)))
     local first = memory()
     local second = memory()
-    test.assert(first:play(sound) ~= 0)
-    test.assert(second:play(sound) ~= 0)
+    assert(first:play(sound) ~= 0)
+    assert(second:play(sound) ~= 0)
     first:listen(0.1)
     second:listen(0.1)
     first:step(0.1)
     second:step(0.1)
-    test.assert(math.abs(assert(first:listening()).peak - 0.5) < 0.01)
-    test.assert(math.abs(assert(second:listening()).peak - 0.5) < 0.01)
+    assert(math.abs(assert(first:listening()).peak - 0.5) < 0.01)
+    assert(math.abs(assert(second:listening()).peak - 0.5) < 0.01)
     first:destroy()
     second:destroy()
 end
@@ -439,19 +438,19 @@ function suite.multipliesATracksFaderByItsBussesOnTheWayToMaster(): nil
     local mixer, sound = console()
     local sfx = mixer:bus("sfx", {gain = 0.5})
     local track = mixer:track({bus = "sfx", gain = 0.5})
-    test.equal(track:bus(), "sfx")
+    assert.eq(track:bus(), "sfx")
     track:play(sound)
     mixer:step(0.1)
     local meters = mixer:meters()
-    test.assert(math.abs(meters.master.peak - 0.125) < 0.005, "0.5 x 0.5 x 0.5: " .. tostring(meters.master.peak))
-    test.assert(math.abs(assert(meters.buses.sfx).peak - 0.125) < 0.005)
-    test.assert(math.abs(assert(meters.tracks[track.id]).peak - 0.25) < 0.005)
+    assert(math.abs(meters.master.peak - 0.125) < 0.005, "0.5 x 0.5 x 0.5: " .. tostring(meters.master.peak))
+    assert(math.abs(assert(meters.buses.sfx).peak - 0.125) < 0.005)
+    assert(math.abs(assert(meters.tracks[track.id]).peak - 0.25) < 0.005)
     sfx:setMuted(true)
     -- A mute glides over a few milliseconds rather than click; read past it.
     mixer:step(0.05)
     mixer:meters()
     mixer:step(0.1)
-    test.assert(mixer:meters().master.peak < 0.01, "a muted Bus silences what routes to it")
+    assert(mixer:meters().master.peak < 0.01, "a muted Bus silences what routes to it")
     mixer:destroy()
 end
 
@@ -460,24 +459,24 @@ function suite.ringsAReturnBusReverbAfterTheSendStops(): nil
     mixer:bus("room", {effects = {effects.reverb({size = 0.8})}})
     local track = mixer:track({sends = {room = 0.5}})
     track:setMuted(true)
-    test.equal(track:sends().room, 0.5)
+    assert.eq(track:sends().room, 0.5)
     local handle = track:play(sound)
     mixer:step(0.2)
     mixer:stop(handle)
     mixer:step(0.05)
-    test.assert(mixer:listen(0.3))
+    assert(mixer:listen(0.3))
     mixer:step(0.3)
     local heard = assert(mixer:listening())
     -- The dry Track is muted, so all of this is the room still ringing.
-    test.assert(heard.peak > 0.001, "the reverb tail rings: " .. tostring(heard.peak))
+    assert(heard.peak > 0.001, "the reverb tail rings: " .. tostring(heard.peak))
     mixer:destroy()
 end
 
 function suite.limitsMasterByDefault(): nil
     local mixer = memory()
     local master = mixer:masterBus()
-    test.equal(#master:effects(), 1)
-    test.equal(master:effects()[1].name, "limiter")
+    assert.eq(#master:effects(), 1)
+    assert.eq(master:effects()[1].name, "limiter")
     local sound = assert(pcm.loadBytes("tests/memory/loud.wav", squareWav(0.5, 127)))
     -- Three full-scale voices would sum to three; the limiter holds -1 dBFS.
     for _ = 1, 3 do
@@ -486,26 +485,26 @@ function suite.limitsMasterByDefault(): nil
     mixer:listen(0.4)
     mixer:step(0.4)
     local heard = assert(mixer:listening())
-    test.equal(heard.clipped, 0)
-    test.assert(heard.peak <= 0.8913, "held under the ceiling: " .. tostring(heard.peak))
+    assert.eq(heard.clipped, 0)
+    assert(heard.peak <= 0.8913, "held under the ceiling: " .. tostring(heard.peak))
     mixer:destroy()
 end
 
 function suite.playsOnATimelineBeatAndHoldsWhilePaused(): nil
     local mixer, sound = console()
     local song = mixer:timeline({tempo = 120})
-    test.equal(song:tempo(), 120)
+    assert.eq(song:tempo(), 120)
     -- Beat two at 120 bpm is one second from now.
     local cue = song:play(sound, {at = 2})
-    test.equal(cue.handle, 0)
-    test.assert(mixer:listen(1.5))
+    assert.eq(cue.handle, 0)
+    assert(mixer:listen(1.5))
     for _ = 1, 30 do
         mixer:step(0.05)
     end
-    test.assert(cue.handle ~= 0, "the cue was sent")
+    assert(cue.handle ~= 0, "the cue was sent")
     local heard = assert(mixer:listening())
-    test.assert(#heard.onsets >= 1)
-    test.assert(math.abs(heard.onsets[1] - 1.0) < 0.011, "lands on the beat: " .. tostring(heard.onsets[1]))
+    assert(#heard.onsets >= 1)
+    assert(math.abs(heard.onsets[1] - 1.0) < 0.011, "lands on the beat: " .. tostring(heard.onsets[1]))
 
     local paused = mixer:timeline()
     local later = paused:play(sound, {at = paused:now() + 0.2})
@@ -513,12 +512,12 @@ function suite.playsOnATimelineBeatAndHoldsWhilePaused(): nil
     for _ = 1, 10 do
         mixer:step(0.05)
     end
-    test.equal(later.handle, 0, "a paused timeline sends nothing")
+    assert.eq(later.handle, 0, "a paused timeline sends nothing")
     paused:resume()
     for _ = 1, 10 do
         mixer:step(0.05)
     end
-    test.assert(later.handle ~= 0, "resumed, it sends")
+    assert(later.handle ~= 0, "resumed, it sends")
     mixer:destroy()
 end
 

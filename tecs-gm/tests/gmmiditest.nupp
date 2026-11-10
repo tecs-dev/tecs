@@ -6,7 +6,6 @@ local gm = require("tecs.gm")
 local hostpump = require("nupp.host.pump")
 local midi = require("tecs.gm.midi")
 local music = require("tecs.audio.sequencer")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -79,7 +78,7 @@ local function underPump(body: function(): boolean): nil
         passes = passes + 1
         state = pump:poll()
     end
-    test.assert(state ~= "parked", "the load never finished")
+    assert(state ~= "parked", "the load never finished")
 end
 
 --- Loads one asset through a fresh loader.
@@ -108,29 +107,29 @@ function suite.readsAFormatZeroSongWithRunningStatusAndATempo(): nil
     ) .. tempo(0, 250000) .. at(0, 0xC0, 5) .. at(0, 0x90, 60, 100) .. at(96, 64, 90) -- running status: another note on
         .. at(96, 0x80, 60, 0) .. at(0, 64, 0) .. finish(96)
     local song = assert(midi.parse(smf(0, 96, {track})))
-    test.equal(song.format, 0)
-    test.equal(song.ppq, 96)
-    test.equal(song.title, "Theme")
-    test.equal(#song.tracks, 1)
-    test.equal(song.tracks[1].endTick, 288)
+    assert.eq(song.format, 0)
+    assert.eq(song.ppq, 96)
+    assert.eq(song.title, "Theme")
+    assert.eq(#song.tracks, 1)
+    assert.eq(song.tracks[1].endTick, 288)
     -- The tempo of 250 000 microseconds a quarter is 0.25 seconds a beat.
-    test.equal(#song.tempos, 1)
-    test.equal(song.tempos[1].microsecondsPerQuarter, 250000)
-    test.equal(song.duration, 0.75)
+    assert.eq(#song.tempos, 1)
+    assert.eq(song.tempos[1].microsecondsPerQuarter, 250000)
+    assert.eq(song.duration, 0.75)
     local notes: {midi.Event} = {}
     for _, event in ipairs(song.events) do
         if event.status < 0xF0 then
             notes[#notes + 1] = event
         end
     end
-    test.equal(#notes, 5)
-    test.equal(notes[1].status, 0xC0)
-    test.equal(notes[1].data2, 0, "a program change carries one data byte")
-    test.equal(notes[3].status, 0x90)
-    test.equal(notes[3].data1, 64)
-    test.equal(notes[3].time, 0.25)
-    test.equal(notes[5].status, 0x80, "running status carries the note off")
-    test.equal(notes[5].time, 0.5)
+    assert.eq(#notes, 5)
+    assert.eq(notes[1].status, 0xC0)
+    assert.eq(notes[1].data2, 0, "a program change carries one data byte")
+    assert.eq(notes[3].status, 0x90)
+    assert.eq(notes[3].data1, 64)
+    assert.eq(notes[3].time, 0.25)
+    assert.eq(notes[5].status, 0x80, "running status carries the note off")
+    assert.eq(notes[5].time, 0.5)
 end
 
 function suite.mergesFormatOneTracksThroughOneTempoMap(): nil
@@ -139,53 +138,53 @@ function suite.mergesFormatOneTracksThroughOneTempoMap(): nil
     local conductor = tempo(0, 500000) .. tempo(480, 1000000) .. finish(0)
     local notes = at(0, 0x91, 60, 100) .. at(960, 0x81, 60, 0) .. finish(0)
     local song = assert(midi.parse(smf(1, 480, {conductor, notes})))
-    test.equal(#song.tempos, 2)
-    test.equal(song.tempos[2].time, 0.5)
+    assert.eq(#song.tempos, 2)
+    assert.eq(song.tempos[2].time, 0.5)
     local off: midi.Event? = nil
     for _, event in ipairs(song.events) do
         if event.status == 0x81 then
             off = event
         end
     end
-    test.equal(assert(off).time, 1.5)
-    test.equal(assert(off).track, 2)
-    test.equal(song.duration, 1.5)
+    assert.eq(assert(off).time, 1.5)
+    assert.eq(assert(off).track, 2)
+    assert.eq(song.duration, 1.5)
 end
 
 function suite.playsFormatTwoPatternsOneAfterAnother(): nil
     local first = at(0, 0x90, 60, 100) .. at(480, 0x80, 60, 0) .. finish(0)
     local second = at(0, 0x90, 62, 100) .. at(480, 0x80, 62, 0) .. finish(0)
     local song = assert(midi.parse(smf(2, 480, {first, second})))
-    test.equal(song.format, 2)
-    test.equal(song.tracks[2].endTick, 960)
-    test.equal(song.events[3].tick, 480, "the second pattern starts where the first ended")
-    test.equal(song.events[3].data1, 62)
-    test.equal(song.duration, 1)
+    assert.eq(song.format, 2)
+    assert.eq(song.tracks[2].endTick, 960)
+    assert.eq(song.events[3].tick, 480, "the second pattern starts where the first ended")
+    assert.eq(song.events[3].data1, 62)
+    assert.eq(song.duration, 1)
 end
 
 function suite.timesAnSmpteFileInFrames(): nil
     -- 25 frames a second, 40 ticks a frame: a thousand ticks a second.
     local division = (256 - 25) * 256 + 40
     local song = assert(midi.parse(smf(0, division, {at(0, 0x90, 60, 1) .. at(1500, 0x80, 60, 0) .. finish(500)})))
-    test.equal(song.ppq, nil)
-    test.equal(song.framesPerSecond, 25)
-    test.equal(song.ticksPerFrame, 40)
-    test.equal(song.events[2].time, 1.5)
-    test.equal(song.duration, 2)
+    assert.eq(song.ppq, nil)
+    assert.eq(song.framesPerSecond, 25)
+    assert.eq(song.ticksPerFrame, 40)
+    assert.eq(song.events[2].time, 1.5)
+    assert.eq(song.duration, 2)
 end
 
 function suite.findsLoopPointsInMarkersOrController111(): nil
     local marked = meta(480, 0x06, "Loop Start") .. at(0, 0x90, 60, 1) .. meta(480, 0x06, "loopEnd") .. finish(480)
     local song = assert(midi.parse(smf(0, 480, {marked})))
-    test.equal(song.loopStart, 0.5)
-    test.equal(song.loopEnd, 1)
-    test.equal(song.duration, 1.5)
+    assert.eq(song.loopStart, 0.5)
+    assert.eq(song.loopEnd, 1)
+    assert.eq(song.duration, 1.5)
     local rpg = at(0, 0x90, 60, 1) .. at(960, 0xB0, 111, 0) .. finish(960)
     local looped = assert(midi.parse(smf(0, 480, {rpg})))
-    test.equal(looped.loopStart, 1)
-    test.equal(looped.loopEnd, nil, "a loop with no end runs to the end of the song")
+    assert.eq(looped.loopStart, 1)
+    assert.eq(looped.loopEnd, nil, "a loop with no end runs to the end of the song")
     local plain = assert(midi.parse(smf(0, 480, {at(0, 0x90, 60, 1) .. finish(10)})))
-    test.equal(plain.loopStart, nil)
+    assert.eq(plain.loopStart, nil)
 end
 
 function suite.keepsSystemExclusiveAndSkipsForeignChunks(): nil
@@ -195,16 +194,16 @@ function suite.keepsSystemExclusiveAndSkipsForeignChunks(): nil
     -- A chunk that is not a track, between the header and the track.
     bytes = string.sub(bytes, 1, 14) .. "XFIH" .. be32(3) .. "abc" .. string.sub(bytes, 15)
     local song = assert(midi.parse(bytes))
-    test.equal(song.events[1].status, 0xF0)
-    test.equal(song.events[1].data, "\x7E\x7F\x09\x01\xF7")
-    test.equal(#song.events, 2)
+    assert.eq(song.events[1].status, 0xF0)
+    assert.eq(song.events[1].data, "\x7E\x7F\x09\x01\xF7")
+    assert.eq(#song.events, 2)
 end
 
 function suite.refusesWhatIsNotAStandardMidiFile(): nil
     local function refused(bytes: string, pattern: string): nil
         local song, reason = midi.parse(bytes, "song.mid")
-        test.equal(song, nil)
-        test.matches(assert(reason), pattern)
+        assert.eq(song, nil)
+        assert.matches(assert(reason), pattern)
     end
 
     refused("RIFF....", "song.mid: not a Standard MIDI File")
@@ -230,22 +229,22 @@ function suite.loadsAMidiFileThroughItsKind(): nil
         ".mid",
         function(path: string): nil
             local loader, handle, reason = load(midi.kind, path)
-            test.assert(handle ~= nil, reason or "no handle")
+            assert(handle ~= nil, reason or "no handle")
             local held = assert(handle)
-            test.equal(held.kind, "music.midi")
+            assert.eq(held.kind, "music.midi")
             local song = held:value() as midi.Song
-            test.equal(song.duration, 0.5)
+            assert.eq(song.duration, 0.5)
             held:release()
             local _, missing, failure = load(midi.kind, path .. ".none")
-            test.equal(missing, nil)
-            test.assert(failure ~= nil)
+            assert.eq(missing, nil)
+            assert(failure ~= nil)
             loader:shutdown()
         end
     )
     temporary("not midi", ".mid", function(path: string): nil
         local loader, nothing, refusal = load(midi.kind, path)
-        test.equal(nothing, nil)
-        test.matches(assert(refusal), "not a Standard MIDI File")
+        assert.eq(nothing, nil)
+        assert.matches(assert(refusal), "not a Standard MIDI File")
         loader:shutdown()
     end)
 end
@@ -396,7 +395,7 @@ local function countOf(harness: Harness, kind: integer): integer
 end
 
 local function near(actual: number, expected: number, what: string?): nil
-    test.assert(
+    assert(
         math.abs(actual - expected) < 1e-9,
         (what or "") .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual)
     )
@@ -432,22 +431,22 @@ end
 function suite.schedulesAheadOnTheMixerClock(): nil
     local harness = newHarness()
     local mixer, player = midiPlayer(harness, scale(false))
-    test.equal(#harness.opened, 1, "the song plays on a synth of its own")
+    assert.eq(#harness.opened, 1, "the song plays on a synth of its own")
     -- Started at 0 with a lead of 0.01: the first note is due then, and the
     -- next one, half a second in, is past the lookahead.
     local ons = sentOf(harness, mixer, "message", 0x90)
-    test.equal(#ons, 1)
-    test.equal(ons[1].voice, harness.opened[1])
+    assert.eq(#ons, 1)
+    assert.eq(ons[1].voice, harness.opened[1])
     near(ons[1].at, 0.01, "first note")
     harness.clock[1] = 0.48
     mixer:update()
     ons = sentOf(harness, mixer, "message", 0x90)
-    test.equal(#ons, 2)
+    assert.eq(#ons, 2)
     near(ons[2].at, 0.51, "second note")
-    test.equal(sentOf(harness, mixer, "message", 0x80)[1].a, 0x80)
+    assert.eq(sentOf(harness, mixer, "message", 0x80)[1].a, 0x80)
     near(player:position(), 0.47, "position")
-    test.assert(player:playing())
-    test.equal(player:status(), "playing")
+    assert(player:playing())
+    assert.eq(player:status(), "playing")
     near(player:duration(), 2)
 end
 
@@ -459,12 +458,12 @@ function suite.slipsAfterAStallRatherThanRushing(): nil
     harness.clock[1] = 3
     mixer:update()
     local ons = sentOf(harness, mixer, "message", 0x90)
-    test.equal(#ons, 2, "only the late note goes, not all that was missed")
+    assert.eq(#ons, 2, "only the late note goes, not all that was missed")
     near(ons[2].at, 3.01, "the late note")
     harness.clock[1] = 3.48
     mixer:update()
     ons = sentOf(harness, mixer, "message", 0x90)
-    test.equal(#ons, 3)
+    assert.eq(#ons, 3)
     near(ons[3].at, 3.51, "the next keeps its distance")
 end
 
@@ -475,18 +474,18 @@ function suite.finishesAndFreesItsSynthAfterTheTail(): nil
         harness.clock[1] = step * 0.05
         mixer:update()
     end
-    test.equal(#sentOf(harness, mixer, "message", 0x90), 4)
-    test.assert(player:finished())
-    test.equal(player:status(), "finished")
-    test.equal(countOf(harness, audiobackend.STOP), 0, "the release tail still rings")
-    test.equal(mixer:sounding(), 1)
+    assert.eq(#sentOf(harness, mixer, "message", 0x90), 4)
+    assert(player:finished())
+    assert.eq(player:status(), "finished")
+    assert.eq(countOf(harness, audiobackend.STOP), 0, "the release tail still rings")
+    assert.eq(mixer:sounding(), 1)
     harness.clock[1] = 2.01 + 2.1
     mixer:update()
-    test.equal(player:status(), "stopped")
-    test.assert(player:finished())
-    test.equal(countOf(harness, audiobackend.STOP), 1)
-    test.equal(assert(lastCommand(harness, audiobackend.STOP)).handle, harness.opened[1])
-    test.equal(mixer:sounding(), 0)
+    assert.eq(player:status(), "stopped")
+    assert(player:finished())
+    assert.eq(countOf(harness, audiobackend.STOP), 1)
+    assert.eq(assert(lastCommand(harness, audiobackend.STOP)).handle, harness.opened[1])
+    assert.eq(mixer:sounding(), 0)
 end
 
 function suite.loopsForeverReleasingHeldNotesAtTheEnd(): nil
@@ -495,15 +494,15 @@ function suite.loopsForeverReleasingHeldNotesAtTheEnd(): nil
     near(assert(song.loopStart), 0)
     near(assert(song.loopEnd), 2)
     local mixer, player = midiPlayer(harness, song)
-    test.assert(player:looping())
+    assert(player:looping())
     for step = 1, 100 do
         harness.clock[1] = step * 0.05
         mixer:update()
     end
-    test.equal(player:loops(), 2)
-    test.assert(not player:finished())
+    assert.eq(player:loops(), 2)
+    assert(not player:finished())
     local ons = sentOf(harness, mixer, "message", 0x90)
-    test.assert(#ons >= 9)
+    assert(#ons >= 9)
     -- The fifth note is the first of the second pass, two seconds on.
     near(ons[5].at, 2.01, "the loop's first note")
     -- The note held at the loop's end was released there.
@@ -514,30 +513,30 @@ function suite.loopsForeverReleasingHeldNotesAtTheEnd(): nil
             released = true
         end
     end
-    test.assert(released, "the held note is released at the loop")
+    assert(released, "the held note is released at the loop")
     player:setLoop(false)
     for step = 101, 160 do
         harness.clock[1] = step * 0.05
         mixer:update()
     end
-    test.assert(player:finished())
+    assert(player:finished())
 end
 
 function suite.scalesTheTempoFromWhatIsScheduled(): nil
     local harness = newHarness()
     local mixer, player = midiPlayer(harness, scale(false), {tempo = 2})
-    test.equal(player:tempo(), 2)
+    assert.eq(player:tempo(), 2)
     harness.clock[1] = 0.24
     mixer:update()
     local ons = sentOf(harness, mixer, "message", 0x90)
-    test.equal(#ons, 2)
+    assert.eq(#ons, 2)
     near(ons[2].at, 0.26, "twice as fast")
     player:setTempo(1)
     harness.clock[1] = 0.6
     mixer:update()
     ons = sentOf(harness, mixer, "message", 0x90)
-    test.equal(#ons, 2)
-    test.raises(
+    assert.eq(#ons, 2)
+    assert.raises(
         function(): nil
             player:setTempo(0)
         end,
@@ -566,15 +565,15 @@ function suite.seeksByResettingAndChasingTheSongState(): nil
     harness.clock[1] = 1
     local before = #allSent(harness, mixer)
     player:seek(1.5)
-    test.equal(#sentOf(harness, mixer, "reset"), 1)
+    assert.eq(#sentOf(harness, mixer, "reset"), 1)
     local controls = sentSince(harness, mixer, before, "message", 0xB1)
-    test.equal(#controls, 1)
-    test.equal(controls[1].c, 90)
+    assert.eq(#controls, 1)
+    assert.eq(controls[1].c, 90)
     near(controls[1].at, 1.01, "the chase lands at the seek")
-    test.equal(sentSince(harness, mixer, before, "message", 0xC1)[1].b, 33)
+    assert.eq(sentSince(harness, mixer, before, "message", 0xC1)[1].b, 33)
     local bend = sentSince(harness, mixer, before, "message", 0xE1)[1]
-    test.equal(bend.b, 0)
-    test.equal(bend.c, 80)
+    assert.eq(bend.b, 0)
+    assert.eq(bend.c, 80)
     mixer:update()
     -- From 1.5 the next event is the note off at 1.5 itself.
     local offs = sentOf(harness, mixer, "message", 0x81)
@@ -591,33 +590,33 @@ function suite.mutesAChannelAndPausesTheSong(): nil
     ) .. at(0, 0x91, 62, 100) .. at(480, 0x80, 60, 0) .. at(0, 0x81, 62, 0) .. finish(0)
     local harness = newHarness()
     local mixer, player = midiPlayer(harness, assert(midi.parse(smf(0, 480, {track}))))
-    test.equal(#sentOf(harness, mixer, "message", 0x91), 1)
+    assert.eq(#sentOf(harness, mixer, "message", 0x91), 1)
     player:setMuted(1, true)
     local cut = sentOf(harness, mixer, "notesOff")
-    test.equal(#cut, 1)
-    test.equal(cut[1].a, 1)
+    assert.eq(#cut, 1)
+    assert.eq(cut[1].a, 1)
     player:seek(0)
     mixer:update()
-    test.equal(#sentOf(harness, mixer, "message", 0x91), 1, "no note on reaches the muted channel")
-    test.equal(#sentOf(harness, mixer, "message", 0x90), 2, "the other channel plays on")
+    assert.eq(#sentOf(harness, mixer, "message", 0x91), 1, "no note on reaches the muted channel")
+    assert.eq(#sentOf(harness, mixer, "message", 0x90), 2, "the other channel plays on")
     player:pause()
-    test.assert(player:paused())
+    assert(player:paused())
     mixer:update()
-    test.assert(lastCommand(harness, audiobackend.PAUSE) ~= nil)
+    assert(lastCommand(harness, audiobackend.PAUSE) ~= nil)
     -- Paused, nothing more is scheduled, however far the clock runs.
     harness.clock[1] = 0.6
     mixer:update()
-    test.equal(#sentOf(harness, mixer, "message", 0x80), 0)
+    assert.eq(#sentOf(harness, mixer, "message", 0x80), 0)
     player:resume()
     mixer:update()
-    test.assert(lastCommand(harness, audiobackend.RESUME) ~= nil)
+    assert(lastCommand(harness, audiobackend.RESUME) ~= nil)
     -- Resuming seeks back to where it paused, the song's start, and plays on
     -- from there on the clock as it now stands.
-    test.equal(#sentOf(harness, mixer, "reset"), 2)
+    assert.eq(#sentOf(harness, mixer, "reset"), 2)
     local ons = sentOf(harness, mixer, "message", 0x90)
-    test.equal(#ons, 3)
+    assert.eq(#ons, 3)
     near(ons[3].at, 0.61, "the resumed note")
-    test.raises(
+    assert.raises(
         function(): nil
             player:setMuted(16, true)
         end,
@@ -625,9 +624,9 @@ function suite.mutesAChannelAndPausesTheSong(): nil
     )
     player:stop(0.5)
     mixer:update()
-    test.equal(assert(lastCommand(harness, audiobackend.STOP)).fade, 0.5)
+    assert.eq(assert(lastCommand(harness, audiobackend.STOP)).fade, 0.5)
     player:stop()
-    test.equal(player:status(), "stopped")
+    assert.eq(player:status(), "stopped")
 end
 
 function suite.playsOnTheTrackItIsGiven(): nil
@@ -638,8 +637,8 @@ function suite.playsOnTheTrackItIsGiven(): nil
     local player = assert(midi.playSong(mixer, font(), scale(false), {track = track, gain = 0.5}))
     mixer:update()
     local play = assert(lastCommand(harness, audiobackend.PLAY))
-    test.equal(play.target, track.id)
-    test.equal(play.gain, 0.5)
+    assert.eq(play.target, track.id)
+    assert.eq(play.gain, 0.5)
     player:stop()
 end
 
@@ -653,16 +652,16 @@ function suite.playsOnWhenItsSynthLosesItsVoice(): nil
         harness.clock[1] = step * 0.05
         mixer:update()
     end
-    test.assert(player:finished())
-    test.equal(player:status(), "stopped")
+    assert(player:finished())
+    assert.eq(player:status(), "stopped")
 end
 
 function suite.playsOnAMixerWithNoOutput(): nil
     local mixer = audio.newAudio({backend = audiobackend.silent()})
     local player = assert(midi.playSong(mixer, font(), scale(false)), "no output needs no branch")
     mixer:update()
-    test.equal(player:status(), "playing")
-    test.equal(mixer:sounding(), 0)
+    assert.eq(player:status(), "playing")
+    assert.eq(mixer:sounding(), 0)
     player:stop()
 end
 
@@ -675,7 +674,7 @@ function suite.followsAReloadOfTheSongHandle(): nil
         local mixer = audio.newAudio({backend = harness.backend, maxVoices = 8})
         local player = assert(midi.play(mixer, font(), held, {loop = false}))
         held:release()
-        test.equal(held:holds(), 1, "the player holds the song")
+        assert.eq(held:holds(), 1, "the player holds the song")
         harness.clock[1] = 1
         mixer:update()
         assert(files.write(path, smf(0, 480, {at(0, 0x90, 72, 100) .. at(9600, 0x80, 72, 0) .. finish(0)})))
@@ -685,13 +684,13 @@ function suite.followsAReloadOfTheSongHandle(): nil
             return true
         end)
         mixer:update()
-        test.equal(#sentOf(harness, mixer, "reset"), 1, "the reload seeks")
+        assert.eq(#sentOf(harness, mixer, "reset"), 1, "the reload seeks")
         harness.clock[1] = 20
         mixer:update()
         local offs = sentOf(harness, mixer, "message", 0x80)
-        test.equal(offs[#offs].b, 72, "the new song plays from where the old one was")
+        assert.eq(offs[#offs].b, 72, "the new song plays from where the old one was")
         player:stop()
-        test.equal(held:holds(), 0)
+        assert.eq(held:holds(), 0)
         loader:shutdown()
     end)
 end
@@ -703,7 +702,7 @@ function suite.refusesAHandleOfAnotherKind(): nil
         local held = assert(handle)
         local harness = newHarness()
         local mixer = audio.newAudio({backend = harness.backend, maxVoices = 8})
-        test.raises(
+        assert.raises(
             function(): nil
                 midi.play(mixer, font(), held)
             end,
@@ -717,13 +716,13 @@ end
 function suite.refusesPlayOptionsOutOfRange(): nil
     local harness = newHarness()
     local mixer = audio.newAudio({backend = harness.backend, maxVoices = 8})
-    test.raises(
+    assert.raises(
         function(): nil
             midi.playSong(mixer, font(), scale(false), {lookahead = 5})
         end,
         "lookahead must be from"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             midi.playSong(mixer, font(), scale(false), {start = -1})
         end,
@@ -735,7 +734,7 @@ end
 local function binding(): {[string]: any}
     local ok, loaded = pcall(require, "tecs.platform.audionative")
     if not ok then
-        test.skip("libtecsaudio is not on the loader path: " .. tostring(loaded))
+        assert.suite.skip("libtecsaudio is not on the loader path: " .. tostring(loaded))
     end
 
     return loaded as {[string]: any}
@@ -744,7 +743,7 @@ end
 function suite.playsASongFromARealSoundFontOnTime(): nil
     local path = os.getenv("TECS_TEST_SOUNDFONT")
     if path == nil or path == "" then
-        test.skip("TECS_TEST_SOUNDFONT names no SoundFont")
+        assert.suite.skip("TECS_TEST_SOUNDFONT names no SoundFont")
     end
     binding()
     local mixer = audio.newAudio({output = "memory", maxVoices = 4, limiter = false})
@@ -753,16 +752,16 @@ function suite.playsASongFromARealSoundFontOnTime(): nil
     local track = at(0, 0x90, 60, 110) .. at(96, 0x80, 60, 0) .. at(384, 0x90, 67, 110) .. at(96, 0x80, 67, 0)
     local song = assert(midi.parse(smf(0, 480, {track .. finish(0)})))
     local player = assert(midi.playSong(mixer, loaded, song, {loop = false}))
-    test.assert(mixer:listen(1.2))
+    assert(mixer:listen(1.2))
     for _ = 1, 24 do
         mixer:step(0.05)
     end
     local heard = assert(mixer:listening())
-    test.assert(heard.peak > 0.01, "the song sounds, peaking at " .. tostring(heard.peak))
+    assert(heard.peak > 0.01, "the song sounds, peaking at " .. tostring(heard.peak))
     -- Both notes, half a second apart from the start's lead.
-    test.assert(#heard.onsets >= 2, "two notes have onsets, got " .. tostring(#heard.onsets))
-    test.assert(math.abs(heard.onsets[1] - 0.01) < 0.03, "the first note, got " .. tostring(heard.onsets[1]))
-    test.assert(math.abs(heard.onsets[2] - 0.51) < 0.03, "the second note, got " .. tostring(heard.onsets[2]))
+    assert(#heard.onsets >= 2, "two notes have onsets, got " .. tostring(#heard.onsets))
+    assert(math.abs(heard.onsets[1] - 0.01) < 0.03, "the first note, got " .. tostring(heard.onsets[1]))
+    assert(math.abs(heard.onsets[2] - 0.51) < 0.03, "the second note, got " .. tostring(heard.onsets[2]))
     player:stop()
     mixer:destroy()
 end

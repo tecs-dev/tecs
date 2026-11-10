@@ -1,4 +1,3 @@
-local test = require("nupp.test")
 local ecs = require("tecs.ecs")
 local suite = {}
 
@@ -6,15 +5,15 @@ function suite.findsALiveEntityByItsDurableKey(): nil
     local world = ecs.newWorld({maxEntities = 8})
     local player = world:spawn(ecs.EntityKey("player"))
     world:commit()
-    test.equal(world:byKey("player") as integer, player)
-    test.equal(world:requireKey("player"), player)
+    assert.eq(world:byKey("player") as integer, player)
+    assert.eq(world:requireKey("player"), player)
 end
 
 function suite.reportsNoEntityForAnUnclaimedKey(): nil
     local world = ecs.newWorld({maxEntities = 8})
     world:spawn(ecs.EntityKey("player"))
     world:commit()
-    test.assert(world:byKey("boss") == nil)
+    assert(world:byKey("boss") == nil)
 end
 
 function suite.raisesWhenARequiredKeyHasNoEntity(): nil
@@ -22,7 +21,7 @@ function suite.raisesWhenARequiredKeyHasNoEntity(): nil
     local ok = pcall(function(): nil
         world:requireKey("absent")
     end)
-    test.assert(not ok)
+    assert(not ok)
 end
 
 function suite.refusesAKeyASecondLiveEntityClaims(): nil
@@ -33,7 +32,7 @@ function suite.refusesAKeyASecondLiveEntityClaims(): nil
     local ok = pcall(function(): nil
         world:commit()
     end)
-    test.assert(not ok)
+    assert(not ok)
 end
 
 function suite.refusesAnEmptyKey(): nil
@@ -42,7 +41,7 @@ function suite.refusesAnEmptyKey(): nil
     local ok = pcall(function(): nil
         world:commit()
     end)
-    test.assert(not ok)
+    assert(not ok)
 end
 
 function suite.releasesAKeyWhenItsEntityDespawns(): nil
@@ -51,10 +50,10 @@ function suite.releasesAKeyWhenItsEntityDespawns(): nil
     world:commit()
     world:despawn(player)
     world:commit()
-    test.assert(world:byKey("player") == nil)
+    assert(world:byKey("player") == nil)
     local reclaimed = world:spawn(ecs.EntityKey("player"))
     world:commit()
-    test.equal(world:byKey("player") as integer, reclaimed)
+    assert.eq(world:byKey("player") as integer, reclaimed)
 end
 
 function suite.movesTheIndexWhenAnEntityChangesItsKey(): nil
@@ -63,8 +62,8 @@ function suite.movesTheIndexWhenAnEntityChangesItsKey(): nil
     world:commit()
     world:set(player, ecs.EntityKey("hero"))
     world:commit()
-    test.assert(world:byKey("player") == nil)
-    test.equal(world:byKey("hero") as integer, player)
+    assert(world:byKey("player") == nil)
+    assert.eq(world:byKey("hero") as integer, player)
 end
 
 function suite.releasesAKeyWhenTheComponentIsRemoved(): nil
@@ -73,7 +72,7 @@ function suite.releasesAKeyWhenTheComponentIsRemoved(): nil
     world:commit()
     world:remove(player, ecs.EntityKey)
     world:commit()
-    test.assert(world:byKey("player") == nil)
+    assert(world:byKey("player") == nil)
 end
 
 function suite.dropsEveryKeyWhenEntitiesAreCleared(): nil
@@ -81,7 +80,7 @@ function suite.dropsEveryKeyWhenEntitiesAreCleared(): nil
     world:spawn(ecs.EntityKey("player"))
     world:commit()
     world:clearEntities()
-    test.assert(world:byKey("player") == nil)
+    assert(world:byKey("player") == nil)
 end
 
 function suite.rebuildsTheIndexAcrossASnapshotRoundTrip(): nil
@@ -91,11 +90,11 @@ function suite.rebuildsTheIndexAcrossASnapshotRoundTrip(): nil
     local snapshot = world:saveSnapshot()
     local restored = ecs.newWorld({maxEntities = 8})
     restored:loadSnapshot(snapshot)
-    test.equal(restored:byKey("player") as integer, player)
+    assert.eq(restored:byKey("player") as integer, player)
 end
 
 function suite.storesTheKeyComponentUnderItsCompatibilityName(): nil
-    test.equal(ecs.EntityKey.componentName, "Key")
+    assert.eq(ecs.EntityKey.componentName, "Key")
 end
 
 return suite

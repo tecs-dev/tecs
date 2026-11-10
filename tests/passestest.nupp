@@ -1,7 +1,6 @@
 const io2 = require("nupp.io")
 
 local passes = require("tecs.gpu.passes")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -43,7 +42,7 @@ local function decode(section: string): Graph
     local at = 1
     for index = 1, nameCount do
         local stop = blob:find("\0", at, true)
-        test.assert(stop ~= nil, "every name is terminated")
+        assert(stop ~= nil, "every name is terminated")
         names[index] = blob:sub(at, (stop as integer) - 1)
         at = (stop as integer) + 1
     end
@@ -94,7 +93,7 @@ local function decode(section: string): Graph
             outputs = outputs
         )
     end
-    test.assert(reader:atEnd(), "the section holds nothing the decoder did not read")
+    assert(reader:atEnd(), "the section holds nothing the decoder did not read")
     nupp.drop(reader)
 
     return Graph(targets = targets, passes = decoded)
@@ -119,90 +118,90 @@ function suite.declaresTheDeferredGraphInOrder(): nil
     end
     -- Every one of these strings is a compatibility surface: a game names a
     -- target to place a pass of its own beside it.
-    test.equal(
+    assert.eq(
         table.concat(names, ","),
         "albedo,normal,orm,emission,lit,scene,occluders,occludersTemp,dropShadowAO,bloomA,bloomB"
     )
     -- The shadow and bloom passes are declared whether or not the frame runs
     -- them, so a game that inserted a pass beside one keeps it when the tuning
     -- changes.
-    test.equal(
+    assert.eq(
         table.concat(passNames(), ","),
         "geometry,occluders,occluderBlurH,occluderBlurV,dropShadowAO,lighting,"
         .. "bloomExtract,bloomBlurX,bloomBlurY,composite,forward,present"
     )
-    test.equal(passes.formatOf("dropShadowAO"), "r8")
-    test.equal(passes.formatOf("bloomA"), "rgba16f")
-    test.equal(passes.formatOf("lit"), "rgba16f")
-    test.equal(passes.formatOf("albedo"), "rgba8")
-    test.equal(passes.formatOf("nothing"), nil)
+    assert.eq(passes.formatOf("dropShadowAO"), "r8")
+    assert.eq(passes.formatOf("bloomA"), "rgba16f")
+    assert.eq(passes.formatOf("lit"), "rgba16f")
+    assert.eq(passes.formatOf("albedo"), "rgba8")
+    assert.eq(passes.formatOf("nothing"), nil)
 end
 
 function suite.encodesTheGraphForTheBackend(): nil
     passes.reset()
     local graph = decode(passes.section())
-    test.equal(#graph.targets, 11)
-    test.equal(#graph.passes, 12)
+    assert.eq(#graph.targets, 11)
+    assert.eq(#graph.passes, 12)
 
     local scene = graph.targets[6]
-    test.equal(scene.name, "scene")
-    test.equal(scene.scale, 1)
+    assert.eq(scene.name, "scene")
+    assert.eq(scene.scale, 1)
     -- `scene` declares no clear, because composite covers every pixel of it and
     -- every later pass loads what composite left.
-    test.equal(scene.hasClear, 0)
+    assert.eq(scene.hasClear, 0)
 
     local normal = graph.targets[2]
-    test.equal(normal.hasClear, 1)
-    test.equal(normal.r, 0.5)
-    test.equal(normal.a, 0)
+    assert.eq(normal.hasClear, 1)
+    assert.eq(normal.r, 0.5)
+    assert.eq(normal.a, 0)
 
     local geometry = graph.passes[1]
-    test.equal(geometry.name, "geometry")
-    test.equal(geometry.depth, 1)
-    test.equal(geometry.hasDepthClear, 1)
-    test.equal(geometry.depthClear, 1)
-    test.equal(#geometry.inputs, 0)
-    test.equal(table.concat(geometry.outputs, ","), "albedo,normal,orm,emission")
+    assert.eq(geometry.name, "geometry")
+    assert.eq(geometry.depth, 1)
+    assert.eq(geometry.hasDepthClear, 1)
+    assert.eq(geometry.depthClear, 1)
+    assert.eq(#geometry.inputs, 0)
+    assert.eq(table.concat(geometry.outputs, ","), "albedo,normal,orm,emission")
 
     local lighting = graph.passes[6]
-    test.equal(lighting.name, "lighting")
+    assert.eq(lighting.name, "lighting")
     -- Declaration order is binding order: the G-buffer's four first, then the
     -- two the shadow lane fills.
-    test.equal(table.concat(lighting.inputs, ","), "albedo,normal,orm,emission,occluders,dropShadowAO")
+    assert.eq(table.concat(lighting.inputs, ","), "albedo,normal,orm,emission,occluders,dropShadowAO")
 
     local mask = graph.targets[7]
-    test.equal(mask.name, "occluders")
+    assert.eq(mask.name, "occluders")
     -- Half the frame, because a nine-tap separable blur runs over it at once.
-    test.equal(mask.scale, 0.5)
+    assert.eq(mask.scale, 0.5)
 
     local ao = graph.targets[9]
-    test.equal(ao.name, "dropShadowAO")
+    assert.eq(ao.name, "dropShadowAO")
     -- White, because a pixel no shadow lands on multiplies its light by one.
-    test.equal(ao.r, 1)
+    assert.eq(ao.r, 1)
 
     local forward = graph.passes[11]
-    test.equal(forward.name, "forward")
-    test.equal(forward.depth, 2)
-    test.equal(forward.hasDepthClear, 0)
+    assert.eq(forward.name, "forward")
+    assert.eq(forward.depth, 2)
+    assert.eq(forward.hasDepthClear, 0)
     -- The forward pass loads what composite wrote rather than clearing it.
-    test.equal(forward.clearMode, 1)
+    assert.eq(forward.clearMode, 1)
 
     local present = graph.passes[12]
-    test.equal(#present.outputs, 0, "an empty output list is the swapchain")
-    test.equal(table.concat(present.inputs, ","), "scene")
+    assert.eq(#present.outputs, 0, "an empty output list is the swapchain")
+    assert.eq(table.concat(present.inputs, ","), "scene")
 end
 
 function suite.cachesTheSectionUntilADeclarationChangesIt(): nil
     passes.reset()
     local first = passes.section()
-    test.equal(passes.section(), first, "a steady graph encodes once")
+    assert.eq(passes.section(), first, "a steady graph encodes once")
 
     local before = passes.revision()
     passes.declareTarget({name = "passestest.overlay"})
-    test.assert(passes.revision() > before, "a declaration raises the revision")
+    assert(passes.revision() > before, "a declaration raises the revision")
     local second = passes.section()
-    test.notEqual(second, first)
-    test.equal(#decode(second).targets, 12)
+    assert.ne(second, first)
+    assert.eq(#decode(second).targets, 12)
     passes.reset()
 end
 
@@ -215,57 +214,57 @@ function suite.insertsAPassAtANamedSeam(): nil
         outputs = {"passestest.overlay"},
     })
     local names = passNames()
-    test.equal(names[#names], "present")
-    test.equal(names[#names - 1], "passestest.overlay")
+    assert.eq(names[#names], "present")
+    assert.eq(names[#names - 1], "passestest.overlay")
 
     -- A pass and a target may share a name, which the deferred graph already
     -- relies on, so the insertion above is not a collision.
     local graph = decode(passes.section())
     const at = #graph.passes - 1
-    test.equal(graph.passes[at].name, "passestest.overlay")
-    test.equal(table.concat(graph.passes[at].outputs, ","), "passestest.overlay")
+    assert.eq(graph.passes[at].name, "passestest.overlay")
+    assert.eq(table.concat(graph.passes[at].outputs, ","), "passestest.overlay")
     passes.reset()
 end
 
 function suite.refusesAGraphThatCannotRun(): nil
     passes.reset()
-    test.raises(
+    assert.raises(
         function(): nil
             passes.declareTarget({name = "albedo"})
         end,
         "already declared"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             passes.declareTarget({name = "depth"})
         end,
         "reserved for the shared depth attachment"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             passes.declareTarget({name = "passestest.bad", scale = 0})
         end,
         "scale above zero and at most one"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             passes.declarePass({name = "geometry"})
         end,
         "already declared"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             passes.declarePass({name = "passestest.reader", inputs = {"passestest.absent"}})
         end,
         "reads undeclared target"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             passes.declarePass({name = "passestest.writer", outputs = {"passestest.absent"}})
         end,
         "writes undeclared target"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             passes.insertPassBefore("passestest.nowhere", {name = "passestest.early"})
         end,
@@ -275,7 +274,7 @@ function suite.refusesAGraphThatCannotRun(): nil
     -- Reading a target only a later pass writes is the ordering mistake the
     -- graph exists to refuse, and inserting the reader before its producer is
     -- the same mistake with the declarations in the other order.
-    test.raises(
+    assert.raises(
         function(): nil
             passes.insertPassBefore("geometry", {name = "passestest.tooEarly", inputs = {"albedo"}})
         end,
@@ -289,7 +288,7 @@ function suite.refusesDepthOnAScaledTarget(): nil
     passes.declareTarget({name = "passestest.half", scale = 0.5})
     -- One depth attachment at frame size serves every depth pass, so a pass
     -- drawing into a scaled target cannot share it.
-    test.raises(
+    assert.raises(
         function(): nil
             passes.declarePass({name = "passestest.small", outputs = {"passestest.half"}, depth = "testWrite"})
         end,
@@ -313,12 +312,12 @@ function suite.readsTheSharedDepthAttachmentByName(): nil
             found = table.concat(graph.passes[index].inputs, ",")
         end
     end
-    test.equal(found, "normal,depth")
+    assert.eq(found, "normal,depth")
     passes.reset()
 
     -- Nothing writes depth before the first pass, so reading it there is the
     -- same refusal as reading a target nothing has written.
-    test.raises(
+    assert.raises(
         function(): nil
             passes.insertPassBefore("geometry", {name = "passestest.tooEarly", inputs = {passes.DEPTH}})
         end,
@@ -336,22 +335,22 @@ function suite.customShadersCopyParametersAndInvalidateOnlyOnChange(): nil
         parameters = values
     })
     values[1] = 0
-    test.equal(passes.passes()[12].parameters[1], 1)
+    assert.eq(passes.passes()[12].parameters[1], 1)
     const revision = passes.revision()
     const section = passes.section()
     passes.setParameters("grade", {1, 0, 0, 1})
-    test.equal(passes.revision(), revision)
-    test.equal(passes.section(), section)
+    assert.eq(passes.revision(), revision)
+    assert.eq(passes.section(), section)
     passes.setParameters("grade", {0, 1, 0, 1})
-    test.assert(passes.revision() > revision)
-    test.notEqual(passes.section(), section)
-    test.raises(
+    assert(passes.revision() > revision)
+    assert.ne(passes.section(), section)
+    assert.raises(
         function(): nil
             passes.setParameters("present", {1})
         end,
         "parameters require a custom shader"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             passes.setShader("present", "")
         end,

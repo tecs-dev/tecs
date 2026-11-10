@@ -1,6 +1,5 @@
 local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
-local test = require("nupp.test")
 local time = require("nupp.time")
 
 local suite = {}
@@ -15,7 +14,7 @@ local suite = {}
 local function binding(): {[string]: any}
     local ok, loaded = pcall(require, "tecs.platform.audionative")
     if not ok then
-        test.skip("libtecsaudio is not on the loader path: " .. tostring(loaded))
+        assert.suite.skip("libtecsaudio is not on the loader path: " .. tostring(loaded))
     end
 
     return loaded as {[string]: any}
@@ -26,7 +25,7 @@ local function opened(): audiobackend.Backend
     local native = binding()
     local backend, reason = native.openOffline(48000, 2, 8)
     if backend == nil then
-        test.skip("libtecsaudio did not open: " .. tostring(reason))
+        assert.suite.skip("libtecsaudio did not open: " .. tostring(reason))
     end
 
     return backend as audiobackend.Backend
@@ -37,9 +36,9 @@ function suite.agreesWithTheLibraryAboutEveryStructOnTheSeam(): nil
     -- before it hands anything back, so reaching a backend at all is the
     -- layout assertion.
     local backend = opened()
-    test.equal(backend.frequency, 48000)
-    test.equal(backend.channels, 2)
-    test.assert(not backend.available)
+    assert.eq(backend.frequency, 48000)
+    assert.eq(backend.channels, 2)
+    assert(not backend.available)
     backend.close()
 end
 
@@ -63,34 +62,34 @@ function suite.carriesACommandBatchAcrossAndDrainsNothingBack(): nil
     backend.submit(commands, 4)
 
     local finished: {integer} = {0, 0, 0, 0}
-    test.equal(backend.drain(finished), 0)
-    test.equal(backend.position(65537), nil)
-    test.assert(not backend.seek(65537, 1))
+    assert.eq(backend.drain(finished), 0)
+    assert.eq(backend.position(65537), nil)
+    assert(not backend.seek(65537, 1))
     backend.close()
 end
 
 function suite.reportsAnOfflineOutputThatNeverDroppedOrReopened(): nil
     local backend = opened()
-    test.equal(assert(backend.outputChanges)(), 0)
+    assert.eq(assert(backend.outputChanges)(), 0)
     local status = assert(backend.output)()
-    test.equal(status.state, "offline")
-    test.equal(status.drops, 0)
-    test.equal(status.reopens, 0)
-    test.equal(status.reason, nil)
-    test.equal(status.frequency, 0)
-    test.equal(status.channels, 0)
+    assert.eq(status.state, "offline")
+    assert.eq(status.drops, 0)
+    assert.eq(status.reopens, 0)
+    assert.eq(status.reason, nil)
+    assert.eq(status.frequency, 0)
+    assert.eq(status.channels, 0)
     backend.close()
-    test.equal(assert(backend.output)().state, "offline")
+    assert.eq(assert(backend.output)().state, "offline")
 end
 
 function suite.takesADecoderOnlyThroughItsSeam(): nil
     -- The core links no codec: a Decoder comes from an extension's library,
     -- and the backend offers the seam it registers through.
     local backend = opened()
-    test.assert(backend.registerDecoder ~= nil)
-    test.assert(backend.openDecoded ~= nil)
+    assert(backend.registerDecoder ~= nil)
+    assert(backend.openDecoded ~= nil)
     local mixer = audio.newAudio({backend = backend})
-    test.equal(#mixer:decoders(), 0)
+    assert.eq(#mixer:decoders(), 0)
     mixer:destroy()
 end
 
@@ -99,11 +98,11 @@ function suite.drivesAWholeMixerOverTheNativeBackend(): nil
     local mixer = audio.newAudio({backend = backend, maxVoices = 4})
     -- The offline backend reports no output, and Tecs answers zero rather than
     -- taking a slot, which is what a machine with no sound card gets.
-    test.assert(not mixer.available)
+    assert(not mixer.available)
     mixer:setMasterGain(0.25)
     mixer:setGroupGain("sfx", 0.5)
     mixer:setLimit("footstep", {voices = 2, cooldown = 0.05})
-    test.equal(mixer:update(0.016), 0)
+    assert.eq(mixer:update(0.016), 0)
     mixer:destroy()
 end
 
@@ -111,9 +110,9 @@ function suite.fallsBackToSilenceWhenTheLibraryIsAbsent(): nil
     -- This one needs no library: it proves the fallback rather than the
     -- binding, so it runs on every machine.
     local mixer = audio.newAudio({backend = audiobackend.silent(), maxVoices = 4})
-    test.assert(not mixer.available)
-    test.equal(mixer:maxVoices(), 4)
-    test.equal(mixer:sounding(), 0)
+    assert(not mixer.available)
+    assert.eq(mixer:maxVoices(), 4)
+    assert.eq(mixer:sounding(), 0)
     mixer:destroy()
 end
 
@@ -125,7 +124,7 @@ local function voided(): audiobackend.Backend
     local native = binding()
     local backend, reason = native.openVoid(48000, 2, 8)
     if backend == nil then
-        test.skip("libtecsaudio did not open a void output: " .. tostring(reason))
+        assert.suite.skip("libtecsaudio did not open a void output: " .. tostring(reason))
     end
 
     return backend as audiobackend.Backend
@@ -133,13 +132,13 @@ end
 
 function suite.keepsTimeOnAVoidOutput(): nil
     local backend = voided()
-    test.assert(backend.available)
-    test.equal(assert(backend.output)().state, "void")
+    assert(backend.available)
+    assert.eq(assert(backend.output)().state, "void")
     local mixer = audio.newAudio({backend = backend, maxVoices = 4})
-    test.assert(mixer.available)
+    assert(mixer.available)
     local started = time.now()
     while mixer:now() < 0.05 do
-        test.assert(time.now() - started < 5000, "the void clock never moved")
+        assert(time.now() - started < 5000, "the void clock never moved")
         time.sleep(10)
         mixer:update(0.01)
     end
@@ -149,32 +148,32 @@ end
 function suite.rendersAndHearsSilenceOnAMemoryOutput(): nil
     binding()
     local mixer = audio.newAudio({output = "memory", maxVoices = 4})
-    test.assert(mixer.available)
-    test.equal(mixer:output().state, "offline")
-    test.assert(mixer:listen(0.5))
-    test.equal(mixer:now(), 0, "nothing moves a memory clock but step")
-    test.equal(mixer:step(0.5), 0.5)
-    test.equal(mixer:now(), 0.5)
+    assert(mixer.available)
+    assert.eq(mixer:output().state, "offline")
+    assert(mixer:listen(0.5))
+    assert.eq(mixer:now(), 0, "nothing moves a memory clock but step")
+    assert.eq(mixer:step(0.5), 0.5)
+    assert.eq(mixer:now(), 0.5)
     local heard = assert(mixer:listening())
-    test.equal(heard.frames, 24000)
-    test.equal(heard.clipped, 0)
-    test.equal(#heard.onsets, 0)
-    test.equal(#mixer:events(), 0)
+    assert.eq(heard.frames, 24000)
+    assert.eq(heard.clipped, 0)
+    assert.eq(#heard.onsets, 0)
+    assert.eq(#mixer:events(), 0)
     mixer:destroy()
 end
 
 function suite.stepsAHeldVoidOutputAndLetsItRunAgain(): nil
     local backend = voided()
     local mixer = audio.newAudio({backend = backend})
-    test.equal(mixer:step(0.1), 0, "a running void output is not stepped")
-    test.assert(mixer:hold(true))
+    assert.eq(mixer:step(0.1), 0, "a running void output is not stepped")
+    assert(mixer:hold(true))
     local before = mixer:now()
-    test.equal(mixer:step(0.25), 0.25)
-    test.assert(math.abs(mixer:now() - before - 0.25) < 0.02)
+    assert.eq(mixer:step(0.25), 0.25)
+    assert(math.abs(mixer:now() - before - 0.25) < 0.02)
     -- Held, the application's tick steps it by the frame's delta.
     mixer:tick(0.05)
-    test.assert(math.abs(mixer:now() - before - 0.3) < 0.02)
-    test.assert(not mixer:hold(false))
+    assert(math.abs(mixer:now() - before - 0.3) < 0.02)
+    assert(not mixer:hold(false))
     mixer:destroy()
 end
 
@@ -183,9 +182,9 @@ function suite.mapsTheDefaultTimelineOntoTheClock(): nil
     local mixer = audio.newAudio({output = "memory", maxVoices = 8, limiter = false})
     mixer:step(0.25)
     local clock = mixer:defaultTimeline()
-    test.assert(math.abs(clock:now() - mixer:now()) < 1e-9)
-    test.assert(math.abs(clock:toClock(3) - 3) < 1e-9)
-    test.equal(mixer:defaultTimeline(), clock)
+    assert(math.abs(clock:now() - mixer:now()) < 1e-9)
+    assert(math.abs(clock:toClock(3) - 3) < 1e-9)
+    assert.eq(mixer:defaultTimeline(), clock)
     mixer:destroy()
 end
 

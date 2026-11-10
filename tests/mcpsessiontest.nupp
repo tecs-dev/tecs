@@ -4,7 +4,6 @@ local json = require("nupp.codec.json")
 local mcp = require("tecs.mcp")
 local net = require("nupp.io.net")
 local tasks = require("nupp.tasks")
-local test = require("nupp.test")
 local time = require("nupp.time")
 
 -- The debug-server gate: an agent reaches a running application over the wire
@@ -96,7 +95,7 @@ local function callOverHTTP(port: integer, name: string, arguments: {[string]: a
     local response = json.decode(received:sub(headEnd + 1), json.NULL) as {[string]: any}
     local result = response.result as {[string]: any}
     local content = result.content as {{[string]: any}}
-    test.assert(result.isError == nil, `${name} failed: ${content ~= nil and content[1].text or "?"}`)
+    assert(result.isError == nil, `${name} failed: ${content ~= nil and content[1].text or "?"}`)
 
     return result.structuredContent as {[string]: any}
 end
@@ -153,63 +152,63 @@ function suite.inspectsAndControlsARunningApplicationOverTheTransport(): nil
         app:iterate(1 / 60, nil)
     end
     local before = spun(app.world)
-    test.assert(before > 0, "the system should have been running")
+    assert(before > 0, "the system should have been running")
 
     withSession(server, server.port, function(port: integer): nil
         local counted = callOverHTTP(port, "stats")
-        test.equal(counted.entities as integer, 2)
+        assert.eq(counted.entities as integer, 2)
 
         local listed = callOverHTTP(port, "systems_list", {phase = "Update"})
         local rows = listed.systems as {{[string]: any}}
-        test.equal(listed.total as integer, 1)
-        test.equal(rows[1].name as string, "test.mcp.session.Spin")
+        assert.eq(listed.total as integer, 1)
+        assert.eq(rows[1].name as string, "test.mcp.session.Spin")
 
         local queried = callOverHTTP(port, "query", {include = {"test.mcp.session.Spun"}})
         local entities = queried.entities as {{[string]: any}}
         local carried = (entities[1].components as {[string]: any})["test.mcp.session.Spun"] as {[string]: any}
-        test.equal(carried.value as number, before)
+        assert.eq(carried.value as number, before)
 
         -- Control: stopping the system stops the part of the game it performs.
         local stopped = callOverHTTP(port, "systems_stop", {name = "test.mcp.session.Spin"})
-        test.assert(stopped.enabled == false)
+        assert(stopped.enabled == false)
 
         -- Control: the state stack moves.
         local pushed = callOverHTTP(port, "states_push", {name = "paused"})
-        test.equal(pushed.top as string, "paused")
-        test.equal(callOverHTTP(port, "states_info").depth as integer, 1)
+        assert.eq(pushed.top as string, "paused")
+        assert.eq(callOverHTTP(port, "states_info").depth as integer, 1)
         callOverHTTP(port, "states_pop")
-        test.equal(callOverHTTP(port, "states_info").depth as integer, 0)
+        assert.eq(callOverHTTP(port, "states_info").depth as integer, 0)
 
         -- Control: a synthetic event is queued for the folds a real one takes.
         local sent = callOverHTTP(port, "send_event", {kind = "keyDown", physicalKey = "KeyF"})
-        test.equal(sent.pushed as string, "keyDown")
+        assert.eq(sent.pushed as string, "keyDown")
 
         -- Control: an entity spawned over the wire is in the world.
         local spawned = callOverHTTP(port, "spawn", {components = {["test.mcp.session.Spun"] = {value = 99}}})
-        test.assert((spawned.entity as integer) > 0)
-        test.equal(callOverHTTP(port, "stats").entities as integer, 3)
+        assert((spawned.entity as integer) > 0)
+        assert.eq(callOverHTTP(port, "stats").entities as integer, 3)
     end)
 
     -- The synthetic key arrives with the next frame, as a platform key does.
-    test.assert(not app.input:keyDown("KeyF"))
+    assert(not app.input:keyDown("KeyF"))
     app:iterate(1 / 60, nil)
-    test.assert(app.input:keyPressed("KeyF"))
-    test.assert(app.input:keyDown("KeyF"))
+    assert(app.input:keyPressed("KeyF"))
+    assert(app.input:keyDown("KeyF"))
 
     -- The stopped system does not run, so the counter it owns stands still.
     local held = spun(app.world)
     for _ = 1, 5 do
         app:iterate(1 / 60, nil)
     end
-    test.equal(spun(app.world), held)
+    assert.eq(spun(app.world), held)
 
     withSession(server, server.port, function(port: integer): nil
         local started = callOverHTTP(port, "systems_start", {name = "test.mcp.session.Spin"})
-        test.assert(started.enabled == true)
+        assert(started.enabled == true)
     end)
 
     app:iterate(1 / 60, nil)
-    test.assert(spun(app.world) > held)
+    assert(spun(app.world) > held)
 
     mcp.destroy(server)
     app:shutdown()
@@ -234,7 +233,7 @@ function suite.answersWhileTheApplicationIsCrashedAndResumesIt(): nil
 
     app:iterate(1 / 60, nil)
     local failure = app:crashed() as string
-    test.assert(failure ~= nil)
+    assert(failure ~= nil)
     mcp.setCrashed(failure)
 
     -- A world tool reports the traceback rather than answering.
@@ -250,7 +249,7 @@ function suite.answersWhileTheApplicationIsCrashedAndResumesIt(): nil
         json.NULL
     ) as {[string]: any}
     local blockedResult = blocked.result as {[string]: any}
-    test.assert(blockedResult.crashed == true)
+    assert(blockedResult.crashed == true)
 
     -- `clear_crash` is one of the tools that survives a crash, and it lets the
     -- loop simulate again.
@@ -267,9 +266,9 @@ function suite.answersWhileTheApplicationIsCrashedAndResumesIt(): nil
     ) as {[string]: any}
     local resumed = (cleared.result as {[string]: any}).structuredContent as {[string]: any}
 
-    test.assert(resumed.resumed == true)
-    test.assert(mcp.crashed() == nil)
-    test.assert(app:crashed() == nil)
+    assert(resumed.resumed == true)
+    assert(mcp.crashed() == nil)
+    assert(app:crashed() == nil)
     app:shutdown()
 end
 

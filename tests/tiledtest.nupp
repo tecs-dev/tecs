@@ -1,5 +1,4 @@
 const tiled = require("tecs.tiled")
-const test = require("nupp.test")
 const ecs = require("tecs.ecs")
 const gfx = require("tecs.gfx")
 const {type World} = require("tecs.ecs")
@@ -10,16 +9,16 @@ const {type Component} = require("tecs.ecs")
 local suite = {}
 function suite.loadsExternalTilesetsGroupsAndMetadata(): nil
     local map = tiled.load("tests/fixtures/tiled/maps/level.tmx")
-    test.equal(map.width, 3)
-    test.equal(#map.layers, 2)
+    assert.eq(map.width, 3)
+    assert.eq(#map.layers, 2)
     local ground = map.layers[1]
-    test.equal(ground.x, 8)
-    test.equal(ground.opacity, 0.5)
-    test.equal(ground.parallaxX, 0.5)
-    test.equal(map.tilesets[1].tiles[1].properties.cost, 2)
-    test.equal(map.layers[2].objects[1].properties.health, 100)
-    test.assert(assert(tiled.getTile(map, 1, 0, 1)).flipH)
-    test.assert(assert(tiled.getTile(map, 1, 2, 1)).flipD)
+    assert.eq(ground.x, 8)
+    assert.eq(ground.opacity, 0.5)
+    assert.eq(ground.parallaxX, 0.5)
+    assert.eq(map.tilesets[1].tiles[1].properties.cost, 2)
+    assert.eq(map.layers[2].objects[1].properties.health, 100)
+    assert(assert(tiled.getTile(map, 1, 0, 1)).flipH)
+    assert(assert(tiled.getTile(map, 1, 2, 1)).flipD)
 end
 
 function suite.rendersAnimatesAndEditsOneCell(): nil
@@ -28,21 +27,21 @@ function suite.rendersAnimatesAndEditsOneCell(): nil
     local root = tiled.spawn(world, map)
     world:update(0)
     local children = world:relationshipSources(ecs.ChildOf, root)
-    test.equal(#children, 2)
+    assert.eq(#children, 2)
     local entity = children[1]
     local original = assert(world:get(entity, gfx.Sprite)).u0
     world:update(0.15)
-    test.assert(assert(world:get(entity, gfx.Sprite)).u0 ~= original)
+    assert(assert(world:get(entity, gfx.Sprite)).u0 ~= original)
     tiled.setTile(map, 1, 2, 0, {tileset = 1, id = 1})
     world:update(0)
-    test.equal(#world:relationshipSources(ecs.ChildOf, root), 2)
-    test.assert(world:isAlive(entity))
+    assert.eq(#world:relationshipSources(ecs.ChildOf, root), 2)
+    assert(world:isAlive(entity))
     tiled.setTile(map, 1, 2, 0, nil)
     world:update(0)
-    test.equal(#world:relationshipSources(ecs.ChildOf, root), 2)
+    assert.eq(#world:relationshipSources(ecs.ChildOf, root), 2)
     world:despawn(root)
     world:commit()
-    test.equal(world.liveCount, 0)
+    assert.eq(world.liveCount, 0)
     world:shutdown()
 end
 
@@ -50,7 +49,7 @@ function suite.restoresObjectsWithoutDuplicatingThem(): nil
     local world = ecs.newWorld()
     local marker = ecs.newTagComponent({name = "tiledtest.Player"})
     tiled.registerObject("Player", function(exclusive running: World, object: Object): integer
-        test.equal(object.id, 42)
+        assert.eq(object.id, 42)
         return running:spawn(marker)
     end)
     local map = tiled.load("tests/fixtures/tiled/maps/level.tmx")
@@ -60,14 +59,14 @@ function suite.restoresObjectsWithoutDuplicatingThem(): nil
     local snapshot = world:saveSnapshot()
     world:loadSnapshot(snapshot)
     world:update(0)
-    test.equal(world.liveCount, count)
+    assert.eq(world.liveCount, count)
     local objects = 0
     for _, child in ipairs(world:relationshipSources(ecs.ChildOf, root)) do
         if world:has(child, marker) then
             objects = objects + 1
         end
     end
-    test.equal(objects, 1)
+    assert.eq(objects, 1)
     world:shutdown()
 end
 
@@ -81,11 +80,11 @@ function suite.buildsNativeCollisionAndRemovesEditedBoundaries(): nil
     world:update(0);
     world:update(1 / 60)
     local hit = physics.raycast(world, 32, -10, 32, 40)
-    test.assert(hit ~= nil)
+    assert(hit ~= nil)
     tiled.setTile(map, 1, 1, 0, nil)
     world:update(0);
     world:update(1 / 60)
-    test.equal(physics.raycast(world, 32, -10, 32, 40), nil)
+    assert.eq(physics.raycast(world, 32, -10, 32, 40), nil)
     world:shutdown()
 end
 
@@ -95,17 +94,17 @@ function suite.rendersTileObjectsAndReusesRepeatingImages(): nil
     local root = tiled.spawn(world, map)
     world:update(0)
     local children = world:relationshipSources(ecs.ChildOf, root)
-    test.assert(#children > 3)
+    assert(#children > 3)
     local object = children[1]
     local pose = assert(world:get(object, ecs.Transform2D))
-    test.equal(pose.x, 32)
-    test.equal(pose.y, 48)
+    assert.eq(pose.x, 32)
+    assert.eq(pose.y, 48)
     world:update(0)
-    test.equal(#world:relationshipSources(ecs.ChildOf, root), #children)
-    test.assert(world:isAlive(object))
+    assert.eq(#world:relationshipSources(ecs.ChildOf, root), #children)
+    assert(world:isAlive(object))
     world:remove(root, tiled.Tilemap)
     world:update(0)
-    test.equal(#world:relationshipSources(ecs.ChildOf, root), 0)
+    assert.eq(#world:relationshipSources(ecs.ChildOf, root), 0)
     world:shutdown()
 end
 
@@ -118,9 +117,9 @@ function suite.groupsStaticTilesAndKeepsAnimatedSprites(): nil
     const map = tiled.load("tests/fixtures/tiled/maps/level.tmx")
     const root = tiled.spawn(world, map)
     world:update(0)
-    test.equal(countComponent(world, gfx.TileChunk), 1)
-    test.equal(countComponent(world, gfx.Sprite), 1)
-    test.equal(countComponent(world, tiled.TileSource), 1)
+    assert.eq(countComponent(world, gfx.TileChunk), 1)
+    assert.eq(countComponent(world, gfx.Sprite), 1)
+    assert.eq(countComponent(world, tiled.TileSource), 1)
     local chunkId: integer = 0
     for _, id in ipairs(world:relationshipSources(ecs.ChildOf, root)) do
         if world:has(id, gfx.TileChunk) then
@@ -129,20 +128,20 @@ function suite.groupsStaticTilesAndKeepsAnimatedSprites(): nil
     end
     const chunk = assert(world:get(chunkId, gfx.TileChunk))
     @unsafe do
-        test.equal(chunk.tiles[2], 2)
-        test.equal(chunk.tiles[17], 2147483650)
-        test.equal(chunk.tiles[18], 1073741826)
-        test.equal(chunk.tiles[19], 536870914)
+        assert.eq(chunk.tiles[2], 2)
+        assert.eq(chunk.tiles[17], 2147483650)
+        assert.eq(chunk.tiles[18], 1073741826)
+        assert.eq(chunk.tiles[19], 536870914)
     end
     -- Move a cell from static to animated, then back, preserving its chunk.
     tiled.setTile(map, 1, 1, 0, {tileset = 1, id = 0})
     world:update(0)
-    test.equal(countComponent(world, gfx.Sprite), 2)
-    test.assert(world:isAlive(chunkId))
+    assert.eq(countComponent(world, gfx.Sprite), 2)
+    assert(world:isAlive(chunkId))
     tiled.setTile(map, 1, 1, 0, {tileset = 1, id = 1})
     world:update(0)
-    test.equal(countComponent(world, gfx.Sprite), 1)
-    test.assert(world:isAlive(chunkId))
+    assert.eq(countComponent(world, gfx.Sprite), 1)
+    assert(world:isAlive(chunkId))
     world:shutdown()
 end
 
@@ -163,15 +162,15 @@ function suite.groupsByTilesetAndRegionIncludingNegativeCells(): nil
     tiled.setTile(map, 1, 1, 1, {tileset = 2, id = 1})
     const root = tiled.spawn(world, map)
     world:update(0)
-    test.equal(countComponent(world, gfx.TileChunk), 4)
-    test.equal(countComponent(world, gfx.Sprite), 0)
-    test.equal(world.liveCount, 5)
+    assert.eq(countComponent(world, gfx.TileChunk), 4)
+    assert.eq(countComponent(world, gfx.Sprite), 0)
+    assert.eq(world.liveCount, 5)
     tiled.setTile(map, 1, -1, -1, nil)
     world:update(0)
-    test.equal(countComponent(world, gfx.TileChunk), 3)
+    assert.eq(countComponent(world, gfx.TileChunk), 3)
     world:remove(root, tiled.Tilemap)
     world:update(0)
-    test.equal(world.liveCount, 1)
+    assert.eq(world.liveCount, 1)
     world:shutdown()
 end
 
@@ -192,9 +191,9 @@ function suite.staticMapsUseChunkCapacityInsteadOfTileCapacity(): nil
     end
     tiled.spawn(world, map)
     world:update(0)
-    test.equal(countComponent(world, gfx.TileChunk), 256)
-    test.equal(countComponent(world, gfx.Sprite), 0)
-    test.equal(world.liveCount, 257)
+    assert.eq(countComponent(world, gfx.TileChunk), 256)
+    assert.eq(countComponent(world, gfx.Sprite), 0)
+    assert.eq(world.liveCount, 257)
     world:shutdown()
 end
 

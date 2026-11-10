@@ -1,7 +1,6 @@
 local ecs = require("tecs.ecs")
 local sequence = require("tecs.sequence")
 local sequencesnapshot = require("tecs.internal.sequencesnapshot")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -48,9 +47,9 @@ function suite.savesUnderTheEstablishedHandlerKey(): nil
     local snapshot = world:saveSnapshot()
 
     local payload = assert(sequenceData(snapshot))
-    test.equal(payload.version, sequencesnapshot.VERSION)
-    test.equal(#(payload.cursors as {any}), 1)
-    test.equal(#(payload.programs as {any}), 1)
+    assert.eq(payload.version, sequencesnapshot.VERSION)
+    assert.eq(#(payload.cursors as {any}), 1)
+    assert.eq(#(payload.programs as {any}), 1)
 end
 
 function suite.resumesAWaitingPlaybackWhereItLeftOff(): nil
@@ -69,27 +68,27 @@ function suite.resumesAWaitingPlaybackWhereItLeftOff(): nil
     })
     local handle = sequence.play(world, program, {params = {tag = "carried"}})
     step(world, 2)
-    test.equal(table.concat(log, ","), "before")
+    assert.eq(table.concat(log, ","), "before")
 
     local snapshot = world:saveSnapshot()
     local savedStep = sequence.currentStep(world)
 
     -- Run past the point the wait would have expired, then rewind.
     step(world, 6)
-    test.equal(table.concat(log, ","), "before,after")
+    assert.eq(table.concat(log, ","), "before,after")
     log = {}
     world:loadSnapshot(snapshot)
 
-    test.equal(sequence.currentStep(world), savedStep)
+    assert.eq(sequence.currentStep(world), savedStep)
     local status = assert(sequence.status(world, handle))
-    test.equal(status.state, "running")
-    test.equal(status.program, program.name)
-    test.equal(status.version, program.version)
-    test.equal(assert(status.wakeAt), savedStep + 3)
+    assert.eq(status.state, "running")
+    assert.eq(status.program, program.name)
+    assert.eq(status.version, program.version)
+    assert.eq(assert(status.wakeAt), savedStep + 3)
     step(world, 2)
-    test.equal(#log, 0)
+    assert.eq(#log, 0)
     step(world)
-    test.equal(table.concat(log, ","), "after")
+    assert.eq(table.concat(log, ","), "after")
 end
 
 function suite.carriesBindingsParametersAndPauseHoldersAcrossALoad(): nil
@@ -111,27 +110,27 @@ function suite.carriesBindingsParametersAndPauseHoldersAcrossALoad(): nil
         channel = "story",
     })
     step(world)
-    test.assert(sequence.pause(world, handle, "menu"))
+    assert(sequence.pause(world, handle, "menu"))
 
     local snapshot = world:saveSnapshot()
     world:loadSnapshot(snapshot)
 
     local status = assert(sequence.status(world, handle))
-    test.equal(status.state, "paused")
+    assert.eq(status.state, "paused")
     step(world, 5)
-    test.equal(#seen, 0)
+    assert.eq(#seen, 0)
 
-    test.assert(sequence.resume(world, handle, "menu"))
+    assert(sequence.resume(world, handle, "menu"))
     step(world, 4)
-    test.equal(table.concat(seen, ","), tostring(actor) .. ":carried")
+    assert.eq(table.concat(seen, ","), tostring(actor) .. ":carried")
 
     -- The owner index and the channel map both came back, so a despawn still
     -- reaches the playback and a second playback still replaces it.
     local again = sequence.play(world, program, {owner = actor, channel = "story"})
-    test.equal(assert(sequence.status(world, again)).state, "running")
+    assert.eq(assert(sequence.status(world, again)).state, "running")
     world:despawn(actor)
     world:commit()
-    test.equal(assert(sequence.status(world, again)).state, "canceled")
+    assert.eq(assert(sequence.status(world, again)).state, "canceled")
 end
 
 function suite.restoresASignalWaiterIntoItsChannelIndex(): nil
@@ -153,10 +152,10 @@ function suite.restoresASignalWaiterIntoItsChannelIndex(): nil
     local snapshot = world:saveSnapshot()
     world:loadSnapshot(snapshot)
 
-    test.equal(sequence.waitingOn(world, "test.saved"), 1)
+    assert.eq(sequence.waitingOn(world, "test.saved"), 1)
     sequence.signal(world, "test.saved")
     step(world)
-    test.assert(woke)
+    assert(woke)
 end
 
 function suite.restoresABranchTreeAndItsPendingJoin(): nil
@@ -178,19 +177,19 @@ function suite.restoresABranchTreeAndItsPendingJoin(): nil
     local handle = sequence.play(world, program)
     step(world, 2)
     local status = assert(sequence.status(world, handle))
-    test.assert(status.joining)
-    test.equal(status.branches, 1)
+    assert(status.joining)
+    assert.eq(status.branches, 1)
 
     local snapshot = world:saveSnapshot()
     world:loadSnapshot(snapshot)
 
     local restored = assert(sequence.status(world, handle))
-    test.assert(restored.joining)
-    test.equal(restored.branches, 1)
-    test.equal(sequence.activeCount(world), 2)
+    assert(restored.joining)
+    assert.eq(restored.branches, 1)
+    assert.eq(sequence.activeCount(world), 2)
 
     step(world, 5)
-    test.assert(joined)
+    assert(joined)
 end
 
 function suite.resumesAnEvaluatingTimelineWhereItWas(): nil
@@ -209,19 +208,19 @@ function suite.resumesAnEvaluatingTimelineWhereItWas(): nil
     world:update(0.25)
     world:update(0.25)
     world:update(0.25)
-    test.assert(math.abs(assert(world:get(actor, ecs.Transform2D)).x - 50) < 1e-9)
+    assert(math.abs(assert(world:get(actor, ecs.Transform2D)).x - 50) < 1e-9)
 
     local snapshot = world:saveSnapshot()
     world:update(0.25)
     world:update(0.25)
-    test.equal(assert(sequence.status(world, handle)).state, "completed")
+    assert.eq(assert(sequence.status(world, handle)).state, "completed")
 
     world:loadSnapshot(snapshot)
 
-    test.equal(assert(sequence.status(world, handle)).state, "running")
-    test.assert(math.abs(assert(world:get(actor, ecs.Transform2D)).x - 50) < 1e-9)
+    assert.eq(assert(sequence.status(world, handle)).state, "running")
+    assert(math.abs(assert(world:get(actor, ecs.Transform2D)).x - 50) < 1e-9)
     world:update(0.25)
-    test.assert(math.abs(assert(world:get(actor, ecs.Transform2D)).x - 75) < 1e-9)
+    assert(math.abs(assert(world:get(actor, ecs.Transform2D)).x - 75) < 1e-9)
 end
 
 function suite.leavesRunningPlaybacksAloneWhenAPayloadIsRejected(): nil
@@ -233,7 +232,7 @@ function suite.leavesRunningPlaybacksAloneWhenAPayloadIsRejected(): nil
     local payload = assert(sequenceData(snapshot))
     payload.version = 99
 
-    test.raises(
+    assert.raises(
         function(): nil
             world:loadSnapshot(snapshot)
         end,
@@ -243,9 +242,9 @@ function suite.leavesRunningPlaybacksAloneWhenAPayloadIsRejected(): nil
     -- The payload is validated before any live cursor is touched, so the
     -- playback is exactly where it was rather than half cleared.
     local status = assert(sequence.status(world, handle))
-    test.equal(status.state, "running")
+    assert.eq(status.state, "running")
     step(world, 20)
-    test.equal(assert(sequence.status(world, handle)).state, "completed")
+    assert.eq(assert(sequence.status(world, handle)).state, "completed")
 end
 
 function suite.dropsPlaybacksWhenNoSequencerStateWasSaved(): nil
@@ -253,13 +252,13 @@ function suite.dropsPlaybacksWhenNoSequencerStateWasSaved(): nil
     local program = sequence.define(uniqueName("test.emptySave."), {sequence.waitSteps(20)})
     sequence.play(world, program)
     step(world)
-    test.equal(sequence.activeCount(world), 1)
+    assert.eq(sequence.activeCount(world), 1)
 
     local empty = ecs.newWorld({timestep = STEP})
     sequence.plugin(empty)
     world:loadSnapshot(empty:saveSnapshot())
 
-    test.equal(sequence.activeCount(world), 0)
+    assert.eq(sequence.activeCount(world), 0)
 end
 
 return suite

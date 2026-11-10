@@ -1,5 +1,4 @@
 local gfx = require("tecs.gfx")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -7,7 +6,7 @@ const WIDTH = 640.0
 const HEIGHT = 360.0
 
 local function close(actual: number, expected: number, message: string): nil
-    test.assert(
+    assert(
         math.abs(actual - expected) < 1e-4,
         message .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual)
     )
@@ -26,7 +25,7 @@ function suite.centersTheViewOnItsPosition(): nil
 
     -- World y and target y both run down, so a larger world y is lower.
     const _, below = camera:toScreen(100, 90, WIDTH, HEIGHT)
-    test.assert(below > screenY, "increasing world y moves down the target")
+    assert(below > screenY, "increasing world y moves down the target")
 end
 
 function suite.roundTripsAPointThroughBothConversions(): nil
@@ -92,23 +91,23 @@ function suite.boundsWhatTheViewCanSee(): nil
 
     const turned = gfx.Camera2D(0, 0, 1, 0.6).value
     const turnedMinX, turnedMinY, turnedMaxX, turnedMaxY = turned:viewBounds(WIDTH, HEIGHT)
-    test.assert(turnedMinX < minX and turnedMaxX > maxX, "a turned view keeps more than it must")
-    test.assert(turnedMinY < minY and turnedMaxY > maxY, "a turned view keeps more than it must")
+    assert(turnedMinX < minX and turnedMaxX > maxX, "a turned view keeps more than it must")
+    assert(turnedMinY < minY and turnedMaxY > maxY, "a turned view keeps more than it must")
 
     -- Every corner of the turned viewport lies inside the reported bound.
     for _, corner in ipairs({{0.0, 0.0}, {WIDTH, 0.0}, {0.0, HEIGHT}, {WIDTH, HEIGHT}}) do
         const worldX, worldY = turned:toWorld(corner[1], corner[2], WIDTH, HEIGHT)
-        test.assert(worldX >= turnedMinX - 1e-6 and worldX <= turnedMaxX + 1e-6, "a corner is inside the bound")
-        test.assert(worldY >= turnedMinY - 1e-6 and worldY <= turnedMaxY + 1e-6, "a corner is inside the bound")
+        assert(worldX >= turnedMinX - 1e-6 and worldX <= turnedMaxX + 1e-6, "a corner is inside the bound")
+        assert(worldY >= turnedMinY - 1e-6 and worldY <= turnedMaxY + 1e-6, "a corner is inside the bound")
     end
 end
 
 function suite.defaultsToAnUnzoomedViewAtTheOrigin(): nil
     const camera = gfx.Camera2D().value
-    test.equal(camera.x, 0)
-    test.equal(camera.y, 0)
-    test.equal(camera.zoom, 1)
-    test.equal(camera.rotation, 0)
+    assert.eq(camera.x, 0)
+    assert.eq(camera.y, 0)
+    assert.eq(camera.zoom, 1)
+    assert.eq(camera.rotation, 0)
 end
 
 return suite

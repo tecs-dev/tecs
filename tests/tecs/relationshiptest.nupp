@@ -2,13 +2,12 @@ const ecs = require("tecs.ecs")
 const {type RelationshipValue} = require("tecs.ecs")
 const {type Archetype} = require("tecs.ecs")
 
-local test = require("nupp.test")
 local components = require("tecs.internal.components")
 local world = require("tecs.internal.world")
 local suite = {}
 
 function suite.requiresAReverseIndexForCascadeDeletion(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             components.newRelationship({
                 name = "test.RelationshipInvalidCascade",
@@ -31,10 +30,10 @@ function suite.storesTargetsAndBuildsAWorldLocalReverseIndex(): nil
     local child = value:spawn(childOf(parent))
     value:commit()
     local relationship: components.RelationshipValue = assert(value:get(child, childOf))
-    test.equal(relationship.target, parent)
+    assert.eq(relationship.target, parent)
     local sources = value:relationshipSources(childOf, parent)
-    test.equal(#sources, 1)
-    test.equal(sources[1], child)
+    assert.eq(#sources, 1)
+    assert.eq(sources[1], child)
 end
 
 function suite.reparentsExclusiveRelationshipsAtTheBarrier(): nil
@@ -49,11 +48,11 @@ function suite.reparentsExclusiveRelationshipsAtTheBarrier(): nil
     local child = value:spawn(childOf(firstParent))
     value:commit()
     value:set(child, childOf(secondParent))
-    test.equal(assert(value:get(child, childOf)).target, firstParent)
+    assert.eq(assert(value:get(child, childOf)).target, firstParent)
     value:commit()
-    test.equal(assert(value:get(child, childOf)).target, secondParent)
-    test.equal(#value:relationshipSources(childOf, firstParent), 0)
-    test.equal(value:relationshipSources(childOf, secondParent)[1], child)
+    assert.eq(assert(value:get(child, childOf)).target, secondParent)
+    assert.eq(#value:relationshipSources(childOf, firstParent), 0)
+    assert.eq(value:relationshipSources(childOf, secondParent)[1], child)
 end
 
 function suite.removesRelationshipsWithoutDespawningTheSource(): nil
@@ -68,9 +67,9 @@ function suite.removesRelationshipsWithoutDespawningTheSource(): nil
     value:commit()
     value:remove(child, childOf)
     value:commit()
-    test.assert(value:isAlive(child))
-    test.assert(value:get(child, childOf) == nil)
-    test.equal(#value:relationshipSources(childOf, parent), 0)
+    assert(value:isAlive(child))
+    assert(value:get(child, childOf) == nil)
+    assert.eq(#value:relationshipSources(childOf, parent), 0)
 end
 
 function suite.cascadeDeletesACommittedDescendantTree(): nil
@@ -87,10 +86,10 @@ function suite.cascadeDeletesACommittedDescendantTree(): nil
     value:commit()
     value:despawn(parent)
     value:commit()
-    test.assert(not value:isAlive(parent))
-    test.assert(not value:isAlive(child))
-    test.assert(not value:isAlive(grandchild))
-    test.equal(value.liveCount, 0)
+    assert(not value:isAlive(parent))
+    assert(not value:isAlive(child))
+    assert(not value:isAlive(grandchild))
+    assert.eq(value.liveCount, 0)
 end
 
 function suite.keepsReverseIndexesIsolatedBetweenWorlds(): nil
@@ -110,10 +109,10 @@ function suite.keepsReverseIndexesIsolatedBetweenWorlds(): nil
     second:commit()
     first:despawn(firstParent)
     first:commit()
-    test.assert(not first:isAlive(firstChild))
-    test.assert(second:isAlive(secondParent))
-    test.assert(second:isAlive(secondChild))
-    test.equal(second:relationshipSources(childOf, secondParent)[1], secondChild)
+    assert(not first:isAlive(firstChild))
+    assert(second:isAlive(secondParent))
+    assert(second:isAlive(secondChild))
+    assert.eq(second:relationshipSources(childOf, secondParent)[1], secondChild)
 end
 
 function suite.cascadesThroughPendingSpawnsWhenAParentIsCancelled(): nil
@@ -129,10 +128,10 @@ function suite.cascadesThroughPendingSpawnsWhenAParentIsCancelled(): nil
     local grandchild = value:spawn(childOf(child))
     value:despawn(parent)
     value:commit()
-    test.assert(not value:isAlive(parent))
-    test.assert(not value:isAlive(child))
-    test.assert(not value:isAlive(grandchild))
-    test.equal(value.liveCount, 0)
+    assert(not value:isAlive(parent))
+    assert(not value:isAlive(child))
+    assert(not value:isAlive(grandchild))
+    assert.eq(value.liveCount, 0)
 end
 
 function suite.matchesRelationshipComponentsInQueries(): nil
@@ -145,10 +144,10 @@ function suite.matchesRelationshipComponentsInQueries(): nil
     local count: integer = 0
     for candidate, length in matching:iter() do
         local relationships: {components.RelationshipValue} = assert(assert(candidate):get(follows))
-        test.equal(relationships[1].target, target)
+        assert.eq(relationships[1].target, target)
         count = count + (length as integer)
     end
-    test.equal(count, 1)
+    assert.eq(count, 1)
 end
 
 function suite.supportsMultipleTargetsInBothStorageModes(): nil
@@ -167,30 +166,30 @@ function suite.supportsMultipleTargetsInBothStorageModes(): nil
         value:forEachRelationship(source, relationship, function(edge: RelationshipValue): nil
             targets[#targets + 1] = edge.target
         end)
-        test.equal(#targets, 2)
-        test.equal(targets[1], first)
-        test.equal(targets[2], second)
+        assert.eq(#targets, 2)
+        assert.eq(targets[1], first)
+        assert.eq(targets[2], second)
         value:set(source, relationship(third))
         value:remove(source, relationship(first))
         value:commit()
         if mode == 1 then
-            test.equal(value.archetypeCount, before)
+            assert.eq(value.archetypeCount, before)
         end
-        test.equal(#value:relationshipSources(relationship, first), 0)
-        test.equal(value:relationshipSources(relationship, third)[1], source)
-        test.equal(assert(value:getFirstRelationship(source, relationship)).target, second)
+        assert.eq(#value:relationshipSources(relationship, first), 0)
+        assert.eq(value:relationshipSources(relationship, third)[1], source)
+        assert.eq(assert(value:getFirstRelationship(source, relationship)).target, second)
         const saved = value:saveSnapshot()
         value:loadSnapshot(saved)
         targets = {}
         value:forEachRelationship(source, relationship, function(edge: RelationshipValue): nil
             targets[#targets + 1] = edge.target
         end)
-        test.equal(#targets, 2)
-        test.equal(targets[2], third)
+        assert.eq(#targets, 2)
+        assert.eq(targets[2], third)
         value:remove(source, relationship)
         value:commit()
-        test.assert(not value:has(source, relationship))
-        test.equal(#value:relationshipSources(relationship, second), 0)
+        assert(not value:has(source, relationship))
+        assert.eq(#value:relationshipSources(relationship, second), 0)
     end
 end
 
@@ -212,14 +211,14 @@ function suite.matchesConcreteDenseTargetsAndSuppressesWildcardMoveCallbacks(): 
     })
     const source = value:spawn(relationship(first))
     value:commit()
-    test.equal(concrete:count(), 1)
-    test.equal(assert(value:get(source, selected)).target, first)
+    assert.eq(concrete:count(), 1)
+    assert.eq(assert(value:get(source, selected)).target, first)
     value:set(source, relationship(second))
     value:commit()
-    test.equal(concrete:count(), 0)
-    test.equal(entries, 1)
-    test.equal(exits, 0)
-    test.equal(assert(value:get(source, relationship)).target, second)
+    assert.eq(concrete:count(), 0)
+    assert.eq(entries, 1)
+    assert.eq(exits, 0)
+    assert.eq(assert(value:get(source, relationship)).target, second)
 end
 
 local record WeightedEdge
@@ -252,7 +251,7 @@ function suite.preservesTypedEdgePayloadsThroughUpdatesMovesAndSnapshots(): nil
         const source = value:spawn(relationship(first, 2), relationship(second, 5))
         value:commit()
         const edge: WeightedEdge = assert(value:get(source, relationship))
-        test.equal(edge.weight, 2)
+        assert.eq(edge.weight, 2)
         value:set(source, relationship(first, 9))
         value:set(source, tag)
         value:commit()
@@ -260,17 +259,17 @@ function suite.preservesTypedEdgePayloadsThroughUpdatesMovesAndSnapshots(): nil
         value:forEachRelationship(source, relationship, function(item: WeightedEdge): nil
             total = total + item.weight
         end)
-        test.equal(total, 14)
+        assert.eq(total, 14)
         if mode == 2 then
             const selected = relationship:targeting(second)
             const specific: WeightedEdge = assert(value:get(source, selected))
-            test.equal(specific.weight, 5)
+            assert.eq(specific.weight, 5)
         end
         const snapshot = value:saveSnapshot()
         value:loadSnapshot(snapshot)
         const restored: WeightedEdge = assert(value:get(source, relationship))
-        test.equal(restored.weight, 9)
-        test.equal(value:relationshipSources(relationship, second)[1], source)
+        assert.eq(restored.weight, 9)
+        assert.eq(value:relationshipSources(relationship, second)[1], source)
     end
 end
 
@@ -282,12 +281,12 @@ function suite.traversesBothDirectionsAndBoundsCycles(): nil
     value:commit()
     const visit = value:traverse(root, ecs.ChildOf)
     local depth, id = visit()
-    test.equal(depth as integer, 0);
-    test.equal(id as integer, child)
+    assert.eq(depth as integer, 0);
+    assert.eq(id as integer, child)
     depth, id = visit()
-    test.equal(depth as integer, 1);
-    test.equal(id as integer, leaf)
-    test.assert(visit() == nil)
+    assert.eq(depth as integer, 1);
+    assert.eq(id as integer, leaf)
+    assert(visit() == nil)
     const ancestors: {integer} = {}
     value:walkUp(
         leaf,
@@ -298,11 +297,11 @@ function suite.traversesBothDirectionsAndBoundsCycles(): nil
         end,
         ancestors
     )
-    test.equal(ancestors[1], child);
-    test.equal(ancestors[2], root)
+    assert.eq(ancestors[1], child);
+    assert.eq(ancestors[2], root)
     value:set(root, ecs.ChildOf(leaf));
     value:commit()
-    test.raises(
+    assert.raises(
         function(): nil
             value:walkUp(
                 leaf,
@@ -325,10 +324,10 @@ function suite.removesDeletedDenseTargetsWithoutDeletingOtherEdges(): nil
     value:commit()
     value:despawn(first)
     value:commit()
-    test.assert(value:isAlive(source))
-    test.assert(not value:has(source, relationship:targeting(first)))
-    test.equal(assert(value:get(source, relationship)).target, second)
-    test.equal(value:relationshipSources(relationship, second)[1], source)
+    assert(value:isAlive(source))
+    assert(not value:has(source, relationship:targeting(first)))
+    assert.eq(assert(value:get(source, relationship)).target, second)
+    assert.eq(value:relationshipSources(relationship, second)[1], source)
 end
 
 function suite.preservesSparseRowsAndIndexesThroughSwapRemovalAndCascade(): nil
@@ -340,12 +339,12 @@ function suite.preservesSparseRowsAndIndexesThroughSwapRemovalAndCascade(): nil
     value:commit()
     value:despawn(parent)
     value:commit()
-    test.assert(value:isAlive(survivor))
-    test.assert(not value:isAlive(child))
-    test.assert(not value:isAlive(parent))
-    test.equal(assert(value:get(survivor, ecs.ChildOf)).target, ancestor)
-    test.equal(value:relationshipSources(ecs.ChildOf, ancestor)[1], survivor)
-    test.equal(value.liveCount, 2)
+    assert(value:isAlive(survivor))
+    assert(not value:isAlive(child))
+    assert(not value:isAlive(parent))
+    assert.eq(assert(value:get(survivor, ecs.ChildOf)).target, ancestor)
+    assert.eq(value:relationshipSources(ecs.ChildOf, ancestor)[1], survivor)
+    assert.eq(value.liveCount, 2)
 end
 
 function suite.marksWildcardAndTargetColumnsDirtyTogether(): nil
@@ -360,10 +359,10 @@ function suite.marksWildcardAndTargetColumnsDirtyTogether(): nil
     const candidate = assert((step(state, nil)))
     candidate:clearDirtyComponents()
     value:getMut(source, selected)
-    test.assert(candidate:isComponentDirty(relationship))
+    assert(candidate:isComponentDirty(relationship))
     candidate:clearDirtyComponents()
     value:getMut(source, relationship)
-    test.assert(candidate:isComponentDirty(selected))
+    assert(candidate:isComponentDirty(selected))
 end
 
 function suite.keepsNewRelationshipStoresIsolatedAcrossWorldsAndGenerations(): nil
@@ -382,10 +381,10 @@ function suite.keepsNewRelationshipStoresIsolatedAcrossWorldsAndGenerations(): n
         first:commit()
         const reused = first:spawn();
         first:commit()
-        test.assert(reused ~= sourceA)
-        test.equal(#first:relationshipSources(relationship, targetA), 0)
-        test.equal(second:relationshipSources(relationship, targetB)[1], sourceB)
-        test.assert(not first:has(reused, relationship))
+        assert(reused ~= sourceA)
+        assert.eq(#first:relationshipSources(relationship, targetA), 0)
+        assert.eq(second:relationshipSources(relationship, targetB)[1], sourceB)
+        assert(not first:has(reused, relationship))
     end
 end
 
