@@ -3,6 +3,7 @@ module tecs.dev.commands
 local files = require("nupp.io.files")
 local path = require("nupp.io.path")
 local process = require("nupp.io.process")
+local system = require("nupp.system")
 
 export type Invocation = {
     args: {string},
@@ -103,9 +104,16 @@ export function output(args: {string}, env: {[string]: string}?): string
 end
 
 --- Uses the compiler that launched this tool when running from a checkout.
+---
+--- A checkout's `bin/nupp` is a shell script Windows cannot start, so Windows
+--- names `bin/nupp.cmd`, which runs it under Git Bash.
 export function compiler(): string
     const compilerRoot = os.getenv("NUPP_COMPILER_ROOT")
-    return compilerRoot and compilerRoot .. "/bin/nupp" or os.getenv("NUPP") or "nupp"
+    if compilerRoot == nil then
+        return os.getenv("NUPP") or "nupp"
+    end
+
+    return compilerRoot .. (system.platform == "windows" and "/bin/nupp.cmd" or "/bin/nupp")
 end
 
 --- Appends the caller's arguments without interpreting flags or quoting.
