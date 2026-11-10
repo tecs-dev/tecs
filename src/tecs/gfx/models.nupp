@@ -44,7 +44,6 @@ components, and stages each instance-owned skin palette and morph vector. No
 table or cdata is allocated per sample. Bounds remain caller-owned and must
 enclose every pose.
 ]]
-const io2 = require("nupp.io")
 const json2 = require("nupp.codec.json")
 const meshregistry = require("tecs.internal.meshregistry")
 
@@ -819,25 +818,25 @@ export type LoadOptions = {
     material: function(exclusive value: MaterialInfo): nil
 }
 
-local function register(bytes: string, path: string, options: LoadOptions?): Model
-    local reader = io2.newScalarReader(bytes)
-    const metadataBytes = reader:readBytes(reader:readUint32() as integer)
-    nupp.drop(reader)
+local function register(encoded: string, path: string, options: LoadOptions?): Model
+    local reader = io.Reader.of(encoded):scalar()
+    const metadataBytes = reader:readbytes(reader:readuint32() as integer)
+    own.drop(reader)
     const source = json2.decode(metadataBytes) as Metadata
     if options ~= nil then
         for _, material in ipairs(source.materials) do
             options.material(material as MaterialInfo)
         end
         const metadata = json2.encode(source)
-        local buffer = io2.newBuffer()
-        local writer = io2.newScalarWriter(buffer)
-        writer:writeUint32(nupp.math.u32.wrap(#metadata))
-            :writeBytes(metadata)
-            :writeBytes(string.rep("\0", (4 - #metadata % 4) % 4))
-        writer:writeBytes(bytes:sub(5 + #metadataBytes + (4 - #metadataBytes % 4) % 4))
-        nupp.drop(writer)
-        bytes = buffer:getString()
-        nupp.drop(buffer)
+        local buffer = bytes.Buffer.create()
+        local writer = buffer:writer():scalar()
+        writer:writeuint32(math.u32.wrap(#metadata))
+            :writebytes(metadata)
+            :writebytes(string.rep("\0", (4 - #metadata % 4) % 4))
+        writer:writebytes(encoded:sub(5 + #metadataBytes + (4 - #metadataBytes % 4) % 4))
+        own.drop(writer)
+        encoded = buffer:tostring()
+        own.drop(buffer)
     end
     const nextId = meshregistry.register(path)
     local animations: {Animation} = {}
@@ -879,7 +878,7 @@ local function register(bytes: string, path: string, options: LoadOptions?): Mod
         _order = orderOf(source.nodes),
         _animationByName = byName
     )
-    commands[#commands + 1] = bytes
+    commands[#commands + 1] = encoded
     commandIds[#commandIds + 1] = nextId
 
     return model
@@ -942,8 +941,8 @@ export function newMesh(options: MeshOptions): MeshInput, BoundsInput
     )
     assert(#options.indices > 0 and #options.indices % 3 == 0, "mesh indices must describe triangles")
     const vertexCount = #options.vertices // 12
-    local data = io2.newBuffer()
-    local writer = io2.newScalarWriter(data)
+    local data = bytes.Buffer.create()
+    local writer = data:writer():scalar()
     local minX, minY, minZ = math.huge, math.huge, math.huge
     local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
     for offset = 1, #options.vertices, 12 do
@@ -970,18 +969,18 @@ export function newMesh(options: MeshOptions): MeshInput, BoundsInput
     end
     for _, value in ipairs(options.vertices) do
         assert(value == value and math.abs(value) < math.huge, "mesh vertices must be finite")
-        writer:writeFloat32(nupp.math.f32.narrow(value))
+        writer:writefloat32(math.f32.narrow(value))
     end
     for _, value in ipairs(options.indices) do
         assert(value >= 0 and value < vertexCount and value % 1 == 0, "mesh index exceeds vertex count")
-        writer:writeUint32(nupp.math.u32.wrap(value))
+        writer:writeuint32(math.u32.wrap(value))
     end
     const colors = options.colors
     if colors ~= nil then
         assert(#colors == vertexCount * 4, "mesh colors need four floats per vertex")
         for _, value in ipairs(colors) do
             assert(value == value and math.abs(value) < math.huge, "mesh colors must be finite")
-            writer:writeFloat32(nupp.math.f32.narrow(value))
+            writer:writefloat32(math.f32.narrow(value))
         end
     end
     const skinOffset = (#options.vertices + #options.indices + (colors ~= nil and #colors or 0)) * 4
@@ -1001,7 +1000,7 @@ export function newMesh(options: MeshOptions): MeshInput, BoundsInput
                     joint >= 0 and joint < 16777216,
                     "mesh joint index must be nonnegative and exactly representable"
                 )
-                writer:writeFloat32(nupp.math.f32.narrow(joint))
+                writer:writefloat32(math.f32.narrow(joint))
                 const weight = weights[vertex * 4 + lane]
                 assert(
                     weight == weight and weight >= 0 and weight < math.huge,
@@ -1011,12 +1010,12 @@ export function newMesh(options: MeshOptions): MeshInput, BoundsInput
             end
             assert(total > 0, "mesh skin weights must have positive total")
             for lane = 1, 4 do
-                writer:writeFloat32(nupp.math.f32.narrow(weights[vertex * 4 + lane] / total))
+                writer:writefloat32(math.f32.narrow(weights[vertex * 4 + lane] / total))
             end
         end
         skinBytes = vertexCount * 32
     end
-    nupp.drop(writer)
+    own.drop(writer)
     const metadata: any = {
         version = 1,
         path = options.name,
@@ -1047,16 +1046,16 @@ export function newMesh(options: MeshOptions): MeshInput, BoundsInput
         draws = {{mesh = 1, material = 0, skin = 0, node = 1, weights = {}}}
     }
     const json = json2.encode(metadata)
-    local output = io2.newBuffer()
-    local prefix = io2.newScalarWriter(output)
-    prefix:writeUint32(nupp.math.u32.wrap(#json))
-        :writeBytes(json)
-        :writeBytes(string.rep("\0", (4 - #json % 4) % 4))
-        :writeBytes(data:getString())
-    nupp.drop(prefix)
-    nupp.drop(data)
-    const bytes = output:getString()
-    nupp.drop(output)
+    local output = bytes.Buffer.create()
+    local prefix = output:writer():scalar()
+    prefix:writeuint32(math.u32.wrap(#json))
+        :writebytes(json)
+        :writebytes(string.rep("\0", (4 - #json % 4) % 4))
+        :writebytes(data:tostring())
+    own.drop(prefix)
+    own.drop(data)
+    const bytes = output:tostring()
+    own.drop(output)
     const model = register(bytes, options.name)
 
     return model._meshes[1], model._bounds[1]
@@ -1098,17 +1097,17 @@ export function loadEnvironment(name: string, faces: {string}): string?, string?
             offset = offset + #bytes
         end
         const metadata = json2.encode({version = 1, environment = name, images = images})
-        local buffer = io2.newBuffer()
-        local writer = io2.newScalarWriter(buffer)
-        writer:writeUint32(nupp.math.u32.wrap(#metadata))
-            :writeBytes(metadata)
-            :writeBytes(string.rep("\0", (4 - #metadata % 4) % 4))
+        local buffer = bytes.Buffer.create()
+        local writer = buffer:writer():scalar()
+        writer:writeuint32(math.u32.wrap(#metadata))
+            :writebytes(metadata)
+            :writebytes(string.rep("\0", (4 - #metadata % 4) % 4))
         for _, bytes in ipairs(pixels) do
-            writer:writeBytes(bytes)
+            writer:writebytes(bytes)
         end
-        nupp.drop(writer)
-        const bytes = buffer:getString()
-        nupp.drop(buffer)
+        own.drop(writer)
+        const bytes = buffer:tostring()
+        own.drop(buffer)
 
         return bytes
     end)
@@ -1284,17 +1283,17 @@ export function newMaterial(options: MaterialOptions): MaterialInput
         channels = empty,
         animations = empty
     })
-    local buffer = io2.newBuffer()
-    local writer = io2.newScalarWriter(buffer)
-    writer:writeUint32(nupp.math.u32.wrap(#metadata))
-        :writeBytes(metadata)
-        :writeBytes(string.rep("\0", (4 - #metadata % 4) % 4))
+    local buffer = bytes.Buffer.create()
+    local writer = buffer:writer():scalar()
+    writer:writeuint32(math.u32.wrap(#metadata))
+        :writebytes(metadata)
+        :writebytes(string.rep("\0", (4 - #metadata % 4) % 4))
     for _, bytes in ipairs(pixels) do
-        writer:writeBytes(bytes)
+        writer:writebytes(bytes)
     end
-    nupp.drop(writer)
-    const bytes = buffer:getString()
-    nupp.drop(buffer)
+    own.drop(writer)
+    const bytes = buffer:tostring()
+    own.drop(buffer)
 
     return register(bytes, options.name)._materials[1]
 end

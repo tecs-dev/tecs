@@ -354,7 +354,7 @@ end
 --- into another group is setting `group` and clearing `voice`.
 ---
 --- Disabling an entity silences its sound and re-enabling starts it again.
-@derive(nupp.derive.Debug)
+@derive(types.debug)
 export struct Emitter
     --- Caller-writable. Selects a Sound by its `soundId` index. Zero plays
     --- nothing.
@@ -502,7 +502,7 @@ export const TrackComponent: ecs.ComponentDefinition<Emitter> = SoundComponent
 --- transform, world y grows downwards and the listener's frame upwards, so
 --- the sign flips. Without one, a game sets each row's `x`, `y` and `z`, as
 --- it always could. One listener is read: the first the query finds.
-@derive(nupp.derive.Debug)
+@derive(types.debug)
 export struct Listener
     --- Caller-writable. World units per unit of audio distance; a sound one
     --- unit away is half as loud as at the listener. One by default.
@@ -534,7 +534,7 @@ export const ListenerComponent: ecs.ComponentDefinition<Listener> = ecs.newCompo
 --- The Bus is a group name, by its `groupId` index, and should carry a
 --- reverb: `mixer:bus("cave", {effects = {effects.reverb({size = 0.9})}})`.
 --- Zones need a `Listener`, which is what gives the rows a position.
-@derive(nupp.derive.Debug)
+@derive(types.debug)
 export struct ReverbZone
     --- Caller-writable. The return Bus, by its `groupId` index.
     bus: integer

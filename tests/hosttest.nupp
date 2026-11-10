@@ -1,4 +1,3 @@
-const io2 = require("nupp.io")
 
 local ecs = require("tecs.ecs")
 local gfx = require("tecs.gfx")
@@ -164,22 +163,22 @@ function suite.exposesOneBatchedRenderPacketAfterACompletedFrame(): nil
     host.init(session)
 
     assert.eq(host.iterate(session, 0), "continue")
-    local reader = io2.newScalarReader(host.renderPacket(session))
-    assert.eq(reader:readUint32(), 0x54454353)
-    assert.eq(reader:readUint32(), 9)
-    assert.eq(reader:readUint32(), 140)
-    assert.eq(reader:readUint32(), 0)
+    local reader = io.Reader.of(host.renderPacket(session)):scalar()
+    assert.eq(reader:readuint32(), 0x54454353)
+    assert.eq(reader:readuint32(), 9)
+    assert.eq(reader:readuint32(), 140)
+    assert.eq(reader:readuint32(), 0)
     -- The graph revision and the section's byte length, neither of which this
     -- test pins: the render graph is declared elsewhere and may grow.
     reader:skip(4)
     reader:skip(4)
-    assert.eq(reader:readUint32(), 20)
-    assert.eq(reader:readUint32(), 1)
-    assert.eq(reader:readUint32(), 80)
-    assert.eq(reader:readUint32(), 1)
-    assert.eq(reader:readFloat32(), 320)
-    assert.eq(reader:readFloat32(), 180)
-    nupp.drop(reader)
+    assert.eq(reader:readuint32(), 20)
+    assert.eq(reader:readuint32(), 1)
+    assert.eq(reader:readuint32(), 80)
+    assert.eq(reader:readuint32(), 1)
+    assert.eq(reader:readfloat32(), 320)
+    assert.eq(reader:readfloat32(), 180)
+    own.drop(reader)
     assert(host.shutdown(session))
 end
 
@@ -213,13 +212,13 @@ function suite.projectsThePacketThroughThePhysicalDrawableSize(): nil
     host.init(session)
 
     assert.eq(host.iterate(session, 0), "continue")
-    local reader = io2.newScalarReader(host.renderPacket(session))
+    local reader = io.Reader.of(host.renderPacket(session)):scalar()
     reader:skip(40)
-    assert.eq(reader:readFloat32(), 640)
-    assert.eq(reader:readFloat32(), 360)
-    assert.eq(reader:readFloat32(), 320)
-    assert.eq(reader:readFloat32(), 180)
-    nupp.drop(reader)
+    assert.eq(reader:readfloat32(), 640)
+    assert.eq(reader:readfloat32(), 360)
+    assert.eq(reader:readfloat32(), 320)
+    assert.eq(reader:readfloat32(), 180)
+    own.drop(reader)
     assert(host.shutdown(session))
 end
 
@@ -231,25 +230,25 @@ function suite.followsTheDrawableThroughAResize(): nil
     host.init(session)
 
     assert.eq(host.iterate(session, 0), "continue")
-    local before = io2.newScalarReader(host.renderPacket(session))
+    local before = io.Reader.of(host.renderPacket(session)):scalar()
     before:skip(40)
-    assert.eq(before:readFloat32(), 1280)
-    assert.eq(before:readFloat32(), 720)
-    assert.eq(before:readFloat32(), 640)
-    assert.eq(before:readFloat32(), 360)
-    nupp.drop(before)
+    assert.eq(before:readfloat32(), 1280)
+    assert.eq(before:readfloat32(), 720)
+    assert.eq(before:readfloat32(), 640)
+    assert.eq(before:readfloat32(), 360)
+    own.drop(before)
 
     session.input:emit(host.INPUT_ADDRESS, host.ResizeInput, false, 800, 450, 1600, 900, 2, 1, 1)
     assert.eq(host.iterate(session, 0), "continue")
-    local after = io2.newScalarReader(host.renderPacket(session))
+    local after = io.Reader.of(host.renderPacket(session)):scalar()
     after:skip(40)
-    assert.eq(after:readFloat32(), 1600)
-    assert.eq(after:readFloat32(), 900)
+    assert.eq(after:readfloat32(), 1600)
+    assert.eq(after:readfloat32(), 900)
     -- The default view recenters on the new drawable, so a resize moves the
     -- window's edges rather than the content under the middle of it.
-    assert.eq(after:readFloat32(), 800)
-    assert.eq(after:readFloat32(), 450)
-    nupp.drop(after)
+    assert.eq(after:readfloat32(), 800)
+    assert.eq(after:readfloat32(), 450)
+    own.drop(after)
     assert(host.shutdown(session))
 end
 

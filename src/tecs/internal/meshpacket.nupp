@@ -3,7 +3,6 @@ module tecs.internal.meshpacket
 const {type Collector as Collector2} = require("tecs.internal.meshlights")
 const {type Lighting} = require("tecs.gfx.meshes")
 const meshlights = require("tecs.internal.meshlights")
-const io2 = require("nupp.io")
 const json = require("nupp.codec.json")
 
 local world = require("tecs.internal.world")
@@ -92,8 +91,8 @@ local function changed(exclusive self: Collector): boolean
 end
 
 local function collect(exclusive self: Collector): string
-    local buffer, palette = io2.newBuffer(), io2.newBuffer()
-    local writer, paletteWriter = io2.newScalarWriter(buffer), io2.newScalarWriter(palette)
+    local buffer, palette = bytes.Buffer.create(), bytes.Buffer.create()
+    local writer, paletteWriter = buffer:writer():scalar(), palette:writer():scalar()
     local count: integer = 0
     local paletteCount: integer = 0
     @unsafe do
@@ -127,7 +126,7 @@ local function collect(exclusive self: Collector): string
                     0,
                     0
                 }) do
-                    writer:writeUint32(nupp.math.u32.wrap(id))
+                    writer:writeuint32(math.u32.wrap(id))
                 end
                 for _, value in ipairs({
                     transform.x,
@@ -152,34 +151,34 @@ local function collect(exclusive self: Collector): string
                     bound.radius
                 }) do
                     assert(value == value and math.abs(value) < math.huge, "mesh instance values must be finite")
-                    writer:writeFloat32(nupp.math.f32.narrow(value))
+                    writer:writefloat32(math.f32.narrow(value))
                 end
-                writer:writeUint32(nupp.math.u32.wrap(paletteCount))
-                writer:writeUint32(nupp.math.u32.wrap(#skin // 16))
-                writer:writeUint32(nupp.math.u32.wrap(paletteCount + #skin))
-                writer:writeUint32(nupp.math.u32.wrap(#morph))
+                writer:writeuint32(math.u32.wrap(paletteCount))
+                writer:writeuint32(math.u32.wrap(#skin // 16))
+                writer:writeuint32(math.u32.wrap(paletteCount + #skin))
+                writer:writeuint32(math.u32.wrap(#morph))
                 for _, value in ipairs(skin) do
-                    paletteWriter:writeFloat32(nupp.math.f32.narrow(value))
+                    paletteWriter:writefloat32(math.f32.narrow(value))
                 end
                 for _, value in ipairs(morph) do
-                    paletteWriter:writeFloat32(nupp.math.f32.narrow(value))
+                    paletteWriter:writefloat32(math.f32.narrow(value))
                 end
                 paletteCount = paletteCount + #skin + #morph
                 count = count + 1
             end
         end
     end
-    nupp.drop(writer)
-    nupp.drop(paletteWriter)
-    local output = io2.newBuffer()
-    local prefix = io2.newScalarWriter(output)
-    prefix:writeUint32(nupp.math.u32.wrap(count)):writeUint32(nupp.math.u32.wrap(paletteCount))
-    prefix:writeBytes(buffer:getString()):writeBytes(palette:getString())
-    nupp.drop(prefix)
-    const result = output:getString()
-    nupp.drop(output)
-    nupp.drop(buffer)
-    nupp.drop(palette)
+    own.drop(writer)
+    own.drop(paletteWriter)
+    local output = bytes.Buffer.create()
+    local prefix = output:writer():scalar()
+    prefix:writeuint32(math.u32.wrap(count)):writeuint32(math.u32.wrap(paletteCount))
+    prefix:writebytes(buffer:tostring()):writebytes(palette:tostring())
+    own.drop(prefix)
+    const result = output:tostring()
+    own.drop(output)
+    own.drop(buffer)
+    own.drop(palette)
 
     return result
 end
@@ -239,29 +238,29 @@ function Collector.frame(
         self.revision = self.revision + 1
         self.payload = collect(self)
     end
-    local buffer = io2.newBuffer()
-    local writer = io2.newScalarWriter(buffer)
+    local buffer = bytes.Buffer.create()
+    local writer = buffer:writer():scalar()
     const retained = resident == self.revision
-    writer:writeUint32(nupp.math.u32.wrap(0x544D5348)):writeUint32(nupp.math.u32.wrap(2))
-    writer:writeUint32(nupp.math.u32.wrap(self.revision)):writeUint32(nupp.math.u32.wrap(retained and 1 or 0))
+    writer:writeuint32(math.u32.wrap(0x544D5348)):writeuint32(math.u32.wrap(2))
+    writer:writeuint32(math.u32.wrap(self.revision)):writeuint32(math.u32.wrap(retained and 1 or 0))
     const matrix = camera:matrix(width, height)
     for lane = 0, 15 do
-        writer:writeFloat32(nupp.math.f32.narrow(assert(matrix[lane])))
+        writer:writefloat32(math.f32.narrow(assert(matrix[lane])))
     end
     for _, value in ipairs({camera.x, camera.y, camera.z, 0}) do
-        writer:writeFloat32(nupp.math.f32.narrow(value))
+        writer:writefloat32(math.f32.narrow(value))
     end
     const settings = settingsOf(lighting)
-    writer:writeUint32(nupp.math.u32.wrap(#settings)):writeBytes(settings)
-    writer:writeBytes(string.rep("\0", (4 - #settings % 4) % 4))
+    writer:writeuint32(math.u32.wrap(#settings)):writebytes(settings)
+    writer:writebytes(string.rep("\0", (4 - #settings % 4) % 4))
     const lights = self.lights:frame()
-    writer:writeUint32(nupp.math.u32.wrap(#lights)):writeBytes(lights)
+    writer:writeuint32(math.u32.wrap(#lights)):writebytes(lights)
     if not retained then
-        writer:writeBytes(self.payload)
+        writer:writebytes(self.payload)
     end
-    nupp.drop(writer)
-    const result = buffer:getString()
-    nupp.drop(buffer)
+    own.drop(writer)
+    const result = buffer:tostring()
+    own.drop(buffer)
 
     return result
 end

@@ -395,10 +395,10 @@ register(
     function(args: {[string]: any}): {[string]: any}
         assert(session == nil, "a tool sampling session is already running")
         local interval = math.floor(args.intervalMs or 10) as integer
-        const owner = nupp.manage(profile.sample({intervalMs = interval, zone = args.zone}))
+        const owner = own.manage(profile.sample({intervalMs = interval, zone = args.zone}))
         session = owner:alias()
         -- Custody passes to the module slot until `profile_stop` takes it.
-        @unsafe nupp.release(owner)
+        @unsafe own.release(owner)
 
         return {running = true, intervalMs = interval, zone = args.zone}
     end,
@@ -418,7 +418,7 @@ register(
             error(tostring(problem), 0)
         end
         local report = taken:stop()
-        nupp.drop(taken)
+        own.drop(taken)
         local ok, reason = files.writeAtomic(destination, report.text)
         assert(ok, reason?.message)
 

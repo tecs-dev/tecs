@@ -77,7 +77,7 @@ export const DEFAULT_SPEED: number = 1.0
 --- cycle, so it neither grows without bound nor loses precision to its own age.
 --- The cycle's duration is the sum of the durations of the frames the tag
 --- visits, which `tecs.gfx.sheet.Sheet.cycle` reports.
-@derive(nupp.derive.Debug)
+@derive(types.debug)
 export struct Animation
     --- Caller-writable. Selects a sheet by its registration index. Zero plays
     --- nothing.
@@ -373,7 +373,7 @@ local function ticksOf(borrows sprite: rendercomponents.Sprite, clock: number): 
     if sprite.u1 == 0 then
         return sprite.v0
     end
-    return nupp.math.f32.narrow(nupp.math.f32.narrow(clock - sprite.v0) * sprite.u1)
+    return math.f32.narrow(math.f32.narrow(clock - sprite.v0) * sprite.u1)
 end
 
 local function encode(query: ecs.Query, borrows world: ecs.World, clock: number, runs: {[integer]: EncodedRun}): nil

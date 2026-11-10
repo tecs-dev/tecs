@@ -1,4 +1,3 @@
-const io2 = require("nupp.io")
 
 local framepacket = require("tecs.internal.framepacket")
 local gfx = require("tecs.gfx")
@@ -33,24 +32,24 @@ function suite.drawsACameraAndTwoImagesThroughItsEntry(): nil
     assert.eq(images.stateOf(images.id("example/sprites/disc")), "resident")
 
     assert.eq(host.iterate(session, 0.25), "continue")
-    const reader = io2.newScalarReader(host.renderPacket(session))
-    assert.eq(reader:readUint32(), framepacket.MAGIC)
-    assert.eq(reader:readUint32(), framepacket.VERSION)
+    const reader = io.Reader.of(host.renderPacket(session)):scalar()
+    assert.eq(reader:readuint32(), framepacket.MAGIC)
+    assert.eq(reader:readuint32(), framepacket.VERSION)
     reader:skip(20)
-    const batches = reader:readUint32() as integer
+    const batches = reader:readuint32() as integer
     reader:skip(4)
-    assert.eq(reader:readUint32(), 600)
-    assert.eq(reader:readFloat32(), 800)
-    assert.eq(reader:readFloat32(), 450)
+    assert.eq(reader:readuint32(), 600)
+    assert.eq(reader:readfloat32(), 800)
+    assert.eq(reader:readfloat32(), 450)
     -- The camera moved off the field center on the first frame, so the packet
     -- carries the game's view rather than the target-centered default.
-    const cameraX = reader:readFloat32()
+    const cameraX = reader:readfloat32()
     assert.ne(cameraX, 400)
     reader:skip(4)
-    assert(reader:readFloat32() > 0, "the zoom projects")
+    assert(reader:readfloat32() > 0, "the zoom projects")
     reader:skip(4)
-    assert.eq(reader:readUint32(), framepacket.LIGHT_STRIDE)
-    nupp.drop(reader)
+    assert.eq(reader:readuint32(), framepacket.LIGHT_STRIDE)
+    own.drop(reader)
 
     -- Both images are resident and the field alternates between them, so the
     -- run-length batching splits the frame rather than collapsing it.

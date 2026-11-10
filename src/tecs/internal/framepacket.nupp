@@ -191,7 +191,6 @@ disagrees with its batch's, or whose material id its dispatch does not carry.
 const components = require("tecs.internal.components")
 const sheet = require("tecs.gfx.sheet")
 const {type Component} = require("tecs.internal.components")
-const io2 = require("nupp.io")
 const particles = require("tecs.gfx.particles")
 
 local archetype = require("tecs.internal.archetype")
@@ -269,8 +268,8 @@ export const FRAME_RETAINED: integer = 4
 --- Carries dirty byte ranges over a validated resident generation.
 export const FRAME_DELTA: integer = 8
 
-const narrow = nupp.math.f32.narrow
-const wrap = nupp.math.u32.wrap
+const narrow = math.f32.narrow
+const wrap = math.u32.wrap
 const huge = math.huge
 
 local function finite(value: number): boolean
@@ -980,8 +979,8 @@ local function rebuildBatches(exclusive self: Extractor): nil
     local runSampler: integer = -1
     local runChunk = false
     local runLane: integer = -1
-    local batchBuffer = io2.newBuffer()
-    local batchWriter = io2.newScalarWriter(batchBuffer)
+    local batchBuffer = bytes.Buffer.create()
+    local batchWriter = batchBuffer:writer():scalar()
     runImage = -1
     runSampler = -1
     runLane = -1
@@ -995,11 +994,11 @@ local function rebuildBatches(exclusive self: Extractor): nil
             or self.chunkKinds[row] ~= runChunk
         then
             if runLength > 0 then
-                batchWriter:writeUint32(wrap(runImage))
-                    :writeUint32(wrap(runSampler))
-                    :writeUint32(wrap(runLane))
-                    :writeUint32(wrap(runFirst))
-                    :writeUint32(wrap(runLength))
+                batchWriter:writeuint32(wrap(runImage))
+                    :writeuint32(wrap(runSampler))
+                    :writeuint32(wrap(runLane))
+                    :writeuint32(wrap(runFirst))
+                    :writeuint32(wrap(runLength))
             end
             runChunk = self.chunkKinds[row]
             runImage = imageIds[row]
@@ -1011,16 +1010,16 @@ local function rebuildBatches(exclusive self: Extractor): nil
         runLength = runLength + 1
     end
     if runLength > 0 then
-        batchWriter:writeUint32(wrap(runImage))
-            :writeUint32(wrap(runSampler))
-            :writeUint32(wrap(runLane))
-            :writeUint32(wrap(runFirst))
-            :writeUint32(wrap(runLength))
+        batchWriter:writeuint32(wrap(runImage))
+            :writeuint32(wrap(runSampler))
+            :writeuint32(wrap(runLane))
+            :writeuint32(wrap(runFirst))
+            :writeuint32(wrap(runLength))
     end
 
-    nupp.drop(batchWriter)
-    self.cachedBatchBytes = batchBuffer:getString()
-    nupp.drop(batchBuffer)
+    own.drop(batchWriter)
+    self.cachedBatchBytes = batchBuffer:tostring()
+    own.drop(batchBuffer)
     self.cachedBatches = #self.cachedBatchBytes // 20
     local casters: integer = 0
     for index = 1, rows do
@@ -1053,12 +1052,12 @@ local function prefix(exclusive self: Extractor, eye: View, mode: integer, revis
     if mode ~= FRAME_RETAINED then
         for _, run in pairs(self.runs) do
             if run.length > 0 and run.tileBytes ~= "" and (mode == 0 or run.dirty) then
-                local tileBuffer = io2.newBuffer()
-                local tileWriter = io2.newScalarWriter(tileBuffer)
-                tileWriter:writeUint32(wrap(run.tileSlot)):writeBytes(run.tileBytes)
-                nupp.drop(tileWriter)
-                tileUpdates[#tileUpdates + 1] = tileBuffer:getString()
-                nupp.drop(tileBuffer)
+                local tileBuffer = bytes.Buffer.create()
+                local tileWriter = tileBuffer:writer():scalar()
+                tileWriter:writeuint32(wrap(run.tileSlot)):writebytes(run.tileBytes)
+                own.drop(tileWriter)
+                tileUpdates[#tileUpdates + 1] = tileBuffer:tostring()
+                own.drop(tileBuffer)
             end
         end
     end
@@ -1070,44 +1069,44 @@ local function prefix(exclusive self: Extractor, eye: View, mode: integer, revis
     self.frameTableAt = tableRevision
     const particleBytes = particles.section(self.world)
     const graph = passes.section()
-    local buffer = io2.newBuffer()
-    local writer = io2.newScalarWriter(buffer)
-    writer:writeUint32(MAGIC)
-        :writeUint32(VERSION)
-        :writeUint32(HEADER_SIZE)
-        :writeUint32(wrap(frameFlags))
-        :writeUint32(wrap(passes.revision()))
-        :writeUint32(wrap(#graph))
-        :writeUint32(BATCH_STRIDE)
-        :writeUint32(wrap(batches))
-        :writeUint32(INSTANCE_STRIDE)
-        :writeUint32(wrap(rows))
-        :writeFloat32(narrow(eye.width))
-        :writeFloat32(narrow(eye.height))
-        :writeFloat32(narrow(eye.x))
-        :writeFloat32(narrow(eye.y))
-        :writeFloat32(narrow(eye.zoom))
-        :writeFloat32(narrow(eye.rotation))
-        :writeUint32(LIGHT_STRIDE)
-        :writeUint32(wrap(lightCount))
-        :writeUint32(wrap(casters))
-        :writeUint32(wrap(revision))
-        :writeFloat32(narrow(ambientR))
-        :writeFloat32(narrow(ambientG))
-        :writeFloat32(narrow(ambientB))
-        :writeFloat32(narrow(shadowTuning ~= nil and shadowTuning.steps or 24.0))
-        :writeFloat32(narrow(shadowTuning ~= nil and shadowTuning.height or 64.0))
-        :writeFloat32(narrow(shadowTuning ~= nil and shadowTuning.margin or 200.0))
-        :writeFloat32(narrow(shadowTuning ~= nil and shadowTuning.dropOpacity or 0.4))
-        :writeFloat32(narrow(shadowTuning ~= nil and shadowTuning.dropLength or 512.0))
-        :writeFloat32(narrow(bloomTuning ~= nil and bloomTuning.threshold or 0.8))
-        :writeFloat32(narrow(bloomTuning ~= nil and bloomTuning.knee or 0.1))
-        :writeFloat32(narrow(bloomTuning ~= nil and bloomTuning.intensity or 0.7))
-        :writeUint32(wrap(#tileUpdates))
-        :writeFloat32(narrow(frametable.clockOf(self.world)))
-        :writeUint32(wrap(#tableBytes))
-        :writeUint32(wrap(#particleBytes))
-    writer:writeBytes(tableBytes):writeBytes(particleBytes):writeBytes(graph)
+    local buffer = bytes.Buffer.create()
+    local writer = buffer:writer():scalar()
+    writer:writeuint32(MAGIC)
+        :writeuint32(VERSION)
+        :writeuint32(HEADER_SIZE)
+        :writeuint32(wrap(frameFlags))
+        :writeuint32(wrap(passes.revision()))
+        :writeuint32(wrap(#graph))
+        :writeuint32(BATCH_STRIDE)
+        :writeuint32(wrap(batches))
+        :writeuint32(INSTANCE_STRIDE)
+        :writeuint32(wrap(rows))
+        :writefloat32(narrow(eye.width))
+        :writefloat32(narrow(eye.height))
+        :writefloat32(narrow(eye.x))
+        :writefloat32(narrow(eye.y))
+        :writefloat32(narrow(eye.zoom))
+        :writefloat32(narrow(eye.rotation))
+        :writeuint32(LIGHT_STRIDE)
+        :writeuint32(wrap(lightCount))
+        :writeuint32(wrap(casters))
+        :writeuint32(wrap(revision))
+        :writefloat32(narrow(ambientR))
+        :writefloat32(narrow(ambientG))
+        :writefloat32(narrow(ambientB))
+        :writefloat32(narrow(shadowTuning ~= nil and shadowTuning.steps or 24.0))
+        :writefloat32(narrow(shadowTuning ~= nil and shadowTuning.height or 64.0))
+        :writefloat32(narrow(shadowTuning ~= nil and shadowTuning.margin or 200.0))
+        :writefloat32(narrow(shadowTuning ~= nil and shadowTuning.dropOpacity or 0.4))
+        :writefloat32(narrow(shadowTuning ~= nil and shadowTuning.dropLength or 512.0))
+        :writefloat32(narrow(bloomTuning ~= nil and bloomTuning.threshold or 0.8))
+        :writefloat32(narrow(bloomTuning ~= nil and bloomTuning.knee or 0.1))
+        :writefloat32(narrow(bloomTuning ~= nil and bloomTuning.intensity or 0.7))
+        :writeuint32(wrap(#tileUpdates))
+        :writefloat32(narrow(frametable.clockOf(self.world)))
+        :writeuint32(wrap(#tableBytes))
+        :writeuint32(wrap(#particleBytes))
+    writer:writebytes(tableBytes):writebytes(particleBytes):writebytes(graph)
 
     const lightOrder = self.lightOrder
     const lightTransforms = self.lightTransforms
@@ -1117,24 +1116,24 @@ local function prefix(exclusive self: Extractor, eye: View, mode: integer, revis
             const slot = lightOrder[index]
             const transform = lightTransforms[slot]
             const light = lightValues[slot]
-            writer:writeFloat32(narrow(transform.x))
-                :writeFloat32(narrow(transform.y))
-                :writeFloat32(narrow(light.height))
-                :writeFloat32(narrow(light.radius))
-                :writeFloat32(narrow(light.r))
-                :writeFloat32(narrow(light.g))
-                :writeFloat32(narrow(light.b))
-                :writeFloat32(narrow(light.intensity))
+            writer:writefloat32(narrow(transform.x))
+                :writefloat32(narrow(transform.y))
+                :writefloat32(narrow(light.height))
+                :writefloat32(narrow(light.radius))
+                :writefloat32(narrow(light.r))
+                :writefloat32(narrow(light.g))
+                :writefloat32(narrow(light.b))
+                :writefloat32(narrow(light.intensity))
         end
     end
 
-    writer:writeBytes(table.concat(tileUpdates))
+    writer:writebytes(table.concat(tileUpdates))
     if mode == 0 then
-        writer:writeBytes(self.cachedBatchBytes)
+        writer:writebytes(self.cachedBatchBytes)
     end
-    nupp.drop(writer)
-    const bytes = buffer:getString()
-    nupp.drop(buffer)
+    own.drop(writer)
+    const bytes = buffer:tostring()
+    own.drop(buffer)
 
     return bytes
 end
@@ -1243,16 +1242,16 @@ end
 local function payload(exclusive self: Extractor, delta: boolean, baseRevision: integer): string
     local pieces: {string} = {}
     if delta then
-        local buffer = io2.newBuffer()
-        local writer = io2.newScalarWriter(buffer)
-        writer:writeUint32(wrap(baseRevision)):writeUint32(wrap(self.ranges.count))
+        local buffer = bytes.Buffer.create()
+        local writer = buffer:writer():scalar()
+        writer:writeuint32(wrap(baseRevision)):writeuint32(wrap(self.ranges.count))
         for index = 0, self.ranges.count - 1 do
             const offset, size = self.ranges:at(index)
-            writer:writeUint32(wrap(offset)):writeUint32(wrap(size))
+            writer:writeuint32(wrap(offset)):writeuint32(wrap(size))
         end
-        nupp.drop(writer)
-        pieces[1] = buffer:getString()
-        nupp.drop(buffer)
+        own.drop(writer)
+        pieces[1] = buffer:tostring()
+        own.drop(buffer)
     end
     local input = self.instanceWords:read()
     do

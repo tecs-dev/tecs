@@ -13,13 +13,13 @@ local function readEdge<T is RelationshipPayload>(borrows world: World, id: inte
     return world:getFirstRelationship(id, declaration)
 end
 
-@derive(tecs.ecs.Component, nupp.derive.Debug)
+@derive(tecs.ecs.Component, types.debug)
 local struct Velocity
     x: number = 0
     y: number = 0
 end
 
-@derive(tecs.ecs.Component, nupp.derive.Debug)
+@derive(tecs.ecs.Component, types.debug)
 local record Description
     text: string = ""
 end

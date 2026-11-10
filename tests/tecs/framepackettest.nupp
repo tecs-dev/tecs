@@ -1,5 +1,3 @@
-const {type ScalarReader} = require("nupp.io")
-const io2 = require("nupp.io")
 const frametable = require("tecs.gfx.frametable")
 const layers = require("tecs.gfx.layers")
 const clips = require("tecs.gfx.clips")
@@ -62,27 +60,27 @@ end
 
 --- Reads the versioned header, holds the packet to every constant in it, and
 --- steps past the graph section so the light table is next.
-local function header(borrows reader: ScalarReader): Header
-    assert.eq(reader:readUint32(), framepacket.MAGIC)
-    assert.eq(reader:readUint32(), framepacket.VERSION)
-    assert.eq(reader:readUint32(), framepacket.HEADER_SIZE)
-    local flags = reader:readUint32()
-    local revision = reader:readUint32()
-    local graphBytes = reader:readUint32()
-    assert.eq(reader:readUint32(), framepacket.BATCH_STRIDE)
-    local batches = reader:readUint32()
-    assert.eq(reader:readUint32(), framepacket.INSTANCE_STRIDE)
-    local instances = reader:readUint32()
-    local targetWidth = reader:readFloat32()
-    local targetHeight = reader:readFloat32()
-    local cameraX = reader:readFloat32()
-    local cameraY = reader:readFloat32()
-    local zoom = reader:readFloat32()
-    local rotation = reader:readFloat32()
-    assert.eq(reader:readUint32(), framepacket.LIGHT_STRIDE)
-    local lights = reader:readUint32()
-    local casters = reader:readUint32()
-    assert.eq(reader:readUint32(), 0)
+local function header(borrows reader: io.ScalarReader): Header
+    assert.eq(reader:readuint32(), framepacket.MAGIC)
+    assert.eq(reader:readuint32(), framepacket.VERSION)
+    assert.eq(reader:readuint32(), framepacket.HEADER_SIZE)
+    local flags = reader:readuint32()
+    local revision = reader:readuint32()
+    local graphBytes = reader:readuint32()
+    assert.eq(reader:readuint32(), framepacket.BATCH_STRIDE)
+    local batches = reader:readuint32()
+    assert.eq(reader:readuint32(), framepacket.INSTANCE_STRIDE)
+    local instances = reader:readuint32()
+    local targetWidth = reader:readfloat32()
+    local targetHeight = reader:readfloat32()
+    local cameraX = reader:readfloat32()
+    local cameraY = reader:readfloat32()
+    local zoom = reader:readfloat32()
+    local rotation = reader:readfloat32()
+    assert.eq(reader:readuint32(), framepacket.LIGHT_STRIDE)
+    local lights = reader:readuint32()
+    local casters = reader:readuint32()
+    assert.eq(reader:readuint32(), 0)
 
     local read = Header(
         flags = flags as integer,
@@ -98,67 +96,67 @@ local function header(borrows reader: ScalarReader): Header
         rotation = rotation,
         lights = lights as integer,
         casters = casters as integer,
-        ambientR = reader:readFloat32(),
-        ambientG = reader:readFloat32(),
-        ambientB = reader:readFloat32(),
-        shadowSteps = reader:readFloat32(),
-        shadowHeight = reader:readFloat32(),
-        shadowMargin = reader:readFloat32(),
-        dropOpacity = reader:readFloat32(),
-        dropLength = reader:readFloat32(),
-        bloomThreshold = reader:readFloat32(),
-        bloomKnee = reader:readFloat32(),
-        bloomIntensity = reader:readFloat32()
+        ambientR = reader:readfloat32(),
+        ambientG = reader:readfloat32(),
+        ambientB = reader:readfloat32(),
+        shadowSteps = reader:readfloat32(),
+        shadowHeight = reader:readfloat32(),
+        shadowMargin = reader:readfloat32(),
+        dropOpacity = reader:readfloat32(),
+        dropLength = reader:readfloat32(),
+        bloomThreshold = reader:readfloat32(),
+        bloomKnee = reader:readfloat32(),
+        bloomIntensity = reader:readfloat32()
     )
-    assert.eq(reader:readUint32(), 0)
-    reader:readFloat32()
-    const tableBytes = reader:readUint32() as integer
-    const particleBytes = reader:readUint32() as integer
+    assert.eq(reader:readuint32(), 0)
+    reader:readfloat32()
+    const tableBytes = reader:readuint32() as integer
+    const particleBytes = reader:readuint32() as integer
     reader:skip(tableBytes + particleBytes + read.graphBytes)
 
     return read
 end
 
-local function light(borrows reader: ScalarReader): Light
+local function light(borrows reader: io.ScalarReader): Light
     return Light(
-        x = reader:readFloat32(),
-        y = reader:readFloat32(),
-        height = reader:readFloat32(),
-        radius = reader:readFloat32(),
-        r = reader:readFloat32(),
-        g = reader:readFloat32(),
-        b = reader:readFloat32(),
-        intensity = reader:readFloat32()
+        x = reader:readfloat32(),
+        y = reader:readfloat32(),
+        height = reader:readfloat32(),
+        radius = reader:readfloat32(),
+        r = reader:readfloat32(),
+        g = reader:readfloat32(),
+        b = reader:readfloat32(),
+        intensity = reader:readfloat32()
     )
 end
 
-local function batch(borrows reader: ScalarReader): Batch
+local function batch(borrows reader: io.ScalarReader): Batch
     return Batch(
-        image = reader:readUint32() as integer,
-        sampler = reader:readUint32() as integer,
-        lane = reader:readUint32() as integer,
-        first = reader:readUint32() as integer,
-        count = reader:readUint32() as integer
+        image = reader:readuint32() as integer,
+        sampler = reader:readuint32() as integer,
+        lane = reader:readuint32() as integer,
+        first = reader:readuint32() as integer,
+        count = reader:readuint32() as integer
     )
 end
 
 --- Skips one instance and answers the fields the ordering tests read.
-local function instance(borrows reader: ScalarReader): number, number, number
-    local x = reader:readFloat32()
-    local y = reader:readFloat32()
+local function instance(borrows reader: io.ScalarReader): number, number, number
+    local x = reader:readfloat32()
+    local y = reader:readfloat32()
     reader:skip(4)
-    local depth = reader:readFloat32()
+    local depth = reader:readfloat32()
     reader:skip(64)
 
     return x, y, depth
 end
 
 --- Reads one instance's cast height and flags, which sit at the far end of it.
-local function castOf(borrows reader: ScalarReader): number, integer
+local function castOf(borrows reader: io.ScalarReader): number, integer
     reader:skip(28)
-    local height = reader:readFloat32()
+    local height = reader:readfloat32()
     reader:skip(36)
-    local flags = reader:readUint32() as integer
+    local flags = reader:readuint32() as integer
     reader:skip(8)
 
     return height, flags
@@ -212,7 +210,7 @@ function suite.defaultsToACameraCenteredOnTheTarget(): nil
     world:spawn(ecs.Transform2D(1, 2, 0, 1, 0, 3, 4), gfx.Tint(), gfx.Renderable2D)
     world:commit()
 
-    local reader = io2.newScalarReader(extractor:packet(640, 360))
+    local reader = io.Reader.of(extractor:packet(640, 360)):scalar()
     local read = header(reader)
     assert.eq(read.targetWidth, 640)
     assert.eq(read.targetHeight, 360)
@@ -222,7 +220,7 @@ function suite.defaultsToACameraCenteredOnTheTarget(): nil
     assert.eq(read.cameraY, 180)
     assert.eq(read.zoom, 1)
     assert.eq(read.rotation, 0)
-    nupp.drop(reader)
+    own.drop(reader)
 end
 
 function suite.tracksTheTargetThroughAResize(): nil
@@ -231,17 +229,17 @@ function suite.tracksTheTargetThroughAResize(): nil
     world:spawn(ecs.Transform2D(1, 2, 0, 1, 0, 3, 4), gfx.Tint(), gfx.Renderable2D)
     world:commit()
 
-    local first = io2.newScalarReader(extractor:packet(640, 360))
+    local first = io.Reader.of(extractor:packet(640, 360)):scalar()
     assert.eq(header(first).cameraX, 320)
-    nupp.drop(first)
+    own.drop(first)
 
-    local second = io2.newScalarReader(extractor:packet(1920, 1080))
+    local second = io.Reader.of(extractor:packet(1920, 1080)):scalar()
     local read = header(second)
     assert.eq(read.targetWidth, 1920)
     assert.eq(read.targetHeight, 1080)
     assert.eq(read.cameraX, 960)
     assert.eq(read.cameraY, 540)
-    nupp.drop(second)
+    own.drop(second)
 
     assert.raises(
         function(): nil
@@ -262,19 +260,19 @@ function suite.projectsThroughTheLowestActiveCamera(): nil
     world:spawn(gfx.Camera2D(-1, -2, 4, 1), gfx.ActiveCamera)
     world:commit()
 
-    local reader = io2.newScalarReader(extractor:packet(640, 360))
+    local reader = io.Reader.of(extractor:packet(640, 360)):scalar()
     local read = header(reader)
     assert.eq(read.cameraX, 100)
     assert.eq(read.cameraY, 200)
     assert.eq(read.zoom, 2)
     assert.eq(read.rotation, 0.5)
-    nupp.drop(reader)
+    own.drop(reader)
 
     world:despawn(chosen)
     world:commit()
-    local after = io2.newScalarReader(extractor:packet(640, 360))
+    local after = io.Reader.of(extractor:packet(640, 360)):scalar()
     assert.eq(header(after).cameraX, -1)
-    nupp.drop(after)
+    own.drop(after)
 end
 
 function suite.fallsBackToAnUntaggedCamera(): nil
@@ -284,11 +282,11 @@ function suite.fallsBackToAnUntaggedCamera(): nil
     world:spawn(gfx.Camera2D(64, 32, 0.5, 0))
     world:commit()
 
-    local reader = io2.newScalarReader(extractor:packet(640, 360))
+    local reader = io.Reader.of(extractor:packet(640, 360)):scalar()
     local read = header(reader)
     assert.eq(read.cameraX, 64)
     assert.eq(read.zoom, 0.5)
-    nupp.drop(reader)
+    own.drop(reader)
 end
 
 function suite.rejectsACameraZoomThatCannotProject(): nil
@@ -314,7 +312,7 @@ function suite.encodesOneOrderedBatchForRust(): nil
     world:spawn(ecs.Transform2D(1, 2, 0, 0, 0, 3, 4), gfx.Tint(1, 1, 1, 1))
     world:commit()
 
-    local reader = io2.newScalarReader(extractor:packet(640, 360))
+    local reader = io.Reader.of(extractor:packet(640, 360)):scalar()
     local read = header(reader)
     assert.eq(read.batches, 1)
     assert.eq(read.instances, 2)
@@ -329,33 +327,33 @@ function suite.encodesOneOrderedBatchForRust(): nil
     assert.eq(only.count, 2)
 
     -- Layer 1 sits farther from the viewer than layer 2, so it is written first.
-    assert.eq(reader:readFloat32(), 50)
-    assert.eq(reader:readFloat32(), 60)
-    assert.eq(reader:readFloat32(), 0.5)
-    local farDepth = reader:readFloat32()
-    assert.eq(reader:readFloat32(), 70)
-    assert.eq(reader:readFloat32(), 80)
-    assert.eq(reader:readFloat32(), 0.25)
-    assert.eq(reader:readFloat32(), 0)
-    assert.eq(reader:readFloat32(), 0)
-    assert.eq(reader:readFloat32(), 0)
-    assert.eq(reader:readFloat32(), 1)
-    assert.eq(reader:readFloat32(), 1)
-    assert.eq(reader:readFloat32(), 0)
-    assert.eq(reader:readFloat32(), 1)
-    assert.eq(reader:readFloat32(), 0)
-    assert.eq(reader:readFloat32(), 1)
-    assert.eq(reader:readUint32(), 0)
-    assert.eq(reader:readUint32(), 0)
-    assert.eq(reader:readUint32(), 0)
-    assert.eq(reader:readUint32(), 0)
+    assert.eq(reader:readfloat32(), 50)
+    assert.eq(reader:readfloat32(), 60)
+    assert.eq(reader:readfloat32(), 0.5)
+    local farDepth = reader:readfloat32()
+    assert.eq(reader:readfloat32(), 70)
+    assert.eq(reader:readfloat32(), 80)
+    assert.eq(reader:readfloat32(), 0.25)
+    assert.eq(reader:readfloat32(), 0)
+    assert.eq(reader:readfloat32(), 0)
+    assert.eq(reader:readfloat32(), 0)
+    assert.eq(reader:readfloat32(), 1)
+    assert.eq(reader:readfloat32(), 1)
+    assert.eq(reader:readfloat32(), 0)
+    assert.eq(reader:readfloat32(), 1)
+    assert.eq(reader:readfloat32(), 0)
+    assert.eq(reader:readfloat32(), 1)
+    assert.eq(reader:readuint32(), 0)
+    assert.eq(reader:readuint32(), 0)
+    assert.eq(reader:readuint32(), 0)
+    assert.eq(reader:readuint32(), 0)
 
     local nearX, nearY, nearDepth = instance(reader)
     assert.eq(nearX, 200)
     assert.eq(nearY, 100)
     assert(nearDepth < farDepth, "a higher layer draws nearer")
     assert(reader:atEnd())
-    nupp.drop(reader)
+    own.drop(reader)
 end
 
 function suite.splitsBatchesOnTheBlendedLane(): nil
@@ -369,7 +367,7 @@ function suite.splitsBatchesOnTheBlendedLane(): nil
     world:spawn(ecs.Transform2D(4, 1, 0, 4, 0, 1, 1), gfx.Tint(1, 1, 1, 1), gfx.Renderable2D)
     world:commit()
 
-    local reader = io2.newScalarReader(extractor:packet(640, 360))
+    local reader = io.Reader.of(extractor:packet(640, 360)):scalar()
     local read = header(reader)
     assert.eq(read.instances, 4)
     assert.eq(read.batches, 3)
@@ -388,7 +386,7 @@ function suite.splitsBatchesOnTheBlendedLane(): nil
     assert.eq(nearest.lane, framepacket.LANE_OPAQUE)
     assert.eq(nearest.first, 3)
     assert.eq(nearest.count, 1)
-    nupp.drop(reader)
+    own.drop(reader)
 end
 
 function suite.carriesTheMaterialAndItsParameter(): nil
@@ -400,22 +398,22 @@ function suite.carriesTheMaterialAndItsParameter(): nil
     world:spawn(ecs.Transform2D(2, 1, 0, 2, 0, 1, 1), gfx.Tint(), gfx.Renderable2D)
     world:commit()
 
-    local reader = io2.newScalarReader(extractor:packet(640, 360))
+    local reader = io.Reader.of(extractor:packet(640, 360)):scalar()
     assert.eq(header(reader).instances, 2)
     assert.eq(batch(reader).count, 2)
 
     reader:skip(24)
-    assert.eq(reader:readFloat32(), 0.75)
+    assert.eq(reader:readfloat32(), 0.75)
     reader:skip(36)
-    assert.eq(reader:readUint32(), ring)
-    assert.eq(reader:readUint32(), 0)
+    assert.eq(reader:readuint32(), ring)
+    assert.eq(reader:readuint32(), 0)
     reader:skip(8)
 
     reader:skip(24)
-    assert.eq(reader:readFloat32(), 0.25)
+    assert.eq(reader:readfloat32(), 0.25)
     reader:skip(36)
-    assert.eq(reader:readUint32(), 0)
-    nupp.drop(reader)
+    assert.eq(reader:readuint32(), 0)
+    own.drop(reader)
 end
 
 function suite.rejectsAMaterialTheBuildDoesNotCarry(): nil
@@ -438,17 +436,17 @@ function suite.carriesTheDeclaredGraphInEveryPacket(): nil
     world:commit()
 
     local section = passes.section()
-    local reader = io2.newScalarReader(extractor:packet(320, 200))
+    local reader = io.Reader.of(extractor:packet(320, 200)):scalar()
     local read = header(reader)
     assert.eq(read.graphBytes, #section)
     assert.eq(read.graphRevision, passes.revision())
-    nupp.drop(reader)
+    own.drop(reader)
 
     -- The declaration rides in every packet rather than being sent once, so a
     -- backend that lost its device rebuilds from the next frame.
-    local again = io2.newScalarReader(extractor:packet(320, 200))
+    local again = io.Reader.of(extractor:packet(320, 200)):scalar()
     assert.eq(header(again).graphBytes, #section)
-    nupp.drop(again)
+    own.drop(again)
 end
 
 function suite.ordersEqualDepthsByEntityId(): nil
@@ -460,7 +458,7 @@ function suite.ordersEqualDepthsByEntityId(): nil
     world:commit()
     assert(first < second and second < third)
 
-    local reader = io2.newScalarReader(extractor:packet(640, 360))
+    local reader = io.Reader.of(extractor:packet(640, 360)):scalar()
     assert.eq(header(reader).instances, 3)
     assert.eq(batch(reader).count, 3)
     local firstX = instance(reader)
@@ -469,7 +467,7 @@ function suite.ordersEqualDepthsByEntityId(): nil
     assert.eq(firstX, 1)
     assert.eq(secondX, 2)
     assert.eq(thirdX, 3)
-    nupp.drop(reader)
+    own.drop(reader)
 end
 
 function suite.repeatsItselfExactlyBetweenFrames(): nil
@@ -492,9 +490,9 @@ function suite.repeatsItselfExactlyBetweenFrames(): nil
     -- behind in the sort order.
     world:despawn(1)
     world:commit()
-    local shrunk = io2.newScalarReader(extractor:packet(640, 360))
+    local shrunk = io.Reader.of(extractor:packet(640, 360)):scalar()
     assert.eq(header(shrunk).instances, 7)
-    nupp.drop(shrunk)
+    own.drop(shrunk)
 end
 
 function suite.carriesSpriteIdentityAndSamplerIntoBatches(): nil
@@ -520,7 +518,7 @@ function suite.carriesSpriteIdentityAndSamplerIntoBatches(): nil
     world:spawn(ecs.Transform2D(3, 1, 0, 2, 0, 1, 1), gfx.Tint(), gfx.Sprite(stone), gfx.Renderable2D)
     world:commit()
 
-    local reader = io2.newScalarReader(extractor:packet(640, 360))
+    local reader = io.Reader.of(extractor:packet(640, 360)):scalar()
     local read = header(reader)
     assert.eq(read.instances, 3)
     assert.eq(read.batches, 2)
@@ -539,11 +537,11 @@ function suite.carriesSpriteIdentityAndSamplerIntoBatches(): nil
 
     -- The first sprite's UV rectangle survives the crossing intact.
     reader:skip(32)
-    assert.eq(reader:readFloat32(), 0)
-    assert.eq(reader:readFloat32(), 0)
-    assert.eq(reader:readFloat32(), 0.5)
-    assert.eq(reader:readFloat32(), 0.5)
-    nupp.drop(reader)
+    assert.eq(reader:readfloat32(), 0)
+    assert.eq(reader:readfloat32(), 0)
+    assert.eq(reader:readfloat32(), 0.5)
+    assert.eq(reader:readfloat32(), 0.5)
+    own.drop(reader)
 end
 
 function suite.drawsAMissingImageAgainstTheFallback(): nil
@@ -562,7 +560,7 @@ function suite.drawsAMissingImageAgainstTheFallback(): nil
     world:spawn(ecs.Transform2D(2, 1, 0, 1, 0, 1, 1), gfx.Tint(), gfx.Sprite(failed), gfx.Renderable2D)
     world:commit()
 
-    local reader = io2.newScalarReader(extractor:packet(640, 360))
+    local reader = io.Reader.of(extractor:packet(640, 360)):scalar()
     local read = header(reader)
     assert.eq(read.instances, 2)
     -- Neither image is resident, so both rows fall into the fallback run rather
@@ -571,7 +569,7 @@ function suite.drawsAMissingImageAgainstTheFallback(): nil
     local only = batch(reader)
     assert.eq(only.image, 0)
     assert.eq(only.count, 2)
-    nupp.drop(reader)
+    own.drop(reader)
 end
 
 function suite.keepsTransparentRowsInBackToFrontOrder(): nil
@@ -585,7 +583,7 @@ function suite.keepsTransparentRowsInBackToFrontOrder(): nil
     world:spawn(ecs.Transform2D(2, 1, 0, 2, 0, 1, 1), gfx.Tint(1, 1, 1, 0.5), gfx.Renderable2D)
     world:commit()
 
-    local reader = io2.newScalarReader(extractor:packet(640, 360))
+    local reader = io.Reader.of(extractor:packet(640, 360)):scalar()
     assert.eq(header(reader).instances, 3)
     -- The opaque row is farthest and leads, then the two blended ones follow in
     -- one run of their own lane.
@@ -598,7 +596,7 @@ function suite.keepsTransparentRowsInBackToFrontOrder(): nil
     assert.eq(secondX, 2)
     assert.eq(thirdX, 3)
     assert(firstDepth > secondDepth and secondDepth > thirdDepth, "written back to front")
-    nupp.drop(reader)
+    own.drop(reader)
 end
 
 function suite.encodesAnEmptyScene(): nil
@@ -608,12 +606,12 @@ function suite.encodesAnEmptyScene(): nil
 
     local packed = extractor:packet(16, 9)
     assert.eq(#packed, (framepacket.HEADER_SIZE as integer) + #frametable.packed() + #passes.section())
-    local reader = io2.newScalarReader(packed)
+    local reader = io.Reader.of(packed):scalar()
     local read = header(reader)
     assert.eq(read.batches, 0)
     assert.eq(read.instances, 0)
     assert(reader:atEnd())
-    nupp.drop(reader)
+    own.drop(reader)
 end
 
 function suite.carriesLightsInAscendingEntityOrder(): nil
@@ -629,7 +627,7 @@ function suite.carriesLightsInAscendingEntityOrder(): nil
     world:commit()
     assert(first < second, "an earlier spawn takes a lower id")
 
-    local reader = io2.newScalarReader(extractor:packet(640, 360))
+    local reader = io.Reader.of(extractor:packet(640, 360)):scalar()
     local read = header(reader)
     assert.eq(read.lights, 2)
     local leading = light(reader)
@@ -641,7 +639,7 @@ function suite.carriesLightsInAscendingEntityOrder(): nil
     assert.eq(leading.intensity, 3)
     assert.eq(trailing.x, 30)
     assert.eq(trailing.radius, 20)
-    nupp.drop(reader)
+    own.drop(reader)
 end
 
 function suite.carriesTheTuningEveryFrameAndFlagsWhatIsOn(): nil
@@ -650,7 +648,7 @@ function suite.carriesTheTuningEveryFrameAndFlagsWhatIsOn(): nil
     local extractor = framepacket.new(world)
     world:commit()
 
-    local reader = io2.newScalarReader(extractor:packet(64, 64))
+    local reader = io.Reader.of(extractor:packet(64, 64)):scalar()
     local off = header(reader)
     assert.eq(off.flags, 0)
     assert.eq(off.ambientR, 1)
@@ -658,12 +656,12 @@ function suite.carriesTheTuningEveryFrameAndFlagsWhatIsOn(): nil
     -- one layout and the flag alone decides.
     assert.eq(off.shadowSteps, 24)
     assert(off.bloomThreshold > 0.79 and off.bloomThreshold < 0.81, "the default threshold rides too")
-    nupp.drop(reader)
+    own.drop(reader)
 
     lighting.setAmbient(0.25, 0.5, 0.75)
     lighting.setShadows({steps = 8, margin = 12, height = 50, dropOpacity = 0.5, dropLength = 64})
     lighting.setBloom({threshold = 1.5, knee = 0.25, intensity = 0.5})
-    local second = io2.newScalarReader(extractor:packet(64, 64))
+    local second = io.Reader.of(extractor:packet(64, 64)):scalar()
     local on = header(second)
     assert.eq(on.flags, (framepacket.FRAME_SHADOWS as integer) + (framepacket.FRAME_BLOOM as integer))
     assert.eq(on.ambientG, 0.5)
@@ -675,7 +673,7 @@ function suite.carriesTheTuningEveryFrameAndFlagsWhatIsOn(): nil
     assert.eq(on.bloomThreshold, 1.5)
     assert.eq(on.bloomKnee, 0.25)
     assert.eq(on.bloomIntensity, 0.5)
-    nupp.drop(second)
+    own.drop(second)
     lighting.reset()
 end
 
@@ -699,7 +697,7 @@ function suite.marksACasterAndLeavesATranslucentOneAlone(): nil
     world:spawn(ecs.Transform2D(4, 1, 0, 1, 0, 1, 1), gfx.Tint(1, 1, 1, 0.5), gfx.Occluder2D(1), gfx.Renderable2D)
     world:commit()
 
-    local reader = io2.newScalarReader(extractor:packet(640, 360))
+    local reader = io.Reader.of(extractor:packet(640, 360)):scalar()
     local read = header(reader)
     assert.eq(read.instances, 4)
     assert.eq(read.casters, 3)
@@ -718,7 +716,7 @@ function suite.marksACasterAndLeavesATranslucentOneAlone(): nil
     local fourthHeight, fourthFlags = castOf(reader)
     assert.eq(fourthFlags, framepacket.FLAG_BLENDED)
     assert.eq(fourthHeight, 0)
-    nupp.drop(reader)
+    own.drop(reader)
 end
 
 function suite.dropsTheLightsPastTheCeiling(): nil
@@ -729,9 +727,9 @@ function suite.dropsTheLightsPastTheCeiling(): nil
     end
     world:commit()
 
-    local reader = io2.newScalarReader(extractor:packet(64, 64))
+    local reader = io.Reader.of(extractor:packet(64, 64)):scalar()
     assert.eq(header(reader).lights, lighting.MAX_LIGHTS)
-    nupp.drop(reader)
+    own.drop(reader)
 end
 
 function suite.refusesALightThatCannotProject(): nil
@@ -759,37 +757,37 @@ function suite.bulkInstancesMatchScalarRoundingAndOwnTheirBytes(): nil
     end
     world:commit()
     local original = extractor:packet(640, 360)
-    local reader = io2.newScalarReader(original)
+    local reader = io.Reader.of(original):scalar()
     local read = header(reader)
     assert.eq(read.instances, 300)
     assert.eq(batch(reader).count, 300)
     local at = original:len() - 300 * 80 + 1
     for index = 1, 300 do
         local x = values[(index - 1) % #values + 1]
-        local expected = io2.newBuffer()
-        local writer = io2.newScalarWriter(expected)
-        writer:writeFloat32(nupp.math.f32.narrow(x))
-            :writeFloat32(nupp.math.f32.narrow(-0.1))
-            :writeFloat32(nupp.math.f32.narrow(0.3))
-        nupp.drop(writer)
-        assert.eq(original:sub(at, at + 11), expected:getString())
-        nupp.drop(expected)
+        local expected = bytes.Buffer.create()
+        local writer = expected:writer():scalar()
+        writer:writefloat32(math.f32.narrow(x))
+            :writefloat32(math.f32.narrow(-0.1))
+            :writefloat32(math.f32.narrow(0.3))
+        own.drop(writer)
+        assert.eq(original:sub(at, at + 11), expected:tostring())
+        own.drop(expected)
         at = at + 80
     end
-    nupp.drop(reader)
+    own.drop(reader)
     for index = 1, #entities do
         world:despawn(entities[index])
     end
     world:commit()
-    local empty = io2.newScalarReader(extractor:packet(640, 360))
+    local empty = io.Reader.of(extractor:packet(640, 360)):scalar()
     assert.eq(header(empty).instances, 0)
     assert(empty:atEnd())
-    nupp.drop(empty)
+    own.drop(empty)
     -- Returned strings survive subsequent packets and buffer reclamation.
     collectgarbage("collect")
-    local retained = io2.newScalarReader(original)
+    local retained = io.Reader.of(original):scalar()
     assert.eq(header(retained).instances, 300)
-    nupp.drop(retained)
+    own.drop(retained)
 end
 
 function suite.refreshesCachedOrderAfterChangesAndARefusedPacket(): nil
@@ -809,12 +807,12 @@ function suite.refreshesCachedOrderAfterChangesAndARefusedPacket(): nil
         "is not one this build carries"
     )
     assert(world:getMut(second, gfx.Material)).id = 0
-    local reader = io2.newScalarReader(extractor:packet(640, 360))
+    local reader = io.Reader.of(extractor:packet(640, 360)):scalar()
     assert.eq(header(reader).instances, 2)
     assert.eq(batch(reader).count, 2)
     assert.eq(select(1, instance(reader)), 30)
     assert.eq(select(1, instance(reader)), 10)
-    nupp.drop(reader)
+    own.drop(reader)
     -- Another depth edit invalidates the cached order without an error path.
     assert(world:getMut(first, ecs.Transform2D)).layer = 1
     assert.eq(extractor:packet(640, 360), original)
@@ -828,22 +826,22 @@ function suite.packsClipsAndKeepsScreenOverlaysStillUnderACamera(): nil
     world:spawn(ecs.Transform2D(100, 50, 0, 16, 0, 40, 20), gfx.Tint(), gfx.Renderable2D, gfx.Clip(250))
     world:commit()
     local extractor = framepacket.new(world)
-    local reader = io2.newScalarReader(extractor:packet(800, 600))
+    local reader = io.Reader.of(extractor:packet(800, 600)):scalar()
     local h = header(reader)
     local b = batch(reader)
     assert.eq(b.lane, framepacket.LANE_BLEND)
-    assert(math.abs(reader:readFloat32() - 1125) < 0.001)
-    assert(math.abs(reader:readFloat32() - 1850) < 0.001)
-    assert(math.abs(reader:readFloat32() - math.pi / 2) < 0.001)
+    assert(math.abs(reader:readfloat32() - 1125) < 0.001)
+    assert(math.abs(reader:readfloat32() - 1850) < 0.001)
+    assert(math.abs(reader:readfloat32() - math.pi / 2) < 0.001)
     reader:skip(4)
-    assert.eq(reader:readFloat32(), 20)
-    assert.eq(reader:readFloat32(), 10)
+    assert.eq(reader:readfloat32(), 20)
+    assert.eq(reader:readfloat32(), 10)
     reader:skip(10 * 4)
     reader:skip(4)
-    assert.eq(reader:readUint32(), 9)
-    assert.eq(reader:readUint32(), 11 + 20 * 65536)
-    assert.eq(reader:readUint32(), 111 + 70 * 65536)
-    nupp.drop(reader)
+    assert.eq(reader:readuint32(), 9)
+    assert.eq(reader:readuint32(), 11 + 20 * 65536)
+    assert.eq(reader:readuint32(), 111 + 70 * 65536)
+    own.drop(reader)
     clips.clearRegion(250)
     layers.configure(16, {sort = "topdown"})
     assert.eq(h.instances, 1)

@@ -172,7 +172,7 @@ function suite.rejectsInvalidTimerArgumentsAtConstruction(): nil
         function(): nil
             ecs.runif.every(1, 0.1)
         end,
-        "requires a nupp.random.Xoshiro128"
+        "requires a math.Xoshiro128"
     )
     assert.raises(
         function(): nil

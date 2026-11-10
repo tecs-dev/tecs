@@ -16,7 +16,7 @@ local archetype = require("tecs.internal.archetype")
 local ffistorage = require("tecs.internal.ffistorage")
 local suite = {}
 
-@derive(nupp.derive.Debug)
+@derive(types.debug)
 local struct Point
     x: number
     y: number

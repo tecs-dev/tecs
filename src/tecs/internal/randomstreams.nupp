@@ -34,25 +34,25 @@ end
 
 -- The old stream-name mixer is retained, not the old generator implementation.
 local function mix32(value: int32): int32
-    local shifted = nupp.math.i32.fromU32(nupp.math.u32.shiftRightLogical(nupp.math.u32.fromI32(value), 16))
-    local mixed = nupp.math.i32.mul(nupp.math.i32.xorBits(value, shifted), nupp.math.i32.wrap(0x21F0AAAD))
-    shifted = nupp.math.i32.fromU32(nupp.math.u32.shiftRightLogical(nupp.math.u32.fromI32(mixed), 15))
-    mixed = nupp.math.i32.mul(nupp.math.i32.xorBits(mixed, shifted), nupp.math.i32.wrap(0x735A2D97))
-    shifted = nupp.math.i32.fromU32(nupp.math.u32.shiftRightLogical(nupp.math.u32.fromI32(mixed), 15))
+    local shifted = math.i32.fromu32(math.u32.shiftrightlogical(math.u32.fromi32(value), 16))
+    local mixed = math.i32.mul(math.i32.xorbits(value, shifted), math.i32.wrap(0x21F0AAAD))
+    shifted = math.i32.fromu32(math.u32.shiftrightlogical(math.u32.fromi32(mixed), 15))
+    mixed = math.i32.mul(math.i32.xorbits(mixed, shifted), math.i32.wrap(0x735A2D97))
+    shifted = math.i32.fromu32(math.u32.shiftrightlogical(math.u32.fromi32(mixed), 15))
 
-    return nupp.math.i32.xorBits(mixed, shifted)
+    return math.i32.xorbits(mixed, shifted)
 end
 
 local function streamSeed(seed: integer, name: string): integer
-    local hash = nupp.math.i32.wrap(0x811C9DC5)
+    local hash = math.i32.wrap(0x811C9DC5)
     for index = 1, #name do
-        hash = nupp.math.i32.mul(
-            nupp.math.i32.xorBits(hash, nupp.math.i32.wrap(string.byte(name, index))),
-            nupp.math.i32.wrap(0x01000193)
+        hash = math.i32.mul(
+            math.i32.xorbits(hash, math.i32.wrap(string.byte(name, index))),
+            math.i32.wrap(0x01000193)
         )
     end
 
-    return mix32(nupp.math.i32.xorBits(hash, mix32(nupp.math.i32.wrap(seed)))) as integer
+    return mix32(math.i32.xorbits(hash, mix32(math.i32.wrap(seed)))) as integer
 end
 
 --- Creates an empty registry with the compatibility default seed.
@@ -80,7 +80,7 @@ end
 --- @param registry The world-owned registry to restart.
 --- @param seed The finite integer validated by the public world method.
 export function reseed(exclusive registry: Registry, seed: integer): nil
-    registry.seed = nupp.math.i32.wrap(seed) as integer
+    registry.seed = math.i32.wrap(seed) as integer
     for name, generator in pairs(registry.streams) do
         generator:reseed(streamSeed(registry.seed, name))
     end
@@ -102,7 +102,7 @@ local function word(value: any): integer
     if type(value) ~= "number" or value % 1 ~= 0 or value < -2147483648 or value > 4294967295 then
         error("world.loadSnapshot: tecs.random requires 32-bit integer words", 3)
     end
-    return nupp.math.i32.wrap(value as integer) as integer
+    return math.i32.wrap(value as integer) as integer
 end
 
 -- Validate the dynamic snapshot boundary before the world discards live entities

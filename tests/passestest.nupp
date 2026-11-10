@@ -1,4 +1,3 @@
-const io2 = require("nupp.io")
 
 local passes = require("tecs.gpu.passes")
 
@@ -33,10 +32,10 @@ end
 --- Decodes the wire section the backend parses, so the two readers of this
 --- layout are held to the same bytes.
 local function decode(section: string): Graph
-    local reader = io2.newScalarReader(section)
-    local nameCount = reader:readUint32() as integer
-    local nameBytes = reader:readUint32() as integer
-    local blob = reader:readBytes(nameBytes)
+    local reader = io.Reader.of(section):scalar()
+    local nameCount = reader:readuint32() as integer
+    local nameBytes = reader:readuint32() as integer
+    local blob = reader:readbytes(nameBytes)
 
     local names: {string} = {}
     local at = 1
@@ -48,38 +47,38 @@ local function decode(section: string): Graph
     end
 
     local targets: {Target} = {}
-    for index = 1, reader:readUint32() as integer do
+    for index = 1, reader:readuint32() as integer do
         targets[
             index
         ] = Target(
-            name = names[(reader:readUint32() as integer) + 1],
-            format = reader:readUint32() as integer,
-            scale = reader:readFloat32(),
-            hasClear = reader:readUint32() as integer,
-            r = reader:readFloat32(),
-            g = reader:readFloat32(),
-            b = reader:readFloat32(),
-            a = reader:readFloat32()
+            name = names[(reader:readuint32() as integer) + 1],
+            format = reader:readuint32() as integer,
+            scale = reader:readfloat32(),
+            hasClear = reader:readuint32() as integer,
+            r = reader:readfloat32(),
+            g = reader:readfloat32(),
+            b = reader:readfloat32(),
+            a = reader:readfloat32()
         )
     end
 
     local decoded: {Pass} = {}
-    for index = 1, reader:readUint32() as integer do
-        local name = names[(reader:readUint32() as integer) + 1]
-        local depth = reader:readUint32() as integer
-        local hasDepthClear = reader:readUint32() as integer
-        local depthClear = reader:readFloat32()
-        local clearMode = reader:readUint32() as integer
+    for index = 1, reader:readuint32() as integer do
+        local name = names[(reader:readuint32() as integer) + 1]
+        local depth = reader:readuint32() as integer
+        local hasDepthClear = reader:readuint32() as integer
+        local depthClear = reader:readfloat32()
+        local clearMode = reader:readuint32() as integer
         reader:skip(16)
-        local inputCount = reader:readUint32() as integer
-        local outputCount = reader:readUint32() as integer
+        local inputCount = reader:readuint32() as integer
+        local outputCount = reader:readuint32() as integer
         local inputs: {string} = {}
         for slot = 1, inputCount do
-            inputs[slot] = names[(reader:readUint32() as integer) + 1]
+            inputs[slot] = names[(reader:readuint32() as integer) + 1]
         end
         local outputs: {string} = {}
         for slot = 1, outputCount do
-            outputs[slot] = names[(reader:readUint32() as integer) + 1]
+            outputs[slot] = names[(reader:readuint32() as integer) + 1]
         end
         decoded[
             index
@@ -94,7 +93,7 @@ local function decode(section: string): Graph
         )
     end
     assert(reader:atEnd(), "the section holds nothing the decoder did not read")
-    nupp.drop(reader)
+    own.drop(reader)
 
     return Graph(targets = targets, passes = decoded)
 end
