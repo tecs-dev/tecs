@@ -9,17 +9,36 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(stage_sdk);
     let linux = target_os().contains("linux");
-    let library = if linux { "libnupp.so" } else { "libnupp.a" };
+    let windows = target_os().contains("windows");
+    let library = if linux {
+        "libnupp.so"
+    } else if windows {
+        "libnupp.dll.a"
+    } else {
+        "libnupp.a"
+    };
     assert!(
         sdk.join(library).is_file(),
         "Nupp SDK at {} has no {library}",
         sdk.display()
     );
-    println!("cargo:rustc-link-search=native={}", sdk.display());
     // A Rust staticlib carries std and its dependencies. Thin LTO in the host
     // can pull those objects twice on Linux, even with identical compilers.
     // The SDK's cdylib exports the same C API and already ships in lib/.
-    let linkage = if linux { "dylib" } else { "static" };
+    //
+    // Windows links the cdylib too, for a reason of its own. With no provider
+    // installed beside the component, Nupp reaches the one linked into the
+    // process through `ffi.C`, which on Windows sees only exported symbols, and
+    // exporting a static link's symbols from this executable overflows the
+    // format's 65535 export ordinals. `nupp.dll` exports exactly Nupp's, and
+    // holds the LuaJIT whose module `ffi.C` searches.
+    let linkage = if linux || windows { "dylib" } else { "static" };
+    let search = if windows {
+        dll_beside_build(&sdk)
+    } else {
+        sdk.clone()
+    };
+    println!("cargo:rustc-link-search=native={}", search.display());
     println!("cargo:rustc-link-lib={linkage}=nupp");
     if linux {
         // dlopen now runs inside libnupp.so. DT_RUNPATH only covers direct
@@ -63,6 +82,24 @@ fn main() {
     }
 }
 
+/// Copies the SDK's `nupp.dll` and its import library into `OUT_DIR`.
+///
+/// Windows has no run path: the loader looks beside the executable and on
+/// `PATH`. Cargo puts a link-search directory on the loader's path for
+/// `cargo run` and `cargo test` only when it lies inside the target directory,
+/// which the staged SDK does not, so the link searches this copy instead. A
+/// package puts `nupp.dll` in `bin/`, beside the executable.
+fn dll_beside_build(sdk: &std::path::Path) -> PathBuf {
+    let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo sets OUT_DIR"));
+    for file in ["nupp.dll", "libnupp.dll.a"] {
+        let from = sdk.join(file);
+        println!("cargo:rerun-if-changed={}", from.display());
+        std::fs::copy(&from, out.join(file))
+            .unwrap_or_else(|error| panic!("copy {}: {error}", from.display()));
+    }
+    out
+}
+
 /// The target triple Cargo is building for.
 fn target_os() -> String {
     env::var("TARGET").expect("Cargo sets TARGET")
@@ -86,8 +123,11 @@ fn target_os() -> String {
 // assigns and the ids the prebuilt dispatch answers to come from one rule over
 // one set of files, and `native-net` arrives with the I/O module extraction
 // builds its packet through. A host staged without them refuses to load the
-// component rather than failing later.
-const HOST_FEATURES: &str = "base,native-files,native-net,native-compression";
+// component rather than failing later. `native-uuid` arrives the same way,
+// through `nupp.util`, whose UUID functions bind the native UUID provider: no
+// Tecs module names a UUID, and the component still refuses to start without
+// it.
+const HOST_FEATURES: &str = "base,native-files,native-net,native-compression,native-uuid";
 
 /// Names the run path a packaged link records instead of the staged SDK's
 /// absolute one.
@@ -115,6 +155,14 @@ const INHERITED_CARGO_VARIABLES: [&str; 5] = [
 ];
 
 fn stage_sdk() -> PathBuf {
+    // The toolchain is a shell script, which Windows cannot start; Git Bash
+    // stages the SDK there, as it does the rest of the Nupp toolchain.
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        panic!(
+            "set NUPP_SDK on Windows: from Git Bash, run \
+             `../nupp/scripts/toolchain host-library {HOST_FEATURES}` and export its last line"
+        );
+    }
     let script = find_toolchain();
     let mut command = Command::new(&script);
     for variable in INHERITED_CARGO_VARIABLES {
