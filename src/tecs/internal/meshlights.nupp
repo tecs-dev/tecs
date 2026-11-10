@@ -73,10 +73,12 @@ function Collector.frame(exclusive self: Collector): string
                     local radius, r, g, b, intensity, flags = 0, 0, 0, 0, 0, 0
                     local inner, outer = 1, -1
                     if lane == 1 then
-                        const light = assert(points)[index]
+                        const lights = assert(points)
+                        const light = lights[index]
                         radius, r, g, b, intensity, flags = light.radius, light.r, light.g, light.b, light.intensity, light.flags
                     else
-                        const light = assert(spots)[index]
+                        const lights = assert(spots)
+                        const light = lights[index]
                         radius, r, g, b, intensity, flags = light.radius, light.r, light.g, light.b, light.intensity, light.flags
                         assert(
                             light.innerAngle >= 0

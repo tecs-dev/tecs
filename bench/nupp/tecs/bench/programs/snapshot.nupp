@@ -19,7 +19,7 @@
 
 local ecs = require("tecs.ecs")
 
-local buffer = require("string.buffer")
+local bytes = require("bytes")
 
 local harness = require("tecs.bench.harness")
 
@@ -94,15 +94,24 @@ if saveWorld:getStats().entities ~= COUNT then
 end
 
 const save = harness.newStage("save")
-const output = buffer.new()
-const options: ecs.SnapshotOptions = {format = "binary", buffer = output}
-harness.measure(save, WARMUP, SAMPLES, function(): nil
-    if saveWorld:saveSnapshot(options).entityCount ~= COUNT then
+-- One reused buffer, as a checkpointing game would hold, so a sample measures
+-- the save rather than a fresh allocation and string per save. Timed here rather
+-- than through `harness.measure`, whose repeatable callback cannot hold the
+-- buffer exclusively.
+local output = bytes.Buffer.create()
+for sample = 1, WARMUP + SAMPLES do
+    const started = os.monotonic()
+    const saved = saveWorld:saveSnapshotInto(output)
+    const elapsed = os.monotonic() - started
+    if saved.entityCount ~= COUNT then
         error("bench: save produced the wrong entity count", 0)
     end
-end)
+    if sample > WARMUP then
+        harness.mark(save, elapsed)
+    end
+end
 
-const prepared = saveWorld:saveSnapshot(options)
+const prepared = saveWorld:saveSnapshot({format = "binary"})
 const loadWorld = ecs.newWorld({maxEntities = COUNT + 64})
 const load = harness.newStage("load")
 harness.measure(load, WARMUP, SAMPLES, function(): nil

@@ -8,7 +8,7 @@ weak-key lookup or allocation occurs on an indexed read or write.
 ]]
 
 local ffi = require("ffi")
-local buffer = require("string.buffer")
+local bytes = require("bytes")
 
 export record Field
     name: string
@@ -181,12 +181,12 @@ export function allocate(storage: Storage, capacity: integer): any
     if capacity < 0 or capacity % 1 ~= 0 or capacity > math.floor(2147483647 / storage.width) - 1 then
         error("FFI column exceeds native allocation limit", 2)
     end
-    const bytes = (capacity + 1) * storage.width
+    const size = (capacity + 1) * storage.width
     local column: any
     local owner: any
     if storage.allocator ~= nil then
         local pointer: any
-        pointer, owner = storage.allocator(bytes, storage.alignment)
+        pointer, owner = storage.allocator(size, storage.alignment)
         if pointer == nil or owner == nil then
             error("FFI column allocator must return a pointer and its owning backing", 2)
         end
@@ -196,7 +196,7 @@ export function allocate(storage: Storage, capacity: integer): any
         end
         local spelling = "$ *"
         column = ffi.cast(ffi.typeof(spelling, storage.element), pointer)
-        ffi.fill(column, bytes, 0)
+        ffi.fill(column, size, 0)
     else
         column = ffi.new(storage.arrayType, capacity + 1)
     end
@@ -347,29 +347,60 @@ export function copyRows(
     sourceFirst: integer,
     count: integer
 ): nil
-    const target, bytes = rowBytes(storage, destination, first, count)
+    const target, size = rowBytes(storage, destination, first, count)
     const origin = rowBytes(storage, source, sourceFirst, count)
-    ffi.copy(target, origin, bytes)
+    ffi.copy(target, origin, size)
 end
 
 --- Zeroes a bounded native row range before initializing reused storage.
 export function clearRows(storage: Storage, column: any, first: integer, count: integer): nil
-    const pointer, bytes = rowBytes(storage, column, first, count)
-    ffi.fill(pointer, bytes, 0)
+    const pointer, size = rowBytes(storage, column, first, count)
+    ffi.fill(pointer, size, 0)
+end
+
+--- Appends raw native bytes to a buffer through one reserved write, without an
+--- intermediate string.
+export function appendBytes(exclusive output: bytes.Buffer, source: any, length: integer): nil
+    if length == 0 then
+        return
+    end
+    const lease = output:reserve(length)
+    do
+        const destination = lease:span()
+        const pointer = destination:ref()
+        ffi.copy(pointer, source, length)
+    end
+    lease:commit(length)
 end
 
 --- Appends live rows directly to the buffer without intermediate strings.
-export function writeRows(storage: Storage, column: any, first: integer, count: integer, output: buffer.Buffer): nil
-    const pointer, bytes = rowBytes(storage, column, first, count)
-    output:putcdata(pointer as voidptr, bytes)
+export function writeRows(
+    storage: Storage,
+    column: any,
+    first: integer,
+    count: integer,
+    exclusive output: bytes.Buffer
+): nil
+    const pointer, length = rowBytes(storage, column, first, count)
+    appendBytes(output, pointer, length)
 end
 
 --- Validates the entire range before consuming bytes or touching the destination.
-export function readRows(storage: Storage, column: any, first: integer, count: integer, input: buffer.Buffer): nil
-    const pointer, bytes = rowBytes(storage, column, first, count)
-    if #input < bytes then
+export function readRows(
+    storage: Storage,
+    column: any,
+    first: integer,
+    count: integer,
+    exclusive input: bytes.Buffer
+): nil
+    const pointer, length = rowBytes(storage, column, first, count)
+    if input:len() < length then
         error("truncated FFI component column", 2)
     end
-    ffi.copy(pointer, input:ref(), bytes)
-    input:skip(bytes)
+    do
+        const unread = input:span()
+        const source = unread:ref()
+        ffi.copy(pointer, source, length)
+    end
+    input:skip(length)
 end

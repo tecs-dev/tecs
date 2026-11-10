@@ -10,7 +10,7 @@ const physics = require("tecs.physics")
 const ui = require("tecs.ui")
 
 local ffi = require("ffi")
-local buffer = require("string.buffer")
+local bytes = require("bytes")
 local archetype = require("tecs.internal.archetype")
 local ffistorage = require("tecs.internal.ffistorage")
 local suite = {}
@@ -320,34 +320,23 @@ function suite.rawColumnIOIsBoundedAndDoesNotCopyPaddingRowZero(): nil
         source[1].values[1] = 9
         source[2].values[2] = 11
     end
-    const bytes = buffer.new()
-    ffistorage.writeRows(storage, source, 1, 2, bytes)
-    assert.eq(#bytes, storage.width * 2)
-    ffistorage.readRows(storage, target, 2, 2, bytes)
-    assert.eq(#bytes, 0)
+    local rows = bytes.Buffer.create()
+    ffistorage.writeRows(storage, source, 1, 2, rows)
+    assert.eq(#rows, storage.width * 2)
+    ffistorage.readRows(storage, target, 2, 2, rows)
+    assert.eq(#rows, 0)
     @unsafe do
         assert.eq(target[0].values[1], 0)
         assert.eq(target[2].values[1], 9)
         assert.eq(target[3].values[2], 11)
     end
-    assert.raises(
-        function(): nil
-            ffistorage.readRows(storage, target, 1, 1, bytes)
-        end,
-        "truncated"
-    )
-    assert.raises(
-        function(): nil
-            ffistorage.writeRows(storage, source, 0, 1, bytes)
-        end,
-        "bounds"
-    )
-    assert.raises(
-        function(): nil
-            ffistorage.writeRows(storage, source, 3, 2, bytes)
-        end,
-        "bounds"
-    )
+    const truncated, short = pcall(ffistorage.readRows, storage, target, 1, 1, rows)
+    assert(not truncated and tostring(short):find("truncated", 1, true), tostring(short))
+    const below, before = pcall(ffistorage.writeRows, storage, source, 0, 1, rows)
+    assert(not below and tostring(before):find("bounds", 1, true), tostring(before))
+    const above, after = pcall(ffistorage.writeRows, storage, source, 3, 2, rows)
+    assert(not above and tostring(after):find("bounds", 1, true), tostring(after))
+    assert.eq(#rows, 0)
 end
 
 local struct PointerValue

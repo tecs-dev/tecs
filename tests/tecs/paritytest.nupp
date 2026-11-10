@@ -17,7 +17,9 @@ const {type SystemInfo} = require("tecs.ecs")
 
 local archetype = require("tecs.internal.archetype")
 local events = require("events")
-local buffer = require("string.buffer")
+local bytes = require("bytes")
+local native = require("serde.native")
+local ffistorage = require("tecs.internal.ffistorage")
 local ffi = require("ffi")
 local fixedtracking = require("tecs.internal.fixedtracking")
 local entityworld = require("tecs.internal.world")
@@ -198,17 +200,24 @@ function suite.snapshotNilSerializerOmitsTheComponent(): nil
     assert(world:get(id, value) == nil)
 end
 
+-- Appends each argument as one binary snapshot value, nil included.
+local function values(exclusive output: bytes.Buffer, ...: any): nil
+    for index = 1, select("#", ...) do
+        native.encodevalueinto((select(index, ...)), output)
+    end
+end
+
 function suite.binarySnapshotsRestoreNativeColumnsAndRetainTheInputBuffer(): nil
     const world = ecs.newWorld()
     const count = 1000
     world:batchSpawn(count, {ecs.Transform3D(1, 2, 3)})
     world:commit()
-    const output = buffer.new()
-    const saved = world:saveSnapshot({format = "binary", buffer = output})
-    assert(saved.buffer == output)
+    local output = bytes.Buffer.create()
+    const prelude = world:saveSnapshotInto(output)
+    assert.eq(prelude.entityCount, count)
     const length = #output
     assert(length > count * 80)
-    world:loadSnapshot(saved)
+    world:loadSnapshotFrom(output)
     assert.eq(#output, length)
     assert.eq(world:newQuery({include = {ecs.Transform3D}}):count(), count)
     for candidate, rows in world:newQuery({include = {ecs.Transform3D}}):iter() do
@@ -221,10 +230,11 @@ function suite.binarySnapshotsRestoreNativeColumnsAndRetainTheInputBuffer(): nil
         end
     end
     world:loadSnapshot(output:tostring())
-    world:loadSnapshot(output)
+    world:loadSnapshotFrom(output)
     assert.eq(#output, length)
+    const truncated = output:tostring():sub(1, -2)
     assert.raises(function(): nil
-        world:loadSnapshot(output:tostring():sub(1, -2))
+        world:loadSnapshot(truncated)
     end)
     assert.eq(world:getStats().entities, count)
 end
@@ -245,14 +255,16 @@ function suite.readsColumnIndexedTablesAndMigratesBinarySchemas(): nil
         data = {}
     })
     assert.eq(assert(world:get(1, native)).x, 4)
-    const encoded = buffer.new()
-    encoded:encode(1):encode(2):encode(1):encode(1):encode(1)
-    encoded:encode("Transform3D"):encode("z:double,x:double|16")
-    encoded:encode(1):encode(1):encode(1):encode(0)
+    local encoded = bytes.Buffer.create()
+    values(encoded, 1, 2, 1, 1, 1)
+    values(encoded, "Transform3D", "z:double,x:double|16")
+    values(encoded, 1, 1, 1, 0)
     const ids: any = ffi.new("double[1]", 1)
     const old: any = ffi.new("double[2]", 7, 9)
-    encoded:putcdata(ids as voidptr, 8):putcdata(old as voidptr, 16):encode(false)
-    world:loadSnapshot(encoded)
+    ffistorage.appendBytes(encoded, ids, 8)
+    ffistorage.appendBytes(encoded, old, 16)
+    values(encoded, false)
+    world:loadSnapshotFrom(encoded)
     assert.eq(assert(world:get(1, native)).x, 9)
     assert.eq(assert(world:get(1, native)).z, 7)
 end
@@ -450,13 +462,13 @@ function suite.sparseFramesKeepAbsentTagsAndFalseScalarsDistinct(): nil
     const world = ecs.newWorld()
     const tag = ecs.newTagComponent({name = "test.Parity.SparseTag"})
     const flag = ecs.newScalarComponent({name = "test.Parity.SparseBool", kind = "boolean"})
-    const encoded = buffer.new()
-    encoded:encode(1):encode(3):encode(2):encode(1):encode(2)
-    encoded:encode(tag.componentName):encode(nil):encode(flag.componentName):encode(nil)
-    encoded:encode(2):encode(2):encode(1):encode(2):encode(1)
-    encoded:encode(1):encode(1):encode(nil)
-    encoded:encode(2):encode(2):encode(false):encode(false)
-    world:loadSnapshot(encoded)
+    local encoded = bytes.Buffer.create()
+    values(encoded, 1, 3, 2, 1, 2)
+    values(encoded, tag.componentName, nil, flag.componentName, nil)
+    values(encoded, 2, 2, 1, 2, 1)
+    values(encoded, 1, 1, nil)
+    values(encoded, 2, 2, false, false)
+    world:loadSnapshotFrom(encoded)
     assert(world:has(1, tag))
     assert(not world:has(2, tag))
     assert(not world:has(1, flag))
@@ -709,11 +721,13 @@ function suite.binarySnapshotFileMatchesItsReusableBuffer(): nil
     world:commit()
     do
         local temporary = assert(os.mktemp())
-        const output = buffer.new()
-        world:saveSnapshot({format = "binary", buffer = output, path = tostring(temporary)})
-        const bytes = assert(assert(io.open(tostring(temporary), "rb")):read("a"))
-        assert.eq(bytes, output:tostring())
-        world:loadSnapshot(bytes)
+        local output = bytes.Buffer.create()
+        world:saveSnapshotInto(output, {path = tostring(temporary)})
+        const written = assert(assert(io.open(tostring(temporary), "rb")):read("a"))
+        assert.eq(written, output:tostring())
+        const saved = world:saveSnapshot({format = "binary", path = tostring(temporary)})
+        assert.eq(saved.bytes, written)
+        world:loadSnapshot(written)
         assert.eq(assert(world:get(id, ecs.Transform3D)).z, 5)
     end
 end
