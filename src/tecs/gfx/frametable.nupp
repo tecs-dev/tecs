@@ -6,7 +6,6 @@ entity playing it shares one millisecond lookup table. Instances carry a start
 step and rate, so changing frames performs no CPU work and uploads no instances.
 The clock re-anchors every 524288 fixed steps to preserve millisecond precision.
 ]]
-const io2 = require("nupp.io")
 
 local sheet = require("tecs.gfx.sheet")
 local ecs = require("tecs.ecs")
@@ -27,7 +26,7 @@ local ids: {[string]: integer} = {}
 local changes: integer = 0
 local sheetsAt: integer = -1
 local assembled: integer = -1
-local bytes: string = ""
+local encoded: string = ""
 local origins: {[ecs.World]: integer} = setmetatable({}, {__mode = "k"}) as {[ecs.World]: integer}
 
 --- Returns fixed steps since this world's animation clock origin.
@@ -159,7 +158,7 @@ end
 export function packed(): string
     const current = revision()
     if assembled == current then
-        return bytes
+        return encoded
     end
     local data: {number} = {#playbacks}
     local at = 1 + #playbacks * 4
@@ -188,17 +187,17 @@ export function packed(): string
         data[base], data[base + 1], data[base + 2], data[base + 3] = entryBase, tickBase, #value.ticks, #value.entries
     end
     assert(at <= 16777216, "animation tables exceed exact float32 addressing")
-    local buffer = io2.newBuffer()
-    local writer = io2.newScalarWriter(buffer)
+    local buffer = bytes.Buffer.create()
+    local writer = buffer:writer():scalar()
     for _, value in ipairs(data) do
-        writer:writeFloat32(nupp.math.f32.narrow(value))
+        writer:writefloat32(math.f32.narrow(value))
     end
-    nupp.drop(writer)
-    bytes = buffer:getString()
-    nupp.drop(buffer)
+    own.drop(writer)
+    encoded = buffer:tostring()
+    own.drop(buffer)
     assembled = current
 
-    return bytes
+    return encoded
 end
 
 --- Reports whether GPU playback already applies the supplied slice pivot.

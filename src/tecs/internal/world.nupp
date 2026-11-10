@@ -358,7 +358,7 @@ end
 --- The parameters an event is constructed with, so `emit` binds them by name.
 @comptime
 local function Construction(E: type): typepack
-    return nupp.types.construction(E)
+    return types.construction(E)
 end
 
 local record PendingSpawn

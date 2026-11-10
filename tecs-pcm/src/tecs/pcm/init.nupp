@@ -131,7 +131,7 @@ end
 local function loadFile(path: string, stream: boolean?, streamSeconds: number): (integer?, number?, boolean, string?)
     local info = ffi.new<tecsPcmClipInfo>()
     local mode = stream == true and MODE_STREAM or (stream == false and MODE_RESIDENT or MODE_AUTO)
-    local id = math.floor(tonumber(tecs_pcm_load(path, mode as uint32, nupp.math.f32.narrow(streamSeconds), info)) or 0)
+    local id = math.floor(tonumber(tecs_pcm_load(path, mode as uint32, math.f32.narrow(streamSeconds), info)) or 0)
     if id == 0 then
         return nil, nil, false, reason("'" .. path .. "' did not load")
     end

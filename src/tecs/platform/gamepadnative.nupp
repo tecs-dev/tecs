@@ -251,9 +251,9 @@ local function wrap(openContext: function(): voidptr?, absent: function(): strin
             return tecs_gamepad_rumble(
                 context,
                 device as uint32,
-                nupp.math.f32.narrow(low),
-                nupp.math.f32.narrow(high),
-                nupp.math.f32.narrow(seconds)
+                math.f32.narrow(low),
+                math.f32.narrow(high),
+                math.f32.narrow(seconds)
             ) == 0
         end,
         close = function(): nil

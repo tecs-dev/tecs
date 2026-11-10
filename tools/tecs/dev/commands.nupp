@@ -72,7 +72,7 @@ export function runTogether(invocations: {Invocation}): integer
                 stdout = "inherit",
                 stderr = "inherit"
             }
-            children[#children + 1] = group:adopt(nupp.manage(spawn(options)))
+            children[#children + 1] = group:adopt(own.manage(spawn(options)))
         end
 
         local exitCode: integer = 0

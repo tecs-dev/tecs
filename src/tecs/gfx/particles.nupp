@@ -102,7 +102,6 @@ its frame packet contains emitter records rather than individual particles.
 
 ]]
 const clips = require("tecs.gfx.clips")
-const io2 = require("nupp.io")
 const {type Archetype} = require("tecs.internal.archetype")
 const archetype = require("tecs.internal.archetype")
 
@@ -1426,14 +1425,14 @@ local function packedEffects(): string
         end
     end
     assert(tail <= EFFECT_TABLE_FLOATS, "particle effect table is full")
-    local buffer = io2.newBuffer()
-    local writer = io2.newScalarWriter(buffer)
+    local buffer = bytes.Buffer.create()
+    local writer = buffer:writer():scalar()
     for _, value in ipairs(data) do
-        writer:writeFloat32(nupp.math.f32.narrow(value))
+        writer:writefloat32(math.f32.narrow(value))
     end
-    nupp.drop(writer)
-    effectBytes = buffer:getString()
-    nupp.drop(buffer)
+    own.drop(writer)
+    effectBytes = buffer:tostring()
+    own.drop(buffer)
     effectAt = revision
 
     return effectBytes
@@ -1622,23 +1621,23 @@ export function section(borrows world: ecs.World): string
     if pool.packedSerial == pool.serial and pool.packedRevision == revision then
         return pool.bytes
     end
-    local buffer = io2.newBuffer()
-    local writer = io2.newScalarWriter(buffer)
+    local buffer = bytes.Buffer.create()
+    local writer = buffer:writer():scalar()
     local count: integer = 0
     for _ in pairs(pool.holdings) do
         count = count + 1
     end
-    writer:writeUint32(nupp.math.u32.wrap(0x54505443))
-        :writeUint32(nupp.math.u32.wrap(2))
-        :writeUint32(nupp.math.u32.wrap(pool.id))
-        :writeUint32(nupp.math.u32.wrap(pool.serial))
-        :writeUint32(nupp.math.u32.wrap(pool.capacity))
-        :writeUint32(nupp.math.u32.wrap(pool.maxEmitters))
-        :writeFloat32(nupp.math.f32.narrow(pool.timestep))
-        :writeFloat32(nupp.math.f32.narrow(pool.alpha))
-        :writeUint32(nupp.math.u32.wrap(#effects))
-        :writeUint32(nupp.math.u32.wrap(count))
-    writer:writeBytes(effects)
+    writer:writeuint32(math.u32.wrap(0x54505443))
+        :writeuint32(math.u32.wrap(2))
+        :writeuint32(math.u32.wrap(pool.id))
+        :writeuint32(math.u32.wrap(pool.serial))
+        :writeuint32(math.u32.wrap(pool.capacity))
+        :writeuint32(math.u32.wrap(pool.maxEmitters))
+        :writefloat32(math.f32.narrow(pool.timestep))
+        :writefloat32(math.f32.narrow(pool.alpha))
+        :writeuint32(math.u32.wrap(#effects))
+        :writeuint32(math.u32.wrap(count))
+    writer:writebytes(effects)
     for index = 0, pool.maxEmitters - 1 do
         const holding = pool.indices[index]
         if holding ~= nil then
@@ -1679,15 +1678,15 @@ export function section(borrows world: ecs.World): string
                 holding.steps,
                 holding.advancing and 1 or 0
             }
-            writer:writeUint32(nupp.math.u32.wrap(index)):writeUint32(nupp.math.u32.wrap(holding.token))
+            writer:writeuint32(math.u32.wrap(index)):writeuint32(math.u32.wrap(holding.token))
             for _, value in ipairs(data) do
-                writer:writeFloat32(nupp.math.f32.narrow(checkNumber(value, "emitter field", 2)))
+                writer:writefloat32(math.f32.narrow(checkNumber(value, "emitter field", 2)))
             end
         end
     end
-    nupp.drop(writer)
-    pool.bytes = buffer:getString()
-    nupp.drop(buffer)
+    own.drop(writer)
+    pool.bytes = buffer:tostring()
+    own.drop(buffer)
     pool.packedSerial, pool.packedRevision = pool.serial, revision
 
     return pool.bytes

@@ -1,4 +1,3 @@
-const io2 = require("nupp.io")
 const framepacket = require("tecs.internal.framepacket")
 const meshes = require("tecs.gfx.meshes")
 
@@ -8,30 +7,30 @@ local gfx = require("tecs.gfx")
 local suite = {}
 
 local function packets(bytes: string): {string}, {integer}, integer
-    local reader = io2.newScalarReader(bytes)
+    local reader = io.Reader.of(bytes):scalar()
     reader:skip(8)
-    const revision = reader:readUint32() as integer
+    const revision = reader:readuint32() as integer
     reader:skip(8)
-    const count = reader:readUint32() as integer
+    const count = reader:readuint32() as integer
     local packets: {string} = {}
     local ids: {integer} = {}
     for index = 1, count do
-        ids[index] = reader:readUint32() as integer
+        ids[index] = reader:readuint32() as integer
         reader:skip(16)
-        packets[index] = reader:readBytes(reader:readUint32() as integer)
-        reader:skip(reader:readUint32() as integer)
+        packets[index] = reader:readbytes(reader:readuint32() as integer)
+        reader:skip(reader:readuint32() as integer)
     end
     assert(reader:atEnd())
-    nupp.drop(reader)
+    own.drop(reader)
 
     return packets, ids, revision
 end
 
 local function word(bytes: string, offset: integer): integer
-    local reader = io2.newScalarReader(bytes)
+    local reader = io.Reader.of(bytes):scalar()
     reader:skip(offset)
-    const value = reader:readUint32() as integer
-    nupp.drop(reader)
+    const value = reader:readuint32() as integer
+    own.drop(reader)
 
     return value
 end

@@ -62,7 +62,6 @@ Each explicit `tecs.gfx.View` runs this graph at its viewport resolution.
 The renderer composites those results in view order. With no explicit views,
 the active camera draws one full-frame view.
 ]]
-const io2 = require("nupp.io")
 
 --- Names the shared depth attachment, which is not a declarable target.
 ---
@@ -196,8 +195,8 @@ const CLEAR_LOAD: integer = 1
 --- Clears every output to the color the pass declares.
 const CLEAR_OVERRIDE: integer = 2
 
-const wrap = nupp.math.u32.wrap
-const narrow = nupp.math.f32.narrow
+const wrap = math.u32.wrap
+const narrow = math.f32.narrow
 const huge = math.huge
 
 local targetList: {Target} = {}
@@ -568,12 +567,12 @@ export function section(): string
         blobLength = blobLength + padding
     end
 
-    local buffer = io2.newBuffer()
-    local writer = io2.newScalarWriter(buffer)
-    writer:writeUint32(wrap(#names)):writeUint32(wrap(blobLength))
-    writer:writeBytes(table.concat(blobParts))
+    local buffer = bytes.Buffer.create()
+    local writer = buffer:writer():scalar()
+    writer:writeuint32(wrap(#names)):writeuint32(wrap(blobLength))
+    writer:writebytes(table.concat(blobParts))
 
-    writer:writeUint32(wrap(#targetList))
+    writer:writeuint32(wrap(#targetList))
     for index = 1, #targetList do
         const target = targetList[index]
         const clear = target.clear
@@ -581,17 +580,17 @@ export function section(): string
         if clear ~= nil then
             r, g, b, a = clear.r, clear.g, clear.b, clear.a
         end
-        writer:writeUint32(wrap(nameIndex[target.name] as integer))
-            :writeUint32(wrap(FORMAT_CODES[target.format as string] as integer))
-            :writeFloat32(narrow(target.scale))
-            :writeUint32(wrap(clear ~= nil and 1 or 0))
-            :writeFloat32(narrow(r))
-            :writeFloat32(narrow(g))
-            :writeFloat32(narrow(b))
-            :writeFloat32(narrow(a))
+        writer:writeuint32(wrap(nameIndex[target.name] as integer))
+            :writeuint32(wrap(FORMAT_CODES[target.format as string] as integer))
+            :writefloat32(narrow(target.scale))
+            :writeuint32(wrap(clear ~= nil and 1 or 0))
+            :writefloat32(narrow(r))
+            :writefloat32(narrow(g))
+            :writefloat32(narrow(b))
+            :writefloat32(narrow(a))
     end
 
-    writer:writeUint32(wrap(#passList))
+    writer:writeuint32(wrap(#passList))
     for index = 1, #passList do
         const pass = passList[index]
         const clear = pass.clear
@@ -606,22 +605,22 @@ export function section(): string
         if clear ~= nil then
             r, g, b, a = clear.r, clear.g, clear.b, clear.a
         end
-        writer:writeUint32(wrap(nameIndex[pass.name] as integer))
-            :writeUint32(wrap(DEPTH_CODES[pass.depth as string] as integer))
-            :writeUint32(wrap(depthClear ~= nil and 1 or 0))
-            :writeFloat32(narrow(depthClear or 0.0))
-            :writeUint32(wrap(clearMode))
-            :writeFloat32(narrow(r))
-            :writeFloat32(narrow(g))
-            :writeFloat32(narrow(b))
-            :writeFloat32(narrow(a))
-            :writeUint32(wrap(#pass.inputs))
-            :writeUint32(wrap(#pass.outputs))
+        writer:writeuint32(wrap(nameIndex[pass.name] as integer))
+            :writeuint32(wrap(DEPTH_CODES[pass.depth as string] as integer))
+            :writeuint32(wrap(depthClear ~= nil and 1 or 0))
+            :writefloat32(narrow(depthClear or 0.0))
+            :writeuint32(wrap(clearMode))
+            :writefloat32(narrow(r))
+            :writefloat32(narrow(g))
+            :writefloat32(narrow(b))
+            :writefloat32(narrow(a))
+            :writeuint32(wrap(#pass.inputs))
+            :writeuint32(wrap(#pass.outputs))
         for slot = 1, #pass.inputs do
-            writer:writeUint32(wrap(nameIndex[pass.inputs[slot]] as integer))
+            writer:writeuint32(wrap(nameIndex[pass.inputs[slot]] as integer))
         end
         for slot = 1, #pass.outputs do
-            writer:writeUint32(wrap(nameIndex[pass.outputs[slot]] as integer))
+            writer:writeuint32(wrap(nameIndex[pass.outputs[slot]] as integer))
         end
     end
 
@@ -632,21 +631,21 @@ export function section(): string
         end
     end
     if custom > 0 then
-        writer:writeUint32(0x50504658):writeUint32(wrap(custom))
+        writer:writeuint32(0x50504658):writeuint32(wrap(custom))
         for index, pass in ipairs(passList) do
             if pass.shader ~= nil then
                 const source = assert(pass.shader)
-                writer:writeUint32(wrap(index - 1)):writeUint32(wrap(#source)):writeBytes(source)
-                writer:writeBytes(string.rep("\0", (4 - #source % 4) % 4))
+                writer:writeuint32(wrap(index - 1)):writeuint32(wrap(#source)):writebytes(source)
+                writer:writebytes(string.rep("\0", (4 - #source % 4) % 4))
                 for lane = 1, 16 do
-                    writer:writeFloat32(narrow(pass.parameters[lane] or 0))
+                    writer:writefloat32(narrow(pass.parameters[lane] or 0))
                 end
             end
         end
     end
-    nupp.drop(writer)
-    const encoded = buffer:getString()
-    nupp.drop(buffer)
+    own.drop(writer)
+    const encoded = buffer:tostring()
+    own.drop(buffer)
     cachedSection = encoded
 
     return encoded

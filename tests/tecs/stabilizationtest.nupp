@@ -1,4 +1,3 @@
-const io2 = require("nupp.io")
 
 local application = require("tecs.application")
 local assets = require("tecs.assets")
@@ -25,18 +24,18 @@ end
 -- section between it and the header. Each tile-grid update is its slot word and
 -- 1,072 bytes of grid; every other stride is a packet constant.
 local function firstPose(packet: string): (number, number, number)
-    local reader = io2.newScalarReader(packet)
+    local reader = io.Reader.of(packet):scalar()
     reader:skip(20)
-    const graphBytes = reader:readUint32()
+    const graphBytes = reader:readuint32()
     reader:skip(4)
-    const batches = reader:readUint32()
+    const batches = reader:readuint32()
     reader:skip(36)
-    const lights = reader:readUint32()
+    const lights = reader:readuint32()
     reader:skip(52)
-    const tiles = reader:readUint32()
+    const tiles = reader:readuint32()
     reader:skip(4)
-    const frameTableBytes = reader:readUint32()
-    const particleBytes = reader:readUint32()
+    const frameTableBytes = reader:readuint32()
+    const particleBytes = reader:readuint32()
     reader:skip(
         frameTableBytes
         + particleBytes
@@ -48,9 +47,9 @@ local function firstPose(packet: string): (number, number, number)
         + batches
         * framepacket.BATCH_STRIDE
     )
-    const x = reader:readFloat32()
-    const y = reader:readFloat32()
-    const rotation = reader:readFloat32()
+    const x = reader:readfloat32()
+    const y = reader:readfloat32()
+    const rotation = reader:readfloat32()
 
     return x, y, rotation
 end
@@ -500,17 +499,17 @@ function suite.interpolatesLightPositionsWithoutChangingTheirSimulationPose(): n
     world:commit()
     world:update(0.5)
     const extractor = framepacket.new(world)
-    local reader = io2.newScalarReader(extractor:packet(640, 480))
+    local reader = io.Reader.of(extractor:packet(640, 480)):scalar()
     reader:skip(20)
-    const graphBytes = reader:readUint32()
+    const graphBytes = reader:readuint32()
     -- The frame table and the particle section stand between the header and the
     -- graph, and the light table follows the graph.
     reader:skip(108)
-    const frameTableBytes = reader:readUint32()
-    const particleBytes = reader:readUint32()
+    const frameTableBytes = reader:readuint32()
+    const particleBytes = reader:readuint32()
     reader:skip(frameTableBytes + particleBytes + graphBytes)
-    near(reader:readFloat32(), 10)
-    near(reader:readFloat32(), 20)
+    near(reader:readfloat32(), 10)
+    near(reader:readfloat32(), 20)
     near(assert(world:get(light, ecs.Transform2D)).x, 20)
 end
 

@@ -22,7 +22,7 @@ the query loop. A native column grows geometrically with a single memory copy;
 bulk spawns reserve the whole destination range before calling their writer.
 
 ```nupp
-@derive(tecs.ecs.Component, nupp.derive.Debug)
+@derive(tecs.ecs.Component, types.debug)
 local struct Velocity
     x: number = 0
     y: number = 0
@@ -40,7 +40,7 @@ end
 
 Built-in transforms, tint, shape material, camera, lights, animation, sound,
 physics values and numeric UI components use this storage and derive
-`nupp.derive.Debug`, whose methods work on constructed values and borrowed rows
+`types.debug`, whose methods work on constructed values and borrowed rows
 without changing column layout. Serialization needs no derive:
 `nupp.serde.binding(Velocity)` selects the declaration's fields for
 `nupp.serde.json.encode` and `decode`. That generic encoding describes physical
@@ -352,7 +352,7 @@ alive, but it will not adopt a new archetype that later reuses the same ID.
 
 ## World-managed random streams
 
-`world:randomStream(name)` returns a `nupp.random.Xoshiro128` owned by the world.
+`world:randomStream(name)` returns a `math.Xoshiro128` owned by the world.
 The world seed and the non-empty stream name determine its sequence, independently
 of which other streams exist or how many values they draw. Repeated calls return
 the same generator. Use namespaced names and capture streams during setup.
@@ -372,7 +372,7 @@ The initial world seed is the fixed value `0x5EED1234`, not a clock reading.
 `seedRandom(seed)` reads a 32-bit word and restarts all existing streams in
 place; future streams derive their seeds from the new world seed too. Drawing,
 shuffling, ranges and individual state access use Nupp's generator methods
-directly. Independent generators outside a world use `new nupp.random.Xoshiro128(seed)`.
+directly. Independent generators outside a world use `new math.Xoshiro128(seed)`.
 Generators are mutable and must not be shared across concurrent workers.
 
 The first stream or seed call enables snapshot persistence under `tecs.random`.
@@ -468,7 +468,7 @@ Combinators short-circuit, including their operands' side effects. The example
 pauses its timer outside `game`; swapping the operands keeps the timer advancing
 and spends ticks outside that state. A disabled system or phase never evaluates
 its predicates. Use `every(interval, jitter, generator)` for jitter, supplying a
-`nupp.random.Xoshiro128` directly. The first interval is unjittered and later
+`math.Xoshiro128` directly. The first interval is unjittered and later
 intervals clamp to one percent of the base interval. Pass a named world stream
 to snapshot its random state; there is no implicit stream or automatic timer
 rewind when an entity snapshot is restored.
@@ -523,7 +523,7 @@ export type ComponentValue = derived.Value
 export type RelationshipPayload = derived.Edge
 
 @comptime
-local function componentOptions(info: nupp.derive.Info, edge: boolean): any
+local function componentOptions(info: types.derive.Info, edge: boolean): any
     local result = {name = info.qualifiedName, representation = info.kind, relationship = edge}
     for _, annotation in ipairs(info.annotations) do
         if annotation.name == (edge and "relationship" or "component") then
@@ -541,11 +541,11 @@ end
 --- @return Returns its metadata and reusable initializer recipe.
 --- @raises string when the declaration cannot supply a reusable initializer.
 @comptime
-export function Component(info: nupp.derive.Info): nupp.derive.Result<derived.Value>
+export function Component(info: types.derive.Info): types.derive.Result<derived.Value>
     if info.kind ~= "record" and info.kind ~= "struct" then
-        return nupp.derive.error("Component requires a record or fixed-layout struct", info.reference)
+        return types.derive.error("Component requires a record or fixed-layout struct", info.reference)
     end
-    return nupp.derive.implement{data = {tecs = componentOptions(info, false)}, initializer = true}
+    return types.derive.implement{data = {tecs = componentOptions(info, false)}, initializer = true}
 end
 
 --- Marks a target-bearing record or struct as an ECS relationship.
@@ -553,16 +553,16 @@ end
 --- @return Returns its metadata and reusable initializer recipe.
 --- @raises string when the target, policies or initializer are invalid.
 @comptime
-export function Relationship(info: nupp.derive.Info): nupp.derive.Result<derived.Edge>
+export function Relationship(info: types.derive.Info): types.derive.Result<derived.Edge>
     if info.kind ~= "record" and info.kind ~= "struct" then
-        return nupp.derive.error("Relationship requires a record or fixed-layout struct", info.reference)
+        return types.derive.error("Relationship requires a record or fixed-layout struct", info.reference)
     end
     local target = false
     for _, field in ipairs(info.fields) do
         if field.name == "target" then
-            local name = nupp.types.describe(field.readType).name
+            local name = types.describe(field.readType).name
             if name ~= "number" and (info.kind == "struct" or name ~= "integer") then
-                return nupp.derive.error(
+                return types.derive.error(
                     "Relationship target must be number in a struct, or number or integer in a record",
                     field.reference
                 )
@@ -571,14 +571,14 @@ export function Relationship(info: nupp.derive.Info): nupp.derive.Result<derived
         end
     end
     if not target then
-        return nupp.derive.error("Relationship requires a target field", info.reference)
+        return types.derive.error("Relationship requires a target field", info.reference)
     end
     local policy = componentOptions(info, true)
     if policy.cascadeDelete and not (policy.exclusive and policy.reverseIndex) then
-        return nupp.derive.error("cascadeDelete requires exclusive and reverseIndex", info.reference)
+        return types.derive.error("cascadeDelete requires exclusive and reverseIndex", info.reference)
     end
 
-    return nupp.derive.implement{data = {tecs = policy}, initializer = true}
+    return types.derive.implement{data = {tecs = policy}, initializer = true}
 end
 
 --- Configures a derived component's persisted identity and snapshot policy.

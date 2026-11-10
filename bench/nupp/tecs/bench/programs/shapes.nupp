@@ -1,6 +1,5 @@
 const {type SampleSession} = require("debug.profile")
 const profile = require("debug.profile")
-const io2 = require("nupp.io")
 
 --- Steady-state shape field, simulated and extracted.
 ---
@@ -152,9 +151,9 @@ if profiling ~= nil then
     profiling:stop(profilePath)
 end
 const bytes = #packet
-local reader = io2.newScalarReader(packet:sub(37, 40))
-const instances = reader:readUint32() as integer
-nupp.drop(reader)
+local reader = io.Reader.of(packet:sub(37, 40)):scalar()
+const instances = reader:readuint32() as integer
+own.drop(reader)
 assert(instances == COUNT, "benchmark packet lost instances")
 print(
     (

@@ -3,7 +3,6 @@ module tecs.internal.tilechunk
 --[[Native 16 by 16 tile grids, uploaded as compact GPU tile IDs without
 creating an ECS entity for each tile. Tile IDs are one-based atlas indices
 zero is empty. Bits 31, 30 and 29 retain Tiled's H, V and diagonal flips.]]
-const io2 = require("nupp.io")
 
 local components = require("tecs.internal.components")
 local rendercomponents = require("tecs.internal.rendercomponents")
@@ -155,8 +154,8 @@ end
 
 --- Encodes the atlas geometry followed by 256 packed tile IDs for the GPU.
 export function packed(borrows value: TileChunk): string
-    local buffer = io2.newBuffer()
-    local writer = io2.newScalarWriter(buffer)
+    local buffer = bytes.Buffer.create()
+    local writer = buffer:writer():scalar()
     const width, height = images.sizeOf(value.tileset)
     for _, number in ipairs({
         value.tileWidth,
@@ -172,16 +171,16 @@ export function packed(borrows value: TileChunk): string
         math.max(1, height),
         0
     }) do
-        writer:writeFloat32(nupp.math.f32.narrow(number))
+        writer:writefloat32(math.f32.narrow(number))
     end
     @unsafe do
         for index = 1, 256 do
-            writer:writeUint32(value.tiles[index])
+            writer:writeuint32(value.tiles[index])
         end
     end
-    nupp.drop(writer)
-    const bytes = buffer:getString()
-    nupp.drop(buffer)
+    own.drop(writer)
+    const bytes = buffer:tostring()
+    own.drop(buffer)
 
     return bytes
 end

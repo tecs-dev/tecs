@@ -414,14 +414,14 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
                 target.handle = source.handle as uint32
                 target.clip = source.clip as uint32
                 target.flags = source.flags as uint32
-                target.gain = nupp.math.f32.narrow(source.gain)
-                target.pitch = nupp.math.f32.narrow(source.pitch)
-                target.start = nupp.math.f32.narrow(source.start)
-                target.fade = nupp.math.f32.narrow(source.fade)
-                target.loopStart = nupp.math.f32.narrow(source.loopStart)
-                target.x = nupp.math.f32.narrow(source.x)
-                target.y = nupp.math.f32.narrow(source.y)
-                target.z = nupp.math.f32.narrow(source.z)
+                target.gain = math.f32.narrow(source.gain)
+                target.pitch = math.f32.narrow(source.pitch)
+                target.start = math.f32.narrow(source.start)
+                target.fade = math.f32.narrow(source.fade)
+                target.loopStart = math.f32.narrow(source.loopStart)
+                target.x = math.f32.narrow(source.x)
+                target.y = math.f32.narrow(source.y)
+                target.z = math.f32.narrow(source.z)
                 target.at = source.at
                 target.target = source.target as uint32
                 target.param = source.param as uint32
@@ -529,7 +529,7 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
             return seconds
         end,
         seek = function(handle: integer, seconds: number): boolean
-            return extra.seek(device, handle as uint32, nupp.math.f32.narrow(seconds)) ~= 0
+            return extra.seek(device, handle as uint32, math.f32.narrow(seconds)) ~= 0
         end,
         now = function(): number
             if closed[1] then
@@ -955,7 +955,7 @@ local function wrapCapture(
             end
             @unsafe do
                 for index = 0, chunk * width - 1 do
-                    samples[index].value = nupp.math.f32.narrow(source[offset + index + 1])
+                    samples[index].value = math.f32.narrow(source[offset + index + 1])
                 end
             end
             local accepted = tecs_audio_microphone_write(microphone, samples, chunk as uint32) as integer
