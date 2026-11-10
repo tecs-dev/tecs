@@ -25,14 +25,13 @@ resident or failed, and the packet the host extracts next already says so.
 const screenshot = require("tecs.gfx.screenshot")
 const models = require("tecs.gfx.models")
 const events = require("nupp.events")
-const nupphost = require("nupp.host")
-const suspension = require("nupp.suspension")
+const nupphost = require("os.host")
 const span = require("nupp.mem.span")
 
 local application = require("tecs.application")
 local viewpacket = require("tecs.internal.viewpacket")
 local framepacket = require("tecs.internal.framepacket")
-local hostpump = require("nupp.host.pump")
+local hostpump = require("os.host")
 local images = require("tecs.gfx.images")
 local platformevents = require("tecs.platform.events")
 local window = require("tecs.platform.window")
@@ -41,7 +40,7 @@ local window = require("tecs.platform.window")
 ---
 --- `held` is a turn the paused application held, which ran no frame. The
 --- states are a compatibility surface between this module and the host.
-export type FrameState = hostpump.State | "held"
+export type FrameState = hostpump.Pump.State | "held"
 
 --- The address every input route delivers at. The host drives one window.
 export const INPUT_ADDRESS: integer = 1
@@ -505,7 +504,7 @@ export function newSession(config: application.Config?): Session
         events = {},
         commands = {},
         commandIndex = 1,
-        pump = hostpump.newPump(),
+        pump = hostpump.Pump(),
         extractor = framepacket.new(app.world),
         views = viewpacket.new(app.world)
     )
@@ -588,7 +587,7 @@ export function iterate(exclusive session: Session, dt: number): FrameState
     const hosted = session.hosted
     if hosted then
         -- Delivers what the host pushed since the last turn.
-        suspension.poll()
+        coroutine.host.poll()
     end
     local batch = session.events
     session.events = {}

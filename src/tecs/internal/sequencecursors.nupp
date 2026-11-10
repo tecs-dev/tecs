@@ -19,7 +19,7 @@ module walks is sorted first, so a subtree is torn down and a signal is
 delivered the same way on every run.
 ]]
 
-local log = require("nupp.log")
+local log = require("debug.log")
 local entityworld = require("tecs.internal.world")
 local sequenceregistry = require("tecs.internal.sequenceregistry")
 local sequencetypes = require("tecs.internal.sequencetypes")

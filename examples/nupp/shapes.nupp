@@ -10,7 +10,6 @@ const {type Application} = require("tecs.application")
 const ecs = require("tecs.ecs")
 const materials2 = require("tecs.gpu.materials")
 const lighting = require("tecs.gfx.lighting")
-const time = require("nupp.time")
 const gfx = require("tecs.gfx")
 const {type Archetype} = require("tecs.ecs")
 const {type Session} = require("tecs.host")
@@ -62,7 +61,7 @@ local function install(exclusive app: Application, interactive: boolean): nil
                 return
             end
             spawned = true
-            const started = time.now()
+            const started = os.monotonic()
             const width, height = window:getPixelSize()
             centerX, centerY = width * 0.5, height * 0.5
             if interactive then
@@ -100,7 +99,7 @@ local function install(exclusive app: Application, interactive: boolean): nil
                     print(
                         (
                             "shapes: %d %s, %s, target %dx%d, quad %.3fpx, batch init %.0fms"
-                        ):format(total, kind, motion, width, height, size, time.now() - started)
+                        ):format(total, kind, motion, width, height, size, os.monotonic() - started)
                     )
                 end
             )

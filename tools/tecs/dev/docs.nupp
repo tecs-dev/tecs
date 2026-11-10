@@ -2,9 +2,7 @@ module tecs.dev.docs
 
 local commands = require("tecs.dev.commands")
 local files = require("nupp.io.files")
-local net = require("nupp.io.net")
-local tasks = require("nupp.tasks")
-local time = require("nupp.time")
+local net = require("io.net")
 
 --- Checks metadata and house style before Nupp validates the generated links.
 export function pages(): nil
@@ -132,11 +130,11 @@ export function serve(port: integer): nil
     build(output)
     io.stdout:setvbuf("line")
     print("Serving http://localhost:" .. port .. "/; rebuilding docs and source changes. Ctrl-C to stop.")
-    with scope = tasks.open() do
+    with scope = coroutine.scope() do
         scope:spawn(function(): nil
             local previous = fingerprint()
             while true do
-                time.sleep(1000)
+                coroutine.sleep(1000)
                 const current = fingerprint()
                 if current == previous then
                     continue

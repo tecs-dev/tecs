@@ -8,9 +8,8 @@ the pump. Application guards rethrow it rather than recording a crash, so the
 operation unwinds through its cleanup instead of presenting a failure.
 ]]
 
-local cancellation = require("nupp.suspension.cancellation")
 
 --- Reports whether a caught value is a cancellation, such as the host pump's.
 export function is(value: any): boolean
-    return cancellation.is(value)
+    return coroutine.iscancellation(value)
 end

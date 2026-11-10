@@ -181,8 +181,7 @@ local ecs = require("tecs.ecs")
 local effectspecs = require("tecs.audio.effects")
 local timelines = require("tecs.audio.timeline")
 local json = require("nupp.codec.json")
-local log = require("nupp.log")
-local random = require("nupp.random")
+local log = require("debug.log")
 
 --- This logger name is a compatibility surface: a developer types it into a
 --- level filter, so it does not move when its module does.
@@ -1136,7 +1135,7 @@ export record Audio
     @private soundsById: {[integer]: Sound}
     @private decoderNames: {[integer]: string}
     @private decoderIds: {[string]: integer}
-    @private variance: random.Xoshiro128
+    @private variance: math.Xoshiro128
     @private elapsed: number
     @private pending: {audiobackend.Command}
     @private pendingCount: integer
@@ -2669,7 +2668,7 @@ export function newAudio(config: Config?): Audio
         soundsById = {},
         decoderNames = {},
         decoderIds = {},
-        variance = random.Xoshiro128(),
+        variance = math.Xoshiro128(),
         elapsed = 0,
         pending = {},
         pendingCount = 0,

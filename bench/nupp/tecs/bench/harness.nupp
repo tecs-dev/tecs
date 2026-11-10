@@ -30,7 +30,6 @@ print(harness.format({stage}))
 ```
 ]]
 
-local time = require("nupp.time")
 local json = require("nupp.codec.json")
 
 local ceil = math.ceil
@@ -139,9 +138,9 @@ export function measure(
         if prepare ~= nil then
             prepare()
         end
-        const started = time.now()
+        const started = os.monotonic()
         run()
-        mark(stage, time.now() - started)
+        mark(stage, os.monotonic() - started)
     end
 end
 

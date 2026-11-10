@@ -49,7 +49,6 @@ local ecs = require("tecs.ecs")
 
 local harness = require("tecs.bench.harness")
 local physics = require("tecs.physics")
-local time = require("nupp.time")
 
 const BODIES = harness.count("BENCH_BODIES", 4000)
 const WAVES = harness.count("BENCH_WAVES", 8)
@@ -75,21 +74,21 @@ world:addSystem({
     name = "bench.BeforeSync",
     phase = ecs.phases.FixedPostUpdate,
     run = function(): nil
-        syncStarted = time.now()
+        syncStarted = os.monotonic()
     end,
 })
 const simulation = physics.install(world, {gravity = {0.0, 900.0}, workerCount = WORKERS})
 const nativeStep = simulation.step
 simulation.step = function(dt: number): nil
-    const started = time.now()
+    const started = os.monotonic()
     nativeStep(dt)
-    stepMilliseconds = time.now() - started
+    stepMilliseconds = os.monotonic() - started
 end
 world:addSystem({
     name = "bench.AfterSync",
     phase = ecs.phases.FixedPostUpdate,
     run = function(): nil
-        syncMilliseconds = time.now() - syncStarted
+        syncMilliseconds = os.monotonic() - syncStarted
     end,
 })
 
@@ -220,12 +219,12 @@ const update = harness.newStage("update")
 const commands = harness.newStage("commands+ecs")
 const step = harness.newStage("native batch")
 const sync = harness.newStage("sync")
-const setupStarted = time.now()
+const setupStarted = os.monotonic()
 for frame = 0, WARMUP + FRAMES - 1 do
-    const started = time.now()
+    const started = os.monotonic()
     world:update(timestep)
     if frame >= WARMUP then
-        const elapsed = time.now() - started
+        const elapsed = os.monotonic() - started
         harness.mark(update, elapsed)
         harness.mark(step, stepMilliseconds)
         harness.mark(sync, syncMilliseconds)
@@ -241,7 +240,7 @@ for frame = 0, WARMUP + FRAMES - 1 do
         spawned = spawned + dropWave(world, remaining)
     end
 end
-const totalMilliseconds = time.now() - setupStarted
+const totalMilliseconds = os.monotonic() - setupStarted
 
 print(
     (

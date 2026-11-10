@@ -2,9 +2,7 @@ local application = require("tecs.application")
 local ecs = require("tecs.ecs")
 local json = require("nupp.codec.json")
 local mcp = require("tecs.mcp")
-local net = require("nupp.io.net")
-local tasks = require("nupp.tasks")
-local time = require("nupp.time")
+local net = require("io.net")
 
 -- The debug-server gate: an agent reaches a running application over the wire
 -- and both reads it and changes what it does.
@@ -115,13 +113,13 @@ local MAX_TURNS: integer = 4000
 --- @raises any whatever the agent or the poller raised
 local function withSession<T>(server: mcp.Server, port: integer, agent: function(port: integer): T): T
     local finished = false
-    local answers, failures = tasks.gather({
+    local answers, failures = coroutine.gather({
         function(): any
             local turns = 0
             while not finished and turns < MAX_TURNS do
                 mcp.poll(server)
                 turns = turns + 1
-                time.sleep(1)
+                coroutine.sleep(1)
             end
             mcp.poll(server)
 

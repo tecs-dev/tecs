@@ -1,5 +1,5 @@
-const {type SampleSession} = require("nupp.profile")
-const profile = require("nupp.profile")
+const {type SampleSession} = require("debug.profile")
+const profile = require("debug.profile")
 const io2 = require("nupp.io")
 
 --- Steady-state shape field, simulated and extracted.
@@ -41,7 +41,6 @@ local framepacket = require("tecs.internal.framepacket")
 local gfx = require("tecs.gfx")
 local materials = require("tecs.gpu.materials")
 local harness = require("tecs.bench.harness")
-local time = require("nupp.time")
 
 const PER_KIND = harness.count("BENCH_SHAPES", 100000)
 const COUNT = PER_KIND * 2
@@ -95,11 +94,11 @@ end
 -- Seeded exactly as the Teal scene is, so the field is uniform and identical on
 -- every run rather than a lattice.
 math.randomseed(42)
-const spawnStarted = time.now()
+const spawnStarted = os.monotonic()
 fill(world, materials.id("circle"), 6.0, 10.0)
 fill(world, materials.id("rounded"), 10.0, 20.0)
 world:update(0)
-const spawnMilliseconds = time.now() - spawnStarted
+const spawnMilliseconds = os.monotonic() - spawnStarted
 
 const moving = world:newQuery({include = {ecs.Transform2D, gfx.Renderable2D}})
 world:addSystem({
@@ -137,11 +136,11 @@ for index = 1, WARMUP + FRAMES do
     if index == WARMUP + 1 and profilePath ~= "" then
         profiling = profile.sample({intervalMs = 1})
     end
-    const started = time.now()
+    const started = os.monotonic()
     world:update(STEP)
-    const simulated = time.now()
+    const simulated = os.monotonic()
     packet = extractor:packet(WIDTH, HEIGHT)
-    const extracted = time.now()
+    const extracted = os.monotonic()
     if index > WARMUP then
         harness.mark(update, simulated - started)
         harness.mark(extract, extracted - simulated)

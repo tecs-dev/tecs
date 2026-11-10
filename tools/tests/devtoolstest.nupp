@@ -134,14 +134,13 @@ function suite.commandsRunTogetherActuallyOverlap(): nil
             return (
                 [[
 local files = require("nupp.io.files")
-local time = require("nupp.time")
 
 assert(files.write(%q, "ready"))
 for _ = 1, 100 do
     if files.isFile(%q) then
         return
     end
-    time.sleep(20)
+    coroutine.sleep(20)
 end
 error("the peer command never started")
 ]]

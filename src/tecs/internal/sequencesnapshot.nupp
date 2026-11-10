@@ -12,7 +12,7 @@ since been redefined. Programs restored this way register under their original
 name and version, leaving the newest version untouched for later `play` calls.
 ]]
 
-local log = require("nupp.log")
+local log = require("debug.log")
 local sequencecursors = require("tecs.internal.sequencecursors")
 local sequenceprogram = require("tecs.internal.sequenceprogram")
 local sequenceregistry = require("tecs.internal.sequenceregistry")

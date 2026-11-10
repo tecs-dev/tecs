@@ -18,7 +18,7 @@ local screenshot = require("tecs.gfx.screenshot")
 local files = require("nupp.io.files")
 local path = require("nupp.io.path")
 local json = require("nupp.codec.json")
-local profile = require("nupp.profile")
+local profile = require("debug.profile")
 local buffer = require("string.buffer")
 
 local function register(

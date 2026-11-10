@@ -57,8 +57,7 @@ bounded set of paths a game explicitly registered.
 ]]
 
 local files = require("nupp.io.files")
-local log = require("nupp.log")
-local time = require("nupp.time")
+local log = require("debug.log")
 
 --- One settled content change.
 export record Change
@@ -176,7 +175,7 @@ end
 --- Reads the monotonic clock in seconds, the default `Config.clock`.
 --- @return seconds since this process's clock origin
 local function defaultClock(): number
-    return time.now() / 1000
+    return os.monotonic() / 1000
 end
 
 local source: Source = defaultSource

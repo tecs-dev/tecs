@@ -1,7 +1,6 @@
 const {type World} = require("tecs.ecs")
 const {type Phase} = require("tecs.ecs")
 const ecs = require("tecs.ecs")
-const {type Scope} = require("nupp.tasks")
 
 
 local suite = {}
@@ -262,7 +261,7 @@ function suite.preservesDependencyOrderAcrossTaskWaits(): nil
     world:addSystem({
         name = "producer",
         phase = ecs.phases.Update,
-        run = function(_dt: number, exclusive _world: World, borrows scope: Scope): nil
+        run = function(_dt: number, exclusive _world: World, borrows scope: coroutine.Scope): nil
             calls[#calls + 1] = "start"
             const child = scope:spawn(function(): string
                 return "finish"

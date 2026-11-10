@@ -24,7 +24,6 @@ local ecs = require("tecs.ecs")
 local files = require("nupp.io.files")
 local json = require("nupp.codec.json")
 local platformevents = require("tecs.platform.events")
-local time = require("nupp.time")
 local bindings = require("tecs.internal.mcpbindings")
 local registry = require("tecs.internal.mcpregistry")
 local sandbox = require("tecs.internal.mcpsandbox")
@@ -71,7 +70,7 @@ registry.register({
     handler = function(_arguments: {[string]: any}): {[string]: any}?
         local crash = registry.crashed()
 
-        return {ok = crash == nil, crashed = crash ?? json.NULL, ticks = math.floor(time.now() * 1000)}
+        return {ok = crash == nil, crashed = crash ?? json.NULL, ticks = math.floor(os.monotonic() * 1000)}
     end
 })
 

@@ -19,9 +19,7 @@ const {type Emittable} = require("nupp.events")
 const {type Observer} = require("nupp.events")
 const util = require("nupp.util")
 
-local tasks = require("nupp.tasks")
 local ffi = require("ffi")
-local random = require("nupp.random")
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
 local derived = require("tecs.internal.derived")
@@ -43,7 +41,7 @@ local files = require("nupp.io.files")
 --- The borrowed task scope is optional to accept for source compatibility with
 --- ordinary two-argument systems. A system that starts child work accepts it as
 --- its third argument; all children settle before the logical update returns.
-export type System = function(dt: number, exclusive world: World, borrows scope: tasks.Scope)
+export type System = function(dt: number, exclusive world: World, borrows scope: coroutine.Scope)
 
 --- Replaces scheduling while preserving world mutation, event and task-scope ownership.
 export interface Pipeline
@@ -80,7 +78,7 @@ export interface Pipeline
     --- @param dt The frame duration in seconds.
     --- @param world The world whose systems run.
     --- @param scope The call-scoped owner of child tasks.
-    update: function(self: Pipeline, dt: number, exclusive world: World, borrows scope: tasks.Scope): nil
+    update: function(self: Pipeline, dt: number, exclusive world: World, borrows scope: coroutine.Scope): nil
 
     --- Dispatches one phase or phase tree inside the world's task scope.
     --- @param self The custom scheduler.
@@ -93,7 +91,7 @@ export interface Pipeline
         phase: phases.Selection,
         dt: number,
         exclusive world: World,
-        borrows scope: tasks.Scope
+        borrows scope: coroutine.Scope
     ): nil
 
     --- Registers a system and returns its unique name.
@@ -766,7 +764,7 @@ export record World is Source<integer>
     --- @param name The non-empty stream name, preferably namespaced for its consumer.
     --- @return Returns the same mutable generator for each call with this name.
     --- @raises string when the name is empty.
-    randomStream: function(exclusive self: World, name: string): random.Xoshiro128
+    randomStream: function(exclusive self: World, name: string): math.Xoshiro128
 
     --- Restarts every named random stream without replacing captured generators.
     --- Streams created later derive their seeds from this seed too.
@@ -3266,7 +3264,7 @@ local function ensureRandom(exclusive world: World): randomstreams.Registry
     return registry
 end
 
-function World.randomStream(exclusive self: World, name: string): random.Xoshiro128
+function World.randomStream(exclusive self: World, name: string): math.Xoshiro128
     if name == "" then
         error("world.randomStream: a stream needs a non-empty name", 2)
     end
@@ -5097,7 +5095,7 @@ function World.isPhaseEnabled(borrows self: World, phase: phases.Phase): boolean
     return not self.disabledPhases[phase]
 end
 
-local function runPhase(exclusive world: World, phase: phases.Phase, dt: number, borrows scope: tasks.Scope): nil
+local function runPhase(exclusive world: World, phase: phases.Phase, dt: number, borrows scope: coroutine.Scope): nil
     if world.disabledPhases[phase] then
         return
     end
@@ -5133,13 +5131,13 @@ local runSelection: function(
     exclusive world: World,
     selection: phases.Selection,
     dt: number,
-    borrows scope: tasks.Scope
+    borrows scope: coroutine.Scope
 ): nil
 runSelection = function(
     exclusive world: World,
     selection: phases.Selection,
     dt: number,
-    borrows scope: tasks.Scope
+    borrows scope: coroutine.Scope
 ): nil
     const custom = world.customPhases[selection]
     if custom ~= nil and custom.children ~= nil then
@@ -5164,7 +5162,7 @@ local function runPhaseRange(
     first: integer,
     last: integer,
     dt: number,
-    borrows scope: tasks.Scope
+    borrows scope: coroutine.Scope
 ): nil
     for phaseIndex = first, last do
         runPhase(world, assert(phases.at(phaseIndex)), dt, scope)
@@ -5183,7 +5181,7 @@ local function dropFixedCatchUp(exclusive world: World): nil
     world.fixedStepsDropped = world.fixedStepsDropped + math.floor(dropped / timestep + 0.5)
 end
 
-local function runFixedSteps(exclusive world: World, dt: number, borrows scope: tasks.Scope): nil
+local function runFixedSteps(exclusive world: World, dt: number, borrows scope: coroutine.Scope): nil
     local timestep = world.fixedTimestep
     world.fixedAccumulator = world.fixedAccumulator + dt
     local steps: integer = 0
@@ -5200,7 +5198,7 @@ local function runFixedSteps(exclusive world: World, dt: number, borrows scope: 
     end
 end
 
-local function runUpdate(exclusive world: World, dt: number, borrows scope: tasks.Scope): nil
+local function runUpdate(exclusive world: World, dt: number, borrows scope: coroutine.Scope): nil
     runPhaseRange(world, 1, phases.beforeFixedCount, dt, scope)
     runFixedSteps(world, dt, scope)
     runPhaseRange(world, phases.fixedLastIndex + 1, phases.count, dt, scope)
@@ -5210,7 +5208,7 @@ local function runLifecycle(
     exclusive world: World,
     phaseAt: function(integer): phases.Phase?,
     count: integer,
-    borrows scope: tasks.Scope
+    borrows scope: coroutine.Scope
 ): nil
     for index = 1, count do
         runPhase(world, assert(phaseAt(index)), 0, scope)
@@ -5221,7 +5219,7 @@ local function runCustomPipeline(
     exclusive world: World,
     phase: phases.Selection?,
     dt: number,
-    borrows scope: tasks.Scope
+    borrows scope: coroutine.Scope
 ): nil
     const pipeline = assert(world.pipeline)
     world.runningSystem = true
@@ -5247,7 +5245,7 @@ function World.startup(exclusive self: World): nil
     self:commit()
     self.updating = true
     local succeeded, failure = pcall(function(): nil
-        with scope = tasks.open() do
+        with scope = coroutine.scope() do
             if self.pipeline ~= nil then
                 runCustomPipeline(self, phases.StartupGroup, 0, scope)
             else
@@ -5275,7 +5273,7 @@ function World.shutdown(exclusive self: World): nil
     self:commit()
     self.updating = true
     local succeeded, failure = pcall(function(): nil
-        with scope = tasks.open() do
+        with scope = coroutine.scope() do
             if self.pipeline ~= nil then
                 runCustomPipeline(self, phases.ShutdownGroup, 0, scope)
             else
@@ -5309,7 +5307,7 @@ function World.runPhase(exclusive self: World, phase: phases.Selection, dt: numb
     self:commit()
     self.updating = true
     local succeeded, failure = pcall(function(): nil
-        with scope = tasks.open() do
+        with scope = coroutine.scope() do
             if self.pipeline ~= nil then
                 runCustomPipeline(self, phase, elapsed, scope)
             else
@@ -5347,7 +5345,7 @@ function World.update(exclusive self: World, dt: number): nil
     self:commit()
     self.updating = true
     local succeeded, failure = pcall(function(): nil
-        with scope = tasks.open() do
+        with scope = coroutine.scope() do
             if self.pipeline ~= nil then
                 runCustomPipeline(self, nil, dt, scope)
             else

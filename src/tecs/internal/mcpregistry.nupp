@@ -16,7 +16,7 @@ this module directly.
 ]]
 
 local json = require("nupp.codec.json")
-local log = require("nupp.log")
+local log = require("debug.log")
 
 -- The externally typed logger name is `tecs.mcp`, independent of the module
 -- path it is created from. Do not rename this compatibility surface.
