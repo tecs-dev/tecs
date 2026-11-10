@@ -1,7 +1,6 @@
 const {type Scope} = require("nupp.tasks")
 
 local ecs = require("tecs.ecs")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -21,7 +20,7 @@ function suite.givesSystemsTheLogicalUpdateScope(): nil
 
     value:update(0)
 
-    test.equal(answer, 42)
+    assert.eq(answer, 42)
 end
 
 function suite.settlesUnawaitedChildrenBeforeTheUpdateReturns(): nil
@@ -39,7 +38,7 @@ function suite.settlesUnawaitedChildrenBeforeTheUpdateReturns(): nil
 
     value:update(0)
 
-    test.assert(finished)
+    assert(finished)
 end
 
 function suite.propagatesAnUnawaitedChildFailure(): nil
@@ -54,7 +53,7 @@ function suite.propagatesAnUnawaitedChildFailure(): nil
         end,
     })
 
-    test.raises(
+    assert.raises(
         function(): nil
             value:update(0)
         end,
@@ -78,7 +77,7 @@ function suite.recoversWorldBookkeepingAfterAChildFailure(): nil
         end,
     })
 
-    test.raises(
+    assert.raises(
         function(): nil
             value:update(0)
         end,

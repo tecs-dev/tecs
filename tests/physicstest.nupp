@@ -1,5 +1,4 @@
 local ecs = require("tecs.ecs")
-local test = require("nupp.test")
 local contract = require("tecs.physics.contract")
 local physics = require("tecs.physics")
 local reference = require("physicsreference")
@@ -35,8 +34,8 @@ end
 
 function suite.installsOnceAndExposesItsSimulation(): nil
     local world, backend = newWorld()
-    test.assert(physics.of(world) == backend.simulation)
-    test.raises(
+    assert(physics.of(world) == backend.simulation)
+    assert.raises(
         function(): nil
             physics.install(world, {simulation = backend.simulation})
         end,
@@ -47,7 +46,7 @@ end
 function suite.refusesToAttachWithoutASimulation(): nil
     local world = ecs.newWorld()
     local entity = world:spawn()
-    test.raises(
+    assert.raises(
         function(): nil
             physics.attach(world, entity)
         end,
@@ -58,7 +57,7 @@ end
 function suite.rejectsAnUnknownBodyKind(): nil
     local world = newWorld()
     local entity = world:spawn()
-    test.raises(
+    assert.raises(
         function(): nil
             physics.attach(world, entity, {kind = "floaty"})
         end,
@@ -69,7 +68,7 @@ end
 function suite.rejectsACapsuleWithoutARadius(): nil
     local world = newWorld()
     local entity = world:spawn()
-    test.raises(
+    assert.raises(
         function(): nil
             physics.attach(world, entity, {capsuleLength = 10})
         end,
@@ -84,13 +83,13 @@ function suite.attachSuppliesTheComponentsABodyNeeds(): nil
     world:update(STEP)
 
     local declared = assert(world:get(entity, physics.Body))
-    test.equal(declared.kind, contract.BODY_STATIC)
-    test.assert(declared.sleepEnabled)
+    assert.eq(declared.kind, contract.BODY_STATIC)
+    assert(declared.sleepEnabled)
     local shape = assert(world:get(entity, physics.Collider))
-    test.equal(shape.shape, contract.SHAPE_BOX)
-    test.equal(shape.halfWidth, 32)
-    test.assert(world:has(entity, physics.Motion))
-    test.assert(world:has(entity, ecs.Transform2D))
+    assert.eq(shape.shape, contract.SHAPE_BOX)
+    assert.eq(shape.halfWidth, 32)
+    assert(world:has(entity, physics.Motion))
+    assert(world:has(entity, ecs.Transform2D))
 end
 
 function suite.selectsAShapeFromTheOptionsThatNameIt(): nil
@@ -101,8 +100,8 @@ function suite.selectsAShapeFromTheOptionsThatNameIt(): nil
     physics.attach(world, capsule, {radius = 4, capsuleLength = 20})
     world:commit()
 
-    test.equal(assert(world:get(ball, physics.Collider)).shape, contract.SHAPE_CIRCLE)
-    test.equal(assert(world:get(capsule, physics.Collider)).shape, contract.SHAPE_CAPSULE)
+    assert.eq(assert(world:get(ball, physics.Collider)).shape, contract.SHAPE_CIRCLE)
+    assert.eq(assert(world:get(capsule, physics.Collider)).shape, contract.SHAPE_CAPSULE)
 end
 
 function suite.createsBodiesInAscendingEntityOrderRatherThanArchetypeOrder(): nil
@@ -121,9 +120,9 @@ function suite.createsBodiesInAscendingEntityOrderRatherThanArchetypeOrder(): ni
     local expected: {integer} = {first, second, third}
     table.sort(expected)
     local creates = logged(backend, "createBody")
-    test.equal(#creates, 3)
+    assert.eq(#creates, 3)
     for index = 1, 3 do
-        test.equal(creates[index], ("createBody %d"):format(expected[index]))
+        assert.eq(creates[index], ("createBody %d"):format(expected[index]))
     end
 end
 
@@ -132,15 +131,15 @@ function suite.publishesRigidBodyRowsAfterTheStepThatCreatedThem(): nil
     local entity = world:spawn()
     physics.attach(world, entity)
     world:commit()
-    test.assert(not physics.hasBody(world, entity))
+    assert(not physics.hasBody(world, entity))
 
     world:update(STEP)
 
-    test.assert(physics.hasBody(world, entity))
+    assert(physics.hasBody(world, entity))
     local row = handleOf(world, entity)
-    test.notEqual(row.index1, 0)
-    test.equal(row.world0, backend.simulation.id)
-    test.equal(backend.bodyCount(), 1)
+    assert.ne(row.index1, 0)
+    assert.eq(row.world0, backend.simulation.id)
+    assert.eq(backend.bodyCount(), 1)
 end
 
 function suite.rejectsARowLeftOverFromAnotherSimulation(): nil
@@ -148,15 +147,15 @@ function suite.rejectsARowLeftOverFromAnotherSimulation(): nil
     local entity = world:spawn()
     physics.attach(world, entity)
     world:update(STEP)
-    test.assert(physics.hasBody(world, entity))
+    assert(physics.hasBody(world, entity))
 
     local row = assert(world:getMut(entity, physics.RigidBody))
     row.world0 = row.world0 + 1
 
-    test.assert(not physics.hasBody(world, entity))
+    assert(not physics.hasBody(world, entity))
     local vx, vy = physics.velocity(world, entity)
-    test.equal(vx, 0)
-    test.equal(vy, 0)
+    assert.eq(vx, 0)
+    assert.eq(vy, 0)
 end
 
 function suite.writesTransformsBackOnlyForBodiesThatMoved(): nil
@@ -169,10 +168,10 @@ function suite.writesTransformsBackOnlyForBodiesThatMoved(): nil
     world:update(STEP)
 
     local movedTransform = assert(world:get(moving, ecs.Transform2D))
-    test.notEqual(movedTransform.y, 20)
+    assert.ne(movedTransform.y, 20)
     local restingTransform = assert(world:get(resting, ecs.Transform2D))
-    test.equal(restingTransform.x, 30)
-    test.equal(restingTransform.y, 40)
+    assert.eq(restingTransform.x, 30)
+    assert.eq(restingTransform.y, 40)
 end
 
 function suite.convertsPixelsToMetersAcrossTheCrossing(): nil
@@ -187,9 +186,9 @@ function suite.convertsPixelsToMetersAcrossTheCrossing(): nil
     physics.setVelocity(world, entity, 320, 0)
     world:update(STEP)
     local vx = physics.velocity(world, entity)
-    test.equal(vx, 320)
+    assert.eq(vx, 320)
     local transform = assert(world:get(entity, ecs.Transform2D))
-    test.assert(transform.x > 64, "the body advanced in pixels")
+    assert(transform.x > 64, "the body advanced in pixels")
 end
 
 function suite.destroysABodyWhenItsDeclarationIsRemoved(): nil
@@ -203,10 +202,10 @@ function suite.destroysABodyWhenItsDeclarationIsRemoved(): nil
     backend.clearLog()
     world:update(STEP)
 
-    test.equal(#logged(backend, "destroyBody"), 1)
-    test.equal(logged(backend, "destroyBody")[1], ("destroyBody %d"):format(row.index1))
-    test.assert(not world:has(entity, physics.RigidBody))
-    test.equal(backend.bodyCount(), 0)
+    assert.eq(#logged(backend, "destroyBody"), 1)
+    assert.eq(logged(backend, "destroyBody")[1], ("destroyBody %d"):format(row.index1))
+    assert(not world:has(entity, physics.RigidBody))
+    assert.eq(backend.bodyCount(), 0)
 end
 
 function suite.destroysABodyWhenItsEntityDespawns(): nil
@@ -214,14 +213,14 @@ function suite.destroysABodyWhenItsEntityDespawns(): nil
     local entity = world:spawn()
     physics.attach(world, entity)
     world:update(STEP)
-    test.equal(backend.bodyCount(), 1)
+    assert.eq(backend.bodyCount(), 1)
 
     world:despawn(entity)
     backend.clearLog()
     world:update(STEP)
 
-    test.equal(#logged(backend, "destroyBody"), 1)
-    test.equal(backend.bodyCount(), 0)
+    assert.eq(#logged(backend, "destroyBody"), 1)
+    assert.eq(backend.bodyCount(), 0)
 end
 
 function suite.attachesASecondaryColliderToABodyTheSameBatchCreates(): nil
@@ -233,11 +232,11 @@ function suite.attachesASecondaryColliderToABodyTheSameBatchCreates(): nil
     world:update(STEP)
 
     local link = assert(world:get(shape, physics.ColliderShape))
-    test.notEqual(link.index1, 0)
-    test.equal(link.world0, backend.simulation.id)
+    assert.ne(link.index1, 0)
+    assert.eq(link.world0, backend.simulation.id)
     -- One shape from the body and one from the secondary collider.
-    test.equal(backend.colliderCount(), 2)
-    test.equal(assert(world:get(shape, physics.ColliderOf)).target, body)
+    assert.eq(backend.colliderCount(), 2)
+    assert.eq(assert(world:get(shape, physics.ColliderOf)).target, body)
 end
 
 function suite.leavesASecondaryColliderUnrealizedWithoutABody(): nil
@@ -248,9 +247,9 @@ function suite.leavesASecondaryColliderUnrealizedWithoutABody(): nil
 
     world:update(STEP)
 
-    test.assert(not world:has(shape, physics.ColliderShape))
-    test.equal(backend.colliderCount(), 0)
-    test.equal(#logged(backend, "createCollider"), 0)
+    assert(not world:has(shape, physics.ColliderShape))
+    assert.eq(backend.colliderCount(), 0)
+    assert.eq(#logged(backend, "createCollider"), 0)
 end
 
 function suite.rebuildsADirtyColliderAndRefreshesItsShapeRow(): nil
@@ -267,8 +266,8 @@ function suite.rebuildsADirtyColliderAndRefreshesItsShapeRow(): nil
     backend.clearLog()
     world:update(STEP)
 
-    test.equal(#logged(backend, "updateCollider"), 1)
-    test.equal(assert(world:get(shape, physics.ColliderShape)).generation, before + 1)
+    assert.eq(#logged(backend, "updateCollider"), 1)
+    assert.eq(assert(world:get(shape, physics.ColliderShape)).generation, before + 1)
 end
 
 function suite.leavesACleanColliderAlone(): nil
@@ -280,7 +279,7 @@ function suite.leavesACleanColliderAlone(): nil
 
     world:update(STEP)
 
-    test.equal(#logged(backend, "updateCollider"), 0)
+    assert.eq(#logged(backend, "updateCollider"), 0)
 end
 
 function suite.redeclaresADirtyBodyOnlyOnce(): nil
@@ -293,11 +292,11 @@ function suite.redeclaresADirtyBodyOnlyOnce(): nil
     local declared = assert(world:getMut(entity, physics.Body))
     declared.gravityScale = 0.25
     world:update(STEP)
-    test.equal(#logged(backend, "updateBody"), 1)
+    assert.eq(#logged(backend, "updateBody"), 1)
 
     backend.clearLog()
     world:update(STEP)
-    test.equal(#logged(backend, "updateBody"), 0)
+    assert.eq(#logged(backend, "updateBody"), 0)
 end
 
 function suite.holdsAndReleasesPausedBodies(): nil
@@ -312,22 +311,22 @@ function suite.holdsAndReleasesPausedBodies(): nil
     world:set(entity, ecs.Paused)
     world:update(STEP)
 
-    test.assert(world:has(entity, physics.PhysicsHeld))
+    assert(world:has(entity, physics.PhysicsHeld))
     local motion = assert(world:get(entity, physics.Motion))
-    test.equal(motion.vx, 640)
-    test.equal(motion.vy, 320)
+    assert.eq(motion.vx, 640)
+    assert.eq(motion.vy, 320)
     local vx, vy = physics.velocity(world, entity)
-    test.equal(vx, 0)
-    test.equal(vy, 0)
+    assert.eq(vx, 0)
+    assert.eq(vy, 0)
 
     world:remove(entity, ecs.Paused)
     world:update(STEP)
 
-    test.assert(not world:has(entity, physics.PhysicsHeld))
+    assert(not world:has(entity, physics.PhysicsHeld))
     local resumedX, resumedY = physics.velocity(world, entity)
-    test.equal(resumedX, 640)
-    test.equal(resumedY, 320)
-    test.assert(state ~= nil)
+    assert.eq(resumedX, 640)
+    assert.eq(resumedY, 320)
+    assert(state ~= nil)
 end
 
 function suite.disablesAndEnablesBodies(): nil
@@ -338,17 +337,17 @@ function suite.disablesAndEnablesBodies(): nil
 
     world:set(entity, ecs.Disabled)
     world:update(STEP)
-    test.assert(world:has(entity, physics.PhysicsDisabled))
+    assert(world:has(entity, physics.PhysicsDisabled))
     local held = assert(world:get(entity, ecs.Transform2D)).y
     world:update(STEP)
     world:update(STEP)
-    test.equal(assert(world:get(entity, ecs.Transform2D)).y, held)
+    assert.eq(assert(world:get(entity, ecs.Transform2D)).y, held)
 
     world:remove(entity, ecs.Disabled)
     world:update(STEP)
-    test.assert(not world:has(entity, physics.PhysicsDisabled))
+    assert(not world:has(entity, physics.PhysicsDisabled))
     world:update(STEP)
-    test.assert(assert(world:get(entity, ecs.Transform2D)).y ~= held)
+    assert(assert(world:get(entity, ecs.Transform2D)).y ~= held)
 end
 
 function suite.emitsContactAndSensorEventsFromTheDrainedBuffer(): nil
@@ -377,11 +376,11 @@ function suite.emitsContactAndSensorEventsFromTheDrainedBuffer(): nil
     backend.pushEvent(77, 88, false, true)
     world:update(STEP)
 
-    test.equal(#seen, 4)
-    test.equal(seen[1], "contactBegin 11 22")
-    test.equal(seen[2], "contactEnd 33 44")
-    test.equal(seen[3], "sensorBegin 55 66")
-    test.equal(seen[4], "sensorEnd 77 88")
+    assert.eq(#seen, 4)
+    assert.eq(seen[1], "contactBegin 11 22")
+    assert.eq(seen[2], "contactEnd 33 44")
+    assert.eq(seen[3], "sensorBegin 55 66")
+    assert.eq(seen[4], "sensorEnd 77 88")
 end
 
 function suite.queuesEveryBodyActionForTheStepThatFollowsIt(): nil
@@ -398,18 +397,18 @@ function suite.queuesEveryBodyActionForTheStepThatFollowsIt(): nil
     physics.setAngularVelocity(world, entity, 1)
     physics.setAwake(world, entity, false)
     -- Nothing has crossed yet: a queued action is invisible until the step.
-    test.equal(#logged(backend, "action"), 0)
+    assert.eq(#logged(backend, "action"), 0)
 
     world:update(STEP)
 
     local applied = logged(backend, "action")
-    test.equal(#applied, 5)
-    test.equal(applied[1], ("action %d %d"):format(contract.ACTION_IMPULSE, row.index1))
-    test.equal(applied[2], ("action %d %d"):format(contract.ACTION_FORCE, row.index1))
-    test.equal(applied[3], ("action %d %d"):format(contract.ACTION_TORQUE, row.index1))
-    test.equal(applied[4], ("action %d %d"):format(contract.ACTION_SET_ANGULAR_VELOCITY, row.index1))
-    test.equal(applied[5], ("action %d %d"):format(contract.ACTION_SET_AWAKE, row.index1))
-    test.assert(not physics.isAwake(world, entity))
+    assert.eq(#applied, 5)
+    assert.eq(applied[1], ("action %d %d"):format(contract.ACTION_IMPULSE, row.index1))
+    assert.eq(applied[2], ("action %d %d"):format(contract.ACTION_FORCE, row.index1))
+    assert.eq(applied[3], ("action %d %d"):format(contract.ACTION_TORQUE, row.index1))
+    assert.eq(applied[4], ("action %d %d"):format(contract.ACTION_SET_ANGULAR_VELOCITY, row.index1))
+    assert.eq(applied[5], ("action %d %d"):format(contract.ACTION_SET_AWAKE, row.index1))
+    assert(not physics.isAwake(world, entity))
 end
 
 function suite.ignoresActionsOnEntitiesWithNoLiveBody(): nil
@@ -421,7 +420,7 @@ function suite.ignoresActionsOnEntitiesWithNoLiveBody(): nil
     physics.setVelocity(world, entity, 1, 1)
     world:update(STEP)
 
-    test.equal(#logged(backend, "action"), 0)
+    assert.eq(#logged(backend, "action"), 0)
 end
 
 function suite.teleportsTheTransformNowAndTheBodyAtTheNextStep(): nil
@@ -435,16 +434,16 @@ function suite.teleportsTheTransformNowAndTheBodyAtTheNextStep(): nil
     physics.teleport(world, entity, 96, 64, 1.5)
 
     local transform = assert(world:get(entity, ecs.Transform2D))
-    test.equal(transform.x, 96)
-    test.equal(transform.y, 64)
-    test.equal(transform.rotation, 1.5)
+    assert.eq(transform.x, 96)
+    assert.eq(transform.y, 64)
+    assert.eq(transform.rotation, 1.5)
 
     world:update(STEP)
     local applied = logged(backend, "action")
-    test.equal(applied[1], ("action %d %d"):format(contract.ACTION_SET_TRANSFORM, row.index1))
+    assert.eq(applied[1], ("action %d %d"):format(contract.ACTION_SET_TRANSFORM, row.index1))
     local x, y = backend.poseAt(row.index1)
-    test.equal(assert(x), 3)
-    test.equal(y, 2)
+    assert.eq(assert(x), 3)
+    assert.eq(y, 2)
 end
 
 function suite.createsAJointOnceBothBodiesAreQueued(): nil
@@ -458,12 +457,12 @@ function suite.createsAJointOnceBothBodiesAreQueued(): nil
     world:update(STEP)
 
     local link = assert(world:get(joint, physics.JointLink))
-    test.notEqual(link.index1, 0)
-    test.equal(link.world0, backend.simulation.id)
-    test.equal(backend.jointCount(), 1)
+    assert.ne(link.index1, 0)
+    assert.eq(link.world0, backend.simulation.id)
+    assert.eq(backend.jointCount(), 1)
     local declared = assert(world:get(joint, physics.Joint))
-    test.equal(declared.kind, contract.JOINT_REVOLUTE)
-    test.equal(declared.anchorBX, -64)
+    assert.eq(declared.kind, contract.JOINT_REVOLUTE)
+    assert.eq(declared.anchorBX, -64)
 end
 
 function suite.destroysAJointWhenItsDeclarationGoes(): nil
@@ -475,15 +474,15 @@ function suite.destroysAJointWhenItsDeclarationGoes(): nil
     local joint = world:spawn()
     physics.attachJoint(world, joint, anchor, arm)
     world:update(STEP)
-    test.equal(backend.jointCount(), 1)
+    assert.eq(backend.jointCount(), 1)
 
     world:remove(joint, physics.Joint)
     backend.clearLog()
     world:update(STEP)
 
-    test.equal(#logged(backend, "destroyJoint"), 1)
-    test.assert(not world:has(joint, physics.JointLink))
-    test.equal(backend.jointCount(), 0)
+    assert.eq(#logged(backend, "destroyJoint"), 1)
+    assert(not world:has(joint, physics.JointLink))
+    assert.eq(backend.jointCount(), 0)
 end
 
 function suite.despawnsAJointWithEitherOfItsBodies(): nil
@@ -499,8 +498,8 @@ function suite.despawnsAJointWithEitherOfItsBodies(): nil
     world:despawn(arm)
     world:update(STEP)
 
-    test.assert(not world:isAlive(joint))
-    test.equal(backend.jointCount(), 0)
+    assert(not world:isAlive(joint))
+    assert.eq(backend.jointCount(), 0)
 end
 
 function suite.leavesAJointUnrealizedWithoutBodies(): nil
@@ -512,8 +511,8 @@ function suite.leavesAJointUnrealizedWithoutBodies(): nil
 
     world:update(STEP)
 
-    test.assert(not world:has(joint, physics.JointLink))
-    test.equal(backend.jointCount(), 0)
+    assert(not world:has(joint, physics.JointLink))
+    assert.eq(backend.jointCount(), 0)
 end
 
 function suite.rejectsAnUnknownJointKind(): nil
@@ -524,7 +523,7 @@ function suite.rejectsAnUnknownJointKind(): nil
     physics.attach(world, arm)
     local joint = world:spawn()
     world:update(STEP)
-    test.raises(
+    assert.raises(
         function(): nil
             physics.attachJoint(world, joint, anchor, arm, {kind = "wobbly"})
         end,
@@ -541,13 +540,13 @@ function suite.keepsACallerSuppliedTransformWhenABodyIsAttached(): nil
     world:update(STEP)
 
     local kept = assert(world:get(placed, ecs.Transform2D))
-    test.equal(kept.x, 48)
-    test.equal(kept.y, 96)
-    test.equal(kept.layer, 3)
-    test.equal(kept.rotation, 1.25)
+    assert.eq(kept.x, 48)
+    assert.eq(kept.y, 96)
+    assert.eq(kept.layer, 3)
+    assert.eq(kept.rotation, 1.25)
     local defaulted = assert(world:get(bare, ecs.Transform2D))
-    test.equal(defaulted.x, 0)
-    test.equal(defaulted.layer, 1)
+    assert.eq(defaulted.x, 0)
+    assert.eq(defaulted.layer, 1)
 end
 
 function suite.raycastsInPixelsAndReturnsNilWithoutASimulation(): nil
@@ -557,9 +556,9 @@ function suite.raycastsInPixelsAndReturnsNilWithoutASimulation(): nil
     world:update(STEP)
 
     local hit = physics.raycast(world, 0, 0, 128, 0)
-    test.equal(assert(hit).entity, entity)
-    test.equal(assert(hit).x, 64)
-    test.equal(physics.raycast(ecs.newWorld(), 0, 0, 1, 0), nil)
+    assert.eq(assert(hit).entity, entity)
+    assert.eq(assert(hit).x, 64)
+    assert.eq(physics.raycast(ecs.newWorld(), 0, 0, 1, 0), nil)
 end
 
 function suite.roundTripsSimulationStateUnderTheEstablishedKey(): nil
@@ -581,22 +580,22 @@ function suite.roundTripsSimulationStateUnderTheEstablishedKey(): nil
             saved = snapshot.data[index].value as {[string]: any}
         end
     end
-    test.assert(saved ~= nil, "the snapshot carries a tecs.physics entry")
-    test.assert(assert(saved).state ~= nil)
+    assert(saved ~= nil, "the snapshot carries a tecs.physics entry")
+    assert(assert(saved).state ~= nil)
     -- `Motion` is where a save records velocity, so it survives the load.
     local motion = assert(world:get(entity, physics.Motion))
-    test.equal(motion.vx, 128)
-    test.equal(motion.vy, 256)
+    assert.eq(motion.vx, 128)
+    assert.eq(motion.vy, 256)
 
     world:loadSnapshot(snapshot)
 
-    test.assert(world:isAlive(entity))
+    assert(world:isAlive(entity))
     local after = assert(world:get(entity, physics.RigidBody))
-    test.equal(after.index1, before.index1)
-    test.equal(after.generation, before.generation)
-    test.assert(physics.hasBody(world, entity))
-    test.notEqual(assert(world:get(shape, physics.ColliderShape)).index1, 0)
-    test.equal(assert(world:get(entity, physics.Motion)).vx, 128)
+    assert.eq(after.index1, before.index1)
+    assert.eq(after.generation, before.generation)
+    assert(physics.hasBody(world, entity))
+    assert.ne(assert(world:get(shape, physics.ColliderShape)).index1, 0)
+    assert.eq(assert(world:get(entity, physics.Motion)).vx, 128)
 end
 
 function suite.reattachesAJointAfterASnapshotLoad(): nil
@@ -613,10 +612,10 @@ function suite.reattachesAJointAfterASnapshotLoad(): nil
     world:loadSnapshot(world:saveSnapshot())
 
     local after = assert(world:get(joint, physics.JointLink))
-    test.equal(after.index1, before.index1)
-    test.equal(after.generation, before.generation)
-    test.equal(assert(world:get(joint, physics.JointBodyA)).target, anchor)
-    test.equal(assert(world:get(joint, physics.JointBodyB)).target, arm)
+    assert.eq(after.index1, before.index1)
+    assert.eq(after.generation, before.generation)
+    assert.eq(assert(world:get(joint, physics.JointBodyA)).target, anchor)
+    assert.eq(assert(world:get(joint, physics.JointBodyB)).target, arm)
 end
 
 function suite.ignoresASnapshotFromAnotherEngine(): nil
@@ -634,7 +633,7 @@ function suite.ignoresASnapshotFromAnotherEngine(): nil
     backend.clearLog()
     world:loadSnapshot(snapshot)
 
-    test.equal(#logged(backend, "load"), 0)
+    assert.eq(#logged(backend, "load"), 0)
 end
 
 --- Runs one identical scenario and answers the command stream it produced.
@@ -677,10 +676,10 @@ function suite.producesTheSameCommandStreamForTheSameScenario(): nil
     local first = scenario()
     local second = scenario()
 
-    test.equal(#first, #second)
-    test.assert(#first > 20, "the scenario produced a command stream worth comparing")
+    assert.eq(#first, #second)
+    assert(#first > 20, "the scenario produced a command stream worth comparing")
     for index = 1, #first do
-        test.equal(second[index], first[index], "command " .. tostring(index) .. " diverged")
+        assert.eq(second[index], first[index], "command " .. tostring(index) .. " diverged")
     end
 end
 
@@ -693,9 +692,9 @@ function suite.releasesTheSimulationAtShutdown(): nil
 
     world:shutdown()
 
-    test.equal(#logged(backend, "destroy"), 1)
-    test.equal(physics.of(world), nil)
-    test.assert(not physics.hasBody(world, entity))
+    assert.eq(#logged(backend, "destroy"), 1)
+    assert.eq(physics.of(world), nil)
+    assert(not physics.hasBody(world, entity))
 end
 
 return suite

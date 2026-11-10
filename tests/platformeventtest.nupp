@@ -1,42 +1,41 @@
 local ecs = require("tecs.ecs")
 local platformevents = require("tecs.platform.events")
-local test = require("nupp.test")
 
 local suite = {}
 
 function suite.constructsTypedWindowEvents(): nil
     local resized = platformevents.resized(1280, 720, 4, 2, 10.5, 7)
-    test.equal(resized.kind, "windowResized")
-    test.equal(resized.width, 1280)
-    test.equal(resized.height, 720)
-    test.equal(resized.pixelWidth, 2560)
-    test.equal(resized.pixelHeight, 1440)
-    test.equal(resized.window, 4)
-    test.equal(resized.scaleFactor, 2)
-    test.equal(resized.timestamp, 10.5)
-    test.equal(resized.sequence, 7)
+    assert.eq(resized.kind, "windowResized")
+    assert.eq(resized.width, 1280)
+    assert.eq(resized.height, 720)
+    assert.eq(resized.pixelWidth, 2560)
+    assert.eq(resized.pixelHeight, 1440)
+    assert.eq(resized.window, 4)
+    assert.eq(resized.scaleFactor, 2)
+    assert.eq(resized.timestamp, 10.5)
+    assert.eq(resized.sequence, 7)
 
     local focused = platformevents.focused(false, 4)
-    test.equal(focused.kind, "windowFocusLost")
-    test.assert(not focused.focused)
+    assert.eq(focused.kind, "windowFocusLost")
+    assert(not focused.focused)
 
     local scaled = platformevents.scaleChanged(1.5, 800, 600, 4)
-    test.equal(scaled.kind, "windowScaleChanged")
-    test.equal(scaled.scaleFactor, 1.5)
-    test.equal(scaled.pixelWidth, 1200)
-    test.equal(scaled.pixelHeight, 900)
+    assert.eq(scaled.kind, "windowScaleChanged")
+    assert.eq(scaled.scaleFactor, 1.5)
+    assert.eq(scaled.pixelWidth, 1200)
+    assert.eq(scaled.pixelHeight, 900)
 end
 
 function suite.constructsPhysicalAndLogicalKeyData(): nil
     local key = platformevents.key(true, "KeyW", "w", "w", 3, true, 2, 9, 11)
 
-    test.equal(key.kind, "keyDown")
-    test.equal(key.physicalKey, "KeyW")
-    test.equal(key.logicalKey, "w")
-    test.equal(key.text, "w")
-    test.equal(key.modifiers, 3)
-    test.assert(key.repeated)
-    test.assert(key.down)
+    assert.eq(key.kind, "keyDown")
+    assert.eq(key.physicalKey, "KeyW")
+    assert.eq(key.logicalKey, "w")
+    assert.eq(key.text, "w")
+    assert.eq(key.modifiers, 3)
+    assert(key.repeated)
+    assert(key.down)
 end
 
 function suite.dispatchesOnlyTheMatchingTypedEvent(): nil
@@ -44,29 +43,29 @@ function suite.dispatchesOnlyTheMatchingTypedEvent(): nil
     local downs = 0
     local ups = 0
     world:observe(0, platformevents.KeyDown, function(event: platformevents.KeyEvent): nil
-        test.assert(event.down)
+        assert(event.down)
         downs = downs + 1
     end)
     world:observe(0, platformevents.KeyUp, function(event: platformevents.KeyEvent): nil
-        test.assert(not event.down)
+        assert(not event.down)
         ups = ups + 1
     end)
 
     platformevents.dispatch(world, platformevents.key(true, "Space"))
     platformevents.dispatch(world, platformevents.key(false, "Space"))
 
-    test.equal(downs, 1)
-    test.equal(ups, 1)
+    assert.eq(downs, 1)
+    assert.eq(ups, 1)
 end
 
 function suite.preservesCompatibilitySensitiveKindNames(): nil
-    test.equal(platformevents.pointerMoved(1, 2).kind, "mouseMotion")
-    test.equal(platformevents.pointerButton(true, 1, 1, 2).kind, "mouseDown")
-    test.equal(platformevents.pointerButton(false, 1, 1, 2).kind, "mouseUp")
-    test.equal(platformevents.wheel(1, -1).kind, "mouseWheel")
-    test.equal(platformevents.text("hello").kind, "textInput")
-    test.equal(platformevents.quit().kind, "quit")
-    test.equal(platformevents.closeRequested(1).kind, "windowCloseRequested")
+    assert.eq(platformevents.pointerMoved(1, 2).kind, "mouseMotion")
+    assert.eq(platformevents.pointerButton(true, 1, 1, 2).kind, "mouseDown")
+    assert.eq(platformevents.pointerButton(false, 1, 1, 2).kind, "mouseUp")
+    assert.eq(platformevents.wheel(1, -1).kind, "mouseWheel")
+    assert.eq(platformevents.text("hello").kind, "textInput")
+    assert.eq(platformevents.quit().kind, "quit")
+    assert.eq(platformevents.closeRequested(1).kind, "windowCloseRequested")
 end
 
 function suite.routesPointerAndTextPayloads(): nil
@@ -83,30 +82,30 @@ function suite.routesPointerAndTextPayloads(): nil
     platformevents.dispatch(world, platformevents.pointerMoved(12, 20, 2, 3))
     platformevents.dispatch(world, platformevents.text("nupp"))
 
-    test.equal(pointerX, 12)
-    test.equal(typed, "nupp")
+    assert.eq(pointerX, 12)
+    assert.eq(typed, "nupp")
 end
 
 function suite.rejectsInvalidTranslatedValues(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             platformevents.resized(-1, 720)
         end,
         "dimensions"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             platformevents.resized(1, 1, nil, 1, nil, nil, -1, 1)
         end,
         "pixel dimensions"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             platformevents.key(true, "")
         end,
         "physicalKey"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             platformevents.pointerButton(true, 0, 0, 0)
         end,
@@ -118,10 +117,10 @@ function suite.namesEveryKindItDeclaresIncludingTouchAndGamepad(): nil
     local kinds = platformevents.kinds()
     local seen: {[string]: boolean} = {}
     for index = 1, #kinds do
-        test.assert(not seen[kinds[index]], "kind listed twice: " .. kinds[index])
+        assert(not seen[kinds[index]], "kind listed twice: " .. kinds[index])
         seen[kinds[index]] = true
     end
-    test.equal(#kinds, 22)
+    assert.eq(#kinds, 22)
     local expected: {
         string
     } = {
@@ -136,47 +135,47 @@ function suite.namesEveryKindItDeclaresIncludingTouchAndGamepad(): nil
         "gamepadAxis",
     }
     for index = 1, #expected do
-        test.assert(seen[expected[index]], "kind missing: " .. expected[index])
+        assert(seen[expected[index]], "kind missing: " .. expected[index])
     end
 end
 
 function suite.constructsTouchAndGamepadEvents(): nil
     local touch = platformevents.touch("fingerMotion", "screen", "3", 40, 60, 0.4, 0.6, 0.5, 2, -1, 5, 1.5, 8)
-    test.equal(touch.kind, "fingerMotion")
-    test.equal(touch.touchDevice, "screen")
-    test.equal(touch.finger, "3")
-    test.equal(touch.dx, 2)
-    test.equal(touch.dy, -1)
-    test.equal(touch.window, 5)
-    test.assert(touch.down)
+    assert.eq(touch.kind, "fingerMotion")
+    assert.eq(touch.touchDevice, "screen")
+    assert.eq(touch.finger, "3")
+    assert.eq(touch.dx, 2)
+    assert.eq(touch.dy, -1)
+    assert.eq(touch.window, 5)
+    assert(touch.down)
 
     local gone = platformevents.touch("fingerUp", "screen", "3", 40, 60)
-    test.assert(not gone.down)
+    assert(not gone.down)
 
     local added = platformevents.gamepadDevice(true, 2)
-    test.equal(added.kind, "gamepadAdded")
-    test.equal(added.which, 2)
+    assert.eq(added.kind, "gamepadAdded")
+    assert.eq(added.which, 2)
     -- A gamepad belongs to no window, which is what lets the window fold pass
     -- it through untouched.
-    test.equal(added.window, 0)
+    assert.eq(added.window, 0)
 
     local pressed = platformevents.gamepadButton(true, 2, 1)
-    test.equal(pressed.kind, "gamepadButtonDown")
-    test.equal(pressed.button, 1)
-    test.assert(pressed.down)
+    assert.eq(pressed.kind, "gamepadButtonDown")
+    assert.eq(pressed.button, 1)
+    assert(pressed.down)
 
     local moved = platformevents.gamepadAxis(2, 5, 0.5)
-    test.equal(moved.kind, "gamepadAxis")
-    test.equal(moved.axis, 5)
-    test.equal(moved.value, 0.5)
+    assert.eq(moved.kind, "gamepadAxis")
+    assert.eq(moved.axis, 5)
+    assert.eq(moved.value, 0.5)
 
-    test.raises(
+    assert.raises(
         function(): nil
             local _ = platformevents.gamepadButton(true, 2, 0)
         end,
         "button must be positive"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             local _ = platformevents.gamepadAxis(2, 0, 0)
         end,
@@ -207,11 +206,11 @@ function suite.dispatchesTouchAndGamepadToTheirOwnObservers(): nil
     platformevents.dispatch(world, platformevents.gamepadAxis(1, 2, 0.25))
     world:update(0)
 
-    test.equal(#seen, 4)
-    test.equal(seen[1], "fingerDown")
-    test.equal(seen[2], "fingerCanceled")
-    test.equal(seen[3], "gamepadRemoved")
-    test.equal(seen[4], "gamepadAxis")
+    assert.eq(#seen, 4)
+    assert.eq(seen[1], "fingerDown")
+    assert.eq(seen[2], "fingerCanceled")
+    assert.eq(seen[3], "gamepadRemoved")
+    assert.eq(seen[4], "gamepadAxis")
 end
 
 return suite

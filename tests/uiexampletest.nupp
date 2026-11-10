@@ -1,5 +1,4 @@
 const {type Session} = require("tecs.host")
-const test = require("nupp.test")
 const host = require("tecs.host")
 const {type World} = require("tecs.ecs")
 const gfx = require("tecs.gfx")
@@ -19,9 +18,9 @@ local function frame(exclusive session: Session): nil
     local target = session.app.frame + 1
     local started = os.clock()
     while session.app.frame < target do
-        test.assert(os.clock() - started < 10, "demo startup did not complete")
+        assert(os.clock() - started < 10, "demo startup did not complete")
         host.iterate(session, 0)
-        test.equal(host.crashed(session), nil)
+        assert.eq(host.crashed(session), nil)
     end
 end
 
@@ -73,10 +72,10 @@ local function checkSharedFonts(world: World, density: number): nil
             for row = 1, count as integer do
                 const text = column[row]
                 const font = assert(text.font)
-                test.equal(font.size, text.size * density)
+                assert.eq(font.size, text.size * density)
                 const shared = fonts[text.size]
                 if shared then
-                    test.assert(font == shared, "demo labels overwrite the same image with different font atlases")
+                    assert(font == shared, "demo labels overwrite the same image with different font atlases")
                     checked = checked + 1
                 else
                     fonts[text.size] = font
@@ -84,33 +83,33 @@ local function checkSharedFonts(world: World, density: number): nil
             end
         end
     end
-    test.assert(checked > 0, "demo must contain labels sharing a font size")
+    assert(checked > 0, "demo must contain labels sharing a font size")
 end
 
 local function checkSceneGeometry(world: World, scene: string): nil
     if scene == "Flex" then
         const fixed = controlBox(world, "88px")
-        test.equal(fixed.width, 88)
-        test.equal(fixed.height, 104)
+        assert.eq(fixed.width, 88)
+        assert.eq(fixed.height, 104)
         const first = controlBox(world, "grow 1")
         const second = controlBox(world, "grow 2")
-        test.equal(first.x, 96)
-        test.assert(first.width > 0)
-        test.assert(math.abs(second.width - first.width * 2) <= 1)
+        assert.eq(first.x, 96)
+        assert(first.width > 0)
+        assert(math.abs(second.width - first.width * 2) <= 1)
         for index = 1, 8 do
             const chip = controlBox(world, ("item %d"):format(index))
-            test.equal(chip.width, index % 3 == 0 and 128 or 96)
-            test.equal(chip.height, 54)
-            test.equal(chip.y, math.floor((index - 1) / 3) * 62)
+            assert.eq(chip.width, index % 3 == 0 and 128 or 96)
+            assert.eq(chip.height, 54)
+            assert.eq(chip.y, math.floor((index - 1) / 3) * 62)
         end
     elseif scene == "Overlay" then
         const area = controlBox(world, "absolute + z")
         for index, label in ipairs({"top-left", "top-right", "bottom-left", "bottom-right"}) do
             const card = controlBox(world, label)
-            test.equal(card.width, 142)
-            test.equal(card.height, 54)
-            test.equal(card.x, index % 2 == 1 and 14 or area.width - 156)
-            test.equal(card.y, index <= 2 and 14 or area.height - 68)
+            assert.eq(card.width, 142)
+            assert.eq(card.height, 54)
+            assert.eq(card.x, index % 2 == 1 and 14 or area.width - 156)
+            assert.eq(card.y, index <= 2 and 14 or area.height - 68)
         end
     end
 end
@@ -152,13 +151,13 @@ function suite.switchesEveryOriginalSceneThroughPointerInput(): nil
         checkSceneGeometry(world, scenes[index])
         frame(session)
         checkSceneGeometry(world, scenes[index])
-        test.equal(host.crashed(session), nil)
+        assert.eq(host.crashed(session), nil)
         local shown = textEntity(world, labels[index])
-        test.assert(not world:has(shown, ecs.Disabled))
-        test.assert(#text2.glyphsOf(world, shown) > 0)
+        assert(not world:has(shown, ecs.Disabled))
+        assert(#text2.glyphsOf(world, shown) > 0)
         for other = 1, 4 do
             if labels[other] ~= labels[index] then
-                test.equal(#text2.glyphsOf(world, textEntity(world, labels[other])), 0)
+                assert.eq(#text2.glyphsOf(world, textEntity(world, labels[other])), 0)
             end
         end
     end
@@ -168,11 +167,11 @@ function suite.switchesEveryOriginalSceneThroughPointerInput(): nil
     for candidate, _ in cameras:iter() do
         @unsafe do
             const cameras = assert(candidate:get(gfx.Camera2D))
-            test.equal(cameras[1].zoom, 2)
+            assert.eq(cameras[1].zoom, 2)
         end
     end
     local heading = assert(world:get(textEntity(world, "Tecs UI"), gfx.Text))
-    test.equal(assert(heading.font).size, 64)
+    assert.eq(assert(heading.font).size, 64)
     checkSharedFonts(world, 2)
     host.shutdown(session)
     files.reset()
@@ -183,17 +182,17 @@ function suite.keepsTheCenteredStandalonePanel(): nil
     local session = standalone.create(nil, 960, 640, false, nil)
     host.init(session)
     frame(session)
-    test.equal(host.crashed(session), nil)
+    assert.eq(host.crashed(session), nil)
     local world = session.app.world
     local heading = textEntity(world, "Retained, composed UI")
     local headingBox = assert(world:get(heading, ecs.ChildOf)).target
     local panel = assert(world:get(headingBox, ecs.ChildOf)).target
     local layout = assert(world:get(panel, ui.Layout))
-    test.equal(layout.x, 270)
-    test.equal(layout.y, 50)
-    test.equal(layout.width, 420)
-    test.equal(layout.height, 540)
-    test.assert(#text2.glyphsOf(world, textEntity(world, "Rectangle instance")) > 0)
+    assert.eq(layout.x, 270)
+    assert.eq(layout.y, 50)
+    assert.eq(layout.width, 420)
+    assert.eq(layout.height, 540)
+    assert(#text2.glyphsOf(world, textEntity(world, "Rectangle instance")) > 0)
     checkSharedFonts(world, 1)
     for index, density in ipairs({2, 1, 2}) do
         session.input:emit(

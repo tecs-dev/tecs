@@ -1,21 +1,20 @@
-local test = require("nupp.test")
 local ecs = require("tecs.ecs")
 local suite = {}
 
 function suite.exposesTheWorldLifecycleThroughThePublicModule(): nil
     local world = ecs.newWorld({maxEntities = 2})
     local entity = world:spawn()
-    test.assert(not world:isAlive(entity))
+    assert(not world:isAlive(entity))
     world:commit()
-    test.assert(world:isAlive(entity))
+    assert(world:isAlive(entity))
     world:despawn(entity)
     world:commit()
-    test.assert(not world:isAlive(entity))
+    assert(not world:isAlive(entity))
 end
 
 function suite.exposesEntityCapacityConstants(): nil
-    test.equal(ecs.DEFAULT_MAX_ENTITIES, 1048576)
-    test.equal(ecs.MAX_ENTITIES, 4194303)
+    assert.eq(ecs.DEFAULT_MAX_ENTITIES, 1048576)
+    assert.eq(ecs.MAX_ENTITIES, 4194303)
 end
 
 function suite.exposesTagComponentsThroughThePublicModule(): nil
@@ -23,12 +22,12 @@ function suite.exposesTagComponentsThroughThePublicModule(): nil
     local selected = ecs.newTagComponent({name = "test.PublicSelected", transient = true})
     local world = ecs.newWorld({maxEntities = 2})
     local entity = world:spawn(visible, selected)
-    test.assert(not world:has(entity, visible))
+    assert(not world:has(entity, visible))
     world:commit()
-    test.assert(world:has(entity, visible))
-    test.assert(world:has(entity, selected))
-    test.assert(ecs.findComponentByName(visible.componentName) == visible)
-    test.assert(ecs.findComponentById(selected.componentId) == selected)
+    assert(world:has(entity, visible))
+    assert(world:has(entity, selected))
+    assert(ecs.findComponentByName(visible.componentName) == visible)
+    assert(ecs.findComponentById(selected.componentId) == selected)
 end
 
 function suite.exposesReusableQueriesThroughWorlds(): nil
@@ -42,7 +41,7 @@ function suite.exposesReusableQueriesThroughWorlds(): nil
     for _, length in matching:iter() do
         count = count + (length as integer)
     end
-    test.equal(count, 1)
+    assert.eq(count, 1)
 end
 
 function suite.exposesDeferredTagMutationThroughWorlds(): nil
@@ -51,12 +50,12 @@ function suite.exposesDeferredTagMutationThroughWorlds(): nil
     local entity = world:spawn()
     world:commit()
     world:set(entity, tag)
-    test.assert(not world:has(entity, tag))
+    assert(not world:has(entity, tag))
     world:commit()
-    test.assert(world:has(entity, tag))
+    assert(world:has(entity, tag))
     world:remove(entity, tag)
     world:commit()
-    test.assert(not world:has(entity, tag))
+    assert(not world:has(entity, tag))
 end
 
 function suite.exposesTypedScalarComponentsThroughThePublicModule(): nil
@@ -69,7 +68,7 @@ function suite.exposesTypedScalarComponentsThroughThePublicModule(): nil
     local entity = world:spawn(level(7))
     world:commit()
     local current: number? = world:get(entity, level)
-    test.equal(current as number, 7)
+    assert.eq(current as number, 7)
 end
 
 local record PublicPoint
@@ -90,7 +89,7 @@ function suite.exposesTableComponentsThroughThePublicModule(): nil
     local entity = world:spawn(position(8))
     world:commit()
     local current: PublicPoint? = world:get(entity, position)
-    test.equal((current as PublicPoint).x, 8)
+    assert.eq((current as PublicPoint).x, 8)
 end
 
 function suite.exposesTheSynchronousSystemPipeline(): nil
@@ -104,7 +103,7 @@ function suite.exposesTheSynchronousSystemPipeline(): nil
         end
     })
     world:update(0.125)
-    test.equal(seenDt, 0.125)
+    assert.eq(seenDt, 0.125)
 end
 
 function suite.exposesExclusiveRelationships(): nil
@@ -118,7 +117,7 @@ function suite.exposesExclusiveRelationships(): nil
     local source = world:spawn(follows(target))
     world:commit()
     local relationship: ecs.RelationshipValue? = world:get(source, follows)
-    test.equal((relationship as ecs.RelationshipValue).target, target)
+    assert.eq((relationship as ecs.RelationshipValue).target, target)
 end
 
 return suite

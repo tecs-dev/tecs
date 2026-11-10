@@ -1,5 +1,4 @@
 local images = require("tecs.gfx.images")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -12,15 +11,15 @@ end
 
 function suite.internsANameToAPermanentId(): nil
     const first = images.id("imagestest/tiles")
-    test.assert(first > 0, "an id is always positive")
-    test.equal(images.id("imagestest/tiles"), first)
-    test.notEqual(images.id("imagestest/other"), first)
-    test.equal(images.nameOf(first), "imagestest/tiles")
-    test.equal(images.nameOf(0), nil)
+    assert(first > 0, "an id is always positive")
+    assert.eq(images.id("imagestest/tiles"), first)
+    assert.ne(images.id("imagestest/other"), first)
+    assert.eq(images.nameOf(first), "imagestest/tiles")
+    assert.eq(images.nameOf(0), nil)
 
     -- Interning is not residency. A sprite may name pixels that never arrive.
-    test.equal(images.stateOf(first), "unknown")
-    test.raises(
+    assert.eq(images.stateOf(first), "unknown")
+    assert.raises(
         function(): nil
             images.id("")
         end,
@@ -38,29 +37,29 @@ function suite.queuesOneUploadCommandCarryingItsPixels(): nil
         filter = "linear",
         address = "mirror",
     })
-    test.equal(images.stateOf(id), "pending")
+    assert.eq(images.stateOf(id), "pending")
     const width, height = images.sizeOf(id)
-    test.equal(width, 2)
-    test.equal(height, 1)
-    test.equal(images.samplerOf(id), images.samplerIndex("linear", "mirror"))
+    assert.eq(width, 2)
+    assert.eq(height, 1)
+    assert.eq(images.samplerOf(id), images.samplerIndex("linear", "mirror"))
 
     const commands = images.drain()
-    test.equal(#commands, 1)
+    assert.eq(#commands, 1)
     const command = commands[1]
-    test.assert(command is images.UploadImageCommand)
+    assert(command is images.UploadImageCommand)
     if command is images.UploadImageCommand then
-        test.equal(command.kind, "uploadImage")
-        test.equal(command.image, id)
-        test.equal(command.width, 2)
-        test.equal(command.height, 1)
-        test.equal(command.format, "rgba8")
-        test.equal(command.sampler, images.samplerIndex("linear", "mirror"))
-        test.equal(#command.pixels, 8)
+        assert.eq(command.kind, "uploadImage")
+        assert.eq(command.image, id)
+        assert.eq(command.width, 2)
+        assert.eq(command.height, 1)
+        assert.eq(command.format, "rgba8")
+        assert.eq(command.sampler, images.samplerIndex("linear", "mirror"))
+        assert.eq(#command.pixels, 8)
         images.complete(command.image, command.serial, true, nil)
     end
-    test.equal(images.stateOf(id), "resident")
-    test.equal(images.failureOf(id), nil)
-    test.equal(#images.drain(), 0)
+    assert.eq(images.stateOf(id), "resident")
+    assert.eq(images.failureOf(id), nil)
+    assert.eq(#images.drain(), 0)
 end
 
 function suite.replacesTheImageBehindAnExistingId(): nil
@@ -68,18 +67,18 @@ function suite.replacesTheImageBehindAnExistingId(): nil
     const first = images.upload({name = "imagestest/replaced", width = 1, height = 1, pixels = WHITE})
     const queued = images.drain()
     images.complete(first, queued[1].serial, true, nil)
-    test.equal(images.stateOf(first), "resident")
+    assert.eq(images.stateOf(first), "resident")
 
     const second = images.upload({name = "imagestest/replaced", width = 4, height = 4, pixels = WHITE:rep(16)})
-    test.equal(second, first, "a replacement keeps the id every sprite already stores")
-    test.equal(images.stateOf(first), "pending")
+    assert.eq(second, first, "a replacement keeps the id every sprite already stores")
+    assert.eq(images.stateOf(first), "pending")
     const width = images.sizeOf(first)
-    test.equal(width, 4)
+    assert.eq(width, 4)
 
     const again = images.drain()
-    test.equal(#again, 1)
+    assert.eq(#again, 1)
     images.complete(first, again[1].serial, true, nil)
-    test.equal(images.stateOf(first), "resident")
+    assert.eq(images.stateOf(first), "resident")
 end
 
 function suite.discardsACompletionForASupersededCommand(): nil
@@ -92,9 +91,9 @@ function suite.discardsACompletionForASupersededCommand(): nil
     -- The first upload completes after the replacement was queued, so its
     -- outcome must not decide the state the replacement owns.
     images.complete(id, first[1].serial, true, nil)
-    test.equal(images.stateOf(id), "pending")
+    assert.eq(images.stateOf(id), "pending")
     images.complete(id, second[1].serial, true, nil)
-    test.equal(images.stateOf(id), "resident")
+    assert.eq(images.stateOf(id), "resident")
 end
 
 function suite.reportsWhyTheBackendRejectedAnImage(): nil
@@ -102,10 +101,10 @@ function suite.reportsWhyTheBackendRejectedAnImage(): nil
     const id = images.upload({name = "imagestest/rejected", width = 1, height = 1, pixels = WHITE})
     const commands = images.drain()
     images.complete(id, commands[1].serial, false, "the device is out of memory")
-    test.equal(images.stateOf(id), "failed")
-    test.equal(images.failureOf(id), "the device is out of memory")
+    assert.eq(images.stateOf(id), "failed")
+    assert.eq(images.failureOf(id), "the device is out of memory")
 
-    test.raises(
+    assert.raises(
         function(): nil
             images.complete(id, commands[1].serial, false, nil)
         end,
@@ -120,27 +119,27 @@ function suite.releasesAnImageAndKeepsItsId(): nil
     images.complete(id, uploads[1].serial, true, nil)
 
     const ok, reason = images.release("imagestest/released")
-    test.assert(ok)
-    test.equal(reason, nil)
-    test.equal(images.stateOf(id), "released")
+    assert(ok)
+    assert.eq(reason, nil)
+    assert.eq(images.stateOf(id), "released")
 
     const commands = images.drain()
-    test.equal(#commands, 1)
+    assert.eq(#commands, 1)
     const command = commands[1]
-    test.assert(command is images.ReleaseImageCommand)
+    assert(command is images.ReleaseImageCommand)
     if command is images.ReleaseImageCommand then
-        test.equal(command.kind, "releaseImage")
-        test.equal(command.image, id)
+        assert.eq(command.kind, "releaseImage")
+        assert.eq(command.image, id)
     end
 
     const repeated, repeatedReason = images.release("imagestest/released")
-    test.assert(not repeated)
-    test.matches(repeatedReason as string, "is not uploaded")
+    assert(not repeated)
+    assert.matches(repeatedReason as string, "is not uploaded")
     const missing, missingReason = images.release("imagestest/never-seen")
-    test.assert(not missing)
-    test.matches(missingReason as string, "is not uploaded")
+    assert(not missing)
+    assert.matches(missingReason as string, "is not uploaded")
 
-    test.equal(images.id("imagestest/released"), id, "the id outlives the pixels")
+    assert.eq(images.id("imagestest/released"), id, "the id outlives the pixels")
 end
 
 function suite.mapsEverySamplerCombinationToADistinctIndex(): nil
@@ -149,37 +148,37 @@ function suite.mapsEverySamplerCombinationToADistinctIndex(): nil
     for _, filter in ipairs({"nearest", "linear"}) do
         for _, address in ipairs({"clamp", "repeat", "mirror"}) do
             const index = images.samplerIndex(filter as images.Filter, address as images.Address)
-            test.assert(index >= 0 and index < images.SAMPLER_COUNT, "the index selects a created sampler")
-            test.assert(not seen[index], "each combination has its own sampler")
+            assert(index >= 0 and index < images.SAMPLER_COUNT, "the index selects a created sampler")
+            assert(not seen[index], "each combination has its own sampler")
             seen[index] = true
             count = count + 1
         end
     end
-    test.equal(count, images.SAMPLER_COUNT)
-    test.equal(images.samplerIndex(nil, nil), images.samplerIndex("nearest", "clamp"))
-    test.equal(images.samplerOf(0), 0, "an unknown id samples like the fallback")
+    assert.eq(count, images.SAMPLER_COUNT)
+    assert.eq(images.samplerIndex(nil, nil), images.samplerIndex("nearest", "clamp"))
+    assert.eq(images.samplerOf(0), 0, "an unknown id samples like the fallback")
 end
 
 function suite.rejectsAnUploadItCannotDescribe(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             images.upload({name = "", width = 1, height = 1, pixels = WHITE})
         end,
         "must not be empty"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             images.upload({name = "imagestest/bad", width = 0, height = 1, pixels = WHITE})
         end,
         "must be positive"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             images.upload({name = "imagestest/bad", width = 2, height = 2, pixels = WHITE})
         end,
         "needs 16 RGBA8 bytes"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             images.upload({
                 name = "imagestest/bad",
@@ -191,7 +190,7 @@ function suite.rejectsAnUploadItCannotDescribe(): nil
         end,
         "is not a filter"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             images.upload({
                 name = "imagestest/bad",

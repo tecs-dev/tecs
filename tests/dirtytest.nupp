@@ -1,5 +1,4 @@
 local ecs = require("tecs.ecs")
-local test = require("nupp.test")
 local suite = {}
 
 local record DirtyPosition
@@ -31,10 +30,10 @@ function suite.marksPlacementsAndClearsAtUpdateEnd(): nil
     local entity = world:spawn(position(1))
     world:commit()
     local source = matching(world, position)
-    test.assert(source:isComponentDirty(position))
+    assert(source:isComponentDirty(position))
     world:update(0)
-    test.assert(not source:isComponentDirty(position))
-    test.assert(world:isAlive(entity))
+    assert(not source:isComponentDirty(position))
+    assert(world:isAlive(entity))
 end
 
 function suite.keepsReadsCleanAndMarksMutableAccess(): nil
@@ -44,12 +43,12 @@ function suite.keepsReadsCleanAndMarksMutableAccess(): nil
     world:commit()
     local source = matching(world, position)
     source:clearDirtyComponents()
-    test.equal(assert(world:get(entity, position)).x, 1)
-    test.assert(not source:anyComponentDirty())
+    assert.eq(assert(world:get(entity, position)).x, 1)
+    assert(not source:anyComponentDirty())
     local writable = assert(world:getMut(entity, position))
     writable.x = 2
-    test.assert(source:isComponentDirty(position))
-    test.equal(assert(world:get(entity, position)).x, 2)
+    assert(source:isComponentDirty(position))
+    assert.eq(assert(world:get(entity, position)).x, 2)
 end
 
 function suite.marksOnlyAnInPlaceReplacementComponent(): nil
@@ -62,8 +61,8 @@ function suite.marksOnlyAnInPlaceReplacementComponent(): nil
     source:clearDirtyComponents()
     world:set(entity, position(3))
     world:commit()
-    test.assert(source:isComponentDirty(position))
-    test.assert(not source:isComponentDirty(velocity))
+    assert(source:isComponentDirty(position))
+    assert(not source:isComponentDirty(velocity))
 end
 
 function suite.marksSourceAndDestinationAfterAStructuralMove(): nil
@@ -77,9 +76,9 @@ function suite.marksSourceAndDestinationAfterAStructuralMove(): nil
     world:remove(entity, velocity)
     world:commit()
     local target = matching(world, position)
-    test.assert(source:isComponentDirty(position))
-    test.assert(source:isComponentDirty(velocity))
-    test.assert(target:isComponentDirty(position))
+    assert(source:isComponentDirty(position))
+    assert(source:isComponentDirty(velocity))
+    assert(target:isComponentDirty(position))
 end
 
 function suite.supportsColumnAndExplicitMarks(): nil
@@ -91,10 +90,10 @@ function suite.supportsColumnAndExplicitMarks(): nil
     source:clearDirtyComponents()
     local column = assert(source:getMut(position))
     column[1].x = 4
-    test.assert(source:isComponentDirty(position))
+    assert(source:isComponentDirty(position))
     source:clearDirtyComponents()
     world:markComponentDirty(entity, position)
-    test.assert(source:isComponentDirty(position))
+    assert(source:isComponentDirty(position))
 end
 
 function suite.iteratesDirtyComponentsInSignatureOrder(): nil
@@ -108,7 +107,7 @@ function suite.iteratesDirtyComponentsInSignatureOrder(): nil
     for component in source:dirtyComponents() do
         names[#names + 1] = assert(component).componentName
     end
-    test.equal(table.concat(names, ","), "test.DirtyIterFirst,test.DirtyIterSecond")
+    assert.eq(table.concat(names, ","), "test.DirtyIterFirst,test.DirtyIterSecond")
 end
 
 function suite.ignoresExplicitMarksForStaleEntities(): nil
@@ -121,7 +120,7 @@ function suite.ignoresExplicitMarksForStaleEntities(): nil
     world:commit()
     source:clearDirtyComponents()
     world:markComponentDirty(entity, position)
-    test.assert(not source:anyComponentDirty())
+    assert(not source:anyComponentDirty())
 end
 
 return suite

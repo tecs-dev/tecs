@@ -1,4 +1,3 @@
-local test = require("nupp.test")
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
 local suite = {}
@@ -6,20 +5,20 @@ local suite = {}
 function suite.canonicalizesComponentOrder(): nil
     local first = components.newTagComponent({name = "test.ArchetypeFirst"})
     local second = components.newTagComponent({name = "test.ArchetypeSecond"})
-    test.equal(archetype.signatureOf({first, second}), archetype.signatureOf({second, first}))
+    assert.eq(archetype.signatureOf({first, second}), archetype.signatureOf({second, first}))
 end
 
 function suite.tracksMembershipByIdentity(): nil
     local present = components.newTagComponent({name = "test.ArchetypePresent"})
     local absent = components.newTagComponent({name = "test.ArchetypeAbsent"})
     local value = archetype.new(1, {present})
-    test.assert(archetype.has(value, present))
-    test.assert(not archetype.has(value, absent))
+    assert(archetype.has(value, present))
+    assert(not archetype.has(value, absent))
 end
 
 function suite.rejectsDuplicateComponents(): nil
     local tag = components.newTagComponent({name = "test.ArchetypeDuplicate"})
-    test.raises(
+    assert.raises(
         function(): nil
             archetype.signatureOf({tag, tag})
         end,
@@ -33,9 +32,9 @@ function suite.storesRawScalarsInDenseColumns(): nil
     archetype.append(value, 10, {[health.componentId] = 42})
     archetype.append(value, 20, {})
     local values: {number} = assert(archetype.column(value, health))
-    test.equal(values[1], 42)
-    test.equal(values[2], 100)
-    test.equal(archetype.valueAt(value, 0, health) as number, 42)
+    assert.eq(values[1], 42)
+    assert.eq(values[2], 100)
+    assert.eq(archetype.valueAt(value, 0, health) as number, 42)
 end
 
 function suite.swapRemovesScalarColumnsWithEntities(): nil
@@ -45,10 +44,10 @@ function suite.swapRemovesScalarColumnsWithEntities(): nil
     archetype.append(value, 20, {[label.componentId] = "last"})
     local moved = archetype.removeRow(value, 0)
     local labels: {string} = assert(archetype.column(value, label))
-    test.equal(moved as integer, 20)
-    test.equal(value.entities[1], 20)
-    test.equal(labels[1], "last")
-    test.equal(#labels, 1)
+    assert.eq(moved as integer, 20)
+    assert.eq(value.entities[1], 20)
+    assert.eq(labels[1], "last")
+    assert.eq(#labels, 1)
 end
 
 return suite

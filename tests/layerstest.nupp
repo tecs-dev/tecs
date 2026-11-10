@@ -1,5 +1,4 @@
 local layers = require("tecs.gfx.layers")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -17,70 +16,70 @@ function suite.putsAHigherLayerNearerThanEverythingBelowIt(): nil
             farthest = math.max(farthest, near)
         end
     end
-    test.assert(farthest < nearest, "layer 8 never reaches layer 7")
+    assert(farthest < nearest, "layer 8 never reaches layer 7")
 end
 
 function suite.holdsEveryDepthInsideTheDrawableRange(): nil
     for layer = -4, layers.MAX + 4 do
         for _, z in ipairs({-1e9, 0.0, 1e9}) do
             const depth = layers.depthOf(layer, z, 1e9, -1e9)
-            test.assert(depth >= 0.001 and depth <= 0.999, "layer " .. tostring(layer) .. " stays drawable")
+            assert(depth >= 0.001 and depth <= 0.999, "layer " .. tostring(layer) .. " stays drawable")
         end
     end
 end
 
 function suite.clampsALayerOutsideTheBandRange(): nil
-    test.equal(layers.depthOf(0, 0, 0, 0), layers.depthOf(1, 0, 0, 0))
-    test.equal(layers.depthOf(layers.MAX + 9, 0, 0, 0), layers.depthOf(layers.MAX, 0, 0, 0))
+    assert.eq(layers.depthOf(0, 0, 0, 0), layers.depthOf(1, 0, 0, 0))
+    assert.eq(layers.depthOf(layers.MAX + 9, 0, 0, 0), layers.depthOf(layers.MAX, 0, 0, 0))
 end
 
 function suite.sortsTopDownByPositionAndHeight(): nil
     layers.configure(10, {sort = "topdown"})
-    test.equal(layers.sortOf(10), layers.SORT_TOPDOWN)
+    assert.eq(layers.sortOf(10), layers.SORT_TOPDOWN)
 
     -- Larger y is lower on screen and so nearer, and height breaks the tie.
-    test.assert(layers.depthOf(10, 0, 0, 100) < layers.depthOf(10, 0, 0, -100))
-    test.assert(layers.depthOf(10, 10, 0, 0) < layers.depthOf(10, 0, 0, 0))
+    assert(layers.depthOf(10, 0, 0, 100) < layers.depthOf(10, 0, 0, -100))
+    assert(layers.depthOf(10, 10, 0, 0) < layers.depthOf(10, 0, 0, 0))
     -- Height carries most of the band, so it outweighs position.
-    test.assert(layers.depthOf(10, 1000, 0, -10000) < layers.depthOf(10, 0, 0, 10000))
+    assert(layers.depthOf(10, 1000, 0, -10000) < layers.depthOf(10, 0, 0, 10000))
 end
 
 function suite.sortsByHeightAlone(): nil
     layers.configure(11, {sort = "z"})
-    test.equal(layers.sortOf(11), layers.SORT_Z)
-    test.equal(layers.depthOf(11, 5, -900, -900), layers.depthOf(11, 5, 900, 900))
-    test.assert(layers.depthOf(11, 10, 0, 0) < layers.depthOf(11, 0, 0, 0))
+    assert.eq(layers.sortOf(11), layers.SORT_Z)
+    assert.eq(layers.depthOf(11, 5, -900, -900), layers.depthOf(11, 5, 900, 900))
+    assert(layers.depthOf(11, 10, 0, 0) < layers.depthOf(11, 0, 0, 0))
 end
 
 function suite.sortsIsometricallyOnBothAxes(): nil
     layers.configure(12, {sort = "isometric"})
-    test.equal(layers.sortOf(12), layers.SORT_ISOMETRIC)
+    assert.eq(layers.sortOf(12), layers.SORT_ISOMETRIC)
     -- Both axes move an entity towards the viewer on a diamond grid.
-    test.assert(layers.depthOf(12, 0, 100, 0) < layers.depthOf(12, 0, -100, 0))
-    test.assert(layers.depthOf(12, 0, 0, 100) < layers.depthOf(12, 0, 0, -100))
+    assert(layers.depthOf(12, 0, 100, 0) < layers.depthOf(12, 0, -100, 0))
+    assert(layers.depthOf(12, 0, 0, 100) < layers.depthOf(12, 0, 0, -100))
 end
 
 function suite.resolvesABandOnceForManyRows(): nil
     layers.configure(13, {sort = "topdown"})
     const base, sort = layers.bandOf(13)
-    test.equal(sort, layers.SORT_TOPDOWN)
-    test.equal(layers.depthIn(base, sort, 3, 4, 5), layers.depthOf(13, 3, 4, 5))
+    assert.eq(sort, layers.SORT_TOPDOWN)
+    assert.eq(layers.depthIn(base, sort, 3, 4, 5), layers.depthOf(13, 3, 4, 5))
 end
 
 function suite.rejectsAnUnknownLayerOrSort(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             layers.configure(0, {sort = "z"})
         end,
         "outside"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             layers.configure(layers.MAX + 1, {sort = "z"})
         end,
         "outside"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             layers.configure(15, {sort = "sideways" as layers.Sort})
         end,
@@ -91,26 +90,26 @@ end
 function suite.reportsAConfigurationRevision(): nil
     const before = layers.revision()
     layers.configure(14, {sort = "z"})
-    test.assert(layers.revision() > before, "configure moves the revision")
+    assert(layers.revision() > before, "configure moves the revision")
 end
 
 function suite.reportsTheFinestDepthStepItsExtentsAllow(): nil
     const highest, half = layers.extents()
     const finest = layers.resolution()
-    test.assert(finest > 0, "a depth target has something to preserve")
+    assert(finest > 0, "a depth target has something to preserve")
 
     layers.setExtents(highest * 2, half * 2)
-    test.assert(layers.resolution() < finest, "a wider extent spends less depth per world unit")
+    assert(layers.resolution() < finest, "a wider extent spends less depth per world unit")
     layers.setExtents(highest, half)
-    test.equal(layers.resolution(), finest)
+    assert.eq(layers.resolution(), finest)
 
-    test.raises(
+    assert.raises(
         function(): nil
             layers.setExtents(0, half)
         end,
         "greater than zero"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             layers.setExtents(highest, -1)
         end,
@@ -120,36 +119,36 @@ end
 
 function suite.placesScreenSpaceContentsAtTheirOwnPixels(): nil
     layers.configure(2, {sort = "z", screenSpace = true})
-    test.assert(layers.isScreenSpace(2), "the layer reports its own space")
+    assert(layers.isScreenSpace(2), "the layer reports its own space")
 
     -- The camera is read for a world layer and for nothing else, so moving it,
     -- zooming it, and turning it all leave a heads-up display exactly where it
     -- was authored.
     const x, y = layers.place(2, 40, 30, 0, 0, 1, 0, 800, 600)
-    test.equal(x, 40)
-    test.equal(y, 30)
+    assert.eq(x, 40)
+    assert.eq(y, 30)
 
     const movedX, movedY = layers.place(2, 40, 30, 5000, -900, 4, 1.2, 800, 600)
-    test.equal(movedX, 40)
-    test.equal(movedY, 30)
+    assert.eq(movedX, 40)
+    assert.eq(movedY, 30)
 end
 
 function suite.stretchesVirtualCoordinatesOntoTheTarget(): nil
     layers.configure(3, {sort = "z", virtualCoords = true})
-    test.assert(not layers.isScreenSpace(3), "virtual coordinates are not screen pixels")
+    assert(not layers.isScreenSpace(3), "virtual coordinates are not screen pixels")
 
     const width, height = layers.virtualSize()
     const x, y = layers.place(3, width * 0.5, height * 0.25, 900, 900, 3, 0.5, 800, 600)
-    test.equal(x, 400)
-    test.equal(y, 150)
+    assert.eq(x, 400)
+    assert.eq(y, 150)
 
     layers.setVirtualSize(400, 300)
     const halfX, halfY = layers.place(3, 400, 300, 0, 0, 1, 0, 800, 600)
-    test.equal(halfX, 800)
-    test.equal(halfY, 600)
+    assert.eq(halfX, 800)
+    assert.eq(halfY, 600)
     layers.setVirtualSize(width, height)
 
-    test.raises(
+    assert.raises(
         function(): nil
             layers.setVirtualSize(0, 300)
         end,
@@ -163,29 +162,29 @@ function suite.placesAWorldLayerThroughTheCamera(): nil
     -- The view center lands on the middle of the target, and a world unit is
     -- worth the zoom in pixels.
     const centerX, centerY = layers.place(4, 100, 100, 100, 100, 2, 0, 800, 600)
-    test.equal(centerX, 400)
-    test.equal(centerY, 300)
+    assert.eq(centerX, 400)
+    assert.eq(centerY, 300)
 
     const offsetX, offsetY = layers.place(4, 110, 105, 100, 100, 2, 0, 800, 600)
-    test.equal(offsetX, 420)
-    test.equal(offsetY, 310)
+    assert.eq(offsetX, 420)
+    assert.eq(offsetY, 310)
 end
 
 function suite.driftsAParallaxLayerBehindTheCamera(): nil
     layers.configure(5, {sort = "topdown", parallax = 0.5})
-    test.equal(layers.parallaxOf(5), 0.5)
+    assert.eq(layers.parallaxOf(5), 0.5)
 
     -- A layer moving with the world leaves the target when the camera does; one
     -- at half parallax gives up half that distance, which is what puts a
     -- background behind the scene without a second camera.
     const still = layers.place(5, 0, 0, 0, 0, 1, 0, 800, 600)
     const drifted = layers.place(5, 0, 0, 100, 0, 1, 0, 800, 600)
-    test.equal(still, 400)
-    test.equal(drifted, 350)
+    assert.eq(still, 400)
+    assert.eq(drifted, 350)
 
     layers.configure(5, {sort = "topdown"})
     const carried = layers.place(5, 0, 0, 100, 0, 1, 0, 800, 600)
-    test.equal(carried, 300)
+    assert.eq(carried, 300)
 end
 
 function suite.keepsDrawnSizeOnALayerThatIgnoresZoom(): nil
@@ -196,65 +195,65 @@ function suite.keepsDrawnSizeOnALayerThatIgnoresZoom(): nil
     -- the zoom is.
     const near = layers.place(6, 10, 0, 0, 0, 1, 0, 800, 600)
     const far = layers.place(6, 10, 0, 0, 0, 4, 0, 800, 600)
-    test.equal(near, 410)
-    test.equal(far, 410)
+    assert.eq(near, 410)
+    assert.eq(far, 410)
 
     const moved = layers.place(6, 10, 0, 100, 0, 4, 0, 800, 600)
-    test.equal(moved, 310)
+    assert.eq(moved, 310)
 end
 
 function suite.reportsTheEntryARendererPacks(): nil
     layers.configure(9, {sort = "z", screenSpace = true, ignoreZoom = true, unlit = true, overlay = true})
     const mode, parallaxOffset, zoomFlag, litFlag = layers.entryOf(9)
-    test.equal(mode, layers.MODE_SCREEN)
-    test.equal(parallaxOffset, 0.0)
-    test.equal(zoomFlag, 1.0)
-    test.equal(litFlag, 0.0)
-    test.assert(layers.isOverlay(9), "the layer takes the forward lane")
+    assert.eq(mode, layers.MODE_SCREEN)
+    assert.eq(parallaxOffset, 0.0)
+    assert.eq(zoomFlag, 1.0)
+    assert.eq(litFlag, 0.0)
+    assert(layers.isOverlay(9), "the layer takes the forward lane")
 
     -- A configuration replaces the layer rather than amending it, so what was
     -- not said again goes back to its default.
     layers.configure(9, {sort = "z"})
     const plainMode, plainOffset, plainZoom, plainLit = layers.entryOf(9)
-    test.equal(plainMode, layers.MODE_CAMERA)
-    test.equal(plainOffset, 0.0)
-    test.equal(plainZoom, 0.0)
-    test.equal(plainLit, 1.0)
-    test.assert(not layers.isOverlay(9), "overlay went back to its default")
+    assert.eq(plainMode, layers.MODE_CAMERA)
+    assert.eq(plainOffset, 0.0)
+    assert.eq(plainZoom, 0.0)
+    assert.eq(plainLit, 1.0)
+    assert(not layers.isOverlay(9), "overlay went back to its default")
 end
 
 function suite.cullsOnlyTheLayersTheViewRectangleDescribes(): nil
     layers.configure(3, {sort = "z", virtualCoords = true})
-    test.assert(layers.viewCulled(1), "an unconfigured layer is culled against the view")
+    assert(layers.viewCulled(1), "an unconfigured layer is culled against the view")
 
     layers.configure(2, {sort = "z", screenSpace = true})
-    test.assert(not layers.viewCulled(2), "screen pixels have no world bound to test")
-    test.assert(not layers.viewCulled(3), "virtual coordinates have no world bound to test")
+    assert(not layers.viewCulled(2), "screen pixels have no world bound to test")
+    assert(not layers.viewCulled(3), "virtual coordinates have no world bound to test")
 
     layers.configure(5, {sort = "topdown", parallax = 0.5})
-    test.assert(not layers.viewCulled(5), "parallax draws away from the world bound")
+    assert(not layers.viewCulled(5), "parallax draws away from the world bound")
 
     layers.configure(6, {sort = "z", ignoreZoom = true})
-    test.assert(not layers.viewCulled(6), "ignoring zoom draws away from the world bound")
+    assert(not layers.viewCulled(6), "ignoring zoom draws away from the world bound")
 
     layers.configure(6, {sort = "z"})
-    test.assert(layers.viewCulled(6), "a plain world layer keeps exact culling")
+    assert(layers.viewCulled(6), "a plain world layer keeps exact culling")
 end
 
 function suite.answersDefaultsForALayerOutsideTheTable(): nil
     const mode, offset, zoom, lit = layers.entryOf(layers.MAX + 1)
-    test.equal(mode, layers.MODE_CAMERA)
-    test.equal(offset, 0.0)
-    test.equal(zoom, 0.0)
-    test.equal(lit, 1.0)
-    test.assert(layers.viewCulled(0), "an unknown layer is culled")
-    test.assert(not layers.isScreenSpace(0), "an unknown layer is not screen space")
-    test.assert(not layers.isOverlay(0), "an unknown layer is not an overlay")
-    test.equal(layers.parallaxOf(0), 1.0)
+    assert.eq(mode, layers.MODE_CAMERA)
+    assert.eq(offset, 0.0)
+    assert.eq(zoom, 0.0)
+    assert.eq(lit, 1.0)
+    assert(layers.viewCulled(0), "an unknown layer is culled")
+    assert(not layers.isScreenSpace(0), "an unknown layer is not screen space")
+    assert(not layers.isOverlay(0), "an unknown layer is not an overlay")
+    assert.eq(layers.parallaxOf(0), 1.0)
 end
 
 function suite.rejectsALayerAskingForTwoFixedSpaces(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             layers.configure(7, {sort = "z", screenSpace = true, virtualCoords = true})
         end,

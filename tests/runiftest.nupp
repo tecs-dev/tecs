@@ -3,7 +3,6 @@ const {type RunIf} = require("tecs.ecs")
 const {type World} = require("tecs.ecs")
 const random = require("nupp.random")
 
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -18,35 +17,35 @@ function suite.removesDelayedAnonymousSystemsAfterOneRun(): nil
         end
     })
     world:update(0.125)
-    test.equal(calls, 0)
+    assert.eq(calls, 0)
     world:update(0.125)
-    test.equal(calls, 1)
-    test.assert(not world:removeSystem(name))
+    assert.eq(calls, 1)
+    assert(not world:removeSystem(name))
     world:update(1)
-    test.equal(calls, 1)
+    assert.eq(calls, 1)
 end
 
 function suite.retainsIntervalOvershootButRunsOncePerDispatch(): nil
     const world = ecs.newWorld()
     const predicate = ecs.runif.every(0.25)
-    test.assert(not predicate(0.125, world, "timer"))
-    test.assert(predicate(0.625, world, "timer"))
-    test.assert(predicate(0, world, "timer"))
-    test.assert(predicate(0, world, "timer"))
-    test.assert(not predicate(0, world, "timer"))
+    assert(not predicate(0.125, world, "timer"))
+    assert(predicate(0.625, world, "timer"))
+    assert(predicate(0, world, "timer"))
+    assert(predicate(0, world, "timer"))
+    assert(not predicate(0, world, "timer"))
 end
 
 function suite.cooldownFiresImmediatelyAndDiscardsOvershoot(): nil
     const world = ecs.newWorld()
     const predicate = ecs.runif.cooldown(0.25)
-    test.assert(predicate(0, world, "timer"))
-    test.assert(not predicate(0.125, world, "timer"))
-    test.assert(predicate(1, world, "timer"))
-    test.assert(not predicate(0, world, "timer"))
-    test.assert(not predicate(0.125, world, "timer"))
-    test.assert(predicate(0.125, world, "timer"))
-    test.assert(ecs.runif.cooldown(0)(0, world, "zero"))
-    test.assert(ecs.runif.after(0)(0, world, "zero"))
+    assert(predicate(0, world, "timer"))
+    assert(not predicate(0.125, world, "timer"))
+    assert(predicate(1, world, "timer"))
+    assert(not predicate(0, world, "timer"))
+    assert(not predicate(0.125, world, "timer"))
+    assert(predicate(0.125, world, "timer"))
+    assert(ecs.runif.cooldown(0)(0, world, "zero"))
+    assert(ecs.runif.after(0)(0, world, "zero"))
 end
 
 function suite.pausesTimersWhenTheirSystemOrPhaseIsDisabled(): nil
@@ -68,7 +67,7 @@ function suite.pausesTimersWhenTheirSystemOrPhaseIsDisabled(): nil
     world:update(1)
     world:enablePhase(ecs.phases.Update)
     world:update(0.125)
-    test.equal(calls, 1)
+    assert.eq(calls, 1)
 end
 
 function suite.fixedTimersConsumeTheFixedDelta(): nil
@@ -82,7 +81,7 @@ function suite.fixedTimersConsumeTheFixedDelta(): nil
         end
     })
     world:update(0.5)
-    test.equal(calls, 2)
+    assert.eq(calls, 2)
 end
 
 function suite.stateGateOrderControlsTimerProgress(): nil
@@ -92,12 +91,12 @@ function suite.stateGateOrderControlsTimerProgress(): nil
     world:pushState("menu")
     const paused = ecs.runif.both(ecs.runif.inState("game"), ecs.runif.every(0.25))
     const advancing = ecs.runif.both(ecs.runif.every(0.25), ecs.runif.inState("game"))
-    test.assert(not paused(0.125, world, "paused"))
-    test.assert(not advancing(0.125, world, "advancing"))
+    assert(not paused(0.125, world, "paused"))
+    assert(not advancing(0.125, world, "advancing"))
     world:pushState("game")
-    test.assert(not paused(0.125, world, "paused"))
-    test.assert(advancing(0.125, world, "advancing"))
-    test.assert(paused(0.125, world, "paused"))
+    assert(not paused(0.125, world, "paused"))
+    assert(advancing(0.125, world, "advancing"))
+    assert(paused(0.125, world, "paused"))
 end
 
 function suite.shortCircuitsAndPassesPredicateArguments(): nil
@@ -105,9 +104,9 @@ function suite.shortCircuitsAndPassesPredicateArguments(): nil
     local leftCalls = 0
     local rightCalls = 0
     const left: RunIf = function(dt: number, exclusive value: World, name: string): boolean
-        test.equal(dt, 0.125)
-        test.assert(value == world)
-        test.equal(name, "combined")
+        assert.eq(dt, 0.125)
+        assert(value == world)
+        assert.eq(name, "combined")
         leftCalls = leftCalls + 1
 
         return true
@@ -116,15 +115,15 @@ function suite.shortCircuitsAndPassesPredicateArguments(): nil
         rightCalls = rightCalls + 1;
         return false
     end
-    test.assert(ecs.runif.either(left, right)(0.125, world, "combined"))
-    test.equal(rightCalls, 0)
-    test.assert(not ecs.runif.both(ecs.runif.negate(left), right)(0.125, world, "combined"))
-    test.equal(rightCalls, 0)
-    test.assert(not ecs.runif.both(left, right)(0.125, world, "combined"))
-    test.equal(rightCalls, 1)
-    test.assert(ecs.runif.either(right, left)(0.125, world, "combined"))
-    test.equal(rightCalls, 2)
-    test.equal(leftCalls, 4)
+    assert(ecs.runif.either(left, right)(0.125, world, "combined"))
+    assert.eq(rightCalls, 0)
+    assert(not ecs.runif.both(ecs.runif.negate(left), right)(0.125, world, "combined"))
+    assert.eq(rightCalls, 0)
+    assert(not ecs.runif.both(left, right)(0.125, world, "combined"))
+    assert.eq(rightCalls, 1)
+    assert(ecs.runif.either(right, left)(0.125, world, "combined"))
+    assert.eq(rightCalls, 2)
+    assert.eq(leftCalls, 4)
 end
 
 function suite.jitterUsesTheSuppliedReproducibleGenerator(): nil
@@ -134,55 +133,55 @@ function suite.jitterUsesTheSuppliedReproducibleGenerator(): nil
     local runs = 0
     for index = 1, 256 do
         const fired = first(0.03125, world, "first")
-        test.equal(fired, second(0.03125, world, "second"))
+        assert.eq(fired, second(0.03125, world, "second"))
         if fired then
             runs = runs + 1
         end
     end
-    test.assert(runs > 20 and runs < 50)
+    assert(runs > 20 and runs < 50)
     const clamp = ecs.runif.every(1, 1000, random.Xoshiro128(42))
-    test.assert(clamp(1, world, "clamp"))
-    test.assert(not clamp(0, world, "clamp"))
+    assert(clamp(1, world, "clamp"))
+    assert(not clamp(0, world, "clamp"))
 end
 
 function suite.rejectsInvalidTimerArgumentsAtConstruction(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             ecs.runif.every(0)
         end,
         "positive and finite"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             ecs.runif.every(-1)
         end,
         "positive and finite"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             ecs.runif.every(math.huge)
         end,
         "positive and finite"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             ecs.runif.every(1, -1)
         end,
         "non%-negative and finite"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             ecs.runif.every(1, 0.1)
         end,
         "requires a nupp.random.Xoshiro128"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             ecs.runif.after(-1)
         end,
         "non%-negative and finite"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             ecs.runif.cooldown(0 / 0)
         end,

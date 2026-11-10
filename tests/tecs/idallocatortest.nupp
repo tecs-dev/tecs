@@ -1,4 +1,3 @@
-local test = require("nupp.test")
 local idallocator = require("tecs.internal.idallocator")
 local suite = {}
 
@@ -6,21 +5,21 @@ function suite.packsTheFullIdentityRangeExactly(): nil
     local slot = idallocator.absoluteMaxSlotCount
     local generation = idallocator.generationCount - 1
     local id = idallocator.encodeId(slot, generation)
-    test.equal(idallocator.slotOf(id), slot)
-    test.equal(idallocator.generationPartOf(id), generation)
-    test.equal(idallocator.generationOfWithSlot(id, slot), generation)
+    assert.eq(idallocator.slotOf(id), slot)
+    assert.eq(idallocator.generationPartOf(id), generation)
+    assert.eq(idallocator.generationOfWithSlot(id, slot), generation)
 end
 
 function suite.allocatesFreshSlotsThenRecyclesLifo(): nil
     local allocator = idallocator.new(4)
-    test.equal(idallocator.allocSlot(allocator), 1)
-    test.equal(idallocator.allocSlot(allocator), 2)
+    assert.eq(idallocator.allocSlot(allocator), 1)
+    assert.eq(idallocator.allocSlot(allocator), 2)
     idallocator.place(allocator, 1, 7, 3)
     idallocator.place(allocator, 2, 7, 4)
     idallocator.freeSlot(allocator, 1)
     idallocator.freeSlot(allocator, 2)
-    test.equal(idallocator.allocSlot(allocator), 2)
-    test.equal(idallocator.allocSlot(allocator), 1)
+    assert.eq(idallocator.allocSlot(allocator), 2)
+    assert.eq(idallocator.allocSlot(allocator), 1)
 end
 
 function suite.tracksPlacementWithoutExposingNativeStorage(): nil
@@ -28,9 +27,9 @@ function suite.tracksPlacementWithoutExposingNativeStorage(): nil
     local slot = idallocator.allocSlot(allocator)
     idallocator.place(allocator, slot, 13, 0)
     local archetypeId, row = idallocator.placement(allocator, slot)
-    test.equal(archetypeId, 13)
-    test.equal(row, 0)
-    test.equal(idallocator.generationAt(allocator, slot), 0)
+    assert.eq(archetypeId, 13)
+    assert.eq(row, 0)
+    assert.eq(idallocator.generationAt(allocator, slot), 0)
 end
 
 function suite.invalidatesFreedHandles(): nil
@@ -38,13 +37,13 @@ function suite.invalidatesFreedHandles(): nil
     local slot = idallocator.allocSlot(allocator)
     idallocator.place(allocator, slot, 1, 1)
     local original = idallocator.encodeId(slot, idallocator.generationAt(allocator, slot))
-    test.assert(not idallocator.isStale(allocator, original))
+    assert(not idallocator.isStale(allocator, original))
     idallocator.freeSlot(allocator, slot)
-    test.assert(idallocator.isStale(allocator, original))
+    assert(idallocator.isStale(allocator, original))
     local recycled = idallocator.allocSlot(allocator)
     idallocator.place(allocator, recycled, 1, 1)
     local current = idallocator.encodeId(recycled, idallocator.generationAt(allocator, recycled))
-    test.assert(not idallocator.isStale(allocator, current))
+    assert(not idallocator.isStale(allocator, current))
 end
 
 function suite.allocatesContiguousSlotsOnlyFromFreshSuffix(): nil
@@ -52,9 +51,9 @@ function suite.allocatesContiguousSlotsOnlyFromFreshSuffix(): nil
     local recycled = idallocator.allocSlot(allocator)
     idallocator.place(allocator, recycled, 1, 1)
     idallocator.freeSlot(allocator, recycled)
-    test.equal(idallocator.allocContiguousSlots(allocator, 3), 2)
-    test.equal(idallocator.allocSlot(allocator), 1)
-    test.equal(idallocator.allocSlot(allocator), 5)
+    assert.eq(idallocator.allocContiguousSlots(allocator, 3), 2)
+    assert.eq(idallocator.allocSlot(allocator), 1)
+    assert.eq(idallocator.allocSlot(allocator), 5)
 end
 
 function suite.unfreePreventsAStakedSlotFromBeingReissued(): nil
@@ -67,8 +66,8 @@ function suite.unfreePreventsAStakedSlotFromBeingReissued(): nil
     idallocator.freeSlot(allocator, second)
     idallocator.unfree(allocator, first)
     idallocator.place(allocator, first, 2, 1)
-    test.equal(idallocator.allocSlot(allocator), second)
-    test.equal(idallocator.allocSlot(allocator), 3)
+    assert.eq(idallocator.allocSlot(allocator), second)
+    assert.eq(idallocator.allocSlot(allocator), 3)
 end
 
 function suite.rebuildsTheFreeStackFromLiveness(): nil
@@ -81,9 +80,9 @@ function suite.rebuildsTheFreeStackFromLiveness(): nil
     idallocator.freeSlot(allocator, 4)
     allocator.freeCount = 0
     idallocator.rebuildFreeStack(allocator)
-    test.equal(allocator.freeCount, 2)
-    test.equal(idallocator.allocSlot(allocator), 4)
-    test.equal(idallocator.allocSlot(allocator), 2)
+    assert.eq(allocator.freeCount, 2)
+    assert.eq(idallocator.allocSlot(allocator), 4)
+    assert.eq(idallocator.allocSlot(allocator), 2)
 end
 
 function suite.resetInvalidatesAllHandlesAndReusesFromOne(): nil
@@ -95,15 +94,15 @@ function suite.resetInvalidatesAllHandlesAndReusesFromOne(): nil
     local firstId = idallocator.encodeId(first, idallocator.generationAt(allocator, first))
     local secondId = idallocator.encodeId(second, idallocator.generationAt(allocator, second))
     idallocator.reset(allocator)
-    test.assert(idallocator.isStale(allocator, firstId))
-    test.assert(idallocator.isStale(allocator, secondId))
-    test.equal(idallocator.allocSlot(allocator), 1)
+    assert(idallocator.isStale(allocator, firstId))
+    assert(idallocator.isStale(allocator, secondId))
+    assert.eq(idallocator.allocSlot(allocator), 1)
 end
 
 function suite.rejectsExhaustion(): nil
     local allocator = idallocator.new(1)
     idallocator.allocSlot(allocator)
-    test.raises(
+    assert.raises(
         function(): nil
             idallocator.allocSlot(allocator)
         end,
@@ -112,13 +111,13 @@ function suite.rejectsExhaustion(): nil
 end
 
 function suite.rejectsInvalidCapacities(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             idallocator.new(0)
         end,
         "positive integer"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             idallocator.new(idallocator.absoluteMaxSlotCount + 1)
         end,
@@ -135,14 +134,14 @@ function suite.nativeGrowthRetainsPlacementStampsAndRecycleOrder(): nil
     idallocator.freeSlot(allocator, first)
     idallocator.stampMutation(allocator, second, -17)
     idallocator.reserveSlots(allocator, 900)
-    test.equal(idallocator.mutationBatchAt(allocator, second), -17)
+    assert.eq(idallocator.mutationBatchAt(allocator, second), -17)
     const owner, row = idallocator.placement(allocator, second)
-    test.equal(owner, 7)
-    test.equal(row, 13)
-    test.equal(idallocator.allocSlot(allocator), first)
-    test.equal(idallocator.generationAt(allocator, first), 1)
+    assert.eq(owner, 7)
+    assert.eq(row, 13)
+    assert.eq(idallocator.allocSlot(allocator), first)
+    assert.eq(idallocator.generationAt(allocator, first), 1)
     idallocator.clearStamps(allocator)
-    test.equal(idallocator.mutationBatchAt(allocator, second), 0)
+    assert.eq(idallocator.mutationBatchAt(allocator, second), 0)
 end
 
 function suite.nativeSlotsPreserveTheMaximumPackedGeneration(): nil
@@ -150,12 +149,12 @@ function suite.nativeSlotsPreserveTheMaximumPackedGeneration(): nil
     const id = idallocator.encodeId(99, idallocator.generationCount - 1)
     idallocator.stakeId(allocator, id)
     idallocator.place(allocator, 99, 1, 0)
-    test.assert(not idallocator.isStale(allocator, id))
-    test.equal(idallocator.generationAt(allocator, 99), 2147483647)
+    assert(not idallocator.isStale(allocator, id))
+    assert.eq(idallocator.generationAt(allocator, 99), 2147483647)
     idallocator.freeSlot(allocator, 99)
-    test.equal(idallocator.generationAt(allocator, 99), 0)
-    test.assert(idallocator.isStale(allocator, id))
-    test.raises(
+    assert.eq(idallocator.generationAt(allocator, 99), 0)
+    assert(idallocator.isStale(allocator, id))
+    assert.raises(
         function(): nil
             idallocator.stakeId(allocator, 9007199254740992)
         end,

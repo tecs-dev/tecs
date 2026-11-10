@@ -1,4 +1,3 @@
-local test = require("nupp.test")
 local gates = require("tecs.dev.gates")
 local docs = require("tecs.dev.docs")
 local files = require("nupp.io.files")
@@ -20,42 +19,42 @@ end
 
 function suite.requiresAllDiscoveredSuites(): nil
     gates.tests(report(), {"audionativetest"})
-    test.equal(pcall(gates.tests, report(), {"audionativetest", "gamepadnativetest"}), false)
-    test.equal(pcall(gates.tests, report(), {}), false)
+    assert.eq(pcall(gates.tests, report(), {"audionativetest", "gamepadnativetest"}), false)
+    assert.eq(pcall(gates.tests, report(), {}), false)
 end
 
 function suite.refusesInconsistentCountsAndDuplicateCases(): nil
     local wrong = report()
     wrong.total = 2
-    test.equal(pcall(gates.tests, wrong, {"audionativetest"}), false)
+    assert.eq(pcall(gates.tests, wrong, {"audionativetest"}), false)
     wrong = report()
     wrong.tests[2] = wrong.tests[1]
     wrong.total, wrong.passed = 2, 2
-    test.equal(pcall(gates.tests, wrong, {"audionativetest"}), false)
+    assert.eq(pcall(gates.tests, wrong, {"audionativetest"}), false)
 end
 
 function suite.refusesSkipsEvenWhenTheRunnerSucceeds(): nil
     local skipped = report()
     skipped.tests[1].status = "skipped"
     skipped.passed, skipped.skipped = 0, 1
-    test.equal(pcall(gates.tests, skipped, {"audionativetest"}), false)
+    assert.eq(pcall(gates.tests, skipped, {"audionativetest"}), false)
 end
 
 function suite.refusesMissingAndInvalidReports(): nil
-    test.equal(pcall(gates.tests, "not a report", {"audionativetest"}), false)
+    assert.eq(pcall(gates.tests, "not a report", {"audionativetest"}), false)
     local empty = report()
     empty.tests = {}
-    test.equal(pcall(gates.tests, empty, {}), false)
+    assert.eq(pcall(gates.tests, empty, {}), false)
 end
 
 function suite.performanceGateChecksCompleteTailSamples(): nil
     const good = {stages = {{name = "extract", samples = 900, p95 = 3}}}
-    test.equal(#gates.performance(good, {extract = 3}), 0)
-    test.equal(#gates.performance(good, {extract = 2.9}), 1)
-    test.equal(pcall(gates.performance, good, {update = 3}), false)
-    test.equal(pcall(gates.performance, {stages = {{name = "extract", samples = 899, p95 = 1}}}, {extract = 3}), false)
-    test.equal(pcall(gates.performance, {stages = {good.stages[1], good.stages[1]}}, {extract = 3}), false)
-    test.equal(
+    assert.eq(#gates.performance(good, {extract = 3}), 0)
+    assert.eq(#gates.performance(good, {extract = 2.9}), 1)
+    assert.eq(pcall(gates.performance, good, {update = 3}), false)
+    assert.eq(pcall(gates.performance, {stages = {{name = "extract", samples = 899, p95 = 1}}}, {extract = 3}), false)
+    assert.eq(pcall(gates.performance, {stages = {good.stages[1], good.stages[1]}}, {extract = 3}), false)
+    assert.eq(
         pcall(gates.performance, {stages = {{name = "extract", samples = 900, p95 = math.huge}}}, {
             extract = 3
         }),
@@ -68,19 +67,19 @@ function suite.previewResolvesCleanRoutesAndRefusesTraversal(): nil
         const root = scratch:toString()
         assert(files.createDirectory(root .. "/nested"))
         assert(files.write(root .. "/nested/index.html", "example"))
-        test.equal(docs.resolve(root, "/nested?query=yes"), root .. "/nested/index.html")
-        test.equal(docs.resolve(root, "/../nested"), nil)
-        test.equal(docs.resolve(root, "/%2e%2e/nested"), nil)
-        test.equal(docs.resolve(root, "/..\\nested"), nil)
-        test.equal(docs.resolve(root, "/missing"), nil)
+        assert.eq(docs.resolve(root, "/nested?query=yes"), root .. "/nested/index.html")
+        assert.eq(docs.resolve(root, "/../nested"), nil)
+        assert.eq(docs.resolve(root, "/%2e%2e/nested"), nil)
+        assert.eq(docs.resolve(root, "/..\\nested"), nil)
+        assert.eq(docs.resolve(root, "/missing"), nil)
     end
 end
 
 function suite.benchmarkModulesCannotShadowRuntimeModules(): nil
     for _, found in ipairs(assert(files.glob(commands.root .. "/bench/nupp/**/*.nupp"))) do
         const relative = found:toString():sub(#commands.root + #"/bench/nupp/" + 1)
-        test.equal(files.exists(commands.root .. "/src/" .. relative), false)
-        test.equal(files.exists(commands.root .. "/src/" .. relative:gsub("%.nupp$", "/init.nupp")), false)
+        assert.eq(files.exists(commands.root .. "/src/" .. relative), false)
+        assert.eq(files.exists(commands.root .. "/src/" .. relative:gsub("%.nupp$", "/init.nupp")), false)
     end
 end
 
@@ -115,11 +114,11 @@ os.exit(7)
             false,
             root
         )
-        test.equal(result.exit.exitCode, 7)
+        assert.eq(result.exit.exitCode, 7)
         const args = json.decode(result.output)
-        test.equal(args[1], "first argument")
-        test.equal(args[2], literal)
-        test.equal(args[3], "--flag=value with spaces")
+        assert.eq(args[1], "first argument")
+        assert.eq(args[2], literal)
+        assert.eq(args[3], "--flag=value with spaces")
     end
 end
 
@@ -153,7 +152,7 @@ error("the peer command never started")
         const secondProgram = root .. "/second.nupp"
         assert(files.write(firstProgram, rendezvous(first, second)))
         assert(files.write(secondProgram, rendezvous(second, first)))
-        test.equal(
+        assert.eq(
             commands.runTogether({
                 {args = {commands.compiler(), "run", firstProgram}, cwd = root},
                 {args = {commands.compiler(), "run", secondProgram}, cwd = root}

@@ -1,38 +1,37 @@
 local ecs = require("tecs.ecs")
 local gfx = require("tecs.gfx")
 local lighting = require("tecs.gfx.lighting")
-local test = require("nupp.test")
 
 local suite = {}
 
 function suite.startsWhiteWithNeitherLaneOn(): nil
     lighting.reset()
     const r, g, b = lighting.ambient()
-    test.equal(r, 1)
-    test.equal(g, 1)
-    test.equal(b, 1)
+    assert.eq(r, 1)
+    assert.eq(g, 1)
+    assert.eq(b, 1)
     -- Neither shadows nor bloom until a game asks: the passes are declared
     -- either way and the frame's own flags decide.
-    test.equal(lighting.shadows(), nil)
-    test.equal(lighting.bloom(), nil)
+    assert.eq(lighting.shadows(), nil)
+    assert.eq(lighting.bloom(), nil)
 end
 
 function suite.holdsTheAmbientToWhatALightCanBe(): nil
     lighting.reset()
     lighting.setAmbient(0.25, 0.5, 2.0)
     const r, g, b = lighting.ambient()
-    test.equal(r, 0.25)
-    test.equal(g, 0.5)
+    assert.eq(r, 0.25)
+    assert.eq(g, 0.5)
     -- Above one is meaningful, because the resolve writes a target wider than
     -- eight bits a channel.
-    test.equal(b, 2.0)
-    test.raises(
+    assert.eq(b, 2.0)
+    assert.raises(
         function(): nil
             lighting.setAmbient(-0.1, 0, 0)
         end,
         "at or above zero"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             lighting.setAmbient(0, 0 / 0, 0)
         end,
@@ -45,41 +44,41 @@ function suite.takesTheShadowDefaultsAndHoldsTheRanges(): nil
     lighting.reset()
     lighting.setShadows({})
     const held = assert(lighting.shadows())
-    test.equal(held.steps, 24)
+    assert.eq(held.steps, 24)
     -- The default matches `PointLight2D`'s own default height, so an occluder at
     -- height one and a light at its default are level.
-    test.equal(held.height, 64)
-    test.equal(held.margin, 200)
-    test.equal(held.dropOpacity, 0.4)
-    test.equal(held.dropLength, 512)
+    assert.eq(held.height, 64)
+    assert.eq(held.margin, 200)
+    assert.eq(held.dropOpacity, 0.4)
+    assert.eq(held.dropLength, 512)
 
     lighting.setShadows({steps = 8, height = 32, margin = 0, dropOpacity = 1, dropLength = 0})
     const tuned = assert(lighting.shadows())
-    test.equal(tuned.steps, 8)
-    test.equal(tuned.height, 32)
-    test.equal(tuned.dropLength, 0)
+    assert.eq(tuned.steps, 8)
+    assert.eq(tuned.height, 32)
+    assert.eq(tuned.dropLength, 0)
 
     -- Four is the floor because the march clamps its adaptive count to it, so a
     -- lower ceiling would be a ceiling below the floor.
-    test.raises(
+    assert.raises(
         function(): nil
             lighting.setShadows({steps = 2})
         end,
         "shadow steps"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             lighting.setShadows({dropOpacity = 1.5})
         end,
         "drop shadow opacity"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             lighting.setShadows({margin = -1})
         end,
         "shadow margin"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             lighting.setShadows({height = 0})
         end,
@@ -87,7 +86,7 @@ function suite.takesTheShadowDefaultsAndHoldsTheRanges(): nil
     )
 
     lighting.setShadows(nil)
-    test.equal(lighting.shadows(), nil)
+    assert.eq(lighting.shadows(), nil)
     lighting.reset()
 end
 
@@ -95,23 +94,23 @@ function suite.takesTheBloomDefaultsAndHoldsTheRanges(): nil
     lighting.reset()
     lighting.setBloom({})
     const held = assert(lighting.bloom())
-    test.equal(held.threshold, 0.8)
-    test.equal(held.knee, 0.1)
-    test.equal(held.intensity, 0.7)
+    assert.eq(held.threshold, 0.8)
+    assert.eq(held.knee, 0.1)
+    assert.eq(held.intensity, 0.7)
 
     lighting.setBloom({threshold = 2, knee = 0.5, intensity = 0})
     const tuned = assert(lighting.bloom())
-    test.equal(tuned.threshold, 2)
-    test.equal(tuned.intensity, 0)
+    assert.eq(tuned.threshold, 2)
+    assert.eq(tuned.intensity, 0)
 
     -- The knee divides, so zero is out of range rather than merely sharp.
-    test.raises(
+    assert.raises(
         function(): nil
             lighting.setBloom({knee = 0})
         end,
         "bloom knee"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             lighting.setBloom({threshold = -1})
         end,
@@ -119,7 +118,7 @@ function suite.takesTheBloomDefaultsAndHoldsTheRanges(): nil
     )
 
     lighting.setBloom(nil)
-    test.equal(lighting.bloom(), nil)
+    assert.eq(lighting.bloom(), nil)
     lighting.reset()
 end
 
@@ -131,26 +130,26 @@ function suite.spawnsALightAndTwoKindsOfCaster(): nil
     world:commit()
 
     const light: gfx.PointLight2D = assert(world:get(lamp, gfx.PointLight2D))
-    test.equal(light.height, 48)
-    test.equal(light.radius, 200)
-    test.equal(light.intensity, 2)
-    test.equal(light.g, 0.5)
+    assert.eq(light.height, 48)
+    assert.eq(light.radius, 200)
+    assert.eq(light.intensity, 2)
+    assert.eq(light.g, 0.5)
 
     const occluder: gfx.Occluder2D = assert(world:get(wall, gfx.Occluder2D))
-    test.equal(occluder.height, 0.75)
+    assert.eq(occluder.height, 0.75)
     -- A caster defaults to full height, which is the world's configured shadow
     -- height rather than one world unit.
     const shadow: gfx.DropShadow2D = assert(world:get(crate, gfx.DropShadow2D))
-    test.equal(shadow.height, 1.0)
+    assert.eq(shadow.height, 1.0)
 
     -- The default light is white at full strength, reaching two hundred and
     -- fifty-six world units from ninety-six above the plane.
     const plain = world:spawn(ecs.Transform2D(), gfx.PointLight2D())
     world:commit()
     const fallback: gfx.PointLight2D = assert(world:get(plain, gfx.PointLight2D))
-    test.equal(fallback.height, 64)
-    test.equal(fallback.radius, 256)
-    test.equal(fallback.intensity, 1)
+    assert.eq(fallback.height, 64)
+    assert.eq(fallback.radius, 256)
+    assert.eq(fallback.intensity, 1)
 end
 
 return suite

@@ -8,7 +8,7 @@ here may move them: `AGENTS.md` states the rule, and this suite is what holds
 the tree to it.
 
 Every assertion compares a literal against the value a module publishes, never
-against another identifier. `test.equal(ecs.EntityKey.componentName, "Key")`
+against another identifier. `assert.eq(ecs.EntityKey.componentName, "Key")`
 fails when someone tidies the spelling and passes when someone renames the Lua
 binding, which is the only shape that distinguishes the two.
 
@@ -19,7 +19,6 @@ actually carries rather than what it eventually should.
 ]]
 const tiled = require("tecs.tiled")
 
-local test = require("nupp.test")
 
 local assets = require("tecs.assets")
 local audio = require("tecs.audio")
@@ -65,9 +64,9 @@ local suite = {}
 
 --- Asserts that `values` holds exactly `expected`, in order.
 local function equalList(values: {string}, expected: {string}): nil
-    test.equal(#values, #expected, "the list has " .. tostring(#values) .. " entries")
+    assert.eq(#values, #expected, "the list has " .. tostring(#values) .. " entries")
     for index = 1, #expected do
-        test.equal(values[index], expected[index])
+        assert.eq(values[index], expected[index])
     end
 end
 
@@ -82,7 +81,7 @@ local function containsAll(values: {string}, expected: {string}): nil
         present[values[index]] = true
     end
     for index = 1, #expected do
-        test.assert(present[expected[index]] == true, "missing '" .. expected[index] .. "'")
+        assert(present[expected[index]] == true, "missing '" .. expected[index] .. "'")
     end
 end
 
@@ -93,8 +92,8 @@ end
 --- answering under an alias.
 local function registeredAs(name: string): nil
     local component = components.findByName(name)
-    test.assert(component ~= nil, "no component registered as '" .. name .. "'")
-    test.equal(assert(component).componentName, name)
+    assert(component ~= nil, "no component registered as '" .. name .. "'")
+    assert.eq(assert(component).componentName, name)
 end
 
 --- A device-free audio backend, so installing a mixer names its systems and its
@@ -130,72 +129,72 @@ end
 function suite.ecsBuiltinComponentNames(): nil
     -- `EntityKey` is the public binding and `Key` is the registered name. The
     -- two differ deliberately, and the registered one is what persists.
-    test.equal(ecs.EntityKey.componentName, "Key")
-    test.equal(ecs.Name.componentName, "Name")
-    test.equal(ecs.Paused.componentName, "Paused")
-    test.equal(ecs.Disabled.componentName, "Disabled")
-    test.equal(ecs.Transform2D.componentName, "Transform2D")
-    test.equal(ecs.Transform3D.componentName, "Transform3D")
-    test.equal(ecs.TTL.componentName, "TTL")
-    test.equal(ecs.RelativeTransform2D.componentName, "RelativeTransform2D")
+    assert.eq(ecs.EntityKey.componentName, "Key")
+    assert.eq(ecs.Name.componentName, "Name")
+    assert.eq(ecs.Paused.componentName, "Paused")
+    assert.eq(ecs.Disabled.componentName, "Disabled")
+    assert.eq(ecs.Transform2D.componentName, "Transform2D")
+    assert.eq(ecs.Transform3D.componentName, "Transform3D")
+    assert.eq(ecs.TTL.componentName, "TTL")
+    assert.eq(ecs.RelativeTransform2D.componentName, "RelativeTransform2D")
 end
 
 function suite.stateComponentsTakeTheStateSuffix(): nil
     local world = ecs.newWorld()
     local component = world:createState("compatibilitySuiteMenu")
-    test.equal(component.componentName, "compatibilitySuiteMenuState")
+    assert.eq(component.componentName, "compatibilitySuiteMenuState")
 end
 
 function suite.renderComponentNames(): nil
-    test.equal(ecs.PreviousTransform2D.componentName, "PreviousTransform2D")
-    test.equal(gfx.Tint.componentName, "Tint")
-    test.equal(gfx.Sprite.componentName, "Sprite")
-    test.equal(gfx.Camera2D.componentName, "Camera2D")
-    test.equal(gfx.ActiveCamera.componentName, "ActiveCamera")
-    test.equal(gfx.Renderable2D.componentName, "Renderable2D")
-    test.equal(gfx.Clip.componentName, "Clip")
-    test.equal(gfx.Material.componentName, "Material")
-    test.equal(gfx.TileChunk.componentName, "TileChunk")
-    test.equal(gfx.DirtyTileChunk.componentName, "DirtyTileChunk")
+    assert.eq(ecs.PreviousTransform2D.componentName, "PreviousTransform2D")
+    assert.eq(gfx.Tint.componentName, "Tint")
+    assert.eq(gfx.Sprite.componentName, "Sprite")
+    assert.eq(gfx.Camera2D.componentName, "Camera2D")
+    assert.eq(gfx.ActiveCamera.componentName, "ActiveCamera")
+    assert.eq(gfx.Renderable2D.componentName, "Renderable2D")
+    assert.eq(gfx.Clip.componentName, "Clip")
+    assert.eq(gfx.Material.componentName, "Material")
+    assert.eq(gfx.TileChunk.componentName, "TileChunk")
+    assert.eq(gfx.DirtyTileChunk.componentName, "DirtyTileChunk")
 end
 
 function suite.graphicsComponentNames(): nil
-    test.equal(gfx.Animation.componentName, "Animation")
-    test.equal(gfx.AnimationEvents.componentName, "AnimationEvents")
-    test.equal(gfx.Text.componentName, "Text")
-    test.equal(gfx.TextGlyph.componentName, "TextGlyph")
-    test.equal(gfx.PointLight2D.componentName, "PointLight2D")
-    test.equal(gfx.Occluder2D.componentName, "Occluder2D")
-    test.equal(gfx.DropShadow2D.componentName, "DropShadow2D")
+    assert.eq(gfx.Animation.componentName, "Animation")
+    assert.eq(gfx.AnimationEvents.componentName, "AnimationEvents")
+    assert.eq(gfx.Text.componentName, "Text")
+    assert.eq(gfx.TextGlyph.componentName, "TextGlyph")
+    assert.eq(gfx.PointLight2D.componentName, "PointLight2D")
+    assert.eq(gfx.Occluder2D.componentName, "Occluder2D")
+    assert.eq(gfx.DropShadow2D.componentName, "DropShadow2D")
 end
 
 function suite.audioComponentName(): nil
-    test.equal(audio.SoundComponent.componentName, "Sound")
+    assert.eq(audio.SoundComponent.componentName, "Sound")
 end
 
 function suite.sequenceComponentName(): nil
-    test.equal(sequence.TrackingTarget.componentName, "TweenTrackingTarget")
+    assert.eq(sequence.TrackingTarget.componentName, "TweenTrackingTarget")
 end
 
 function suite.physicsComponentNames(): nil
-    test.equal(physics.Body.componentName, "Body")
-    test.equal(physics.Collider.componentName, "Collider")
-    test.equal(physics.Motion.componentName, "Motion")
-    test.equal(physics.RigidBody.componentName, "RigidBody")
-    test.equal(physics.ColliderShape.componentName, "ColliderShape")
-    test.equal(physics.PhysicsHeld.componentName, "PhysicsHeld")
-    test.equal(physics.PhysicsDisabled.componentName, "PhysicsDisabled")
+    assert.eq(physics.Body.componentName, "Body")
+    assert.eq(physics.Collider.componentName, "Collider")
+    assert.eq(physics.Motion.componentName, "Motion")
+    assert.eq(physics.RigidBody.componentName, "RigidBody")
+    assert.eq(physics.ColliderShape.componentName, "ColliderShape")
+    assert.eq(physics.PhysicsHeld.componentName, "PhysicsHeld")
+    assert.eq(physics.PhysicsDisabled.componentName, "PhysicsDisabled")
     -- Joints have no Teal counterpart. They are new compatibility surfaces,
     -- pinned here from the build that introduced them.
-    test.equal(physics.Joint.componentName, "Joint")
-    test.equal(physics.JointLink.componentName, "JointLink")
+    assert.eq(physics.Joint.componentName, "Joint")
+    assert.eq(physics.JointLink.componentName, "JointLink")
 end
 
 function suite.relationshipNames(): nil
-    test.equal(ecs.ChildOf.componentName, "ChildOf")
-    test.equal(physics.ColliderOf.componentName, "ColliderOf")
-    test.equal(physics.JointBodyA.componentName, "JointBodyA")
-    test.equal(physics.JointBodyB.componentName, "JointBodyB")
+    assert.eq(ecs.ChildOf.componentName, "ChildOf")
+    assert.eq(physics.ColliderOf.componentName, "ColliderOf")
+    assert.eq(physics.JointBodyA.componentName, "JointBodyA")
+    assert.eq(physics.JointBodyB.componentName, "JointBodyB")
 end
 
 function suite.everyEngineComponentIsRegisteredUnderItsName(): nil
@@ -245,27 +244,27 @@ function suite.everyEngineComponentIsRegisteredUnderItsName(): nil
 end
 
 function suite.ecsEventNames(): nil
-    test.equal(events.name(ecs.OnSpawn), "OnSpawn")
-    test.equal(events.name(ecs.OnDespawn), "OnDespawn")
-    test.equal(events.name(ecs.ArchetypeCreated), "ArchetypeCreated")
-    test.equal(events.name(ecs.OnSnapshotSave), "OnSnapshotSave")
-    test.equal(events.name(ecs.StartSnapshotLoad), "StartSnapshotLoad")
-    test.equal(events.name(ecs.FinishSnapshotLoad), "FinishSnapshotLoad")
-    test.equal(events.name(ecs.StateEnter), "StateEnter")
-    test.equal(events.name(ecs.StateExit), "StateExit")
-    test.equal(events.name(ecs.StateBlur), "StateBlur")
-    test.equal(events.name(ecs.StateFocus), "StateFocus")
+    assert.eq(events.name(ecs.OnSpawn), "OnSpawn")
+    assert.eq(events.name(ecs.OnDespawn), "OnDespawn")
+    assert.eq(events.name(ecs.ArchetypeCreated), "ArchetypeCreated")
+    assert.eq(events.name(ecs.OnSnapshotSave), "OnSnapshotSave")
+    assert.eq(events.name(ecs.StartSnapshotLoad), "StartSnapshotLoad")
+    assert.eq(events.name(ecs.FinishSnapshotLoad), "FinishSnapshotLoad")
+    assert.eq(events.name(ecs.StateEnter), "StateEnter")
+    assert.eq(events.name(ecs.StateExit), "StateExit")
+    assert.eq(events.name(ecs.StateBlur), "StateBlur")
+    assert.eq(events.name(ecs.StateFocus), "StateFocus")
 end
 
 function suite.subsystemEventNames(): nil
-    test.equal(events.name(physics.ContactBegin), "ContactBegin")
-    test.equal(events.name(physics.ContactEnd), "ContactEnd")
-    test.equal(events.name(physics.SensorBegin), "SensorBegin")
-    test.equal(events.name(physics.SensorEnd), "SensorEnd")
-    test.equal(events.name(animation.Completed), "Completed")
-    test.equal(events.name(animation.Looped), "Looped")
-    test.equal(events.name(sequence.Emission), "SequenceEmission")
-    test.equal(events.name(ui.Event), "tecs.ui.Event")
+    assert.eq(events.name(physics.ContactBegin), "ContactBegin")
+    assert.eq(events.name(physics.ContactEnd), "ContactEnd")
+    assert.eq(events.name(physics.SensorBegin), "SensorBegin")
+    assert.eq(events.name(physics.SensorEnd), "SensorEnd")
+    assert.eq(events.name(animation.Completed), "Completed")
+    assert.eq(events.name(animation.Looped), "Looped")
+    assert.eq(events.name(sequence.Emission), "SequenceEmission")
+    assert.eq(events.name(ui.Event), "tecs.ui.Event")
 end
 
 -------------------------------------------------------------------------------
@@ -276,44 +275,44 @@ end
 -------------------------------------------------------------------------------
 
 function suite.platformEventNames(): nil
-    test.equal(events.name(platformevents.Quit), "tecs.platform.events.quit")
-    test.equal(events.name(platformevents.WindowCloseRequested), "tecs.platform.events.windowCloseRequested")
-    test.equal(events.name(platformevents.WindowResized), "tecs.platform.events.windowResized")
-    test.equal(events.name(platformevents.WindowScaleChanged), "tecs.platform.events.windowScaleChanged")
-    test.equal(events.name(platformevents.WindowFocusGained), "tecs.platform.events.windowFocusGained")
-    test.equal(events.name(platformevents.WindowFocusLost), "tecs.platform.events.windowFocusLost")
-    test.equal(events.name(platformevents.KeyDown), "tecs.platform.events.keyDown")
-    test.equal(events.name(platformevents.KeyUp), "tecs.platform.events.keyUp")
-    test.equal(events.name(platformevents.MouseMotion), "tecs.platform.events.mouseMotion")
-    test.equal(events.name(platformevents.MouseDown), "tecs.platform.events.mouseDown")
-    test.equal(events.name(platformevents.MouseUp), "tecs.platform.events.mouseUp")
-    test.equal(events.name(platformevents.MouseWheel), "tecs.platform.events.mouseWheel")
-    test.equal(events.name(platformevents.TextInput), "tecs.platform.events.textInput")
-    test.equal(events.name(platformevents.FingerDown), "tecs.platform.events.fingerDown")
-    test.equal(events.name(platformevents.FingerUp), "tecs.platform.events.fingerUp")
-    test.equal(events.name(platformevents.FingerMotion), "tecs.platform.events.fingerMotion")
-    test.equal(events.name(platformevents.FingerCanceled), "tecs.platform.events.fingerCanceled")
-    test.equal(events.name(platformevents.GamepadAdded), "tecs.platform.events.gamepadAdded")
-    test.equal(events.name(platformevents.GamepadRemoved), "tecs.platform.events.gamepadRemoved")
-    test.equal(events.name(platformevents.GamepadButtonDown), "tecs.platform.events.gamepadButtonDown")
-    test.equal(events.name(platformevents.GamepadButtonUp), "tecs.platform.events.gamepadButtonUp")
-    test.equal(events.name(platformevents.GamepadAxis), "tecs.platform.events.gamepadAxis")
+    assert.eq(events.name(platformevents.Quit), "tecs.platform.events.quit")
+    assert.eq(events.name(platformevents.WindowCloseRequested), "tecs.platform.events.windowCloseRequested")
+    assert.eq(events.name(platformevents.WindowResized), "tecs.platform.events.windowResized")
+    assert.eq(events.name(platformevents.WindowScaleChanged), "tecs.platform.events.windowScaleChanged")
+    assert.eq(events.name(platformevents.WindowFocusGained), "tecs.platform.events.windowFocusGained")
+    assert.eq(events.name(platformevents.WindowFocusLost), "tecs.platform.events.windowFocusLost")
+    assert.eq(events.name(platformevents.KeyDown), "tecs.platform.events.keyDown")
+    assert.eq(events.name(platformevents.KeyUp), "tecs.platform.events.keyUp")
+    assert.eq(events.name(platformevents.MouseMotion), "tecs.platform.events.mouseMotion")
+    assert.eq(events.name(platformevents.MouseDown), "tecs.platform.events.mouseDown")
+    assert.eq(events.name(platformevents.MouseUp), "tecs.platform.events.mouseUp")
+    assert.eq(events.name(platformevents.MouseWheel), "tecs.platform.events.mouseWheel")
+    assert.eq(events.name(platformevents.TextInput), "tecs.platform.events.textInput")
+    assert.eq(events.name(platformevents.FingerDown), "tecs.platform.events.fingerDown")
+    assert.eq(events.name(platformevents.FingerUp), "tecs.platform.events.fingerUp")
+    assert.eq(events.name(platformevents.FingerMotion), "tecs.platform.events.fingerMotion")
+    assert.eq(events.name(platformevents.FingerCanceled), "tecs.platform.events.fingerCanceled")
+    assert.eq(events.name(platformevents.GamepadAdded), "tecs.platform.events.gamepadAdded")
+    assert.eq(events.name(platformevents.GamepadRemoved), "tecs.platform.events.gamepadRemoved")
+    assert.eq(events.name(platformevents.GamepadButtonDown), "tecs.platform.events.gamepadButtonDown")
+    assert.eq(events.name(platformevents.GamepadButtonUp), "tecs.platform.events.gamepadButtonUp")
+    assert.eq(events.name(platformevents.GamepadAxis), "tecs.platform.events.gamepadAxis")
 end
 
 function suite.platformEventKinds(): nil
-    test.equal(platformevents.quit().kind, "quit")
-    test.equal(platformevents.closeRequested().kind, "windowCloseRequested")
-    test.equal(platformevents.resized(64, 48).kind, "windowResized")
-    test.equal(platformevents.scaleChanged(2.0, 64, 48).kind, "windowScaleChanged")
-    test.equal(platformevents.focused(true).kind, "windowFocusGained")
-    test.equal(platformevents.focused(false).kind, "windowFocusLost")
-    test.equal(platformevents.key(true, "KeyA").kind, "keyDown")
-    test.equal(platformevents.key(false, "KeyA").kind, "keyUp")
-    test.equal(platformevents.pointerMoved(1.0, 2.0).kind, "mouseMotion")
-    test.equal(platformevents.pointerButton(true, 1, 1.0, 2.0).kind, "mouseDown")
-    test.equal(platformevents.pointerButton(false, 1, 1.0, 2.0).kind, "mouseUp")
-    test.equal(platformevents.wheel(0.0, 1.0).kind, "mouseWheel")
-    test.equal(platformevents.text("a").kind, "textInput")
+    assert.eq(platformevents.quit().kind, "quit")
+    assert.eq(platformevents.closeRequested().kind, "windowCloseRequested")
+    assert.eq(platformevents.resized(64, 48).kind, "windowResized")
+    assert.eq(platformevents.scaleChanged(2.0, 64, 48).kind, "windowScaleChanged")
+    assert.eq(platformevents.focused(true).kind, "windowFocusGained")
+    assert.eq(platformevents.focused(false).kind, "windowFocusLost")
+    assert.eq(platformevents.key(true, "KeyA").kind, "keyDown")
+    assert.eq(platformevents.key(false, "KeyA").kind, "keyUp")
+    assert.eq(platformevents.pointerMoved(1.0, 2.0).kind, "mouseMotion")
+    assert.eq(platformevents.pointerButton(true, 1, 1.0, 2.0).kind, "mouseDown")
+    assert.eq(platformevents.pointerButton(false, 1, 1.0, 2.0).kind, "mouseUp")
+    assert.eq(platformevents.wheel(0.0, 1.0).kind, "mouseWheel")
+    assert.eq(platformevents.text("a").kind, "textInput")
 end
 
 -------------------------------------------------------------------------------
@@ -341,8 +340,8 @@ function suite.aLoggerNameStampsItsLines(): nil
     nupplog.named("tecs.audio"):info("probe")
     nupplog.setSink(previousSink)
     nupplog.setLevel(previousLevel)
-    test.equal(#seen, 1)
-    test.equal(seen[1], "tecs.audio")
+    assert.eq(#seen, 1)
+    assert.eq(seen[1], "tecs.audio")
 end
 
 -------------------------------------------------------------------------------
@@ -572,7 +571,7 @@ local function subsetOf(values: {string}, allowed: {string}): nil
         permitted[allowed[index]] = true
     end
     for index = 1, #values do
-        test.assert(permitted[values[index]] == true, "unexpected saved key '" .. values[index] .. "'")
+        assert(permitted[values[index]] == true, "unexpected saved key '" .. values[index] .. "'")
     end
 end
 
@@ -580,18 +579,18 @@ function suite.spriteSnapshotKeys(): nil
     local keys: {string} = {"image", "u0", "u1", "v0", "v1"}
     subsetOf(savedKeys(gfx.Sprite, gfx.Sprite(0, 0.0, 0.0, 1.0, 1.0).value), keys)
     local restored = loadPayload(gfx.Sprite, {image = "", u0 = 0.125, v0 = 0.25, u1 = 0.5, v1 = 0.75})
-    test.equal(restored.u0, 0.125)
-    test.equal(restored.v0, 0.25)
-    test.equal(restored.u1, 0.5)
-    test.equal(restored.v1, 0.75)
+    assert.eq(restored.u0, 0.125)
+    assert.eq(restored.v0, 0.25)
+    assert.eq(restored.u1, 0.5)
+    assert.eq(restored.v1, 0.75)
 end
 
 function suite.materialSnapshotKeys(): nil
     materials.reset()
     equalList(savedKeys(gfx.Material, gfx.Material(0, 0.25).value), {"material", "param"})
     local restored = loadPayload(gfx.Material, {material = "circle", param = 0.5})
-    test.equal(restored.id, materials.id("circle"))
-    test.equal(restored.param, 0.5)
+    assert.eq(restored.id, materials.id("circle"))
+    assert.eq(restored.param, 0.5)
 end
 
 function suite.soundSnapshotKeys(): nil
@@ -609,14 +608,14 @@ function suite.soundSnapshotKeys(): nil
         z = 3.0,
         group = "",
     })
-    test.equal(restored.playing, false)
-    test.equal(restored.gain, 0.5)
-    test.equal(restored.loop, true)
-    test.equal(restored.pitch, 1.5)
-    test.equal(restored.spatial, true)
-    test.equal(restored.x, 1.0)
-    test.equal(restored.y, 2.0)
-    test.equal(restored.z, 3.0)
+    assert.eq(restored.playing, false)
+    assert.eq(restored.gain, 0.5)
+    assert.eq(restored.loop, true)
+    assert.eq(restored.pitch, 1.5)
+    assert.eq(restored.spatial, true)
+    assert.eq(restored.x, 1.0)
+    assert.eq(restored.y, 2.0)
+    assert.eq(restored.z, 3.0)
 end
 
 function suite.animationSnapshotKeys(): nil
@@ -630,10 +629,10 @@ function suite.animationSnapshotKeys(): nil
         loop = false,
         playing = false
     })
-    test.equal(restored.speed, 2.0)
-    test.equal(restored.time, 0.5)
-    test.equal(restored.loop, false)
-    test.equal(restored.playing, false)
+    assert.eq(restored.speed, 2.0)
+    assert.eq(restored.time, 0.5)
+    assert.eq(restored.loop, false)
+    assert.eq(restored.playing, false)
 end
 
 function suite.textSnapshotKeys(): nil
@@ -646,10 +645,10 @@ function suite.textSnapshotKeys(): nil
         align = "center",
         wrapWidth = 80.0
     })
-    test.equal(restored.text, "hello")
-    test.equal(restored.size, 24.0)
-    test.equal(restored.align, "center")
-    test.equal(restored.wrapWidth, 80.0)
+    assert.eq(restored.text, "hello")
+    assert.eq(restored.size, 24.0)
+    assert.eq(restored.align, "center")
+    assert.eq(restored.wrapWidth, 80.0)
 end
 
 -------------------------------------------------------------------------------
@@ -871,7 +870,7 @@ end
 function suite.depthTargetNameIsReserved(): nil
     passes.reset()
     -- Not a declared target, and the graph refuses to let one take the name.
-    test.raises(
+    assert.raises(
         function(): nil
             passes.declareTarget({name = "depth", format = "rgba8"})
         end,
@@ -888,8 +887,8 @@ end
 
 function suite.builtinMaterialNames(): nil
     materials.reset()
-    test.equal(materials.DEFAULT, "textured")
-    test.equal(materials.id("textured"), 0)
+    assert.eq(materials.DEFAULT, "textured")
+    assert.eq(materials.id("textured"), 0)
     equalList(materials.names(), {
         "textured",
         "capsule",
@@ -918,10 +917,10 @@ function suite.layerSortNames(): nil
     layers.configure(1, {sort = "topdown"})
     layers.configure(2, {sort = "z"})
     layers.configure(3, {sort = "isometric"})
-    test.equal(layers.SORT_TOPDOWN, 0)
-    test.equal(layers.SORT_Z, 1)
-    test.equal(layers.SORT_ISOMETRIC, 2)
-    test.raises(
+    assert.eq(layers.SORT_TOPDOWN, 0)
+    assert.eq(layers.SORT_Z, 1)
+    assert.eq(layers.SORT_ISOMETRIC, 2)
+    assert.raises(
         function(): nil
             layers.configure(4, {sort = "topDown" as layers.Sort})
         end,
@@ -936,16 +935,16 @@ end
 -------------------------------------------------------------------------------
 
 function suite.contentKindNames(): nil
-    test.equal(assets.DOCUMENT, "document")
-    test.equal(assets.IMAGE, "image")
-    test.equal(assets.SOUND, "sound")
-    test.equal(assets.MODEL, "model")
+    assert.eq(assets.DOCUMENT, "document")
+    assert.eq(assets.IMAGE, "image")
+    assert.eq(assets.SOUND, "sound")
+    assert.eq(assets.MODEL, "model")
     -- New with the rewrite: the SDL tree noted no font or shader content.
-    test.equal(assets.FONT, "font")
-    test.equal(assets.SHADER, "shader")
+    assert.eq(assets.FONT, "font")
+    assert.eq(assets.SHADER, "shader")
     -- New with the music kinds.
-    test.equal(assets.MUSIC_MIDI, "music.midi")
-    test.equal(assets.MUSIC_FM, "music.fm")
+    assert.eq(assets.MUSIC_MIDI, "music.midi")
+    assert.eq(assets.MUSIC_FM, "music.fm")
 end
 
 -------------------------------------------------------------------------------
@@ -1025,17 +1024,17 @@ end
 
 function suite.mouseButtonNames(): nil
     local state = input.newInput(gamepadbackend.none())
-    test.equal(state:mouseDown("left"), false)
-    test.equal(state:mouseDown("middle"), false)
-    test.equal(state:mouseDown("right"), false)
+    assert.eq(state:mouseDown("left"), false)
+    assert.eq(state:mouseDown("middle"), false)
+    assert.eq(state:mouseDown("right"), false)
     -- `winit` spells these `Back` and `Forward` where SDL spelled them `x1`
     -- and `x2`. A device vocabulary follows the library reporting it, so this
     -- records a deliberate break rather than a name to preserve. The numeric
     -- codes four and five did not move, which is why both still answer.
-    test.equal(state:mouseDown("back"), false)
-    test.equal(state:mouseDown("forward"), false)
-    test.equal(state:mouseDown(4), false)
-    test.equal(state:mouseDown(5), false)
+    assert.eq(state:mouseDown("back"), false)
+    assert.eq(state:mouseDown("forward"), false)
+    assert.eq(state:mouseDown(4), false)
+    assert.eq(state:mouseDown(5), false)
 end
 
 -------------------------------------------------------------------------------
@@ -1046,12 +1045,12 @@ end
 -------------------------------------------------------------------------------
 
 function suite.physicsBodyAndShapeNumbering(): nil
-    test.equal(physicscontract.BODY_STATIC, 0)
-    test.equal(physicscontract.BODY_KINEMATIC, 1)
-    test.equal(physicscontract.BODY_DYNAMIC, 2)
-    test.equal(physicscontract.SHAPE_BOX, 0)
-    test.equal(physicscontract.SHAPE_CIRCLE, 1)
-    test.equal(physicscontract.SHAPE_CAPSULE, 2)
+    assert.eq(physicscontract.BODY_STATIC, 0)
+    assert.eq(physicscontract.BODY_KINEMATIC, 1)
+    assert.eq(physicscontract.BODY_DYNAMIC, 2)
+    assert.eq(physicscontract.SHAPE_BOX, 0)
+    assert.eq(physicscontract.SHAPE_CIRCLE, 1)
+    assert.eq(physicscontract.SHAPE_CAPSULE, 2)
 end
 
 -------------------------------------------------------------------------------
@@ -1063,93 +1062,93 @@ end
 -------------------------------------------------------------------------------
 
 function suite.sequenceOpcodeNumbering(): nil
-    test.equal(sequenceprogram.WAIT, 1)
-    test.equal(sequenceprogram.CALL, 2)
-    test.equal(sequenceprogram.EMIT, 3)
-    test.equal(sequenceprogram.JUMP, 4)
-    test.equal(sequenceprogram.END, 5)
-    test.equal(sequenceprogram.WAIT_SIGNAL, 6)
-    test.equal(sequenceprogram.FORK, 7)
-    test.equal(sequenceprogram.JOIN, 8)
-    test.equal(sequenceprogram.WAIT_QUERY, 9)
-    test.equal(sequenceprogram.PLAY_TWEEN, 10)
-    test.equal(sequenceprogram.WAIT_TWEEN, 11)
-    test.equal(sequenceprogram.EVAL, 12)
-    test.equal(sequenceprogram.AWAIT, 13)
-    test.equal(sequenceprogram.STRIDE, 3)
+    assert.eq(sequenceprogram.WAIT, 1)
+    assert.eq(sequenceprogram.CALL, 2)
+    assert.eq(sequenceprogram.EMIT, 3)
+    assert.eq(sequenceprogram.JUMP, 4)
+    assert.eq(sequenceprogram.END, 5)
+    assert.eq(sequenceprogram.WAIT_SIGNAL, 6)
+    assert.eq(sequenceprogram.FORK, 7)
+    assert.eq(sequenceprogram.JOIN, 8)
+    assert.eq(sequenceprogram.WAIT_QUERY, 9)
+    assert.eq(sequenceprogram.PLAY_TWEEN, 10)
+    assert.eq(sequenceprogram.WAIT_TWEEN, 11)
+    assert.eq(sequenceprogram.EVAL, 12)
+    assert.eq(sequenceprogram.AWAIT, 13)
+    assert.eq(sequenceprogram.STRIDE, 3)
 end
 
 function suite.tweenEvaluatorName(): nil
-    test.equal(tweenrun.EVALUATOR, "tecs.tween")
+    assert.eq(tweenrun.EVALUATOR, "tecs.tween")
 end
 
 function suite.easingNames(): nil
-    test.assert(sequence.easing("linear") ~= nil)
-    test.assert(sequence.easing("quadIn") ~= nil)
-    test.assert(sequence.easing("quadOut") ~= nil)
-    test.assert(sequence.easing("quadInOut") ~= nil)
-    test.assert(sequence.easing("quadOutIn") ~= nil)
-    test.assert(sequence.easing("cubicIn") ~= nil)
-    test.assert(sequence.easing("cubicOut") ~= nil)
-    test.assert(sequence.easing("cubicInOut") ~= nil)
-    test.assert(sequence.easing("cubicOutIn") ~= nil)
-    test.assert(sequence.easing("quartIn") ~= nil)
-    test.assert(sequence.easing("quartOut") ~= nil)
-    test.assert(sequence.easing("quartInOut") ~= nil)
-    test.assert(sequence.easing("quartOutIn") ~= nil)
-    test.assert(sequence.easing("quintIn") ~= nil)
-    test.assert(sequence.easing("quintOut") ~= nil)
-    test.assert(sequence.easing("quintInOut") ~= nil)
-    test.assert(sequence.easing("quintOutIn") ~= nil)
-    test.assert(sequence.easing("sineIn") ~= nil)
-    test.assert(sequence.easing("sineOut") ~= nil)
-    test.assert(sequence.easing("sineInOut") ~= nil)
-    test.assert(sequence.easing("sineOutIn") ~= nil)
-    test.assert(sequence.easing("expoIn") ~= nil)
-    test.assert(sequence.easing("expoOut") ~= nil)
-    test.assert(sequence.easing("expoInOut") ~= nil)
-    test.assert(sequence.easing("expoOutIn") ~= nil)
-    test.assert(sequence.easing("backIn") ~= nil)
-    test.assert(sequence.easing("backOut") ~= nil)
-    test.assert(sequence.easing("backInOut") ~= nil)
-    test.assert(sequence.easing("backOutIn") ~= nil)
-    test.assert(sequence.easing("elasticIn") ~= nil)
-    test.assert(sequence.easing("elasticOut") ~= nil)
-    test.assert(sequence.easing("elasticInOut") ~= nil)
-    test.assert(sequence.easing("elasticOutIn") ~= nil)
-    test.assert(sequence.easing("bounceIn") ~= nil)
-    test.assert(sequence.easing("bounceOut") ~= nil)
-    test.assert(sequence.easing("bounceInOut") ~= nil)
-    test.assert(sequence.easing("bounceOutIn") ~= nil)
+    assert(sequence.easing("linear") ~= nil)
+    assert(sequence.easing("quadIn") ~= nil)
+    assert(sequence.easing("quadOut") ~= nil)
+    assert(sequence.easing("quadInOut") ~= nil)
+    assert(sequence.easing("quadOutIn") ~= nil)
+    assert(sequence.easing("cubicIn") ~= nil)
+    assert(sequence.easing("cubicOut") ~= nil)
+    assert(sequence.easing("cubicInOut") ~= nil)
+    assert(sequence.easing("cubicOutIn") ~= nil)
+    assert(sequence.easing("quartIn") ~= nil)
+    assert(sequence.easing("quartOut") ~= nil)
+    assert(sequence.easing("quartInOut") ~= nil)
+    assert(sequence.easing("quartOutIn") ~= nil)
+    assert(sequence.easing("quintIn") ~= nil)
+    assert(sequence.easing("quintOut") ~= nil)
+    assert(sequence.easing("quintInOut") ~= nil)
+    assert(sequence.easing("quintOutIn") ~= nil)
+    assert(sequence.easing("sineIn") ~= nil)
+    assert(sequence.easing("sineOut") ~= nil)
+    assert(sequence.easing("sineInOut") ~= nil)
+    assert(sequence.easing("sineOutIn") ~= nil)
+    assert(sequence.easing("expoIn") ~= nil)
+    assert(sequence.easing("expoOut") ~= nil)
+    assert(sequence.easing("expoInOut") ~= nil)
+    assert(sequence.easing("expoOutIn") ~= nil)
+    assert(sequence.easing("backIn") ~= nil)
+    assert(sequence.easing("backOut") ~= nil)
+    assert(sequence.easing("backInOut") ~= nil)
+    assert(sequence.easing("backOutIn") ~= nil)
+    assert(sequence.easing("elasticIn") ~= nil)
+    assert(sequence.easing("elasticOut") ~= nil)
+    assert(sequence.easing("elasticInOut") ~= nil)
+    assert(sequence.easing("elasticOutIn") ~= nil)
+    assert(sequence.easing("bounceIn") ~= nil)
+    assert(sequence.easing("bounceOut") ~= nil)
+    assert(sequence.easing("bounceInOut") ~= nil)
+    assert(sequence.easing("bounceOutIn") ~= nil)
 end
 
 function suite.tweenTargetNames(): nil
-    test.assert(tweeneval.resolveTarget("transform.x") ~= nil)
-    test.assert(tweeneval.resolveTarget("transform.y") ~= nil)
-    test.assert(tweeneval.resolveTarget("transform.xy") ~= nil)
-    test.assert(tweeneval.resolveTarget("transform.rotation") ~= nil)
-    test.assert(tweeneval.resolveTarget("transform.rotationShortest") ~= nil)
-    test.assert(tweeneval.resolveTarget("transform.scaleX") ~= nil)
-    test.assert(tweeneval.resolveTarget("transform.scaleY") ~= nil)
-    test.assert(tweeneval.resolveTarget("transform.scaleXY") ~= nil)
-    test.assert(tweeneval.resolveTarget("color.rgba") ~= nil)
-    test.assert(tweeneval.resolveTarget("color.a") ~= nil)
+    assert(tweeneval.resolveTarget("transform.x") ~= nil)
+    assert(tweeneval.resolveTarget("transform.y") ~= nil)
+    assert(tweeneval.resolveTarget("transform.xy") ~= nil)
+    assert(tweeneval.resolveTarget("transform.rotation") ~= nil)
+    assert(tweeneval.resolveTarget("transform.rotationShortest") ~= nil)
+    assert(tweeneval.resolveTarget("transform.scaleX") ~= nil)
+    assert(tweeneval.resolveTarget("transform.scaleY") ~= nil)
+    assert(tweeneval.resolveTarget("transform.scaleXY") ~= nil)
+    assert(tweeneval.resolveTarget("color.rgba") ~= nil)
+    assert(tweeneval.resolveTarget("color.a") ~= nil)
 end
 
 function suite.retainedUiAndTiledNames(): nil
-    test.equal(ui.Node.componentName, "UiNode")
-    test.equal(ui.Style.componentName, "UiStyle")
-    test.equal(ui.Root.componentName, "UiRoot")
-    test.equal(ui.Layout.componentName, "UiLayout")
-    test.equal(ui.Paint.componentName, "UiPaint")
-    test.equal(ui.Intrinsic.componentName, "UiIntrinsic")
-    test.equal(ui.Scroll.componentName, "UiScroll")
-    test.equal(ui.Scrollbar.componentName, "UiScrollbar")
-    test.equal(ui.Interaction.componentName, "UiInteraction")
-    test.equal(ui.InteractionState.componentName, "UiInteractionState")
-    test.equal(ui.FocusScope.componentName, "UiFocusScope")
-    test.equal(tiled.Tilemap.componentName, "Tilemap")
-    test.equal(tiled.TileSource.componentName, "TileSource")
+    assert.eq(ui.Node.componentName, "UiNode")
+    assert.eq(ui.Style.componentName, "UiStyle")
+    assert.eq(ui.Root.componentName, "UiRoot")
+    assert.eq(ui.Layout.componentName, "UiLayout")
+    assert.eq(ui.Paint.componentName, "UiPaint")
+    assert.eq(ui.Intrinsic.componentName, "UiIntrinsic")
+    assert.eq(ui.Scroll.componentName, "UiScroll")
+    assert.eq(ui.Scrollbar.componentName, "UiScrollbar")
+    assert.eq(ui.Interaction.componentName, "UiInteraction")
+    assert.eq(ui.InteractionState.componentName, "UiInteractionState")
+    assert.eq(ui.FocusScope.componentName, "UiFocusScope")
+    assert.eq(tiled.Tilemap.componentName, "Tilemap")
+    assert.eq(tiled.TileSource.componentName, "TileSource")
 end
 
 -------------------------------------------------------------------------------
@@ -1162,9 +1161,9 @@ end
 -------------------------------------------------------------------------------
 
 function suite.pathPolicyNames(): nil
-    test.equal(application.DEFAULT_IDENTITY, "tecs")
-    test.equal(files.ASSET_ROOT_VARIABLE, "TECS_ASSETS")
-    test.equal(files.CONTENT_GLOBAL, "__tecsContent")
+    assert.eq(application.DEFAULT_IDENTITY, "tecs")
+    assert.eq(files.ASSET_ROOT_VARIABLE, "TECS_ASSETS")
+    assert.eq(files.CONTENT_GLOBAL, "__tecsContent")
 end
 
 return suite

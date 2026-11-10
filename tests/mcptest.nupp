@@ -2,7 +2,6 @@ local application = require("tecs.application")
 local ecs = require("tecs.ecs")
 local json = require("nupp.codec.json")
 local mcp = require("tecs.mcp")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -35,24 +34,24 @@ function suite.answersInitializeWithTheProtocolVersion(): nil
     local response = decode(mcp.dispatch([[{"jsonrpc":"2.0","id":1,"method":"initialize"}]]))
     local result = response.result as {[string]: any}
 
-    test.equal(response.jsonrpc as string, "2.0")
-    test.equal(result.protocolVersion as string, "2025-06-18")
-    test.equal((result.serverInfo as {[string]: any}).name as string, "tecs")
+    assert.eq(response.jsonrpc as string, "2.0")
+    assert.eq(result.protocolVersion as string, "2025-06-18")
+    assert.eq((result.serverInfo as {[string]: any}).name as string, "tecs")
 end
 
 function suite.reportsAParseErrorForMalformedJSON(): nil
     local response = decode(mcp.dispatch("{not json"))
     local failure = response.error as {[string]: any}
 
-    test.equal(failure.code as integer, -32700)
+    assert.eq(failure.code as integer, -32700)
 end
 
 function suite.reportsAnInvalidRequestWithNoMethod(): nil
     local response = decode(mcp.dispatch([[{"jsonrpc":"2.0","id":2}]]))
     local failure = response.error as {[string]: any}
 
-    test.equal(failure.code as integer, -32600)
-    test.equal(failure.message as string, "no method")
+    assert.eq(failure.code as integer, -32600)
+    assert.eq(failure.message as string, "no method")
 end
 
 function suite.listsEveryBuiltInToolName(): nil
@@ -89,7 +88,7 @@ function suite.listsEveryBuiltInToolName(): nil
         "despawn"
     }
     for index = 1, #expected do
-        test.assert(names[expected[index]] == true, `tools/list is missing ${expected[index]}`)
+        assert(names[expected[index]] == true, `tools/list is missing ${expected[index]}`)
     end
 end
 
@@ -105,16 +104,16 @@ function suite.advertisesAnnotationsAndSchemasForABuiltInTool(): nil
 
     local entry = found as {[string]: any}
     local annotations = entry.annotations as {[string]: any}
-    test.assert(annotations.readOnlyHint == true)
-    test.assert(annotations.destructiveHint == false)
-    test.assert(annotations.whenCrashedHint == false)
+    assert(annotations.readOnlyHint == true)
+    assert(annotations.destructiveHint == false)
+    assert(annotations.whenCrashedHint == false)
 
     local schema = entry.inputSchema as {[string]: any}
     local properties = schema.properties as {[string]: any}
-    test.assert(properties.include ~= nil)
-    test.assert(properties.limit ~= nil)
-    test.assert(properties.values ~= nil)
-    test.equal((schema.required as {string})[1], "include")
+    assert(properties.include ~= nil)
+    assert(properties.limit ~= nil)
+    assert(properties.values ~= nil)
+    assert.eq((schema.required as {string})[1], "include")
 end
 
 function suite.dispatchesARegisteredToolByName(): nil
@@ -131,8 +130,8 @@ function suite.dispatchesARegisteredToolByName(): nil
     local result = call("test.mcp.echo", {value = "hello"})
     local structured = result.structuredContent as {[string]: any}
 
-    test.equal(structured.echoed as string, "hello")
-    test.assert(result.isError == nil)
+    assert.eq(structured.echoed as string, "hello")
+    assert(result.isError == nil)
 end
 
 function suite.reportsMethodNotFoundForAnUnknownTool(): nil
@@ -148,8 +147,8 @@ function suite.reportsMethodNotFoundForAnUnknownTool(): nil
     )
     local failure = response.error as {[string]: any}
 
-    test.equal(failure.code as integer, -32601)
-    test.assert(failure.message as string ~= "")
+    assert.eq(failure.code as integer, -32601)
+    assert(failure.message as string ~= "")
 end
 
 function suite.reportsAFailingHandlerToTheAgentRatherThanRaising(): nil
@@ -162,8 +161,8 @@ function suite.reportsAFailingHandlerToTheAgentRatherThanRaising(): nil
 
     local result = call("test.mcp.raises")
 
-    test.assert(result.isError == true)
-    test.equal(errorText(result), "deliberate")
+    assert(result.isError == true)
+    assert.eq(errorText(result), "deliberate")
 end
 
 function suite.rejectsArgumentsAToolRequires(): nil
@@ -172,8 +171,8 @@ function suite.rejectsArgumentsAToolRequires(): nil
     -- it: a schema is advertised to the agent, never trusted from it.
     local result = call("query", {include = json.EMPTY_ARRAY})
 
-    test.assert(result.isError == true)
-    test.assert(errorText(result):find("include must name at least one component", 1, true) ~= nil)
+    assert(result.isError == true)
+    assert(errorText(result):find("include must name at least one component", 1, true) ~= nil)
 end
 
 function suite.rejectsAnUnknownComponentNameWithTheKnownOnes(): nil
@@ -181,9 +180,9 @@ function suite.rejectsAnUnknownComponentNameWithTheKnownOnes(): nil
 
     local result = call("query", {include = {"test.mcp.nothingDeclaredThis"}})
 
-    test.assert(result.isError == true)
-    test.assert(errorText(result):find("no component named", 1, true) ~= nil)
-    test.assert(errorText(result):find("known:", 1, true) ~= nil)
+    assert(result.isError == true)
+    assert(errorText(result):find("no component named", 1, true) ~= nil)
+    assert(errorText(result):find("known:", 1, true) ~= nil)
 end
 
 function suite.rejectsAMissingRequiredNameArgument(): nil
@@ -191,8 +190,8 @@ function suite.rejectsAMissingRequiredNameArgument(): nil
 
     local result = call("systems_info", json.EMPTY_OBJECT as {[string]: any})
 
-    test.assert(result.isError == true)
-    test.assert(errorText(result):find("invalid_arguments", 1, true) ~= nil)
+    assert(result.isError == true)
+    assert(errorText(result):find("invalid_arguments", 1, true) ~= nil)
 end
 
 function suite.answersEveryToolThatNeedsAWorldWithWhyThereIsNone(): nil
@@ -200,27 +199,27 @@ function suite.answersEveryToolThatNeedsAWorldWithWhyThereIsNone(): nil
 
     local result = call("stats")
 
-    test.assert(result.isError == true)
-    test.assert(errorText(result):find("no world is bound", 1, true) ~= nil)
+    assert(result.isError == true)
+    assert(errorText(result):find("no world is bound", 1, true) ~= nil)
 end
 
 function suite.blocksWorldToolsAfterACrashAndKeepsPingAnswering(): nil
     mcp.setCrashed("traceback: something broke")
 
     local blocked = call("stats")
-    test.assert(blocked.isError == true)
-    test.assert(blocked.crashed == true)
-    test.equal(errorText(blocked), "traceback: something broke")
+    assert(blocked.isError == true)
+    assert(blocked.crashed == true)
+    assert.eq(errorText(blocked), "traceback: something broke")
 
     local alive = call("ping")
-    test.assert(alive.isError == nil)
+    assert(alive.isError == nil)
     local structured = alive.structuredContent as {[string]: any}
-    test.assert(structured.ok == false)
-    test.equal(structured.crashed as string, "traceback: something broke")
+    assert(structured.ok == false)
+    assert.eq(structured.crashed as string, "traceback: something broke")
 
     mcp.setCrashed(nil)
-    test.assert(mcp.crashed() == nil)
-    test.assert((call("ping").structuredContent as {[string]: any}).ok == true)
+    assert(mcp.crashed() == nil)
+    assert((call("ping").structuredContent as {[string]: any}).ok == true)
 end
 
 function suite.keepsFirstRegistrationOrderWhenAToolIsReplaced(): nil
@@ -254,8 +253,8 @@ function suite.keepsFirstRegistrationOrderWhenAToolIsReplaced(): nil
         end
     end
 
-    test.assert(firstAt > 0 and secondAt > firstAt)
-    test.assert((call("test.mcp.ordered.first").structuredContent as {[string]: any}).replaced == true)
+    assert(firstAt > 0 and secondAt > firstAt)
+    assert((call("test.mcp.ordered.first").structuredContent as {[string]: any}).replaced == true)
 end
 
 function suite.raisesWhenARegistrationHasNoHandler(): nil
@@ -263,7 +262,7 @@ function suite.raisesWhenARegistrationHasNoHandler(): nil
         mcp.register({name = "test.mcp.incomplete"} as mcp.Tool)
     end)
 
-    test.assert(not ok)
+    assert(not ok)
 end
 
 --- Sends one synthetic event and returns the kind the tool reports pushing.
@@ -283,10 +282,10 @@ function suite.pushesTouchAndGamepadEventsThroughSendEvent(): nil
     for _, name in ipairs(kinds.kinds as {string}) do
         listed[name] = true
     end
-    test.assert(listed.fingerDown == true)
-    test.assert(listed.gamepadAxis == true)
+    assert(listed.fingerDown == true)
+    assert(listed.gamepadAxis == true)
 
-    test.equal(
+    assert.eq(
         pushed({
             kind = "fingerDown",
             finger = "1",
@@ -298,25 +297,25 @@ function suite.pushesTouchAndGamepadEventsThroughSendEvent(): nil
         "fingerDown"
     )
     -- Queued for the next frame rather than folded on the spot.
-    test.equal(#app.input:touches(), 0)
+    assert.eq(#app.input:touches(), 0)
     app:iterate(1 / 60, nil)
     local held = app.input:touches()
-    test.equal(#held, 1)
-    test.equal(held[1].finger, "1")
-    test.equal(held[1].x, 8)
+    assert.eq(#held, 1)
+    assert.eq(held[1].finger, "1")
+    assert.eq(held[1].x, 8)
 
     -- `which` names the device for the gamepad kinds and the window for
     -- everything else, which is the split the Teal tool published.
-    test.equal(pushed({kind = "gamepadAdded", which = 4}), "gamepadAdded")
-    test.equal(pushed({kind = "gamepadButtonDown", which = 4, button = 1}), "gamepadButtonDown")
-    test.equal(pushed({kind = "gamepadAxis", which = 4, axis = 1, value = 0.8}), "gamepadAxis")
+    assert.eq(pushed({kind = "gamepadAdded", which = 4}), "gamepadAdded")
+    assert.eq(pushed({kind = "gamepadButtonDown", which = 4, button = 1}), "gamepadButtonDown")
+    assert.eq(pushed({kind = "gamepadAxis", which = 4, axis = 1, value = 0.8}), "gamepadAxis")
     app:iterate(1 / 60, nil)
 
     local pad = assert(app.input:gamepadById(4))
-    test.assert(pad:buttonDown("south"))
-    test.equal(pad:axis("leftX"), 0.8)
+    assert(pad:buttonDown("south"))
+    assert.eq(pad:axis("leftX"), 0.8)
 
-    test.matches(errorText(call("send_event", {kind = "fingerMotion", x = 1, y = 1})), "finger is required")
+    assert.matches(errorText(call("send_event", {kind = "fingerMotion", x = 1, y = 1})), "finger is required")
 
     mcp.bind(nil, nil)
     app:shutdown()
@@ -345,12 +344,12 @@ function suite.sendEventKeyIsPressedOnTheNextFrame(): nil
     app:iterate(1 / 60, nil)
 
     local sent = call("send_event", {kind = "keyDown", physicalKey = "KeyQ"}).structuredContent as {[string]: any}
-    test.equal(sent.pending as integer, 1)
+    assert.eq(sent.pending as integer, 1)
     app:iterate(1 / 60, nil)
     app:iterate(1 / 60, nil)
-    test.equal(#pressedOn, 1)
-    test.equal(pressedOn[1], 2)
-    test.assert(app.input:keyDown("KeyQ"))
+    assert.eq(#pressedOn, 1)
+    assert.eq(pressedOn[1], 2)
+    assert(app.input:keyDown("KeyQ"))
 
     mcp.bind(nil, nil)
     app:shutdown()

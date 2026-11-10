@@ -1,4 +1,3 @@
-local test = require("nupp.test")
 local components = require("tecs.internal.components")
 local idallocator = require("tecs.internal.idallocator")
 local phases = require("tecs.internal.phases")
@@ -8,11 +7,11 @@ local suite = {}
 function suite.publishesSpawnsAtCommit(): nil
     local value = world.new(4)
     local entity = value:spawn()
-    test.assert(not value:isAlive(entity))
-    test.equal(value.liveCount, 0)
+    assert(not value:isAlive(entity))
+    assert.eq(value.liveCount, 0)
     value:commit()
-    test.assert(value:isAlive(entity))
-    test.equal(value.liveCount, 1)
+    assert(value:isAlive(entity))
+    assert.eq(value.liveCount, 1)
 end
 
 function suite.publishesDespawnsAtCommit(): nil
@@ -20,10 +19,10 @@ function suite.publishesDespawnsAtCommit(): nil
     local entity = value:spawn()
     value:commit()
     value:despawn(entity)
-    test.assert(value:isAlive(entity))
+    assert(value:isAlive(entity))
     value:commit()
-    test.assert(not value:isAlive(entity))
-    test.equal(value.liveCount, 0)
+    assert(not value:isAlive(entity))
+    assert.eq(value.liveCount, 0)
 end
 
 function suite.cancelsASpawnDespawnedBeforePublication(): nil
@@ -31,12 +30,12 @@ function suite.cancelsASpawnDespawnedBeforePublication(): nil
     local entity = value:spawn()
     value:despawn(entity)
     value:commit()
-    test.assert(not value:isAlive(entity))
-    test.equal(value.liveCount, 0)
+    assert(not value:isAlive(entity))
+    assert.eq(value.liveCount, 0)
 
     local replacement = value:spawn()
-    test.equal(idallocator.slotOf(replacement), idallocator.slotOf(entity))
-    test.assert(replacement ~= entity)
+    assert.eq(idallocator.slotOf(replacement), idallocator.slotOf(entity))
+    assert(replacement ~= entity)
 end
 
 function suite.recyclesSlotsWithoutRevivingStaleIds(): nil
@@ -47,13 +46,13 @@ function suite.recyclesSlotsWithoutRevivingStaleIds(): nil
     value:commit()
     local second = value:spawn()
     value:commit()
-    test.equal(idallocator.slotOf(second), idallocator.slotOf(first))
-    test.assert(not value:isAlive(first))
-    test.assert(value:isAlive(second))
+    assert.eq(idallocator.slotOf(second), idallocator.slotOf(first))
+    assert(not value:isAlive(first))
+    assert(value:isAlive(second))
 
     value:despawn(first)
     value:commit()
-    test.assert(value:isAlive(second))
+    assert(value:isAlive(second))
 end
 
 function suite.preservesDenseRowsAcrossSwapRemoval(): nil
@@ -64,9 +63,9 @@ function suite.preservesDenseRowsAcrossSwapRemoval(): nil
     value:commit()
     value:despawn(second)
     value:commit()
-    test.assert(value:isAlive(first))
-    test.assert(value:isAlive(third))
-    test.equal(value.liveCount, 2)
+    assert(value:isAlive(first))
+    assert(value:isAlive(third))
+    assert.eq(value.liveCount, 2)
 end
 
 function suite.restoresExactPackedIds(): nil
@@ -74,9 +73,9 @@ function suite.restoresExactPackedIds(): nil
     local restored = idallocator.encodeId(6, 17)
     value:spawnAt(restored)
     value:commit()
-    test.assert(value:isAlive(restored))
+    assert(value:isAlive(restored))
     local automatic = value:spawn()
-    test.equal(idallocator.slotOf(automatic), 7)
+    assert.eq(idallocator.slotOf(automatic), 7)
 end
 
 function suite.clearInvalidatesCommittedAndPendingIds(): nil
@@ -85,10 +84,10 @@ function suite.clearInvalidatesCommittedAndPendingIds(): nil
     value:commit()
     local pending = value:spawn()
     value:clearEntities()
-    test.assert(not value:isAlive(committed))
-    test.assert(not value:isAlive(pending))
-    test.equal(value.liveCount, 0)
-    test.equal(idallocator.slotOf(value:spawn()), 1)
+    assert(not value:isAlive(committed))
+    assert(not value:isAlive(pending))
+    assert.eq(value.liveCount, 0)
+    assert.eq(idallocator.slotOf(value:spawn()), 1)
 end
 
 function suite.groupsEquivalentTagSignaturesIntoOneArchetype(): nil
@@ -97,12 +96,12 @@ function suite.groupsEquivalentTagSignaturesIntoOneArchetype(): nil
     local value = world.new(4)
     local left = value:spawn(first, second)
     local right = value:spawn(second, first)
-    test.equal(value.archetypeCount, 2)
+    assert.eq(value.archetypeCount, 2)
     value:commit()
-    test.assert(value:has(left, first))
-    test.assert(value:has(left, second))
-    test.assert(value:has(right, first))
-    test.assert(value:has(right, second))
+    assert(value:has(left, first))
+    assert(value:has(left, second))
+    assert(value:has(right, first))
+    assert(value:has(right, second))
 end
 
 function suite.keepsTagMembershipCorrectAfterSwapRemoval(): nil
@@ -114,9 +113,9 @@ function suite.keepsTagMembershipCorrectAfterSwapRemoval(): nil
     value:commit()
     value:despawn(middle)
     value:commit()
-    test.assert(value:has(first, tag))
-    test.assert(value:has(last, tag))
-    test.assert(not value:has(middle, tag))
+    assert(value:has(first, tag))
+    assert(value:has(last, tag))
+    assert(not value:has(middle, tag))
 end
 
 function suite.updatesReusableQueriesAsArchetypesAppear(): nil
@@ -135,8 +134,8 @@ function suite.updatesReusableQueriesAsArchetypesAppear(): nil
         archetypes = archetypes + 1
         entities = entities + (count as integer)
     end
-    test.equal(archetypes, 1)
-    test.equal(entities, 2)
+    assert.eq(archetypes, 1)
+    assert.eq(entities, 2)
 end
 
 function suite.queriesSkipArchetypesAfterTheirLastEntityLeaves(): nil
@@ -151,7 +150,7 @@ function suite.queriesSkipArchetypesAfterTheirLastEntityLeaves(): nil
     for _ in matching:iter() do
         seen = seen + 1
     end
-    test.equal(seen, 0)
+    assert.eq(seen, 0)
 end
 
 function suite.stagesTagAddsAndRemovalsAtCommit(): nil
@@ -160,13 +159,13 @@ function suite.stagesTagAddsAndRemovalsAtCommit(): nil
     local entity = value:spawn()
     value:commit()
     value:set(entity, tag)
-    test.assert(not value:has(entity, tag))
+    assert(not value:has(entity, tag))
     value:commit()
-    test.assert(value:has(entity, tag))
+    assert(value:has(entity, tag))
     value:remove(entity, tag)
-    test.assert(value:has(entity, tag))
+    assert(value:has(entity, tag))
     value:commit()
-    test.assert(not value:has(entity, tag))
+    assert(not value:has(entity, tag))
 end
 
 function suite.coalescesTagChangesOnPendingSpawns(): nil
@@ -177,8 +176,8 @@ function suite.coalescesTagChangesOnPendingSpawns(): nil
     value:set(entity, kept)
     value:remove(entity, removed)
     value:commit()
-    test.assert(value:has(entity, kept))
-    test.assert(not value:has(entity, removed))
+    assert(value:has(entity, kept))
+    assert(not value:has(entity, removed))
 end
 
 function suite.movesEntitiesIntoAndOutOfActiveQueries(): nil
@@ -193,7 +192,7 @@ function suite.movesEntitiesIntoAndOutOfActiveQueries(): nil
     for _, count in matching:iter() do
         included = included + (count as integer)
     end
-    test.equal(included, 1)
+    assert.eq(included, 1)
 
     value:remove(entity, tag)
     value:commit()
@@ -201,7 +200,7 @@ function suite.movesEntitiesIntoAndOutOfActiveQueries(): nil
     for _, count in matching:iter() do
         afterRemoval = afterRemoval + (count as integer)
     end
-    test.equal(afterRemoval, 0)
+    assert.eq(afterRemoval, 0)
 end
 
 function suite.spawnsAndReadsRawScalarValues(): nil
@@ -212,8 +211,8 @@ function suite.spawnsAndReadsRawScalarValues(): nil
     value:commit()
     local explicitHealth: number? = value:get(explicit, health)
     local defaultHealth: number? = value:get(defaulted, health)
-    test.equal(explicitHealth as number, 42)
-    test.equal(defaultHealth as number, 100)
+    assert.eq(explicitHealth as number, 42)
+    assert.eq(defaultHealth as number, 100)
 end
 
 function suite.stagesScalarAddsAndUpdates(): nil
@@ -222,13 +221,13 @@ function suite.stagesScalarAddsAndUpdates(): nil
     local entity = value:spawn()
     value:commit()
     value:set(entity, mana, 50)
-    test.assert(value:get(entity, mana) == nil)
+    assert(value:get(entity, mana) == nil)
     value:commit()
-    test.equal(value:get(entity, mana) as number, 50)
+    assert.eq(value:get(entity, mana) as number, 50)
     value:set(entity, mana(75))
-    test.equal(value:get(entity, mana) as number, 50)
+    assert.eq(value:get(entity, mana) as number, 50)
     value:commit()
-    test.equal(value:get(entity, mana) as number, 75)
+    assert.eq(value:get(entity, mana) as number, 75)
 end
 
 function suite.carriesScalarsAcrossSignatureMoves(): nil
@@ -239,11 +238,11 @@ function suite.carriesScalarsAcrossSignatureMoves(): nil
     value:commit()
     value:set(entity, selected)
     value:commit()
-    test.equal(value:get(entity, health) as number, 37)
-    test.assert(value:get(entity, selected) == selected)
+    assert.eq(value:get(entity, health) as number, 37)
+    assert(value:get(entity, selected) == selected)
     value:remove(entity, selected)
     value:commit()
-    test.equal(value:get(entity, health) as number, 37)
+    assert.eq(value:get(entity, health) as number, 37)
 end
 
 function suite.keepsScalarRowsAlignedAfterSwapRemoval(): nil
@@ -255,8 +254,8 @@ function suite.keepsScalarRowsAlignedAfterSwapRemoval(): nil
     value:commit()
     value:despawn(middle)
     value:commit()
-    test.equal(value:get(first, score) as number, 1)
-    test.equal(value:get(last, score) as number, 3)
+    assert.eq(value:get(first, score) as number, 1)
+    assert.eq(value:get(last, score) as number, 3)
 end
 
 local record Position
@@ -279,19 +278,19 @@ function suite.spawnsUpdatesAndMovesTableComponents(): nil
     local entity = value:spawn(position(2, 5))
     value:commit()
     local initial: Position = assert(value:get(entity, position))
-    test.equal(initial.x, 2)
-    test.equal(initial.y, 5)
+    assert.eq(initial.x, 2)
+    assert.eq(initial.y, 5)
 
     value:set(entity, visible)
     value:commit()
     local moved: Position = assert(value:get(entity, position))
-    test.assert(moved == initial)
+    assert(moved == initial)
 
     value:set(entity, position(7, 9))
     value:commit()
     local updated: Position = assert(value:get(entity, position))
-    test.equal(updated.x, 7)
-    test.equal(updated.y, 9)
+    assert.eq(updated.x, 7)
+    assert.eq(updated.y, 9)
 end
 
 function suite.usesFreshTableDefaultsPerEntity(): nil
@@ -310,9 +309,9 @@ function suite.usesFreshTableDefaultsPerEntity(): nil
     value:commit()
     local left = assert(value:get(first, state))
     local right = assert(value:get(second, state))
-    test.assert(left ~= right)
+    assert(left ~= right)
     left.x = 12
-    test.equal(right.x, 0)
+    assert.eq(right.x, 0)
 end
 
 function suite.exposesTypedColumnsDuringQueryIteration(): nil
@@ -336,11 +335,11 @@ function suite.exposesTypedColumnsDuringQueryIteration(): nil
         local entities = active.entities
         for index = 1, count as integer do
             positions[index].x = positions[index].x + 10
-            test.assert(entities[index] == first or entities[index] == second)
+            assert(entities[index] == first or entities[index] == second)
         end
     end
-    test.equal(assert(value:get(first, position)).x, 11)
-    test.equal(assert(value:get(second, position)).x, 13)
+    assert.eq(assert(value:get(first, position)).x, 11)
+    assert.eq(assert(value:get(second, position)).x, 13)
 end
 
 function suite.runsSystemsInPhaseAndRegistrationOrder(): nil
@@ -368,7 +367,7 @@ function suite.runsSystemsInPhaseAndRegistrationOrder(): nil
         end
     })
     value:update(0.25)
-    test.equal(table.concat(order, ","), "first,update-first,update-second")
+    assert.eq(table.concat(order, ","), "first,update-first,update-second")
 end
 
 function suite.honorsSystemGatesAndSamePhaseBarriers(): nil
@@ -395,7 +394,7 @@ function suite.honorsSystemGatesAndSamePhaseBarriers(): nil
         end
     })
     value:update(0.5)
-    test.assert(observed)
+    assert(observed)
 end
 
 function suite.removesSystemsWithoutDestabilizingDispatch(): nil
@@ -406,13 +405,13 @@ function suite.removesSystemsWithoutDestabilizingDispatch(): nil
         phase = phases.Update,
         run = function(_dt: number, exclusive running: world.World): nil
             calls = calls + 1
-            test.assert(running:removeSystem("test.system.removed"))
+            assert(running:removeSystem("test.system.removed"))
         end
     })
     value:update(0)
     value:update(0)
-    test.equal(calls, 1)
-    test.equal(value.systemCount, 0)
+    assert.eq(calls, 1)
+    assert.eq(value.systemCount, 0)
 end
 
 function suite.recoversPipelineBookkeepingAfterASystemRaises(): nil
@@ -424,13 +423,13 @@ function suite.recoversPipelineBookkeepingAfterASystemRaises(): nil
             error("expected system failure")
         end
     })
-    test.raises(
+    assert.raises(
         function(): nil
             value:update(0)
         end,
         "expected system failure"
     )
-    test.assert(value:removeSystem("test.system.failure"))
+    assert(value:removeSystem("test.system.failure"))
 
     local recovered: boolean = false
     value:addSystem({
@@ -441,7 +440,7 @@ function suite.recoversPipelineBookkeepingAfterASystemRaises(): nil
         end
     })
     value:update(0)
-    test.assert(recovered)
+    assert(recovered)
 end
 
 return suite

@@ -1,5 +1,4 @@
 local harness = require("tecs.bench.harness")
-local test = require("nupp.test")
 local suite = {}
 
 --- Builds a stage holding exactly the given samples.
@@ -13,7 +12,7 @@ local function stageOf(name: string, samples: {number}): harness.Stage
 end
 
 function suite.rejectsAnEmptyStageName(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             harness.newStage("")
         end,
@@ -22,8 +21,8 @@ function suite.rejectsAnEmptyStageName(): nil
 end
 
 function suite.reportsNothingForAStageWithNoSamples(): nil
-    test.equal(harness.report(harness.newStage("empty")), nil)
-    test.equal(harness.format({harness.newStage("empty")}), "")
+    assert.eq(harness.report(harness.newStage("empty")), nil)
+    assert.eq(harness.format({harness.newStage("empty")}), "")
 end
 
 function suite.readsPercentilesByNearestRank(): nil
@@ -31,28 +30,28 @@ function suite.readsPercentilesByNearestRank(): nil
     -- ninety-fifth is the tenth. Every reported value is one that was
     -- observed, which is the property the Teal report has as well.
     const row = assert(harness.report(stageOf("ranks", {10, 1, 9, 2, 8, 3, 7, 4, 6, 5})))
-    test.equal(row.p50, 5)
-    test.equal(row.p95, 10)
-    test.equal(row.p99, 10)
-    test.equal(row.max, 10)
-    test.equal(row.mean, 5.5)
-    test.equal(row.samples, 10)
+    assert.eq(row.p50, 5)
+    assert.eq(row.p95, 10)
+    assert.eq(row.p99, 10)
+    assert.eq(row.max, 10)
+    assert.eq(row.mean, 5.5)
+    assert.eq(row.samples, 10)
 end
 
 function suite.readsASingleSampleAsEveryPercentile(): nil
     const row = assert(harness.report(stageOf("one", {4})))
-    test.equal(row.p50, 4)
-    test.equal(row.p95, 4)
-    test.equal(row.max, 4)
-    test.equal(row.samples, 1)
+    assert.eq(row.p50, 4)
+    assert.eq(row.p95, 4)
+    assert.eq(row.max, 4)
+    assert.eq(row.samples, 1)
 end
 
 function suite.clearsSamplesWithoutLosingTheStage(): nil
     const stage = stageOf("cleared", {1, 2, 3})
     harness.reset(stage)
-    test.equal(harness.report(stage), nil)
+    assert.eq(harness.report(stage), nil)
     harness.mark(stage, 7)
-    test.equal(assert(harness.report(stage)).p50, 7)
+    assert.eq(assert(harness.report(stage)).p50, 7)
 end
 
 function suite.formatsOneRowPerRecordedStage(): nil
@@ -68,10 +67,10 @@ function suite.formatsOneRowPerRecordedStage(): nil
     }):gmatch("[^\n]+") do
         lines[#lines + 1] = line
     end
-    test.equal(#lines, 4)
-    test.assert(lines[1]:find("stage", 1, true) == 1)
-    test.assert(lines[3]:find("first", 1, true) == 1)
-    test.assert(lines[4]:find("last", 1, true) == 1)
+    assert.eq(#lines, 4)
+    assert(lines[1]:find("stage", 1, true) == 1)
+    assert(lines[3]:find("first", 1, true) == 1)
+    assert(lines[4]:find("last", 1, true) == 1)
 end
 
 function suite.runsWarmupUntimedAndRecordsEverySample(): nil
@@ -80,8 +79,8 @@ function suite.runsWarmupUntimedAndRecordsEverySample(): nil
     harness.measure(stage, 3, 5, function(): nil
         calls = calls + 1
     end)
-    test.equal(calls, 8)
-    test.equal(assert(harness.report(stage)).samples, 5)
+    assert.eq(calls, 8)
+    assert.eq(assert(harness.report(stage)).samples, 5)
 end
 
 function suite.runsPrepareOutsideEveryTimedWindow(): nil
@@ -97,11 +96,11 @@ function suite.runsPrepareOutsideEveryTimedWindow(): nil
             prepared = prepared + 1
         end
     )
-    test.equal(prepared, 6)
+    assert.eq(prepared, 6)
 end
 
 function suite.rejectsANonPositiveSampleCount(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             harness.measure(harness.newStage("none"), 0, 0, function(): nil
             end)
@@ -113,10 +112,10 @@ end
 function suite.readsFixtureSizesFromTheEnvironment(): nil
     -- The variables are unset in a test process, so each falls back. The
     -- rejection paths below are what a mistyped benchmark invocation hits.
-    test.equal(harness.count("BENCH_HARNESS_ABSENT", 7), 7)
-    test.equal(harness.optionalCount("BENCH_HARNESS_ABSENT", 0), 0)
-    test.equal(harness.amount("BENCH_HARNESS_ABSENT", 1.5), 1.5)
-    test.equal(harness.text("BENCH_HARNESS_ABSENT", "frame"), "frame")
+    assert.eq(harness.count("BENCH_HARNESS_ABSENT", 7), 7)
+    assert.eq(harness.optionalCount("BENCH_HARNESS_ABSENT", 0), 0)
+    assert.eq(harness.amount("BENCH_HARNESS_ABSENT", 1.5), 1.5)
+    assert.eq(harness.text("BENCH_HARNESS_ABSENT", "frame"), "frame")
 end
 
 return suite

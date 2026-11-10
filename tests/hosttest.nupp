@@ -6,7 +6,6 @@ local application = require("tecs.application")
 local host = require("tecs.host")
 local platformevents = require("tecs.platform.events")
 local images = require("tecs.gfx.images")
-local test = require("nupp.test")
 local window = require("tecs.platform.window")
 local suspension = require("nupp.suspension")
 
@@ -44,15 +43,15 @@ function suite.sealsTranslatedEventsIntoOneApplicationFrame(): nil
     session.input:emit(host.INPUT_ADDRESS, host.ResizeInput, false, 800, 450, 1600, 900, 2, 1.1, 2)
     session.input:emit(host.INPUT_ADDRESS, host.KeyInput, true, "KeyW", "w", "w", 0, false, 1.2, 3)
 
-    test.equal(host.iterate(session, 0.25), "continue")
+    assert.eq(host.iterate(session, 0.25), "continue")
 
     local width, height = session.app.window:getSize()
-    test.equal(width, 800)
-    test.equal(height, 450)
-    test.assert(not session.app.window:hasFocus())
-    test.assert(session.app.input:keyPressed("KeyW"))
-    test.equal(session.app.elapsed, 0.25)
-    test.assert(host.shutdown(session))
+    assert.eq(width, 800)
+    assert.eq(height, 450)
+    assert(not session.app.window:hasFocus())
+    assert(session.app.input:keyPressed("KeyW"))
+    assert.eq(session.app.elapsed, 0.25)
+    assert(host.shutdown(session))
 end
 
 function suite.keepsInputInArrivalOrderAcrossKinds(): nil
@@ -70,9 +69,9 @@ function suite.keepsInputInArrivalOrderAcrossKinds(): nil
     session.input:emit(host.INPUT_ADDRESS, host.KeyInput, false, "KeyA", nil, nil, 0, false, 0.3, 3)
     session.input:emit(host.INPUT_ADDRESS, host.PointerMoveInput, 3, 4, 0, 0, 0.4, 4)
 
-    test.equal(host.iterate(session, 0), "continue")
-    test.equal(table.concat(seen, " "), "keyDown:1 mouseMotion:2 keyUp:3 mouseMotion:4")
-    test.assert(host.shutdown(session))
+    assert.eq(host.iterate(session, 0), "continue")
+    assert.eq(table.concat(seen, " "), "keyDown:1 mouseMotion:2 keyUp:3 mouseMotion:4")
+    assert(host.shutdown(session))
 end
 
 function suite.queuesTouchAsOneFingerTheInputStateTracks(): nil
@@ -96,16 +95,16 @@ function suite.queuesTouchAsOneFingerTheInputStateTracks(): nil
         1
     )
 
-    test.equal(host.iterate(session, 0.1), "continue")
+    assert.eq(host.iterate(session, 0.1), "continue")
 
     local held = session.app.input:touches()
-    test.equal(#held, 1)
-    test.equal(held[1].finger, "9")
-    test.equal(held[1].x, 12)
-    test.equal(held[1].normalX, 0.25)
-    test.equal(held[1].pressure, 0.75)
+    assert.eq(#held, 1)
+    assert.eq(held[1].finger, "9")
+    assert.eq(held[1].x, 12)
+    assert.eq(held[1].normalX, 0.25)
+    assert.eq(held[1].pressure, 0.75)
 
-    test.raises(
+    assert.raises(
         function(): nil
             session.input:emit(
                 host.INPUT_ADDRESS,
@@ -126,7 +125,7 @@ function suite.queuesTouchAsOneFingerTheInputStateTracks(): nil
         end,
         "unknown touch phase"
     )
-    test.assert(host.shutdown(session))
+    assert(host.shutdown(session))
 end
 
 function suite.exposesTaggedCommandsAndCorrelatedFailures(): nil
@@ -135,28 +134,28 @@ function suite.exposesTaggedCommandsAndCorrelatedFailures(): nil
     local serial = session.app.window:setTitle("changed")
 
     local kind, returnedSerial, text, x, y, flag = host.nextWindowCommand(session)
-    test.equal(kind, "setTitle")
-    test.equal(returnedSerial, serial)
-    test.equal(text, "changed")
-    test.equal(x, nil)
-    test.equal(y, nil)
-    test.equal(flag, nil)
-    test.equal(host.nextWindowCommand(session), nil)
+    assert.eq(kind, "setTitle")
+    assert.eq(returnedSerial, serial)
+    assert.eq(text, "changed")
+    assert.eq(x, nil)
+    assert.eq(y, nil)
+    assert.eq(flag, nil)
+    assert.eq(host.nextWindowCommand(session), nil)
 
     host.windowCommandFailed(session, assert(returnedSerial), "desktop rejected the title")
     local failures = window.takeFailures(session.app.window)
-    test.equal(failures[1].serial, serial)
-    test.equal(failures[1].reason, "desktop rejected the title")
-    test.assert(host.shutdown(session))
+    assert.eq(failures[1].serial, serial)
+    assert.eq(failures[1].reason, "desktop rejected the title")
+    assert(host.shutdown(session))
 end
 
 function suite.supportsBoundedHeadlessSmokeRuns(): nil
     local session = host.create(nil, nil, nil, false, 1)
     host.init(session)
 
-    test.equal(host.iterate(session, 0), "stopped")
-    test.equal(session.app.frame, 1)
-    test.assert(host.shutdown(session))
+    assert.eq(host.iterate(session, 0), "stopped")
+    assert.eq(session.app.frame, 1)
+    assert(host.shutdown(session))
 end
 
 function suite.exposesOneBatchedRenderPacketAfterACompletedFrame(): nil
@@ -165,24 +164,24 @@ function suite.exposesOneBatchedRenderPacketAfterACompletedFrame(): nil
     session.app.world:commit()
     host.init(session)
 
-    test.equal(host.iterate(session, 0), "continue")
+    assert.eq(host.iterate(session, 0), "continue")
     local reader = io2.newScalarReader(host.renderPacket(session))
-    test.equal(reader:readUint32(), 0x54454353)
-    test.equal(reader:readUint32(), 9)
-    test.equal(reader:readUint32(), 140)
-    test.equal(reader:readUint32(), 0)
+    assert.eq(reader:readUint32(), 0x54454353)
+    assert.eq(reader:readUint32(), 9)
+    assert.eq(reader:readUint32(), 140)
+    assert.eq(reader:readUint32(), 0)
     -- The graph revision and the section's byte length, neither of which this
     -- test pins: the render graph is declared elsewhere and may grow.
     reader:skip(4)
     reader:skip(4)
-    test.equal(reader:readUint32(), 20)
-    test.equal(reader:readUint32(), 1)
-    test.equal(reader:readUint32(), 80)
-    test.equal(reader:readUint32(), 1)
-    test.equal(reader:readFloat32(), 320)
-    test.equal(reader:readFloat32(), 180)
+    assert.eq(reader:readUint32(), 20)
+    assert.eq(reader:readUint32(), 1)
+    assert.eq(reader:readUint32(), 80)
+    assert.eq(reader:readUint32(), 1)
+    assert.eq(reader:readFloat32(), 320)
+    assert.eq(reader:readFloat32(), 180)
     nupp.drop(reader)
-    test.assert(host.shutdown(session))
+    assert(host.shutdown(session))
 end
 
 function suite.projectsThePacketThroughThePhysicalDrawableSize(): nil
@@ -214,15 +213,15 @@ function suite.projectsThePacketThroughThePhysicalDrawableSize(): nil
     )
     host.init(session)
 
-    test.equal(host.iterate(session, 0), "continue")
+    assert.eq(host.iterate(session, 0), "continue")
     local reader = io2.newScalarReader(host.renderPacket(session))
     reader:skip(40)
-    test.equal(reader:readFloat32(), 640)
-    test.equal(reader:readFloat32(), 360)
-    test.equal(reader:readFloat32(), 320)
-    test.equal(reader:readFloat32(), 180)
+    assert.eq(reader:readFloat32(), 640)
+    assert.eq(reader:readFloat32(), 360)
+    assert.eq(reader:readFloat32(), 320)
+    assert.eq(reader:readFloat32(), 180)
     nupp.drop(reader)
-    test.assert(host.shutdown(session))
+    assert(host.shutdown(session))
 end
 
 function suite.followsTheDrawableThroughAResize(): nil
@@ -232,27 +231,27 @@ function suite.followsTheDrawableThroughAResize(): nil
     attach(session)
     host.init(session)
 
-    test.equal(host.iterate(session, 0), "continue")
+    assert.eq(host.iterate(session, 0), "continue")
     local before = io2.newScalarReader(host.renderPacket(session))
     before:skip(40)
-    test.equal(before:readFloat32(), 1280)
-    test.equal(before:readFloat32(), 720)
-    test.equal(before:readFloat32(), 640)
-    test.equal(before:readFloat32(), 360)
+    assert.eq(before:readFloat32(), 1280)
+    assert.eq(before:readFloat32(), 720)
+    assert.eq(before:readFloat32(), 640)
+    assert.eq(before:readFloat32(), 360)
     nupp.drop(before)
 
     session.input:emit(host.INPUT_ADDRESS, host.ResizeInput, false, 800, 450, 1600, 900, 2, 1, 1)
-    test.equal(host.iterate(session, 0), "continue")
+    assert.eq(host.iterate(session, 0), "continue")
     local after = io2.newScalarReader(host.renderPacket(session))
     after:skip(40)
-    test.equal(after:readFloat32(), 1600)
-    test.equal(after:readFloat32(), 900)
+    assert.eq(after:readFloat32(), 1600)
+    assert.eq(after:readFloat32(), 900)
     -- The default view recenters on the new drawable, so a resize moves the
     -- window's edges rather than the content under the middle of it.
-    test.equal(after:readFloat32(), 800)
-    test.equal(after:readFloat32(), 450)
+    assert.eq(after:readFloat32(), 800)
+    assert.eq(after:readFloat32(), 450)
     nupp.drop(after)
-    test.assert(host.shutdown(session))
+    assert(host.shutdown(session))
 end
 
 function suite.leavesImageCommandsQueuedWithoutAHost(): nil
@@ -271,25 +270,25 @@ function suite.leavesImageCommandsQueuedWithoutAHost(): nil
     })
     -- With no embedding host to ask, a frame finishes without applying the
     -- upload, and it stays queued for whoever drives the registry.
-    test.equal(host.iterate(session, 0), "continue")
+    assert.eq(host.iterate(session, 0), "continue")
     local commands = images.drain()
-    test.equal(#commands, 1)
+    assert.eq(#commands, 1)
     const upload = commands[1]
-    test.assert(upload is images.UploadImageCommand)
+    assert(upload is images.UploadImageCommand)
     if upload is images.UploadImageCommand then
-        test.equal(upload.image, id)
-        test.equal(upload.width, 1)
-        test.equal(upload.height, 2)
-        test.equal(upload.sampler, images.samplerIndex("linear", "repeat"))
-        test.equal(upload.format, "rgba8")
-        test.equal(#upload.pixels, 8)
-        test.equal(images.stateOf(id), "pending")
+        assert.eq(upload.image, id)
+        assert.eq(upload.width, 1)
+        assert.eq(upload.height, 2)
+        assert.eq(upload.sampler, images.samplerIndex("linear", "repeat"))
+        assert.eq(upload.format, "rgba8")
+        assert.eq(#upload.pixels, 8)
+        assert.eq(images.stateOf(id), "pending")
         images.complete(upload.image, upload.serial, true, nil)
     end
-    test.equal(images.stateOf(id), "resident")
-    test.assert(images.release("hosttest/checker"))
+    assert.eq(images.stateOf(id), "resident")
+    assert(images.release("hosttest/checker"))
     images.drain()
-    test.assert(host.shutdown(session))
+    assert(host.shutdown(session))
 end
 
 function suite.resumesAParkedUpdateOnALaterHostTurn(): nil
@@ -321,15 +320,15 @@ function suite.resumesAParkedUpdateOnALaterHostTurn(): nil
     })
     host.init(session)
 
-    test.equal(host.iterate(session, 0.25), "parked")
-    test.equal(session.app.frame, 0)
-    test.equal(host.iterate(session, 99), "parked")
-    test.equal(session.app.frame, 0)
-    test.equal(host.iterate(session, 99), "continue")
-    test.assert(resumed)
-    test.equal(session.app.frame, 1)
-    test.equal(session.app.elapsed, 0.25)
-    test.assert(host.shutdown(session))
+    assert.eq(host.iterate(session, 0.25), "parked")
+    assert.eq(session.app.frame, 0)
+    assert.eq(host.iterate(session, 99), "parked")
+    assert.eq(session.app.frame, 0)
+    assert.eq(host.iterate(session, 99), "continue")
+    assert(resumed)
+    assert.eq(session.app.frame, 1)
+    assert.eq(session.app.elapsed, 0.25)
+    assert(host.shutdown(session))
 end
 
 function suite.shutdownUnwindsAParkedUpdateWithoutReportingACrash(): nil
@@ -346,32 +345,32 @@ function suite.shutdownUnwindsAParkedUpdateWithoutReportingACrash(): nil
     })
     host.init(session)
 
-    test.equal(host.iterate(session, 0), "parked")
-    test.assert(host.shutdown(session))
-    test.equal(host.crashed(session), nil)
+    assert.eq(host.iterate(session, 0), "parked")
+    assert(host.shutdown(session))
+    assert.eq(host.crashed(session), nil)
 end
 
 function suite.reportsAHeldTurnApartFromAFrameThatRan(): nil
     local session = host.create(nil, nil, nil, false, nil)
     host.init(session)
-    test.equal(host.iterate(session, 0.25), "continue")
+    assert.eq(host.iterate(session, 0.25), "continue")
     session.app:pause()
 
     -- A held turn runs no frame, which is what lets a host skip drawing it.
-    test.equal(host.iterate(session, 0.25), "held")
-    test.equal(host.iterate(session, 0.25), "held")
-    test.equal(session.app.frame, 1)
+    assert.eq(host.iterate(session, 0.25), "held")
+    assert.eq(host.iterate(session, 0.25), "held")
+    assert.eq(session.app.frame, 1)
     session.app:step(1, 0.5)
-    test.equal(host.iterate(session, 0.25), "continue")
-    test.equal(session.app.frame, 2)
-    test.equal(session.app.elapsed, 0.75)
-    test.equal(host.iterate(session, 0.25), "held")
+    assert.eq(host.iterate(session, 0.25), "continue")
+    assert.eq(session.app.frame, 2)
+    assert.eq(session.app.elapsed, 0.75)
+    assert.eq(host.iterate(session, 0.25), "held")
 
     -- A quit is still honored on a held turn, and stops rather than holds.
     session.app:queueEvent(platformevents.quit())
-    test.equal(host.iterate(session, 0.25), "stopped")
-    test.equal(session.app.frame, 2)
-    test.assert(host.shutdown(session))
+    assert.eq(host.iterate(session, 0.25), "stopped")
+    assert.eq(session.app.frame, 2)
+    assert(host.shutdown(session))
 end
 
 return suite

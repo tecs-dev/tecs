@@ -7,7 +7,6 @@ local archetype = require("tecs.internal.archetype")
 local ecs = require("tecs.ecs")
 local gfx = require("tecs.gfx")
 local sheet = require("tecs.gfx.sheet")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -63,15 +62,15 @@ function suite.showsTheFirstFrameOnItsFirstStep(): nil
 
     -- Spawned, the entity carries whatever `sprite` gave it and no frame has
     -- been written yet.
-    test.equal(assert(world:get(entity, animation.AnimationComponent)).frame, 0)
-    test.equal(animation.frameOf(world, entity), 1)
+    assert.eq(assert(world:get(entity, animation.AnimationComponent)).frame, 0)
+    assert.eq(animation.frameOf(world, entity), 1)
 
     advance(world, 0.05)
-    test.equal(animation.frameOf(world, entity), 1)
+    assert.eq(animation.frameOf(world, entity), 1)
     const sprite = assert(world:get(entity, gfx.Sprite))
-    test.equal(sprite.image, 5)
-    test.assert(frametable.playbackOf(sprite) > 0, "sprite carries a shared playback")
-    test.equal(sprite.u1, 1000 / 60)
+    assert.eq(sprite.image, 5)
+    assert(frametable.playbackOf(sprite) > 0, "sprite carries a shared playback")
+    assert.eq(sprite.u1, 1000 / 60)
 end
 
 function suite.advancesFramesWithoutWritingTheSpriteRegion(): nil
@@ -83,16 +82,16 @@ function suite.advancesFramesWithoutWritingTheSpriteRegion(): nil
     world:commit()
 
     advance(world, 0.15)
-    test.equal(animation.frameOf(world, entity), 2)
+    assert.eq(animation.frameOf(world, entity), 2)
     const encoded = assert(world:get(entity, gfx.Sprite)).u0
 
     advance(world, 0.1)
-    test.equal(animation.frameOf(world, entity), 3)
-    test.equal(assert(world:get(entity, gfx.Sprite)).u0, encoded)
+    assert.eq(animation.frameOf(world, entity), 3)
+    assert.eq(assert(world:get(entity, gfx.Sprite)).u0, encoded)
 
     advance(world, 0.1)
-    test.equal(animation.frameOf(world, entity), 4)
-    test.equal(assert(world:get(entity, gfx.Sprite)).u0, encoded)
+    assert.eq(animation.frameOf(world, entity), 4)
+    assert.eq(assert(world:get(entity, gfx.Sprite)).u0, encoded)
 end
 
 function suite.wrapsALoopingTagBackToItsFirstFrame(): nil
@@ -106,9 +105,9 @@ function suite.wrapsALoopingTagBackToItsFirstFrame(): nil
     -- Four frames of a tenth, so a whole cycle plus a little is back on the
     -- first frame with the phase inside the cycle rather than past it.
     advance(world, 0.45)
-    test.equal(animation.frameOf(world, entity), 1)
-    test.assert(animation.timeOf(world, entity) < 0.1, "the phase wrapped rather than growing")
-    test.assert(assert(world:get(entity, animation.AnimationComponent)).playing, "a looping tag keeps playing")
+    assert.eq(animation.frameOf(world, entity), 1)
+    assert(animation.timeOf(world, entity) < 0.1, "the phase wrapped rather than growing")
+    assert(assert(world:get(entity, animation.AnimationComponent)).playing, "a looping tag keeps playing")
 end
 
 function suite.holdsTheLastFrameOfAOneShotAndStops(): nil
@@ -120,13 +119,13 @@ function suite.holdsTheLastFrameOfAOneShotAndStops(): nil
     world:commit()
 
     advance(world, 1.0)
-    test.equal(animation.frameOf(world, entity), 4)
+    assert.eq(animation.frameOf(world, entity), 4)
     const instance = assert(world:get(entity, animation.AnimationComponent))
-    test.assert(instance.playing, "unwatched one-shots clamp without rewriting playback state")
+    assert(instance.playing, "unwatched one-shots clamp without rewriting playback state")
 
     -- It stays there however long the world runs, rather than starting over.
     advance(world, 1.0)
-    test.equal(animation.frameOf(world, entity), 4)
+    assert.eq(animation.frameOf(world, entity), 4)
 end
 
 function suite.playsOnlyTheFramesATagNames(): nil
@@ -138,18 +137,18 @@ function suite.playsOnlyTheFramesATagNames(): nil
     world:commit()
 
     advance(world, 0.05)
-    test.equal(animation.frameOf(world, entity), 2)
+    assert.eq(animation.frameOf(world, entity), 2)
     advance(world, 0.1)
-    test.equal(animation.frameOf(world, entity), 3)
+    assert.eq(animation.frameOf(world, entity), 3)
     -- The tag is two frames long, so it wraps to its own first frame rather
     -- than running on into frame four.
     advance(world, 0.1)
-    test.equal(animation.frameOf(world, entity), 2)
+    assert.eq(animation.frameOf(world, entity), 2)
 end
 
 function suite.refusesATagTheSheetDoesNotCarry(): nil
     const built = strip(5)
-    test.raises(
+    assert.raises(
         function(): nil
             animation.of(built, "swim")
         end,
@@ -169,8 +168,8 @@ function suite.runsAtTheSpeedTheAnimationAsks(): nil
     -- Three tenths of authored time for one, and a lot less than one for the
     -- other, out of the same run of fixed steps.
     advance(world, 0.175)
-    test.equal(animation.frameOf(world, fast), 4)
-    test.equal(animation.frameOf(world, slow), 1)
+    assert.eq(animation.frameOf(world, fast), 4)
+    assert.eq(animation.frameOf(world, slow), 1)
 end
 
 function suite.holdsItsFrameWhenSpeedIsZeroOrPlayingIsFalse(): nil
@@ -183,9 +182,9 @@ function suite.holdsItsFrameWhenSpeedIsZeroOrPlayingIsFalse(): nil
     world:commit()
 
     advance(world, 0.5)
-    test.equal(animation.frameOf(world, stopped), 1)
-    test.equal(animation.frameOf(world, held), 1)
-    test.equal(animation.timeOf(world, stopped), 0)
+    assert.eq(animation.frameOf(world, stopped), 1)
+    assert.eq(animation.frameOf(world, held), 1)
+    assert.eq(animation.timeOf(world, stopped), 0)
 end
 
 function suite.holdsAPausedEntityWhereItWas(): nil
@@ -196,19 +195,19 @@ function suite.holdsAPausedEntityWhereItWas(): nil
     const entity = world:spawn(ecs.Transform2D(0, 0), built:sprite(), animation.of(built))
     world:commit()
     advance(world, 0.15)
-    test.equal(animation.frameOf(world, entity), 2)
+    assert.eq(animation.frameOf(world, entity), 2)
 
     world:set(entity, ecs.Paused)
     world:commit()
     advance(world, 0.5)
-    test.equal(animation.frameOf(world, entity), 2)
+    assert.eq(animation.frameOf(world, entity), 2)
 
     -- A thaw carries on from where the freeze left it rather than starting
     -- over.
     world:remove(entity, ecs.Paused)
     world:commit()
     advance(world, 0.1)
-    test.equal(animation.frameOf(world, entity), 3)
+    assert.eq(animation.frameOf(world, entity), 3)
 end
 
 function suite.pointsALiveEntityAtAnotherTagAndRestartsIt(): nil
@@ -219,12 +218,12 @@ function suite.pointsALiveEntityAtAnotherTagAndRestartsIt(): nil
     const entity = world:spawn(ecs.Transform2D(0, 0), built:sprite(), animation.of(built))
     world:commit()
     advance(world, 0.25)
-    test.equal(animation.frameOf(world, entity), 3)
+    assert.eq(animation.frameOf(world, entity), 3)
 
     animation.play(world, entity, built, "run")
-    test.equal(animation.timeOf(world, entity), 0)
+    assert.eq(animation.timeOf(world, entity), 0)
     advance(world, 0.05)
-    test.equal(animation.frameOf(world, entity), 2)
+    assert.eq(animation.frameOf(world, entity), 2)
 
     -- An entity carrying no animation is given one.
     const plain = world:spawn(ecs.Transform2D(0, 0), built:sprite())
@@ -232,7 +231,7 @@ function suite.pointsALiveEntityAtAnotherTagAndRestartsIt(): nil
     animation.play(world, plain, built, "run")
     world:commit()
     advance(world, 0.05)
-    test.equal(animation.frameOf(world, plain), 2)
+    assert.eq(animation.frameOf(world, plain), 2)
 end
 
 function suite.replaysAOneShotThatHasFinished(): nil
@@ -243,18 +242,18 @@ function suite.replaysAOneShotThatHasFinished(): nil
     const entity = world:spawn(ecs.Transform2D(0, 0), built:sprite(), animation.of(built, nil, {loop = false}))
     world:commit()
     advance(world, 1.0)
-    test.equal(animation.frameOf(world, entity), 4)
+    assert.eq(animation.frameOf(world, entity), 4)
 
-    test.assert(animation.restart(world, entity), "there was an animation to restart")
-    test.equal(animation.timeOf(world, entity), 0)
+    assert(animation.restart(world, entity), "there was an animation to restart")
+    assert.eq(animation.timeOf(world, entity), 0)
     advance(world, 0.05)
-    test.equal(animation.frameOf(world, entity), 1)
+    assert.eq(animation.frameOf(world, entity), 1)
 
     const bare = world:spawn(ecs.Transform2D(0, 0))
     world:commit()
-    test.assert(not animation.restart(world, bare), "there is nothing to say what a bare entity would play")
-    test.equal(animation.frameOf(world, bare), 0)
-    test.equal(animation.timeOf(world, bare), 0)
+    assert(not animation.restart(world, bare), "there is nothing to say what a bare entity would play")
+    assert.eq(animation.frameOf(world, bare), 0)
+    assert.eq(animation.timeOf(world, bare), 0)
 end
 
 function suite.reportsCompletionOnceForASubscriber(): nil
@@ -282,21 +281,21 @@ function suite.reportsCompletionOnceForASubscriber(): nil
     world:commit()
 
     advance(world, 0.15)
-    test.equal(completions, 0)
+    assert.eq(completions, 0)
 
     advance(world, 0.2)
-    test.equal(completions, 1)
-    test.equal(reportedTag, "run")
-    test.equal(reportedSheet, built.name)
-    test.equal(animation.frameOf(world, entity), 3)
+    assert.eq(completions, 1)
+    assert.eq(reportedTag, "run")
+    assert.eq(reportedSheet, built.name)
+    assert.eq(animation.frameOf(world, entity), 3)
 
     -- Once per playthrough and never again until something restarts it.
     advance(world, 1.0)
-    test.equal(completions, 1)
+    assert.eq(completions, 1)
 
     animation.restart(world, entity)
     advance(world, 0.3)
-    test.equal(completions, 2)
+    assert.eq(completions, 2)
 end
 
 function suite.reportsALoopWhenTheCycleWraps(): nil
@@ -315,15 +314,15 @@ function suite.reportsALoopWhenTheCycleWraps(): nil
     world:commit()
 
     advance(world, 0.35)
-    test.equal(loops, 0)
+    assert.eq(loops, 0)
 
     advance(world, 0.1)
-    test.equal(loops, 1)
+    assert.eq(loops, 1)
     -- The whole sheet reports the empty string rather than a tag name.
-    test.equal(reportedTag, "")
+    assert.eq(reportedTag, "")
 
     advance(world, 0.4)
-    test.equal(loops, 2)
+    assert.eq(loops, 2)
 end
 
 function suite.clampsAOneShotWithoutVisitingUnwatchedEntities(): nil
@@ -337,11 +336,11 @@ function suite.clampsAOneShotWithoutVisitingUnwatchedEntities(): nil
     world:commit()
 
     advance(world, 1.0)
-    test.assert(
+    assert(
         assert(world:get(entity, animation.AnimationComponent)).playing,
         "unwatched one-shot keeps its authored state"
     )
-    test.equal(animation.frameOf(world, entity), 4)
+    assert.eq(animation.frameOf(world, entity), 4)
 end
 
 function suite.carriesPlaybackThroughASnapshot(): nil
@@ -353,7 +352,7 @@ function suite.carriesPlaybackThroughASnapshot(): nil
     world:commit()
     advance(world, 0.075)
     const phase = animation.timeOf(world, entity)
-    test.equal(animation.frameOf(world, entity), 3)
+    assert.eq(animation.frameOf(world, entity), 3)
 
     const saved = world:saveSnapshot()
 
@@ -373,16 +372,16 @@ function suite.carriesPlaybackThroughASnapshot(): nil
             recovered = active.entities[row]
         end
     end
-    test.equal(found, 1)
+    assert.eq(found, 1)
 
     const instance = assert(restored:get(recovered, animation.AnimationComponent))
-    test.equal(instance.sheet, built.id)
-    test.equal(instance.tag, built:tagId("run"))
-    test.equal(instance.speed, 2)
-    test.equal(instance.time, phase)
+    assert.eq(instance.sheet, built.id)
+    assert.eq(instance.tag, built:tagId("run"))
+    assert.eq(instance.speed, 2)
+    assert.eq(instance.time, phase)
     -- Restoring encodes a fresh playback before the first rendered frame.
-    test.equal(instance.frame, -1)
-    test.equal(animation.frameOf(restored, recovered), 3)
+    assert.eq(instance.frame, -1)
+    assert.eq(animation.frameOf(restored, recovered), 3)
 end
 
 function suite.showsTheNewFramesAfterASheetIsFoldedIn(): nil
@@ -417,12 +416,12 @@ function suite.showsTheNewFramesAfterASheetIsFoldedIn(): nil
         tags = {run = {from = 1, to = 2}},
     })
     const folded, reason = sheet.replace(rebuilt)
-    test.assert(reason == nil, "the fold was accepted")
-    test.equal(assert(folded).id, live.id)
+    assert(reason == nil, "the fold was accepted")
+    assert.eq(assert(folded).id, live.id)
 
     advance(world, 0.1)
-    test.equal(animation.frameOf(world, entity), 2)
-    test.assert(frametable.packed() ~= tableBefore, "reload rewrites shared frame regions")
+    assert.eq(animation.frameOf(world, entity), 2)
+    assert(frametable.packed() ~= tableBefore, "reload rewrites shared frame regions")
 end
 
 function suite.showsNothingForASheetThisRunDoesNotHave(): nil
@@ -435,8 +434,8 @@ function suite.showsNothingForASheetThisRunDoesNotHave(): nil
     world:commit()
 
     advance(world, 0.5)
-    test.equal(animation.frameOf(world, entity), 0)
-    test.equal(assert(world:get(entity, gfx.Sprite)).image, 7)
+    assert.eq(animation.frameOf(world, entity), 0)
+    assert.eq(assert(world:get(entity, gfx.Sprite)).image, 7)
 end
 
 function suite.installsItsSystemsOnceUnderTheirEstablishedNames(): nil
@@ -444,14 +443,14 @@ function suite.installsItsSystemsOnceUnderTheirEstablishedNames(): nil
     animation.plugin(world)
     const before = world.systemCount
     animation.plugin(world)
-    test.equal(world.systemCount, before)
+    assert.eq(world.systemCount, before)
 
     local names: {[string]: boolean} = {}
     for _, info in ipairs(world:listSystems()) do
         names[info.name] = true
     end
-    test.assert(names["tecs.EncodeAnimation"], "the advance keeps its established name")
-    test.assert(names["tecs.ReportAnimation"], "the reporter keeps its established name")
+    assert(names["tecs.EncodeAnimation"], "the advance keeps its established name")
+    assert(names["tecs.ReportAnimation"], "the reporter keeps its established name")
 end
 
 function suite.retainsAnUnchangedAnimatedCrowdAcrossFrames(): nil
@@ -474,9 +473,9 @@ function suite.retainsAnUnchangedAnimatedCrowdAcrossFrames(): nil
     const writes = active:writeCount(gfx.Sprite)
     advance(world, 0.2)
     const held = extractor:frame(320, 240, revision)
-    test.equal(active:writeCount(gfx.Sprite), writes)
-    test.equal(extractor:revision(), revision)
-    test.assert(#held < #first, "new clock retains GPU instances and frame table")
+    assert.eq(active:writeCount(gfx.Sprite), writes)
+    assert.eq(extractor:revision(), revision)
+    assert(#held < #first, "new clock retains GPU instances and frame table")
 end
 
 return suite

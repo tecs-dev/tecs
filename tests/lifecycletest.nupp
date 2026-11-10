@@ -1,7 +1,6 @@
 const {type Scope} = require("nupp.tasks")
 
 local ecs = require("tecs.ecs")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -22,7 +21,7 @@ function suite.runsStartupAndShutdownLeavesInOrder(): nil
             name = "test.lifecycle." .. phase,
             phase = phase,
             run = function(dt: number, exclusive _world: ecs.World): nil
-                test.equal(dt, 0)
+                assert.eq(dt, 0)
                 order[#order + 1] = phase
             end,
         })
@@ -31,7 +30,7 @@ function suite.runsStartupAndShutdownLeavesInOrder(): nil
     value:startup()
     value:shutdown()
 
-    test.equal(
+    assert.eq(
         table.concat(order, ","),
         table.concat({"PreStartup", "Startup", "PostStartup", "PreShutdown", "Shutdown", "PostShutdown",}, ",")
     )
@@ -57,7 +56,7 @@ function suite.publishesBetweenLifecycleLeaves(): nil
 
     value:startup()
 
-    test.assert(observed)
+    assert(observed)
 end
 
 function suite.settlesLifecycleChildTasks(): nil
@@ -74,7 +73,7 @@ function suite.settlesLifecycleChildTasks(): nil
 
     value:startup()
 
-    test.equal(answer, 42)
+    assert.eq(answer, 42)
 end
 
 function suite.runsOneRequestedLeafWithTheRequestedDelta(): nil
@@ -98,10 +97,10 @@ function suite.runsOneRequestedLeafWithTheRequestedDelta(): nil
 
     value:runPhase(ecs.phases.Update, 0.25)
 
-    test.equal(updateCalls, 1)
-    test.equal(renderCalls, 0)
-    test.equal(seenDt, 0.25)
-    test.equal(value:fixedStepCount(), 0)
+    assert.eq(updateCalls, 1)
+    assert.eq(renderCalls, 0)
+    assert.eq(seenDt, 0.25)
+    assert.eq(value:fixedStepCount(), 0)
 end
 
 function suite.recoversAfterALifecycleSystemRaises(): nil
@@ -113,13 +112,13 @@ function suite.recoversAfterALifecycleSystemRaises(): nil
             error("expected lifecycle failure")
         end,
     })
-    test.raises(
+    assert.raises(
         function(): nil
             value:startup()
         end,
         "expected lifecycle failure"
     )
-    test.assert(value:removeSystem("test.lifecycle.failure"))
+    assert(value:removeSystem("test.lifecycle.failure"))
     value:startup()
 end
 
@@ -136,11 +135,11 @@ function suite.reportsCoreWorldStatistics(): nil
 
     local stats = value:getStats()
 
-    test.equal(stats.entities, 1)
-    test.equal(stats.archetypes, 2)
-    test.equal(stats.components, 1)
+    assert.eq(stats.entities, 1)
+    assert.eq(stats.archetypes, 2)
+    assert.eq(stats.components, 1)
     -- The four builtin systems every world carries, plus the one above.
-    test.equal(stats.systems, 5)
+    assert.eq(stats.systems, 5)
 end
 
 return suite

@@ -16,7 +16,6 @@ const {type Pipeline} = require("tecs.ecs")
 const {type SystemInfo} = require("tecs.ecs")
 const files = require("nupp.io.files")
 
-local test = require("nupp.test")
 local archetype = require("tecs.internal.archetype")
 local events = require("nupp.events")
 local buffer = require("string.buffer")
@@ -47,10 +46,10 @@ function suite.observesArchetypeRowsAndTracksResidue(): nil
                 count: integer,
                 source: archetype.Archetype?
             ): nil
-                test.equal(last - first + 1, count)
-                test.assert(candidate.entities[first] ~= nil)
+                assert.eq(last - first + 1, count)
+                assert(candidate.entities[first] ~= nil)
                 if source ~= nil then
-                    test.assert(source ~= candidate)
+                    assert(source ~= candidate)
                 end
                 added = added + count
             end,
@@ -62,7 +61,7 @@ function suite.observesArchetypeRowsAndTracksResidue(): nil
                 count: integer,
                 _target: archetype.Archetype?
             ): nil
-                test.assert(candidate.entities[first] ~= nil)
+                assert(candidate.entities[first] ~= nil)
                 removed = removed + count
             end,
             onEntityMove = function(
@@ -72,16 +71,16 @@ function suite.observesArchetypeRowsAndTracksResidue(): nil
                 fromRow: integer,
                 toRow: integer
             ): nil
-                test.equal(fromRow, 2)
-                test.equal(toRow, 0)
-                test.equal(candidate.entities[toRow + 1], entity)
+                assert.eq(fromRow, 2)
+                assert.eq(toRow, 0)
+                assert.eq(candidate.entities[toRow + 1], entity)
                 moved = moved + 1
             end,
             onActivated = function(_observer: archetype.EntityObserver, _candidate: archetype.Archetype): nil
                 activated = activated + 1
             end,
             onDeactivated = function(_observer: archetype.EntityObserver, candidate: archetype.Archetype): nil
-                test.equal(#candidate.entities, 0)
+                assert.eq(#candidate.entities, 0)
                 deactivated = deactivated + 1
             end
         })
@@ -95,24 +94,24 @@ function suite.observesArchetypeRowsAndTracksResidue(): nil
     const version = source:structuralCount()
     source:trackValueCount(value)
     source:set(1, value(7))
-    test.equal(source:valueCount(), 1)
-    test.equal(world:get(first, value), 7)
+    assert.eq(source:valueCount(), 1)
+    assert.eq(world:get(first, value), 7)
     world:despawn(first)
     world:commit()
     const rows, count = source:structuralTouched()
-    test.equal(count, 1)
-    test.equal(rows[1], 1)
-    test.assert(source:structuralDescribed(version))
+    assert.eq(count, 1)
+    assert.eq(rows[1], 1)
+    assert(source:structuralDescribed(version))
     world:batchSet(world:newQuery({include = {value}}), marker)
     world:commit()
-    test.equal(created, 2)
-    test.equal(added, 5)
-    test.equal(removed, 3)
-    test.equal(activated, 2)
-    test.equal(deactivated, 1)
-    test.equal(moved, 1)
+    assert.eq(created, 2)
+    assert.eq(added, 5)
+    assert.eq(removed, 3)
+    assert.eq(activated, 2)
+    assert.eq(deactivated, 1)
+    assert.eq(moved, 1)
     const stats = world:getStats()
-    test.assert(world:getStats(stats) == stats)
+    assert(world:getStats(stats) == stats)
 end
 
 function suite.dirtyArchetypesFollowFirstWriteOrder(): nil
@@ -129,9 +128,9 @@ function suite.dirtyArchetypesFollowFirstWriteOrder(): nil
     a:markComponentDirty(left)
     b:markComponentDirty(right)
     const next = world:dirtyArchetypes()
-    test.assert(next() == b)
-    test.assert(next() == a)
-    test.assert(next() == nil)
+    assert(next() == b)
+    assert(next() == a)
+    assert(next() == nil)
 end
 
 function suite.snapshotEventsFilterAndFanOut(): nil
@@ -147,7 +146,7 @@ function suite.snapshotEventsFilterAndFanOut(): nil
         event:exclude(derived)
     end)
     world:observe(0, StartSnapshotLoad, function(borrows event: StartSnapshotLoad): nil
-        test.equal(event.prelude.entityCount, 1)
+        assert.eq(event.prelude.entityCount, 1)
         event:onData("test.parity", function(value: any): nil
             loaded = loaded + (value as integer)
         end)
@@ -156,22 +155,22 @@ function suite.snapshotEventsFilterAndFanOut(): nil
         end)
     end)
     world:observe(0, FinishSnapshotLoad, function(borrows event: FinishSnapshotLoad): nil
-        test.equal(event.prelude.entityCount, 1)
-        test.equal(loaded, 14)
+        assert.eq(event.prelude.entityCount, 1)
+        assert.eq(loaded, 14)
         finished = true
     end)
     world:disablePhase("Update")
     const saved = world:saveSnapshot()
     world:enablePhase("Update")
     world:loadSnapshot(saved)
-    test.assert(finished)
-    test.assert(not world:isPhaseEnabled("Update"))
+    assert(finished)
+    assert(not world:isPhaseEnabled("Update"))
     const pose = assert(world:get(retained, ecs.Transform3D))
-    test.equal(pose.z, 3)
-    test.equal(pose.rotationW, 1)
-    test.equal(pose.scaleZ, 1)
-    test.equal(world:newQuery({include = {derived}}):count(), 0)
-    test.equal(events.name(OnSnapshotSave), "OnSnapshotSave")
+    assert.eq(pose.z, 3)
+    assert.eq(pose.rotationW, 1)
+    assert.eq(pose.scaleZ, 1)
+    assert.eq(world:newQuery({include = {derived}}):count(), 0)
+    assert.eq(events.name(OnSnapshotSave), "OnSnapshotSave")
 end
 
 function suite.snapshotNilSerializerOmitsTheComponent(): nil
@@ -197,8 +196,8 @@ function suite.snapshotNilSerializerOmitsTheComponent(): nil
     const id = world:spawn(value())
     world:commit()
     world:loadSnapshot(world:saveSnapshot())
-    test.assert(world:isAlive(id))
-    test.assert(world:get(id, value) == nil)
+    assert(world:isAlive(id))
+    assert(world:get(id, value) == nil)
 end
 
 function suite.binarySnapshotsRestoreNativeColumnsAndRetainTheInputBuffer(): nil
@@ -208,28 +207,28 @@ function suite.binarySnapshotsRestoreNativeColumnsAndRetainTheInputBuffer(): nil
     world:commit()
     const output = buffer.new()
     const saved = world:saveSnapshot({format = "binary", buffer = output})
-    test.assert(saved.buffer == output)
+    assert(saved.buffer == output)
     const length = #output
-    test.assert(length > count * 80)
+    assert(length > count * 80)
     world:loadSnapshot(saved)
-    test.equal(#output, length)
-    test.equal(world:newQuery({include = {ecs.Transform3D}}):count(), count)
+    assert.eq(#output, length)
+    assert.eq(world:newQuery({include = {ecs.Transform3D}}):count(), count)
     for candidate, rows in world:newQuery({include = {ecs.Transform3D}}):iter() do
         const values = assert(candidate:get(ecs.Transform3D))
         @unsafe do
             for row = 1, assert(rows) do
-                test.equal(values[row].z, 3);
-                test.equal(values[row].scaleX, 1)
+                assert.eq(values[row].z, 3);
+                assert.eq(values[row].scaleX, 1)
             end
         end
     end
     world:loadSnapshot(output:tostring())
     world:loadSnapshot(output)
-    test.equal(#output, length)
-    test.raises(function(): nil
+    assert.eq(#output, length)
+    assert.raises(function(): nil
         world:loadSnapshot(output:tostring():sub(1, -2))
     end)
-    test.equal(world:getStats().entities, count)
+    assert.eq(world:getStats().entities, count)
 end
 
 function suite.readsColumnIndexedTablesAndMigratesBinarySchemas(): nil
@@ -247,7 +246,7 @@ function suite.readsColumnIndexedTablesAndMigratesBinarySchemas(): nil
         },
         data = {}
     })
-    test.equal(assert(world:get(1, native)).x, 4)
+    assert.eq(assert(world:get(1, native)).x, 4)
     const encoded = buffer.new()
     encoded:encode(1):encode(2):encode(1):encode(1):encode(1)
     encoded:encode("Transform3D"):encode("z:double,x:double|16")
@@ -256,8 +255,8 @@ function suite.readsColumnIndexedTablesAndMigratesBinarySchemas(): nil
     const old: any = ffi.new("double[2]", 7, 9)
     encoded:putcdata(ids as voidptr, 8):putcdata(old as voidptr, 16):encode(false)
     world:loadSnapshot(encoded)
-    test.equal(assert(world:get(1, native)).x, 9)
-    test.equal(assert(world:get(1, native)).z, 7)
+    assert.eq(assert(world:get(1, native)).x, 9)
+    assert.eq(assert(world:get(1, native)).z, 7)
 end
 
 local struct NestedPose
@@ -290,8 +289,8 @@ function suite.nativeNestedAndPointerLayoutsUseCustomCodecs(): nil
     world:commit()
     world:loadSnapshot(world:saveSnapshot({format = "binary"}))
     const restored = assert(world:get(id, component))
-    test.equal(restored.pose.x, 17)
-    test.assert(assert(world:get(id, component)).pointer == nil)
+    assert.eq(restored.pose.x, 17)
+    assert(assert(world:get(id, component)).pointer == nil)
 end
 
 function suite.savesAndLoadsInsideAnActiveSystem(): nil
@@ -306,7 +305,7 @@ function suite.savesAndLoadsInsideAnActiveSystem(): nil
         end
     })
     world:update(0)
-    test.equal(world:newQuery({include = {marker}}):count(), 1)
+    assert.eq(world:newQuery({include = {marker}}):count(), 1)
 end
 
 function suite.customPhaseTreesDispatchAndEnableRecursively(): nil
@@ -331,17 +330,17 @@ function suite.customPhaseTreesDispatchAndEnableRecursively(): nil
         end
     })
     world:update(0)
-    test.equal(order, "")
+    assert.eq(order, "")
     world:runPhase("test.CustomGroup")
-    test.equal(order, "ab")
+    assert.eq(order, "ab")
     world:disablePhase("test.CustomGroup")
     world:runPhase("test.CustomGroup")
-    test.equal(order, "ab")
+    assert.eq(order, "ab")
     world:enablePhase("test.CustomLast")
     world:runPhase("test.CustomGroup")
-    test.equal(order, "abb")
-    test.assert(first.position ~= nil)
-    test.raises(
+    assert.eq(order, "abb")
+    assert(first.position ~= nil)
+    assert.raises(
         function(): nil
             world:registerPhase({name = "test.Cycle", children = {"test.Cycle"}})
         end,
@@ -374,8 +373,8 @@ function suite.worldAwareDeserializersReceiveTheDestination(): nil
     const id = destination:spawn(value())
     destination:commit()
     destination:loadSnapshot(destination:saveSnapshot({format = "binary"}))
-    test.assert(seen)
-    test.equal(assert(destination:get(id, value)).count, 17)
+    assert(seen)
+    assert.eq(assert(destination:get(id, value)).count, 17)
 end
 
 function suite.fixedTrackingDistinguishesVariableRateOverwrites(): nil
@@ -392,7 +391,7 @@ function suite.fixedTrackingDistinguishesVariableRateOverwrites(): nil
     end)
     fixedtracking.afterStep(world, function(exclusive current: World): nil
         after = after + 1
-        test.assert(fixedtracking.wroteThisStep(current, candidate, value))
+        assert(fixedtracking.wroteThisStep(current, candidate, value))
     end)
     world:addSystem({
         name = "test.parity.fixed",
@@ -402,12 +401,12 @@ function suite.fixedTrackingDistinguishesVariableRateOverwrites(): nil
         end
     })
     world:update(0.21)
-    test.equal(before, 2)
-    test.equal(after, 2)
-    test.equal(fixedtracking.currentStep(world), 2)
-    test.equal(fixedtracking.version(candidate, value), 2)
+    assert.eq(before, 2)
+    assert.eq(after, 2)
+    assert.eq(fixedtracking.currentStep(world), 2)
+    assert.eq(fixedtracking.version(candidate, value), 2)
     world:getMut(id, value)
-    test.assert(not fixedtracking.wroteThisStep(world, candidate, value))
+    assert(not fixedtracking.wroteThisStep(world, candidate, value))
 end
 
 function suite.flatQueuesPreserveCoalescingAndMixedPublicationOrder(): nil
@@ -427,26 +426,26 @@ function suite.flatQueuesPreserveCoalescingAndMixedPublicationOrder(): nil
         order[#order + 1] = event.entity
     end)
     world:commit()
-    test.equal(order[1], parent)
-    test.equal(order[2], first)
-    test.equal(order[3], related)
-    test.equal(order[4], last)
-    test.equal(world:get(first, a), 3)
-    test.equal(world:get(first, b), 2)
+    assert.eq(order[1], parent)
+    assert.eq(order[2], first)
+    assert.eq(order[3], related)
+    assert.eq(order[4], last)
+    assert.eq(world:get(first, a), 3)
+    assert.eq(world:get(first, b), 2)
     world:set(first, a(10))
     world:remove(first, b)
     world:set(first, a(11))
     world:set(last, b(12))
     world:set(first, relation(parent))
     world:commit()
-    test.equal(world:get(first, a), 11)
-    test.assert(not world:has(first, b))
-    test.equal(world:get(last, b), 12)
-    test.equal(#world:relationshipSources(relation, parent), 2)
+    assert.eq(world:get(first, a), 11)
+    assert(not world:has(first, b))
+    assert.eq(world:get(last, b), 12)
+    assert.eq(#world:relationshipSources(relation, parent), 2)
     const canceled = bundle:spawn(a(20))
     world:despawn(canceled)
     world:commit()
-    test.assert(not world:isAlive(canceled))
+    assert(not world:isAlive(canceled))
 end
 
 function suite.sparseFramesKeepAbsentTagsAndFalseScalarsDistinct(): nil
@@ -460,12 +459,12 @@ function suite.sparseFramesKeepAbsentTagsAndFalseScalarsDistinct(): nil
     encoded:encode(1):encode(1):encode(nil)
     encoded:encode(2):encode(2):encode(false):encode(false)
     world:loadSnapshot(encoded)
-    test.assert(world:has(1, tag))
-    test.assert(not world:has(2, tag))
-    test.assert(not world:has(1, flag))
-    test.equal(world:get(2, flag), false)
+    assert(world:has(1, tag))
+    assert(not world:has(2, tag))
+    assert(not world:has(1, flag))
+    assert.eq(world:get(2, flag), false)
     world:loadSnapshot(world:saveSnapshot({format = "binary"}))
-    test.equal(world:get(2, flag), false)
+    assert.eq(world:get(2, flag), false)
 end
 
 local struct NativeEdge
@@ -489,11 +488,11 @@ function suite.binaryRelationshipsRestoreDenseNativeAndSparseEdgeSets(): nil
     const second = world:spawn(sparse(left), sparse(right))
     world:commit()
     world:loadSnapshot(world:saveSnapshot({format = "binary"}))
-    test.equal(assert(world:get(source, dense:targeting(left))).weight, 3)
-    test.equal(assert(world:get(source, dense:targeting(right))).weight, 7)
-    test.equal(world:relationshipSources(dense, right)[1], source)
-    test.equal(world:relationshipSources(sparse, left)[1], second)
-    test.equal(world:relationshipSources(sparse, right)[1], second)
+    assert.eq(assert(world:get(source, dense:targeting(left))).weight, 3)
+    assert.eq(assert(world:get(source, dense:targeting(right))).weight, 7)
+    assert.eq(world:relationshipSources(dense, right)[1], source)
+    assert.eq(world:relationshipSources(sparse, left)[1], second)
+    assert.eq(world:relationshipSources(sparse, right)[1], second)
 end
 
 function suite.coldTransitionHooksObserveEntityAndStateChanges(): nil
@@ -503,12 +502,12 @@ function suite.coldTransitionHooksObserveEntityAndStateChanges(): nil
     local states: integer = 0
     entityworld.setTransitionObserver(world, {
         entity = function(id: integer, before: archetype.Archetype?, after: archetype.Archetype?): nil
-            test.assert(id > 0)
-            test.assert(before ~= after)
+            assert(id > 0)
+            assert(before ~= after)
             transitions = transitions + 1
         end,
         state = function(_kind: string, _before: string?, _after: string?, changed: string): nil
-            test.equal(changed, "test.parity.state")
+            assert.eq(changed, "test.parity.state")
             states = states + 1
         end
     })
@@ -521,8 +520,8 @@ function suite.coldTransitionHooksObserveEntityAndStateChanges(): nil
     world:createState("test.parity.state")
     world:pushState("test.parity.state")
     world:popState()
-    test.equal(transitions, 3)
-    test.equal(states, 2)
+    assert.eq(transitions, 3)
+    assert.eq(states, 2)
     entityworld.setTransitionObserver(world, nil)
 end
 
@@ -619,7 +618,7 @@ function suite.customPipelineOwnsDispatchControlsAndSnapshotClock(): nil
         end
     })
     world:registerPhase({name = "test.CustomPipeline"})
-    test.equal(registeredPhase, "test.CustomPipeline")
+    assert.eq(registeredPhase, "test.CustomPipeline")
     const initial = pipeline.count
     world:addSystem({
         name = "test.parity.pipeline",
@@ -629,28 +628,28 @@ function suite.customPipelineOwnsDispatchControlsAndSnapshotClock(): nil
             ran = ran + 1
         end
     })
-    test.equal(world:getStats().systems, initial + 1)
-    test.equal(#world:listSystems(), initial + 1)
+    assert.eq(world:getStats().systems, initial + 1)
+    assert.eq(#world:listSystems(), initial + 1)
     world:update(0.01)
-    test.equal(ran, 1)
-    test.equal(world:getStats().entities, 1)
+    assert.eq(ran, 1)
+    assert.eq(world:getStats().entities, 1)
     world:disablePhase("Update")
     const saved = world:saveSnapshot({format = "binary"})
     world:enablePhase("Update")
     pipeline.fixedAccumulator = 0
     world:loadSnapshot(saved)
-    test.equal(pipeline.fixedAccumulator, 0.125)
-    test.assert(not world:isPhaseEnabled("Update"))
+    assert.eq(pipeline.fixedAccumulator, 0.125)
+    assert(not world:isPhaseEnabled("Update"))
     world:runPhase("Update")
-    test.equal(ran, 1)
+    assert.eq(ran, 1)
     world:enablePhase("Update")
     world:setSystemEnabled("test.parity.pipeline", false)
     world:update(0)
-    test.equal(ran, 1)
-    test.assert(world:removeSystem("test.parity.pipeline"))
-    test.equal(pipeline.count, initial)
-    test.equal(world:fixedStepCount(), 7)
-    test.equal(factoryCalls, 1)
+    assert.eq(ran, 1)
+    assert(world:removeSystem("test.parity.pipeline"))
+    assert.eq(pipeline.count, initial)
+    assert.eq(world:fixedStepCount(), 7)
+    assert.eq(factoryCalls, 1)
 end
 
 function suite.snapshotLayersAndMalformedPipelineValidateBeforeReplacement(): nil
@@ -661,18 +660,18 @@ function suite.snapshotLayersAndMalformedPipelineValidateBeforeReplacement(): ni
     world:commit()
     const selected = world:saveSnapshot({format = "binary", layers = {2}})
     world:loadSnapshot(selected)
-    test.assert(not world:isAlive(left))
-    test.assert(world:isAlive(right) and world:isAlive(unlayered))
+    assert(not world:isAlive(left))
+    assert(world:isAlive(right) and world:isAlive(unlayered))
     const saved: any = world:saveSnapshot()
     saved.pipeline.phaseStates = {"invalid"}
-    test.raises(
+    assert.raises(
         function(): nil
             world:loadSnapshot(saved)
         end,
         "phase states"
     )
-    test.assert(world:isAlive(right) and world:isAlive(unlayered))
-    test.raises(
+    assert(world:isAlive(right) and world:isAlive(unlayered))
+    assert.raises(
         function(): nil
             world:saveSnapshot({customData = {["__tecs.pipeline"] = {}}})
         end,
@@ -693,7 +692,7 @@ function suite.relationshipCodecsReceiveTheDestinationWorld(): nil
             return {target = value.target, weight = value.weight}
         end,
         deserialize = function(exclusive destination: World, value: any): NativeEdge
-            test.assert(destination == world)
+            assert(destination == world)
             seen = seen + 1
             return NativeEdge(value.target as number, value.weight as number)
         end
@@ -702,8 +701,8 @@ function suite.relationshipCodecsReceiveTheDestinationWorld(): nil
     const source = world:spawn(edge(parent, 17))
     world:commit()
     world:loadSnapshot(world:saveSnapshot({format = "binary"}))
-    test.equal(seen, 1)
-    test.equal(assert(world:get(source, edge)).weight, 17)
+    assert.eq(seen, 1)
+    assert.eq(assert(world:get(source, edge)).weight, 17)
 end
 
 function suite.binarySnapshotFileMatchesItsReusableBuffer(): nil
@@ -714,9 +713,9 @@ function suite.binarySnapshotFileMatchesItsReusableBuffer(): nil
         const output = buffer.new()
         world:saveSnapshot({format = "binary", buffer = output, path = temporary:toString()})
         const bytes = assert(files.read(temporary:toString()))
-        test.equal(bytes, output:tostring())
+        assert.eq(bytes, output:tostring())
         world:loadSnapshot(bytes)
-        test.equal(assert(world:get(id, ecs.Transform3D)).z, 5)
+        assert.eq(assert(world:get(id, ecs.Transform3D)).z, 5)
     end
 end
 

@@ -5,7 +5,6 @@ local compression = require("nupp.compression")
 local files = require("nupp.io.files")
 local hostpump = require("nupp.host.pump")
 local musicfm = require("tecs.ymfm.music")
-local test = require("nupp.test")
 
 -- The chip index the native library knows a chip by, which a chip's
 -- Decoder parameters carry.
@@ -209,7 +208,7 @@ local function underPump(body: function(): boolean): nil
         passes = passes + 1
         state = pump:poll()
     end
-    test.assert(state ~= "parked", "the load never finished")
+    assert(state ~= "parked", "the load never finished")
 end
 
 --- Loads one asset through a fresh loader.
@@ -233,25 +232,25 @@ end
 function suite.readsTheWritesOfAYm2612AndSkipsTheSn76489BesideIt(): nil
     local commands = "\x50\x9F" .. "\x52\x28\xF0" .. wait(441) .. "\x53\x30\x71" .. "\x62" .. "\x70"
     local log = assert(musicfm.parse(vgm(header({[0x0C] = 3579545, [0x2C] = 7670453}), commands)))
-    test.equal(log.format, "vgm")
-    test.equal(log.version, 0x171)
-    test.equal(log.rate, 44100)
-    test.equal(#log.chips, 1)
-    test.equal(log.chips[1].chip, "ym2612")
-    test.equal(log.chips[1].clock, 7670453)
-    test.equal(log.count, 2)
+    assert.eq(log.format, "vgm")
+    assert.eq(log.version, 0x171)
+    assert.eq(log.rate, 44100)
+    assert.eq(#log.chips, 1)
+    assert.eq(log.chips[1].chip, "ym2612")
+    assert.eq(log.chips[1].clock, 7670453)
+    assert.eq(log.count, 2)
     local tick, chip, register, value = log:entry(1)
-    test.equal(tick, 0)
-    test.equal(chip, 0)
-    test.equal(register, 0x28)
-    test.equal(value, 0xF0)
+    assert.eq(tick, 0)
+    assert.eq(chip, 0)
+    assert.eq(register, 0x28)
+    assert.eq(value, 0xF0)
     tick, chip, register, value = log:entry(2)
-    test.equal(tick, 441)
-    test.equal(register, 0x130, "port 1 is the second bank")
-    test.equal(log.length, 441 + 735 + 1)
-    test.equal(#log.skipped, 1)
-    test.matches(log.skipped[1], "SN76489")
-    test.raises(
+    assert.eq(tick, 441)
+    assert.eq(register, 0x130, "port 1 is the second bank")
+    assert.eq(log.length, 441 + 735 + 1)
+    assert.eq(#log.skipped, 1)
+    assert.matches(log.skipped[1], "SN76489")
+    assert.raises(
         function(): nil
             log:entry(3)
         end,
@@ -265,14 +264,14 @@ function suite.namesDualAndAlternateChipsFromTheClockFlags(): nil
     local clocks = {[0x50] = 3579545 + 1073741824, [0x30] = 3579545 + 2147483648, [0x4C] = 8000000 + 2147483648}
     local commands = "\x5A\x20\x01" .. "\xAA\x20\x02" .. "\x54\x08\x00" .. "\x58\x28\x01"
     local log = assert(musicfm.parse(vgm(header(clocks), commands)))
-    test.equal(#log.chips, 4)
-    test.equal(log.chips[1].chip, "ym3812")
-    test.equal(log.chips[2].chip, "ym3812")
-    test.assert(log.chips[2].second)
-    test.equal(log.chips[3].chip, "ym2164")
-    test.equal(log.chips[4].chip, "ym2610b")
+    assert.eq(#log.chips, 4)
+    assert.eq(log.chips[1].chip, "ym3812")
+    assert.eq(log.chips[2].chip, "ym3812")
+    assert(log.chips[2].second)
+    assert.eq(log.chips[3].chip, "ym2164")
+    assert.eq(log.chips[4].chip, "ym2610b")
     local _, chip = log:entry(2)
-    test.equal(chip, 1)
+    assert.eq(chip, 1)
 end
 
 function suite.findsTheLoopOffsetAndReadsGd3Tags(): nil
@@ -282,25 +281,25 @@ function suite.findsTheLoopOffsetAndReadsGd3Tags(): nil
     file.loop = #first
     file.tags = {"Stage 1", "ステージ1", "Game", "", "PC", "", "Composer", "", "1990", "Tecs", "made up"}
     local log = assert(musicfm.parse(vgm(file, first .. looped)))
-    test.equal(log.loopStart, 100 / 44100)
-    test.equal(log.duration, 300 / 44100)
+    assert.eq(log.loopStart, 100 / 44100)
+    assert.eq(log.duration, 300 / 44100)
     local tags = assert(log.tags)
-    test.equal(tags.title, "Stage 1")
-    test.equal(tags.titleJapanese, "ステージ1")
-    test.equal(tags.author, "Composer")
-    test.equal(tags.converter, "Tecs")
-    test.equal(tags.notes, "made up")
+    assert.eq(tags.title, "Stage 1")
+    assert.eq(tags.titleJapanese, "ステージ1")
+    assert.eq(tags.author, "Composer")
+    assert.eq(tags.converter, "Tecs")
+    assert.eq(tags.notes, "made up")
 end
 
 function suite.assemblesMemoryImagesFromRomDataBlocks(): nil
     local rom = block(0x82, le32(0x1000) .. le32(0x10) .. "\1\2\3\4") .. block(0x83, le32(16) .. le32(0) .. "\9")
     local log = assert(musicfm.parse(vgm(header({[0x4C] = 8000000}), rom .. "\x58\x10\x00")))
-    test.equal(log.chips[1].chip, "ym2610")
+    assert.eq(log.chips[1].chip, "ym2610")
     local image = assert(log.chips[1].memory.adpcmA)
-    test.equal(#image, 0x14, "the image reaches as far as its furthest piece")
-    test.equal(string.sub(image, 0x11, 0x14), "\1\2\3\4")
-    test.equal(string.byte(image, 1), 0)
-    test.equal(log.chips[1].memory.adpcmB, "\9")
+    assert.eq(#image, 0x14, "the image reaches as far as its furthest piece")
+    assert.eq(string.sub(image, 0x11, 0x14), "\1\2\3\4")
+    assert.eq(string.byte(image, 1), 0)
+    assert.eq(log.chips[1].memory.adpcmB, "\9")
 end
 
 function suite.turnsDacDataIntoTimedWrites(): nil
@@ -308,17 +307,17 @@ function suite.turnsDacDataIntoTimedWrites(): nil
     -- and the first again.
     local commands = block(0x00, "\x10\x20\x30") .. "\x81" .. "\x82" .. "\xE0" .. le32(0) .. "\x80"
     local log = assert(musicfm.parse(vgm(header({[0x2C] = 7670453}), commands)))
-    test.equal(log.count, 3)
+    assert.eq(log.count, 3)
     local tick, _, register, value = log:entry(1)
-    test.equal(tick, 0)
-    test.equal(register, 0x2A)
-    test.equal(value, 0x10)
+    assert.eq(tick, 0)
+    assert.eq(register, 0x2A)
+    assert.eq(value, 0x10)
     tick, _, _, value = log:entry(2)
-    test.equal(tick, 1, "a 0x81 waits a tick after its write")
-    test.equal(value, 0x20)
+    assert.eq(tick, 1, "a 0x81 waits a tick after its write")
+    assert.eq(value, 0x20)
     tick, _, _, value = log:entry(3)
-    test.equal(tick, 3)
-    test.equal(value, 0x10)
+    assert.eq(tick, 3)
+    assert.eq(value, 0x10)
 end
 
 function suite.playsADacStreamAtItsFrequency(): nil
@@ -328,13 +327,13 @@ function suite.playsADacStreamAtItsFrequency(): nil
     local start = "\x93\x00" .. le32(0) .. "\x01" .. le32(3)
     local commands = block(0x00, "\x11\x22\x33\x44") .. "\x52\x2B\x80" .. setup .. start .. wait(20)
     local log = assert(musicfm.parse(vgm(header({[0x2C] = 7670453}), commands)))
-    test.equal(log.count, 4)
+    assert.eq(log.count, 4)
     local expected: {{integer}} = {{0, 0x11}, {4, 0x22}, {8, 0x33}}
     for index, pair in ipairs(expected) do
         local tick, _, register, value = log:entry(index + 1)
-        test.equal(tick, pair[1])
-        test.equal(register, 0x2A)
-        test.equal(value, pair[2])
+        assert.eq(tick, pair[1])
+        assert.eq(register, 0x2A)
+        assert.eq(value, pair[2])
     end
 end
 
@@ -344,84 +343,84 @@ function suite.decompressesABitPackedDataBlock(): nil
     local data = "\x00" .. le32(4) .. "\x08\x04\x00" .. le16(0x10) .. packed
     local commands = block(0x40, data) .. "\x80\x80\x80\x80"
     local log = assert(musicfm.parse(vgm(header({[0x2C] = 7670453}), commands)))
-    test.equal(log.count, 4)
+    assert.eq(log.count, 4)
     for index = 1, 4 do
         local _, _, _, value = log:entry(index)
-        test.equal(value, 0x10 + index)
+        assert.eq(value, 0x10 + index)
     end
 end
 
 function suite.sharesTheYm2413ClockBeforeVersion110(): nil
     local log = assert(musicfm.parse(vgm(header({[0x10] = 7670453}, 0x101), "\x52\x28\xF0")))
-    test.equal(log.chips[1].chip, "ym2612")
-    test.equal(log.chips[1].clock, 7670453)
+    assert.eq(log.chips[1].chip, "ym2612")
+    assert.eq(log.chips[1].clock, 7670453)
 end
 
 function suite.readsTheAyFamilyAsAYm2149(): nil
     local file = header({[0x74] = 2000000})
     file.bytes[0x79] = 0x10
     local log = assert(musicfm.parse(vgm(file, "\xA0\x08\x0F" .. "\xA0\x88\x0F")))
-    test.equal(log.chips[1].chip, "ym2149")
-    test.equal(log.chips[1].clock, 1000000, "pin 26 low halves the clock")
-    test.equal(#log.chips, 1, "a second chip the header does not declare is skipped")
-    test.matches(log.skipped[1], "second chip")
+    assert.eq(log.chips[1].chip, "ym2149")
+    assert.eq(log.chips[1].clock, 1000000, "pin 26 low halves the clock")
+    assert.eq(#log.chips, 1, "a second chip the header does not declare is skipped")
+    assert.matches(log.skipped[1], "second chip")
     local ay8930 = header({[0x74] = 2000000})
     ay8930.bytes[0x78] = 0x03
     local _, reason = musicfm.parse(vgm(ay8930, "\xA0\x08\x0F"))
-    test.matches(assert(reason), "AY8930")
+    assert.matches(assert(reason), "AY8930")
 end
 
 function suite.inflatesAVgzFile(): nil
     local plain = vgm(header({[0x50] = 3579545}), "\x5A\x20\x01" .. wait(10))
     local packed = compression.format("gzip"):compress(plain)
     local log = assert(musicfm.parse(packed, "song.vgz"))
-    test.equal(log.count, 1)
-    test.equal(log.length, 10)
+    assert.eq(log.count, 1)
+    assert.eq(log.length, 10)
     local _, reason = musicfm.parse("\x1F\x8B\x08\x00garbage", "broken.vgz")
-    test.matches(assert(reason), "broken.vgz: the gzip stream cannot be inflated")
+    assert.matches(assert(reason), "broken.vgz: the gzip stream cannot be inflated")
 end
 
 function suite.refusesALogWithNothingToPlayOrACommandItCannotRead(): nil
     local _, onlySn = musicfm.parse(vgm(header({[0x0C] = 3579545}), "\x50\x9F" .. wait(10)), "sms.vgm")
-    test.matches(assert(onlySn), "sms.vgm: nothing in the file is for a chip tecs.ymfm emulates")
-    test.matches(assert(onlySn), "SN76489")
+    assert.matches(assert(onlySn), "sms.vgm: nothing in the file is for a chip tecs.ymfm emulates")
+    assert.matches(assert(onlySn), "SN76489")
     local _, unknown = musicfm.parse(vgm(header({[0x50] = 3579545}), "\x5A\x20\x01\x60"), "odd.vgm")
-    test.matches(assert(unknown), "command 0x60 is not a VGM command")
+    assert.matches(assert(unknown), "command 0x60 is not a VGM command")
     local truncated = vgm(header({[0x50] = 3579545}), "")
     local _, cut = musicfm.parse(string.sub(truncated, 1, #truncated - 1) .. "\x5A\x20", "cut.vgm")
-    test.matches(assert(cut), "cut short")
+    assert.matches(assert(cut), "cut short")
     local _, neither = musicfm.parse("MThd", "x")
-    test.matches(assert(neither), "neither a VGM, a VGZ nor a DRO file")
+    assert.matches(assert(neither), "neither a VGM, a VGZ nor a DRO file")
     local _, unclocked = musicfm.parse(vgm(header({}), "\x5A\x20\x01"), "y")
-    test.matches(assert(unclocked), "no clock")
+    assert.matches(assert(unclocked), "no clock")
 end
 
 function suite.readsADroVersionTwoOpl3WithItsCodemap(): nil
     -- Codes 0 and 1 map to 0x20 and 0xB0; 0x81 is 0xB0 of the high bank.
     local data = "\x00\x01" .. "\xFE\x09" .. "\x01\x32" .. "\xFF\x01" .. "\x81\x32"
     local log = assert(musicfm.parse(dro2(2, {0x20, 0xB0}, data, 600)))
-    test.equal(log.format, "dro")
-    test.equal(log.version, 2)
-    test.equal(log.rate, 1000)
-    test.equal(log.chips[1].chip, "ymf262")
+    assert.eq(log.format, "dro")
+    assert.eq(log.version, 2)
+    assert.eq(log.rate, 1000)
+    assert.eq(log.chips[1].chip, "ymf262")
     local tick, _, register, value = log:entry(2)
-    test.equal(tick, 10, "a short delay of 9 is ten milliseconds")
-    test.equal(register, 0xB0)
-    test.equal(value, 0x32)
+    assert.eq(tick, 10, "a short delay of 9 is ten milliseconds")
+    assert.eq(register, 0xB0)
+    assert.eq(value, 0x32)
     tick, _, register = log:entry(3)
-    test.equal(tick, 10 + 512)
-    test.equal(register, 0x1B0)
-    test.equal(log.length, 600)
+    assert.eq(tick, 10 + 512)
+    assert.eq(register, 0x1B0)
+    assert.eq(log.length, 600)
 end
 
 function suite.placesADualOpl2CaptureOneChipToEachSide(): nil
     local log = assert(musicfm.parse(dro2(1, {0x20}, "\x00\x01\x80\x02", 10)))
-    test.equal(#log.chips, 2)
-    test.equal(log.chips[1].left, 1)
-    test.equal(log.chips[1].right, 0)
-    test.equal(log.chips[2].right, 1)
+    assert.eq(#log.chips, 2)
+    assert.eq(log.chips[1].left, 1)
+    assert.eq(log.chips[1].right, 0)
+    assert.eq(log.chips[2].right, 1)
     local _, chip = log:entry(2)
-    test.equal(chip, 1)
+    assert.eq(chip, 1)
 end
 
 function suite.readsADroVersionOneWithEitherHardwareField(): nil
@@ -430,33 +429,33 @@ function suite.readsADroVersionOneWithEitherHardwareField(): nil
     local data = "\x20\x01" .. "\x00\x04" .. "\x01\x00\x01" .. "\x03" .. "\x04\x02\x07"
     for _, wide in ipairs({true, false}) do
         local log = assert(musicfm.parse(dro1(2, data, wide)))
-        test.equal(log.version, 1)
-        test.equal(#log.chips, 2, "hardware 2 is a dual OPL2 in version 1")
+        assert.eq(log.version, 1)
+        assert.eq(#log.chips, 2, "hardware 2 is a dual OPL2 in version 1")
         local tick, chip, register, value = log:entry(2)
-        test.equal(tick, 5 + 257)
-        test.equal(chip, 1)
-        test.equal(register, 0x02)
-        test.equal(value, 7)
+        assert.eq(tick, 5 + 257)
+        assert.eq(chip, 1)
+        assert.eq(register, 0x02)
+        assert.eq(value, 7)
     end
 end
 
 function suite.refusesADroFileItCannotRead(): nil
     local _, version = musicfm.parse("DBRAWOPL" .. le16(3) .. le16(0) .. string.rep("\0", 20), "a.dro")
-    test.matches(assert(version), "DRO version 3.0")
+    assert.matches(assert(version), "DRO version 3.0")
     local _, code = musicfm.parse(dro2(0, {0x20}, "\x05\x01", 1), "b.dro")
-    test.matches(assert(code), "code 5 is past the codemap")
+    assert.matches(assert(code), "code 5 is past the codemap")
     local _, hardware = musicfm.parse(dro2(7, {}, "", 1), "c.dro")
-    test.matches(assert(hardware), "hardware type 7")
+    assert.matches(assert(hardware), "hardware type 7")
 end
 
 function suite.loadsAVgzFileThroughItsKind(): nil
     local plain = vgm(header({[0x50] = 3579545}), "\x5A\x20\x01" .. wait(10))
     temporary(compression.format("gzip"):compress(plain), ".vgz", function(path: string): nil
         local loader, handle, reason = load(musicfm.kind, path)
-        test.assert(handle ~= nil, reason or "no handle")
+        assert(handle ~= nil, reason or "no handle")
         local held = assert(handle)
-        test.equal(held.kind, "music.fm")
-        test.equal((held:value() as musicfm.RegisterLog).count, 1)
+        assert.eq(held.kind, "music.fm")
+        assert.eq((held:value() as musicfm.RegisterLog).count, 1)
         held:release()
         loader:shutdown()
     end)
@@ -594,7 +593,7 @@ local function kindOf(name: string): integer
 end
 
 local function near(actual: number, expected: number, what: string?): nil
-    test.assert(
+    assert(
         math.abs(actual - expected) < 1e-9,
         (what or "") .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual)
     )
@@ -623,34 +622,34 @@ function suite.playsALogOnChipsOfItsOwn(): nil
     local harness = newHarness()
     local mixer = audio.newAudio({backend = harness.backend, maxVoices = 8})
     local log = fmLog()
-    test.equal(#log.chips, 2)
+    assert.eq(#log.chips, 2)
     local player = assert(musicfm.playLog(mixer, log, {group = "music", loop = false}))
     -- Each chip opened on its first write, with its parameters and images.
-    test.equal(#harness.opened, 2)
-    test.equal(u32(harness.opened[1].params, 1), kindOf("ym2610"))
-    test.equal(u32(harness.opened[2].params, 1), kindOf("ym2612"))
-    test.equal(u32(harness.opened[2].params, 5), 7670453)
-    test.equal(harness.opened[1].bytes, le32(0) .. le32(2) .. "\1\2", "the YM2610's ADPCM-A image")
-    test.equal(harness.opened[2].bytes, "")
+    assert.eq(#harness.opened, 2)
+    assert.eq(u32(harness.opened[1].params, 1), kindOf("ym2610"))
+    assert.eq(u32(harness.opened[2].params, 1), kindOf("ym2612"))
+    assert.eq(u32(harness.opened[2].params, 5), 7670453)
+    assert.eq(harness.opened[1].bytes, le32(0) .. le32(2) .. "\1\2", "the YM2610's ADPCM-A image")
+    assert.eq(harness.opened[2].bytes, "")
     local writes = sentOf(harness, mixer, "write")
     -- The YM2610's write and the YM2612's three at tick zero.
-    test.equal(#writes, 4)
-    test.equal(writes[1].voice, harness.opened[1].handle)
-    test.equal(writes[2].voice, harness.opened[2].handle)
+    assert.eq(#writes, 4)
+    assert.eq(writes[1].voice, harness.opened[1].handle)
+    assert.eq(writes[2].voice, harness.opened[2].handle)
     near(writes[2].at, 0.01)
-    test.equal(writes[4].a, 0x130)
+    assert.eq(writes[4].a, 0x130)
     harness.clock[1] = 0.5
     mixer:update()
     writes = sentOf(harness, mixer, "write")
-    test.equal(#writes, 5)
+    assert.eq(#writes, 5)
     near(writes[5].at, 0.51)
-    test.equal(writes[5].b, 0xF1)
+    assert.eq(writes[5].b, 0xF1)
     player:setMuted(1, true)
     mixer:update()
     local muted = assert(lastCommand(harness, audiobackend.SET_GAIN))
-    test.equal(muted.gain, 0)
-    test.equal(muted.handle, harness.opened[2].handle)
-    test.raises(
+    assert.eq(muted.gain, 0)
+    assert.eq(muted.handle, harness.opened[2].handle)
+    assert.raises(
         function(): nil
             player:setMuted(2, true)
         end,
@@ -659,18 +658,18 @@ function suite.playsALogOnChipsOfItsOwn(): nil
     -- A seek resets both chips and writes back every register's last value.
     player:seek(0.75)
     local resets = sentOf(harness, mixer, "reset")
-    test.equal(#resets, 2)
+    assert.eq(#resets, 2)
     writes = sentOf(harness, mixer, "write")
     local last = writes[#writes]
-    test.equal(last.a, 0x130, "the YM2612's registers in ascending order")
+    assert.eq(last.a, 0x130, "the YM2612's registers in ascending order")
     near(last.at, 0.51)
     harness.clock[1] = 2
     mixer:update()
     harness.clock[1] = 4
     mixer:update()
-    test.equal(player:status(), "stopped")
-    test.equal(countOf(harness, audiobackend.STOP), 2)
-    test.equal(mixer:sounding(), 0)
+    assert.eq(player:status(), "stopped")
+    assert.eq(countOf(harness, audiobackend.STOP), 2)
+    assert.eq(mixer:sounding(), 0)
 end
 
 function suite.placesADualOpl2CaptureOnItsVoices(): nil
@@ -685,9 +684,9 @@ function suite.placesADualOpl2CaptureOnItsVoices(): nil
             stereo[#stereo + 1] = command
         end
     end
-    test.equal(#stereo, 2)
-    test.equal(#harness.opened, 2)
-    test.equal(u32(harness.opened[1].params, 1), kindOf("ym3812"))
+    assert.eq(#stereo, 2)
+    assert.eq(#harness.opened, 2)
+    assert.eq(u32(harness.opened[1].params, 1), kindOf("ym3812"))
     player:stop()
 end
 
@@ -704,11 +703,11 @@ function suite.loopsALogFromItsLoopWrite(): nil
         mixer:update()
     end
     -- Twice the first pass's tenth of a second, then a loop every tenth.
-    test.equal(player:loops(), 5)
+    assert.eq(player:loops(), 5)
     local writes = sentOf(harness, mixer, "write")
-    test.equal(writes[1].b, 1)
-    test.equal(writes[2].b, 2)
-    test.equal(writes[3].b, 2, "the loop goes back to its own write")
+    assert.eq(writes[1].b, 1)
+    assert.eq(writes[2].b, 2)
+    assert.eq(writes[3].b, 2, "the loop goes back to its own write")
     near(writes[3].at, 0.21)
     player:stop()
 end
@@ -724,8 +723,8 @@ function suite.playsOnWhenItsChipsLoseTheirVoices(): nil
         harness.clock[1] = step * 0.05
         mixer:update()
     end
-    test.assert(player:finished())
-    test.equal(player:status(), "stopped")
+    assert(player:finished())
+    assert.eq(player:status(), "stopped")
 end
 
 function suite.followsTheTrackItIsGiven(): nil
@@ -739,10 +738,10 @@ function suite.followsTheTrackItIsGiven(): nil
     for _, command in ipairs(harness.commands) do
         if command.kind == audiobackend.PLAY then
             starts = starts + 1
-            test.equal(command.target, track.id)
+            assert.eq(command.target, track.id)
         end
     end
-    test.equal(starts, 2)
+    assert.eq(starts, 2)
     player:stop()
 end
 
@@ -753,7 +752,7 @@ function suite.refusesAHandleOfAnotherKind(): nil
         local held = assert(handle)
         local harness = newHarness()
         local mixer = audio.newAudio({backend = harness.backend, maxVoices = 8})
-        test.raises(
+        assert.raises(
             function(): nil
                 musicfm.play(mixer, held)
             end,
@@ -764,7 +763,7 @@ function suite.refusesAHandleOfAnotherKind(): nil
     end)
     temporary(smf(0, 96, {at(0, 0x90, 60, 100) .. finish(0)}), ".mid", function(path: string): nil
         local loader, handle = load(musicfm.kind, path)
-        test.equal(handle, nil, "a MIDI file is not a register log")
+        assert.eq(handle, nil, "a MIDI file is not a register log")
         loader:shutdown()
     end)
 end

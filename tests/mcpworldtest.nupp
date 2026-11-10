@@ -1,7 +1,6 @@
 local ecs = require("tecs.ecs")
 local json = require("nupp.codec.json")
 local mcp = require("tecs.mcp")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -43,7 +42,7 @@ end
 local function structured(name: string, arguments: {[string]: any}?): {[string]: any}
     local result = call(name, arguments)
     local content = result.content as {{[string]: any}}
-    test.assert(result.isError == nil, `${name} failed: ${content ~= nil and content[1].text or "?"}`)
+    assert(result.isError == nil, `${name} failed: ${content ~= nil and content[1].text or "?"}`)
 
     return result.structuredContent as {[string]: any}
 end
@@ -59,7 +58,7 @@ function suite.namesEveryDeclaredComponentAndSaysWhichAreCarried(): nil
     local world = boundWorld()
     local entity = world:spawn(Position(1, 2))
     world:commit()
-    test.assert(entity > 0)
+    assert(entity > 0)
 
     local answer = structured("components_info")
     local listed = answer.components as {{[string]: any}}
@@ -68,15 +67,15 @@ function suite.namesEveryDeclaredComponentAndSaysWhichAreCarried(): nil
         byName[listed[index].name as string] = listed[index]
     end
 
-    test.assert(answer.bound == true)
+    assert(answer.bound == true)
     local position = byName["test.mcp.Position"] as {[string]: any}
-    test.assert(position.present == true)
-    test.assert(position.tag == false)
-    test.equal((position.fields as {string})[1], "x")
+    assert(position.present == true)
+    assert(position.tag == false)
+    assert.eq((position.fields as {string})[1], "x")
 
     local marked = byName["test.mcp.Marked"] as {[string]: any}
-    test.assert(marked.tag == true)
-    test.assert(marked.present == false)
+    assert(marked.tag == true)
+    assert(marked.present == false)
 end
 
 function suite.findsEntitiesCarryingEveryNamedComponent(): nil
@@ -88,11 +87,11 @@ function suite.findsEntitiesCarryingEveryNamedComponent(): nil
     local answer = structured("query", {include = {"test.mcp.Position", "test.mcp.Marked"}})
     local rows = answer.entities as {{[string]: any}}
 
-    test.equal(answer.matched as integer, 1)
-    test.equal(rows[1].entity as integer, first)
+    assert.eq(answer.matched as integer, 1)
+    assert.eq(rows[1].entity as integer, first)
     local values = rows[1].components as {[string]: any}
-    test.equal((values["test.mcp.Position"] as {[string]: any}).x as number, 3)
-    test.assert(values["test.mcp.Marked"] == true)
+    assert.eq((values["test.mcp.Position"] as {[string]: any}).x as number, 3)
+    assert(values["test.mcp.Marked"] == true)
 end
 
 function suite.omitsValuesWhenAskedTo(): nil
@@ -103,8 +102,8 @@ function suite.omitsValuesWhenAskedTo(): nil
     local answer = structured("query", {include = {"test.mcp.Position"}, values = false})
     local rows = answer.entities as {{[string]: any}}
 
-    test.equal(answer.returned as integer, 1)
-    test.assert(rows[1].components == nil)
+    assert.eq(answer.returned as integer, 1)
+    assert(rows[1].components == nil)
 end
 
 function suite.honorsTheQueryLimitWhileStillCountingTheMatches(): nil
@@ -116,8 +115,8 @@ function suite.honorsTheQueryLimitWhileStillCountingTheMatches(): nil
 
     local answer = structured("query", {include = {"test.mcp.Position"}, limit = 2})
 
-    test.equal(answer.matched as integer, 5)
-    test.equal(answer.returned as integer, 2)
+    assert.eq(answer.matched as integer, 5)
+    assert.eq(answer.returned as integer, 2)
 end
 
 function suite.reportsOneEntityAndSaysWhenItIsNotAlive(): nil
@@ -128,13 +127,13 @@ function suite.reportsOneEntityAndSaysWhenItIsNotAlive(): nil
     local answer = structured("info", {entity = entity})
     local values = answer.components as {[string]: any}
 
-    test.assert(answer.alive == true)
-    test.equal((values["test.mcp.Position"] as {[string]: any}).y as number, 8)
-    test.equal((values["test.mcp.Health"] as {[string]: any}).value as number, 30)
+    assert(answer.alive == true)
+    assert.eq((values["test.mcp.Position"] as {[string]: any}).y as number, 8)
+    assert.eq((values["test.mcp.Health"] as {[string]: any}).value as number, 30)
 
     world:despawn(entity)
     world:commit()
-    test.assert(structured("info", {entity = entity}).alive == false)
+    assert(structured("info", {entity = entity}).alive == false)
 end
 
 function suite.spawnsAnEntityCarryingTheNamedComponents(): nil
@@ -145,9 +144,9 @@ function suite.spawnsAnEntityCarryingTheNamedComponents(): nil
     })
     local entity = answer.entity as integer
 
-    test.assert(world:isAlive(entity))
-    test.assert(world:has(entity, Marked))
-    test.equal((world:get(entity, Position) as Point).x, 9)
+    assert(world:isAlive(entity))
+    assert(world:has(entity, Marked))
+    assert.eq((world:get(entity, Position) as Point).x, 9)
 end
 
 function suite.refusesASpawnThatNamesNoComponent(): nil
@@ -156,8 +155,8 @@ function suite.refusesASpawnThatNamesNoComponent(): nil
     local result = call("spawn", {components = json.EMPTY_OBJECT})
     local content = result.content as {{[string]: any}}
 
-    test.assert(result.isError == true)
-    test.assert((content[1].text as string):find("at least one component", 1, true) ~= nil)
+    assert(result.isError == true)
+    assert((content[1].text as string):find("at least one component", 1, true) ~= nil)
 end
 
 function suite.replacesAComponentInFullAndReportsWhetherItWasAdded(): nil
@@ -167,16 +166,16 @@ function suite.replacesAComponentInFullAndReportsWhetherItWasAdded(): nil
 
     local replaced = structured("set", {entity = entity, component = "test.mcp.Position", values = {x = 20}})
 
-    test.assert(replaced.added == false)
+    assert(replaced.added == false)
     local value = world:get(entity, Position) as Point
-    test.equal(value.x, 20)
+    assert.eq(value.x, 20)
     -- `set` is a replacement, so the field the payload omitted took the
     -- component's own default rather than what the entity carried.
-    test.equal(value.y, 0)
+    assert.eq(value.y, 0)
 
     local added = structured("set", {entity = entity, component = "test.mcp.Health", values = {value = 55}})
-    test.assert(added.added == true)
-    test.equal(world:get(entity, Health) as number, 55)
+    assert(added.added == true)
+    assert.eq(world:get(entity, Health) as number, 55)
 end
 
 function suite.changesOnlyTheNamedFields(): nil
@@ -186,10 +185,10 @@ function suite.changesOnlyTheNamedFields(): nil
 
     local answer = structured("modify", {entity = entity, component = "test.mcp.Position", values = {x = 30}})
 
-    test.assert(answer.skipped == false)
+    assert(answer.skipped == false)
     local value = world:get(entity, Position) as Point
-    test.equal(value.x, 30)
-    test.equal(value.y, 2)
+    assert.eq(value.x, 30)
+    assert.eq(value.y, 2)
 end
 
 function suite.skipsAnEntityWithoutTheComponentRatherThanAddingOne(): nil
@@ -199,8 +198,8 @@ function suite.skipsAnEntityWithoutTheComponentRatherThanAddingOne(): nil
 
     local answer = structured("modify", {entity = entity, component = "test.mcp.Position", values = {x = 1}})
 
-    test.assert(answer.skipped == true)
-    test.assert(not world:has(entity, Position))
+    assert(answer.skipped == true)
+    assert(not world:has(entity, Position))
 end
 
 function suite.refusesAModifyThatNamesNoField(): nil
@@ -210,7 +209,7 @@ function suite.refusesAModifyThatNamesNoField(): nil
 
     local result = call("modify", {entity = entity, component = "test.mcp.Position", values = json.EMPTY_OBJECT})
 
-    test.assert(result.isError == true)
+    assert(result.isError == true)
 end
 
 function suite.removesAComponentAndDespawnsAnEntity(): nil
@@ -219,15 +218,15 @@ function suite.removesAComponentAndDespawnsAnEntity(): nil
     world:commit()
 
     local removed = structured("remove", {entity = entity, component = "test.mcp.Marked"})
-    test.assert(removed.skipped == false)
-    test.assert(not world:has(entity, Marked))
-    test.assert(world:isAlive(entity))
+    assert(removed.skipped == false)
+    assert(not world:has(entity, Marked))
+    assert(world:isAlive(entity))
 
     local despawned = structured("despawn", {entity = entity})
-    test.assert(despawned.skipped == false)
-    test.assert(not world:isAlive(entity))
+    assert(despawned.skipped == false)
+    assert(not world:isAlive(entity))
 
-    test.assert(structured("despawn", {entity = entity}).skipped == true)
+    assert(structured("despawn", {entity = entity}).skipped == true)
 end
 
 local function noop(_dt: number, exclusive _world: ecs.World): nil
@@ -240,22 +239,22 @@ function suite.listsAndControlsTheSystemsTheWorldRuns(): nil
 
     -- The two above plus the four builtin systems every world carries.
     local listed = structured("systems_list")
-    test.equal(listed.registered as integer, 6)
-    test.equal(listed.total as integer, 6)
+    assert.eq(listed.registered as integer, 6)
+    assert.eq(listed.total as integer, 6)
 
     local narrowed = structured("systems_list", {phase = "Update"})
-    test.equal(narrowed.total as integer, 1)
-    test.equal(((narrowed.systems as {{[string]: any}})[1]).name as string, "test.mcp.Spin")
+    assert.eq(narrowed.total as integer, 1)
+    assert.eq(((narrowed.systems as {{[string]: any}})[1]).name as string, "test.mcp.Spin")
 
     local stopped = structured("systems_stop", {name = "test.mcp.Spin"})
-    test.assert(stopped.enabled == false)
-    test.equal(structured("systems_list", {disabled = true}).total as integer, 1)
+    assert(stopped.enabled == false)
+    assert.eq(structured("systems_list", {disabled = true}).total as integer, 1)
 
     local started = structured("systems_start", {name = "test.mcp.Spin"})
-    test.assert(started.enabled == true)
+    assert(started.enabled == true)
 
     local info = structured("systems_info", {name = "test.mcp.Draw"})
-    test.equal(info.phase as string, "Last")
+    assert.eq(info.phase as string, "Last")
 end
 
 function suite.reportsAnUnknownSystemWithACodeToMatchOn(): nil
@@ -264,8 +263,8 @@ function suite.reportsAnUnknownSystemWithACodeToMatchOn(): nil
     local result = call("systems_stop", {name = "test.mcp.absent"})
     local content = result.content as {{[string]: any}}
 
-    test.assert(result.isError == true)
-    test.assert((content[1].text as string):find("unknown_system", 1, true) == 1)
+    assert(result.isError == true)
+    assert((content[1].text as string):find("unknown_system", 1, true) == 1)
 end
 
 function suite.readsAndMovesTheStateStack(): nil
@@ -273,16 +272,16 @@ function suite.readsAndMovesTheStateStack(): nil
     world:createState("menu")
     world:createState("play")
 
-    test.equal(structured("states_info").depth as integer, 0)
+    assert.eq(structured("states_info").depth as integer, 0)
 
     structured("states_push", {name = "menu"})
     structured("states_push", {name = "play"})
     local stack = structured("states_info")
-    test.equal(stack.depth as integer, 2)
-    test.equal(stack.top as string, "play")
+    assert.eq(stack.depth as integer, 2)
+    assert.eq(stack.top as string, "play")
 
     structured("states_pop")
-    test.equal(structured("states_info").top as string, "menu")
+    assert.eq(structured("states_info").top as string, "menu")
 end
 
 function suite.reportsAnUnknownStateAndAnEmptyStack(): nil
@@ -290,13 +289,13 @@ function suite.reportsAnUnknownStateAndAnEmptyStack(): nil
 
     local unknown = call("states_push", {name = "test.mcp.absent"})
     local unknownText = (unknown.content as {{[string]: any}})[1].text as string
-    test.assert(unknown.isError == true)
-    test.assert(unknownText:find("unknown_state", 1, true) == 1)
+    assert(unknown.isError == true)
+    assert(unknownText:find("unknown_state", 1, true) == 1)
 
     local empty = call("states_pop")
     local emptyText = (empty.content as {{[string]: any}})[1].text as string
-    test.assert(empty.isError == true)
-    test.assert(emptyText:find("empty_stack", 1, true) == 1)
+    assert(empty.isError == true)
+    assert(emptyText:find("empty_stack", 1, true) == 1)
 end
 
 function suite.countsWhatTheWorldHolds(): nil
@@ -308,10 +307,10 @@ function suite.countsWhatTheWorldHolds(): nil
 
     local answer = structured("stats")
 
-    test.equal(answer.entities as integer, 2)
+    assert.eq(answer.entities as integer, 2)
     -- The four builtin systems every world carries, plus the one above.
-    test.equal(answer.systems as integer, 5)
-    test.assert((answer.message as string):find("2 entities", 1, true) == 1)
+    assert.eq(answer.systems as integer, 5)
+    assert((answer.message as string):find("2 entities", 1, true) == 1)
 end
 
 return suite

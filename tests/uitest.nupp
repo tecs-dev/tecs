@@ -1,6 +1,5 @@
 const ecs = require("tecs.ecs")
 const ui = require("tecs.ui")
-const test = require("nupp.test")
 const gfx = require("tecs.gfx")
 const clips = require("tecs.gfx.clips")
 const {Event} = require("tecs.ui")
@@ -19,17 +18,17 @@ function suite.laysOutFlexAndSkipsUnchangedNativeWork(): nil
     local b = world:spawn(ecs.ChildOf(root), ui.Style({flexGrow = 1, height = 30}))
     world:update(0)
     local box = assert(world:get(b, ui.Layout))
-    test.equal(box.x, 60)
-    test.equal(box.width, 240)
+    assert.eq(box.x, 60)
+    assert.eq(box.width, 240)
     local pose = assert(world:get(a, ecs.Transform2D))
-    test.equal(pose.x, 25)
-    test.equal(pose.scaleX, 50)
+    assert.eq(pose.x, 25)
+    assert.eq(pose.scaleX, 50)
     local calls = ui.layouts(world)
     world:update(0)
-    test.equal(ui.layouts(world), calls)
+    assert.eq(ui.layouts(world), calls)
     ui.resize(world, 400, 100)
     world:update(0)
-    test.equal(assert(world:get(b, ui.Layout)).width, 340)
+    assert.eq(assert(world:get(b, ui.Layout)).width, 340)
     world:shutdown()
 end
 
@@ -39,14 +38,14 @@ function suite.clipsScrollAndRevealsChildren(): nil
     local root = world:spawn(ui.Root(), ui.Style({width = 100, height = 50, flexDirection = "column"}), ui.Scroll())
     local child = world:spawn(ecs.ChildOf(root), ui.Style({width = 80, height = 100, flexShrink = 0}), ui.Interaction())
     world:update(0)
-    test.equal(assert(world:get(root, ui.Scroll)).contentHeight, 100)
-    test.assert(ui.reveal(world, child, "end"))
+    assert.eq(assert(world:get(root, ui.Scroll)).contentHeight, 100)
+    assert(ui.reveal(world, child, "end"))
     world:update(0)
-    test.equal(assert(world:get(root, ui.Scroll)).y, 50)
+    assert.eq(assert(world:get(root, ui.Scroll)).y, 50)
     local clip = assert(world:get(child, gfx.Clip)).index
-    test.assert(clip > 0)
-    test.assert(clips.contains(clip, 10, 25))
-    test.assert(not clips.contains(clip, 10, 75))
+    assert(clip > 0)
+    assert(clips.contains(clip, 10, 25))
+    assert(not clips.contains(clip, 10, 75))
     world:shutdown()
 end
 
@@ -65,8 +64,8 @@ function suite.routesPointerActivationAndFocus(): nil
     events.dispatch(world, events.pointerButton(true, 1, 10, 10))
     events.dispatch(world, events.pointerButton(false, 1, 10, 10))
     world:update(0)
-    test.equal(activated, 1)
-    test.equal(ui.focused(world), button)
+    assert.eq(activated, 1)
+    assert.eq(ui.focused(world), button)
     world:shutdown()
 end
 
@@ -77,11 +76,11 @@ function suite.sharesClipsAndReleasesTheLastRoot(): nil
     local a = world:spawn(ecs.ChildOf(root), ui.Style({width = 20, height = 20}))
     local b = world:spawn(ecs.ChildOf(root), ui.Style({width = 20, height = 20}))
     world:update(0)
-    test.equal(assert(world:get(a, gfx.Clip)).index, assert(world:get(b, gfx.Clip)).index)
+    assert.eq(assert(world:get(a, gfx.Clip)).index, assert(world:get(b, gfx.Clip)).index)
     world:despawn(root);
     world:commit();
     world:update(0)
-    test.equal(world.liveCount, 0)
+    assert.eq(world.liveCount, 0)
     world:shutdown()
 end
 
@@ -101,14 +100,14 @@ function suite.sizesAndDragsScrollbarThumbs(): nil
     )
     world:update(0)
     local box = assert(world:get(thumb, ui.Layout))
-    test.assert(math.abs(box.height - 100 / 3) < 0.01)
+    assert(math.abs(box.height - 100 / 3) < 0.01)
     events.dispatch(world, events.pointerButton(true, 1, 95, 10))
     events.dispatch(world, events.pointerMoved(95, 40))
     world:update(0)
-    test.assert(assert(world:get(root, ui.Scroll)).y > 80)
+    assert(assert(world:get(root, ui.Scroll)).y > 80)
     assert(world:getMut(root, ui.Style)).style.height = 400
     world:update(0)
-    test.equal(assert(world:get(thumb, ui.Layout)).height, 0)
+    assert.eq(assert(world:get(thumb, ui.Layout)).height, 0)
     world:shutdown()
 end
 
@@ -119,12 +118,12 @@ function suite.paintsAtDisplayDensityAndRestoresFocusScopes(): nil
     local button = world:spawn(ecs.ChildOf(root), ui.Style({width = 40, height = 20}), ui.Paint(true), ui.Interaction())
     local modal = world:spawn(ecs.ChildOf(root), ui.FocusScope, ui.Style({width = 80, height = 50}))
     world:update(0)
-    test.equal(assert(world:get(button, ecs.Transform2D)).scaleX, 80)
-    test.assert(ui.focus(world, button))
-    test.assert(ui.pushFocusScope(world, modal))
-    test.assert(not ui.focus(world, button))
-    test.assert(ui.popFocusScope(world, modal))
-    test.equal(ui.focused(world), button)
+    assert.eq(assert(world:get(button, ecs.Transform2D)).scaleX, 80)
+    assert(ui.focus(world, button))
+    assert(ui.pushFocusScope(world, modal))
+    assert(not ui.focus(world, button))
+    assert(ui.popFocusScope(world, modal))
+    assert.eq(ui.focused(world), button)
     world:shutdown()
 end
 
@@ -143,14 +142,14 @@ function suite.restoresLayoutsAndCancelsHiddenInteractions(): nil
     local snapshot = world:saveSnapshot();
     world:loadSnapshot(snapshot);
     world:update(0)
-    test.equal(assert(world:get(button, ui.Layout)).width, 80)
+    assert.eq(assert(world:get(button, ui.Layout)).width, 80)
     events.dispatch(world, events.pointerButton(true, 1, 10, 10));
     world:update(0)
     assert(world:getMut(button, ui.Style)).style.display = "none"
     events.dispatch(world, events.pointerButton(false, 1, 10, 10));
     world:update(0)
-    test.equal(activated, 0)
-    test.equal(ui.focused(world), 0)
+    assert.eq(activated, 0)
+    assert.eq(ui.focused(world), 0)
     world:shutdown()
 end
 
@@ -175,12 +174,12 @@ function suite.wrapsTextAndClipsEveryGlyph(): nil
     )
     world:update(0)
     local box = assert(world:get(label, ui.Layout))
-    test.assert(box.height > 30)
-    test.equal(assert(world:get(label, gfx.Text)).wrapWidth, 90)
+    assert(box.height > 30)
+    assert.eq(assert(world:get(label, gfx.Text)).wrapWidth, 90)
     local glyphs = text2.glyphsOf(world, label)
-    test.assert(#glyphs > 0)
+    assert(#glyphs > 0)
     for _, glyph in ipairs(glyphs) do
-        test.equal(assert(world:get(glyph, gfx.Clip)).index, assert(world:get(label, gfx.Clip)).index)
+        assert.eq(assert(world:get(glyph, gfx.Clip)).index, assert(world:get(label, gfx.Clip)).index)
     end
     world:shutdown()
 end
@@ -206,7 +205,7 @@ function suite.keepsNaturallySizedTextOnOneLine(): nil
     local text = assert(world:get(label, gfx.Text))
     local _, naturalHeight = text2.measureIntrinsic(text)
     local _, actualHeight = text2.measureText(text)
-    test.equal(actualHeight, naturalHeight)
+    assert.eq(actualHeight, naturalHeight)
     world:shutdown()
 end
 
@@ -227,8 +226,8 @@ function suite.alignsWrappedRowsToStart(): nil
     local first = world:spawn(ecs.ChildOf(root), ui.Style({width = 60, height = 20}))
     local second = world:spawn(ecs.ChildOf(root), ui.Style({width = 60, height = 20}))
     world:update(0)
-    test.equal(assert(world:get(first, ui.Layout)).y, 0)
-    test.equal(assert(world:get(second, ui.Layout)).y, 30)
+    assert.eq(assert(world:get(first, ui.Layout)).y, 0)
+    assert.eq(assert(world:get(second, ui.Layout)).y, 30)
     world:shutdown()
 end
 
@@ -242,8 +241,8 @@ function suite.handsUnusedWheelToParentAndHonorsConsumption(): nil
     world:update(0)
     events.dispatch(world, events.wheel(0, -1, nil, nil, 10, 10))
     world:update(0)
-    test.equal(assert(world:get(inner, ui.Scroll)).y, 20)
-    test.equal(assert(world:get(root, ui.Scroll)).y, 20)
+    assert.eq(assert(world:get(inner, ui.Scroll)).y, 20)
+    assert.eq(assert(world:get(root, ui.Scroll)).y, 20)
     world:observe(root, Event, function(event: Event): nil
         if event.kind == "wheel" then
             event.consumed = true
@@ -251,7 +250,7 @@ function suite.handsUnusedWheelToParentAndHonorsConsumption(): nil
     end)
     events.dispatch(world, events.wheel(0, -1, nil, nil, 10, 10))
     world:update(0)
-    test.equal(assert(world:get(root, ui.Scroll)).y, 20)
+    assert.eq(assert(world:get(root, ui.Scroll)).y, 20)
     world:shutdown()
 end
 
@@ -270,14 +269,14 @@ function suite.hidesAndRestoresSceneGlyphs(): nil
     local scene = world:spawn(ecs.ChildOf(root), ui.Style({width = 100, height = 80}))
     local label = world:spawn(ecs.ChildOf(scene), ui.Intrinsic({source = "text"}), gfx.Text("Scene", font, 16))
     world:update(0)
-    test.equal(#text2.glyphsOf(world, label), 5)
+    assert.eq(#text2.glyphsOf(world, label), 5)
     for cycle = 1, 3 do
         assert(world:getMut(scene, ui.Style)).style.display = "none"
         world:update(0)
-        test.equal(#text2.glyphsOf(world, label), 0)
+        assert.eq(#text2.glyphsOf(world, label), 0)
         assert(world:getMut(scene, ui.Style)).style.display = "flex"
         world:update(0)
-        test.equal(#text2.glyphsOf(world, label), 5)
+        assert.eq(#text2.glyphsOf(world, label), 5)
     end
     world:shutdown()
 end

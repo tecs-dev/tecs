@@ -3,7 +3,6 @@ const {type Archetype} = require("tecs.ecs")
 const {OnSpawn} = require("tecs.ecs")
 const {OnDespawn} = require("tecs.ecs")
 
-local test = require("nupp.test")
 
 local record Point
     x: number
@@ -30,16 +29,16 @@ function suite.initializesBatchesBeforeMembershipAndSpawnEvents(): nil
     world:newQuery({
         include = {position},
         onEntitiesAdded = function(candidate: Archetype, first: integer, last: integer, count: integer): nil
-            test.assert(initialized)
+            assert(initialized)
             notifications = notifications + 1
-            test.equal(count, 4)
+            assert.eq(count, 4)
             for row = first, last do
-                test.equal(assert(candidate:get(position))[row].x, 17)
+                assert.eq(assert(candidate:get(position))[row].x, 17)
             end
         end
     })
     world:observe(0, OnSpawn, function(): nil
-        test.assert(initialized);
+        assert(initialized);
         spawned = spawned + 1
     end)
     const first, ids = world:batchSpawn(
@@ -48,22 +47,22 @@ function suite.initializesBatchesBeforeMembershipAndSpawnEvents(): nil
             position
         },
         function(candidate: Archetype, start: integer, last: integer, count: integer): nil
-            test.equal(count, 4)
+            assert.eq(count, 4)
             const column = assert(candidate:getMut(position))
             for row = start, last do
-                test.assert(world:isAlive(candidate.entities[row]))
+                assert(world:isAlive(candidate.entities[row]))
                 column[row].x = 17
             end
             initialized = true
         end
     )
-    test.assert(first ~= nil and ids == nil)
-    test.assert(not initialized)
-    test.assert(not world:isAlive(assert(first)))
+    assert(first ~= nil and ids == nil)
+    assert(not initialized)
+    assert(not world:isAlive(assert(first)))
     world:commit()
-    test.equal(notifications, 1)
-    test.equal(spawned, 4)
-    test.equal(world:getStats().entities, 4)
+    assert.eq(notifications, 1)
+    assert.eq(spawned, 4)
+    assert.eq(world:getStats().entities, 4)
 end
 
 function suite.preservesLaterScalarWritesAndRemovalsOnBatchSpawns(): nil
@@ -81,11 +80,11 @@ function suite.preservesLaterScalarWritesAndRemovalsOnBatchSpawns(): nil
     world:set(first + 2, extra)
     world:despawn(first + 3)
     world:commit()
-    test.equal(assert(world:get(first, position)).x, 99)
-    test.assert(not world:has(first + 1, position))
-    test.equal(assert(world:get(first + 2, position)).x, 5)
-    test.assert(world:has(first + 2, extra))
-    test.assert(not world:isAlive(first + 3))
+    assert.eq(assert(world:get(first, position)).x, 99)
+    assert(not world:has(first + 1, position))
+    assert.eq(assert(world:get(first + 2, position)).x, 5)
+    assert(world:has(first + 2, extra))
+    assert(not world:isAlive(first + 3))
 end
 
 function suite.reservesMixedGenerationAndRecycledHandles(): nil
@@ -94,46 +93,46 @@ function suite.reservesMixedGenerationAndRecycledHandles(): nil
     world:commit()
     world:clearEntities()
     const first, ids = world:batchSpawn(6, {tag})
-    test.assert(first == nil and ids ~= nil)
+    assert(first == nil and ids ~= nil)
     world:commit()
     for _, id in ipairs(assert(ids)) do
-        test.assert(world:isAlive(id))
+        assert(world:isAlive(id))
     end
-    test.assert(not world:isAlive(initial))
+    assert(not world:isAlive(initial))
     const saved = assert(ids)
     world:despawn(saved[2])
     world:despawn(saved[5])
     world:commit()
     const recycledFirst, recycledIds = world:batchSpawn(2, {tag})
-    test.assert(recycledFirst == nil)
+    assert(recycledFirst == nil)
     world:commit()
     for _, id in ipairs(assert(recycledIds)) do
-        test.assert(world:isAlive(id))
+        assert(world:isAlive(id))
     end
-    test.assert(not world:isAlive(saved[2]))
+    assert(not world:isAlive(saved[2]))
 end
 
 function suite.validatesAllExplicitIdsBeforeReservingAny(): nil
     const world = ecs.newWorld({maxEntities = 10})
-    test.raises(
+    assert.raises(
         function(): nil
             world:batchSpawnAt({3, 3}, {tag})
         end,
         "duplicate or occupied"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             world:batchSpawnAt({3, 11}, {tag})
         end,
         "invalid packed"
     )
     world:batchSpawnAt({5, 3, 1}, {position(8)})
-    test.assert(not world:isAlive(5))
+    assert(not world:isAlive(5))
     world:commit()
     for _, id in ipairs({5, 3, 1}) do
-        test.equal(assert(world:get(id, position)).x, 8)
+        assert.eq(assert(world:get(id, position)).x, 8)
     end
-    test.raises(
+    assert.raises(
         function(): nil
             world:batchSpawnAt({2, 3}, {tag})
         end,
@@ -141,7 +140,7 @@ function suite.validatesAllExplicitIdsBeforeReservingAny(): nil
     )
     world:spawnAt(2, tag)
     world:commit()
-    test.assert(world:isAlive(2))
+    assert(world:isAlive(2))
 end
 
 function suite.bulkConstantsAreIndependentRecordsAndPreserveFalse(): nil
@@ -149,18 +148,18 @@ function suite.bulkConstantsAreIndependentRecordsAndPreserveFalse(): nil
     const first = assert(world:batchSpawn(3, {position(1), tag}))
     world:commit()
     assert(world:getMut(first, position)).x = 8
-    test.equal(assert(world:get(first + 1, position)).x, 1)
+    assert.eq(assert(world:get(first + 1, position)).x, 1)
     const selection = world:newQuery({include = {tag}})
     world:batchSet(selection, position(4))
     world:batchSet(selection, flag(false))
     world:commit()
     assert(world:getMut(first, position)).x = 12
-    test.equal(assert(world:get(first + 1, position)).x, 4)
-    test.equal(world:get(first, flag), false)
+    assert.eq(assert(world:get(first + 1, position)).x, 4)
+    assert.eq(world:get(first, flag), false)
     world:batchRemove(selection, position)
     world:commit()
-    test.assert(not world:has(first, position))
-    test.assert(world:has(first, tag))
+    assert(not world:has(first, position))
+    assert(world:has(first, tag))
 end
 
 function suite.capturesMembershipAtCallTimeAndHonorsAutomaticFilters(): nil
@@ -172,13 +171,13 @@ function suite.capturesMembershipAtCallTimeAndHonorsAutomaticFilters(): nil
     world:batchSet(selection, extra)
     const later = world:spawn(tag)
     world:commit()
-    test.assert(world:has(active, extra))
-    test.assert(not world:has(disabled, extra))
-    test.assert(not world:has(later, extra))
+    assert(world:has(active, extra))
+    assert(not world:has(disabled, extra))
+    assert(not world:has(later, extra))
     world:batchDespawn(selection)
     world:commit()
-    test.assert(not world:isAlive(active) and not world:isAlive(later))
-    test.assert(world:isAlive(disabled))
+    assert(not world:isAlive(active) and not world:isAlive(later))
+    assert(world:isAlive(disabled))
 end
 
 function suite.ordersMultipleWritersWithScalarWritesBetweenThem(): nil
@@ -200,12 +199,12 @@ function suite.ordersMultipleWritersWithScalarWritesBetweenThem(): nil
     world:set(id, position(10))
     world:batchSet(selection, position, increment)
     world:commit()
-    test.equal(calls, 2)
-    test.equal(assert(world:get(id, position)).x, 11)
+    assert.eq(calls, 2)
+    assert.eq(assert(world:get(id, position)).x, 11)
     world:batchSet(selection, position, increment)
     world:set(id, position(30))
     world:commit()
-    test.equal(assert(world:get(id, position)).x, 30)
+    assert.eq(assert(world:get(id, position)).x, 30)
 end
 
 function suite.writersInitializeNewColumnsBeforeEntryNotifications(): nil
@@ -217,7 +216,7 @@ function suite.writersInitializeNewColumnsBeforeEntryNotifications(): nil
         include = {position},
         onEntitiesAdded = function(candidate: Archetype, first: integer, last: integer): nil
             for row = first, last do
-                test.equal(assert(candidate:get(position))[row].x, 33)
+                assert.eq(assert(candidate:get(position))[row].x, 33)
             end
         end
     })
@@ -228,16 +227,16 @@ function suite.writersInitializeNewColumnsBeforeEntryNotifications(): nil
         position,
         function(candidate: Archetype, first: integer, last: integer, count: integer): nil
             calls = calls + 1
-            test.equal(count, 3)
+            assert.eq(count, 3)
             const column = assert(candidate:getMut(position))
             for row = first, last do
                 column[row].x = 33
             end
         end
     )
-    test.equal(calls, 0)
+    assert.eq(calls, 0)
     world:commit()
-    test.equal(calls, 1)
+    assert.eq(calls, 1)
 end
 
 function suite.drainsCallbackStagedBatchesWithoutDroppingLaterWork(): nil
@@ -250,8 +249,8 @@ function suite.drainsCallbackStagedBatchesWithoutDroppingLaterWork(): nil
         world:batchSpawn(2, {position(18)})
     end)
     world:commit()
-    test.assert(world:has(id, extra))
-    test.equal(world:getStats().entities, 3)
+    assert(world:has(id, extra))
+    assert.eq(world:getStats().entities, 3)
 end
 
 function suite.preservesRelationshipEdgesAcrossWriterSegmentsAndCascades(): nil
@@ -268,62 +267,62 @@ function suite.preservesRelationshipEdgesAcrossWriterSegmentsAndCascades(): nil
     world:set(child, extra)
     world:set(child, follows(other))
     world:commit()
-    test.equal(#world:relationshipSources(follows, parent), 1)
-    test.equal(#world:relationshipSources(follows, other), 1)
+    assert.eq(#world:relationshipSources(follows, parent), 1)
+    assert.eq(#world:relationshipSources(follows, other), 1)
     world:batchRemove(selection, follows(parent))
     world:commit()
-    test.equal(#world:relationshipSources(follows, parent), 0)
-    test.equal(#world:relationshipSources(follows, other), 1)
+    assert.eq(#world:relationshipSources(follows, parent), 0)
+    assert.eq(#world:relationshipSources(follows, other), 1)
     const ancestor = assert(world:batchSpawn(1, {tag}))
     const descendant = assert(world:batchSpawn(1, {ecs.ChildOf(ancestor)}))
     world:despawn(ancestor)
     world:commit()
-    test.assert(not world:isAlive(ancestor) and not world:isAlive(descendant))
+    assert(not world:isAlive(ancestor) and not world:isAlive(descendant))
 end
 
 function suite.rejectsForeignQueriesAndUnsafeCallbackShapes(): nil
     const world = ecs.newWorld({maxEntities = 2})
     const other = ecs.newWorld()
     const selection = world:newQuery({})
-    test.raises(
+    assert.raises(
         function(): nil
             world:batchSet(other:newQuery({}), tag)
         end,
         "query from this world"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             world:batchSet(selection, position(1), function(): nil
             end)
         end,
         "plain component definition"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             world:batchSet(selection, ecs.ChildOf, function(): nil
             end)
         end,
         "plain component definition"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             world:batchSpawn(0, {})
         end,
         "positive integer"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             world:batchSpawn(3, {})
         end,
         "exhaustion"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             world:batchSpawn(1, {ecs.EntityKey("key")})
         end,
         "EntityKey"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             world:batchSpawn(1, {ecs.ChildOf})
         end,
@@ -331,7 +330,7 @@ function suite.rejectsForeignQueriesAndUnsafeCallbackShapes(): nil
     )
     world:batchSpawn(2, {})
     world:commit()
-    test.equal(world:getStats().entities, 2)
+    assert.eq(world:getStats().entities, 2)
 end
 
 function suite.retainsAStagedChildRetargetedBeforeOldParentCancellation(): nil
@@ -342,9 +341,9 @@ function suite.retainsAStagedChildRetargetedBeforeOldParentCancellation(): nil
     world:set(child, ecs.ChildOf(nextParent))
     world:despawn(oldParent)
     world:commit()
-    test.assert(world:isAlive(child))
-    test.equal(assert(world:get(child, ecs.ChildOf)).target, nextParent)
-    test.equal(#world:relationshipSources(ecs.ChildOf, nextParent), 1)
+    assert(world:isAlive(child))
+    assert.eq(assert(world:get(child, ecs.ChildOf)).target, nextParent)
+    assert.eq(#world:relationshipSources(ecs.ChildOf, nextParent), 1)
 end
 
 function suite.notifiesCorrectRowsWhenAnotherMoveSwapRemovesTheDestination(): nil
@@ -364,8 +363,8 @@ function suite.notifiesCorrectRowsWhenAnotherMoveSwapRemovesTheDestination(): ni
     world:batchSet(world:newQuery({include = {tag}}), tag, function(): nil
     end)
     world:commit()
-    test.equal(observed, source)
-    test.assert(world:has(source, position) and not world:has(destination, position))
+    assert.eq(observed, source)
+    assert(world:has(source, position) and not world:has(destination, position))
 end
 
 function suite.releasesUnpublishedReservationsAfterInitializerFailure(): nil
@@ -374,17 +373,17 @@ function suite.releasesUnpublishedReservationsAfterInitializerFailure(): nil
         error("batch initializer failed")
     end)
     const abandoned = assert(world:batchSpawn(1, {tag}))
-    test.raises(
+    assert.raises(
         function(): nil
             world:commit()
         end,
         "batch initializer failed"
     )
-    test.assert(not world:isAlive(abandoned))
+    assert(not world:isAlive(abandoned))
     const replacement = world:spawn(tag)
     world:commit()
-    test.assert(world:isAlive(replacement))
-    test.assert(replacement ~= abandoned)
+    assert(world:isAlive(replacement))
+    assert(replacement ~= abandoned)
 end
 
 function suite.bulkTeardownFiresEventsAndUnlinksSparseEdges(): nil
@@ -402,11 +401,11 @@ function suite.bulkTeardownFiresEventsAndUnlinksSparseEdges(): nil
     end)
     world:batchDespawn(world:newQuery({include = {tag}}))
     world:commit()
-    test.equal(global, 3)
-    test.equal(addressed, 1)
-    test.assert(not world:hasObservers(first, OnDespawn))
-    test.equal(#world:relationshipSources(ecs.ChildOf, parent), 0)
-    test.assert(world:isAlive(parent))
+    assert.eq(global, 3)
+    assert.eq(addressed, 1)
+    assert(not world:hasObservers(first, OnDespawn))
+    assert.eq(#world:relationshipSources(ecs.ChildOf, parent), 0)
+    assert(world:isAlive(parent))
 end
 
 function suite.recyclesSlotsWithinOneCommitWithoutCancellingNewGenerations(): nil
@@ -424,9 +423,9 @@ function suite.recyclesSlotsWithinOneCommitWithoutCancellingNewGenerations(): ni
         replacement = world:spawn(tag)
     end)
     world:commit()
-    test.assert(world:isAlive(survivor))
-    test.assert(world:isAlive(assert(replacement)))
-    test.assert(not world:isAlive(old))
+    assert(world:isAlive(survivor))
+    assert(world:isAlive(assert(replacement)))
+    assert(not world:isAlive(old))
 end
 
 function suite.initializerQueryRegistrationDoesNotDoubleReportBatchRows(): nil
@@ -441,7 +440,7 @@ function suite.initializerQueryRegistrationDoesNotDoubleReportBatchRows(): nil
         })
     end)
     world:commit()
-    test.equal(entries, 4)
+    assert.eq(entries, 4)
 end
 
 function suite.deferredEntryNotificationsDoNotRepeatInitialQueryMembers(): nil
@@ -472,7 +471,7 @@ function suite.deferredEntryNotificationsDoNotRepeatInitialQueryMembers(): nil
     world:batchSet(world:newQuery({include = {tag}}), position, function(): nil
     end)
     world:commit()
-    test.equal(entries, 4)
+    assert.eq(entries, 4)
 end
 
 function suite.recyclesExplicitIdGapsWithoutReissuingPendingReservations(): nil
@@ -481,10 +480,10 @@ function suite.recyclesExplicitIdGapsWithoutReissuingPendingReservations(): nil
     world:batchSpawnAt({8, 5, 3}, {tag})
     world:batchSpawn(4, {tag})
     world:commit()
-    test.equal(world:getStats().entities, 8)
-    test.assert(world:isAlive(reserved))
-    test.assert(world:isAlive(8) and world:isAlive(5) and world:isAlive(3))
-    test.raises(
+    assert.eq(world:getStats().entities, 8)
+    assert(world:isAlive(reserved))
+    assert(world:isAlive(8) and world:isAlive(5) and world:isAlive(3))
+    assert.raises(
         function(): nil
             world:spawn()
         end,
@@ -504,13 +503,13 @@ function suite.ordersQueuedWholeArchetypeChangesAndLaterScalarExceptions(): nil
     world:remove(first + 1, extra)
     world:despawn(first + 2)
     world:commit()
-    test.equal(assert(world:get(first, position)).x, 81)
-    test.assert(not world:has(first + 1, extra))
-    test.assert(not world:isAlive(first + 2))
+    assert.eq(assert(world:get(first, position)).x, 81)
+    assert(not world:has(first + 1, extra))
+    assert(not world:isAlive(first + 2))
     for id = first + 3, first + 7 do
-        test.assert(world:has(id, extra))
-        test.assert(not world:has(id, position))
-        test.equal(world:get(id, flag), false)
+        assert(world:has(id, extra))
+        assert(not world:has(id, position))
+        assert.eq(world:get(id, flag), false)
     end
 end
 
@@ -533,12 +532,12 @@ function suite.capturedBulkRowsExcludeEarlierQueuedSpawns(): nil
         end
     )
     world:commit()
-    test.equal(written, 4)
+    assert.eq(written, 4)
     for id = first, first + 3 do
-        test.equal(assert(world:get(id, position)).x, 42)
+        assert.eq(assert(world:get(id, position)).x, 42)
     end
     for id = later, later + 2 do
-        test.assert(not world:has(id, position))
+        assert(not world:has(id, position))
     end
 end
 
@@ -558,10 +557,10 @@ function suite.bulkRemovalObserversStageAgainstTheDestinationSignature(): nil
     })
     world:batchRemove(world:newQuery({include = {tag}}), position)
     world:commit()
-    test.equal(removed, 4)
+    assert.eq(removed, 4)
     for id = first, first + 3 do
-        test.assert(world:has(id, extra))
-        test.assert(not world:has(id, position))
+        assert(world:has(id, extra))
+        assert(not world:has(id, position))
     end
 end
 
@@ -572,8 +571,8 @@ function suite.bulkDeletionOfTargetsStillCascadesAcrossArchetypes(): nil
     world:commit()
     world:batchDespawn(world:newQuery({include = {tag}}))
     world:commit()
-    test.equal(world:getStats().entities, 0)
-    test.assert(not world:isAlive(child))
+    assert.eq(world:getStats().entities, 0)
+    assert(not world:isAlive(child))
 end
 
 function suite.batchDefaultsStillRunForEveryEntityAndEachReset(): nil
@@ -594,8 +593,8 @@ function suite.batchDefaultsStillRunForEveryEntityAndEachReset(): nil
     const before = sequence
     world:batchSet(world:newQuery({include = {tag}}), unique)
     world:commit()
-    test.equal(sequence - before, 5)
-    test.assert(assert(world:get(first, unique)).x ~= assert(world:get(first + 1, unique)).x)
+    assert.eq(sequence - before, 5)
+    assert(assert(world:get(first, unique)).x ~= assert(world:get(first + 1, unique)).x)
 end
 
 function suite.failingBulkDefaultsDoNotExchangeLiveSourceColumns(): nil
@@ -617,21 +616,21 @@ function suite.failingBulkDefaultsDoNotExchangeLiveSourceColumns(): nil
     world:commit()
     fail = true
     world:batchSet(world:newQuery({include = {tag}}), fragile)
-    test.raises(
+    assert.raises(
         function(): nil
             world:commit()
         end,
         "bulk default failed"
     )
-    test.equal(world:getStats().entities, 5)
+    assert.eq(world:getStats().entities, 5)
     for id = first, first + 4 do
-        test.equal(assert(world:get(id, position)).x, 61)
-        test.assert(not world:has(id, fragile))
+        assert.eq(assert(world:get(id, position)).x, 61)
+        assert(not world:has(id, fragile))
     end
     fail = false
     world:batchSet(world:newQuery({include = {tag}}), fragile)
     world:commit()
-    test.assert(world:has(first, fragile))
+    assert(world:has(first, fragile))
 end
 
 return suite

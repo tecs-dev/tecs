@@ -3,7 +3,6 @@ local json = require("nupp.codec.json")
 local mcp = require("tecs.mcp")
 local net = require("nupp.io.net")
 local tasks = require("nupp.tasks")
-local test = require("nupp.test")
 local time = require("nupp.time")
 
 local suite = {}
@@ -92,7 +91,7 @@ end
 
 function suite.bindsALoopbackPortAndReportsIt(): nil
     local server = assert(mcp.listen(0))
-    test.assert(server.port > 0)
+    assert(server.port > 0)
     mcp.destroy(server)
 end
 
@@ -100,15 +99,15 @@ function suite.refusesASecondServerOnTheSamePort(): nil
     local first = assert(mcp.listen(0))
     local second, why = mcp.listen(first.port)
 
-    test.assert(second == nil)
-    test.assert((why as string) ~= "")
+    assert(second == nil)
+    assert((why as string) ~= "")
     mcp.destroy(first)
 end
 
 function suite.answersInitializeOverHTTPWithoutTheFrame(): nil
     local body = withServer(function(port: integer): string
         local status, answer = exchange(port, "POST", "/mcp", [[{"jsonrpc":"2.0","id":1,"method":"initialize"}]])
-        test.equal(status, 200)
+        assert.eq(status, 200)
 
         return answer
     end)
@@ -116,7 +115,7 @@ function suite.answersInitializeOverHTTPWithoutTheFrame(): nil
     local response = json.decode(body, json.NULL) as {[string]: any}
     local result = response.result as {[string]: any}
 
-    test.equal(result.protocolVersion as string, "2025-06-18")
+    assert.eq(result.protocolVersion as string, "2025-06-18")
 end
 
 function suite.roundTripsAToolCallThroughTheFrame(): nil
@@ -134,7 +133,7 @@ function suite.roundTripsAToolCallThroughTheFrame(): nil
             "/mcp",
             [[{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"stats","arguments":{}}}]]
         )
-        test.equal(status, 200)
+        assert.eq(status, 200)
 
         return answer
     end)
@@ -142,8 +141,8 @@ function suite.roundTripsAToolCallThroughTheFrame(): nil
     local response = json.decode(body, json.NULL) as {[string]: any}
     local result = (response.result as {[string]: any}).structuredContent as {[string]: any}
 
-    test.equal(response.id as integer, 9)
-    test.equal(result.entities as integer, 3)
+    assert.eq(response.id as integer, 9)
+    assert.eq(result.entities as integer, 3)
 end
 
 function suite.reportsAFailingToolOverHTTPRatherThanClosingTheConnection(): nil
@@ -162,7 +161,7 @@ function suite.reportsAFailingToolOverHTTPRatherThanClosingTheConnection(): nil
             [[{"jsonrpc":"2.0","id":3,"method":"tools/call",]]
             .. [["params":{"name":"test.mcp.transport.raises","arguments":{}}}]]
         )
-        test.equal(status, 200)
+        assert.eq(status, 200)
 
         return answer
     end)
@@ -170,14 +169,14 @@ function suite.reportsAFailingToolOverHTTPRatherThanClosingTheConnection(): nil
     local result = (json.decode(body, json.NULL) as {[string]: any}).result as {[string]: any}
     local content = result.content as {{[string]: any}}
 
-    test.assert(result.isError == true)
-    test.equal(content[1].text as string, "transport failure")
+    assert(result.isError == true)
+    assert.eq(content[1].text as string, "transport failure")
 end
 
 function suite.servesTheRegistryListingOverHTTP(): nil
     local body = withServer(function(port: integer): string
         local status, answer = exchange(port, "POST", "/mcp", [[{"jsonrpc":"2.0","id":4,"method":"tools/list"}]])
-        test.equal(status, 200)
+        assert.eq(status, 200)
 
         return answer
     end)
@@ -189,8 +188,8 @@ function suite.servesTheRegistryListingOverHTTP(): nil
         names[tools[index].name as string] = true
     end
 
-    test.assert(names["ping"] == true)
-    test.assert(names["components_info"] == true)
+    assert(names["ping"] == true)
+    assert(names["components_info"] == true)
 end
 
 function suite.refusesAnythingButPostOnTheEndpoint(): nil
@@ -200,7 +199,7 @@ function suite.refusesAnythingButPostOnTheEndpoint(): nil
         return code
     end)
 
-    test.equal(status, 405)
+    assert.eq(status, 405)
 end
 
 function suite.answersNotFoundOffTheEndpoint(): nil
@@ -210,18 +209,18 @@ function suite.answersNotFoundOffTheEndpoint(): nil
         return code
     end)
 
-    test.equal(status, 404)
+    assert.eq(status, 404)
 end
 
 function suite.acknowledgesANotificationWithNoBody(): nil
     local status = withServer(function(port: integer): integer
         local code, body = exchange(port, "POST", "/mcp", [[{"jsonrpc":"2.0","method":"notifications/initialized"}]])
-        test.equal(body, "")
+        assert.eq(body, "")
 
         return code
     end)
 
-    test.equal(status, 202)
+    assert.eq(status, 202)
 end
 
 function suite.keepsOneConnectionOpenAcrossSeveralCalls(): nil
@@ -257,10 +256,10 @@ function suite.keepsOneConnectionOpenAcrossSeveralCalls(): nil
         return collected
     end)
 
-    test.equal(#answers, 3)
+    assert.eq(#answers, 3)
     for index = 1, 3 do
-        test.assert(answers[index]:find("HTTP/1.1 200", 1, true) == 1)
-        test.assert(answers[index]:find(`"id":${tostring(index)}`, 1, true) ~= nil)
+        assert(answers[index]:find("HTTP/1.1 200", 1, true) == 1)
+        assert(answers[index]:find(`"id":${tostring(index)}`, 1, true) ~= nil)
     end
 end
 
@@ -284,16 +283,16 @@ function suite.blocksAWorldToolOverHTTPAfterACrash(): nil
     local result = (json.decode(body, json.NULL) as {[string]: any}).result as {[string]: any}
     local content = result.content as {{[string]: any}}
 
-    test.assert(result.isError == true)
-    test.assert(result.crashed == true)
-    test.equal(content[1].text as string, "transport traceback")
+    assert(result.isError == true)
+    assert(result.crashed == true)
+    assert.eq(content[1].text as string, "transport traceback")
 end
 
 function suite.stopsAnsweringAfterDestroy(): nil
     local server = assert(mcp.listen(0))
     mcp.destroy(server)
 
-    test.assert(not mcp.poll(server))
+    assert(not mcp.poll(server))
     mcp.destroy(server)
 end
 

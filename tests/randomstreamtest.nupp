@@ -2,21 +2,20 @@ const {type Snapshot} = require("tecs.ecs")
 const ecs = require("tecs.ecs")
 const json = require("nupp.codec.json")
 
-local test = require("nupp.test")
 local random = require("nupp.random")
 
 local suite = {}
 
 local function equalWords(first: {integer}, second: {integer}): nil
-    test.equal(#first, #second)
+    assert.eq(#first, #second)
     for index = 1, #first do
-        test.equal(first[index], second[index])
+        assert.eq(first[index], second[index])
     end
 end
 
 local function sameDraws(first: random.Xoshiro128, second: random.Xoshiro128): nil
     for _ = 1, 30 do
-        test.equal(first:next(), second:next())
+        assert.eq(first:next(), second:next())
     end
 end
 
@@ -33,9 +32,9 @@ function suite.retainsIdentityAndKeepsWorldsIndependent(): nil
     const first = ecs.newWorld()
     const second = ecs.newWorld()
     const loot: random.Xoshiro128 = first:randomStream("game.loot")
-    test.assert(loot == first:randomStream("game.loot"))
-    test.assert(loot ~= first:randomStream("game.Loot"))
-    test.assert(loot ~= second:randomStream("game.loot"))
+    assert(loot == first:randomStream("game.loot"))
+    assert(loot ~= first:randomStream("game.Loot"))
+    assert(loot ~= second:randomStream("game.loot"))
     sameDraws(loot, second:randomStream("game.loot"))
 end
 
@@ -68,8 +67,8 @@ function suite.reseedsExistingAndFutureStreamsWithoutReplacingObjects(): nil
     weather:next()
     world:seedRandom(12345)
     expected:seedRandom(12345)
-    test.assert(world:randomStream("game.loot") == loot)
-    test.assert(world:randomStream("game.weather") == weather)
+    assert(world:randomStream("game.loot") == loot)
+    assert(world:randomStream("game.weather") == weather)
     sameDraws(loot, expected:randomStream("game.loot"))
     sameDraws(weather, expected:randomStream("game.weather"))
     sameDraws(world:randomStream("game.future"), expected:randomStream("game.future"))
@@ -90,28 +89,28 @@ end
 
 function suite.rejectsBadArgumentsWithoutInstallingRandomState(): nil
     const world = ecs.newWorld()
-    test.raises(
+    assert.raises(
         function(): nil
             world:randomStream("")
         end,
         "non%-empty name"
     )
     for _, invalid in ipairs({math.huge, -math.huge, 0 / 0, 1.5}) do
-        test.raises(
+        assert.raises(
             function(): nil
                 world:seedRandom(invalid as integer)
             end,
             "finite integer"
         )
     end
-    test.equal(#world:saveSnapshot().data, 0)
+    assert.eq(#world:saveSnapshot().data, 0)
 end
 
 function suite.savesSeedOnlyAndLoadsWithoutPriorInitialization(): nil
     const world = ecs.newWorld()
     world:seedRandom(42)
     const saved = world:saveSnapshot()
-    test.equal(payload(saved).seed, 42)
+    assert.eq(payload(saved).seed, 42)
     const fresh = ecs.newWorld()
     fresh:loadSnapshot(saved)
     sameDraws(world:randomStream("later"), fresh:randomStream("later"))
@@ -133,7 +132,7 @@ function suite.restoresCapturedAndNotYetRequestedStreams(): nil
     weather:next()
     world:seedRandom(1)
     world:loadSnapshot(saved)
-    test.assert(world:randomStream("loot") == loot)
+    assert(world:randomStream("loot") == loot)
     equalWords(loot:state(), lootState)
     equalWords(weather:state(), weatherState)
     const fresh = ecs.newWorld()
@@ -150,7 +149,7 @@ function suite.restartsUnsavedStreamsFromTheRestoredSeed(): nil
     const extra = world:randomStream("extra")
     extra:next()
     world:loadSnapshot(saved)
-    test.assert(extra == world:randomStream("extra"))
+    assert(extra == world:randomStream("extra"))
     sameDraws(extra, source:randomStream("extra"))
 end
 
@@ -214,20 +213,20 @@ function suite.validatesAllRandomDataBeforeClearingEntitiesOrMovingStreams(): ni
 
     for _, invalid in ipairs(bad) do
         saved.data[1].value = invalid
-        test.raises(loadInvalid, "tecs.random")
-        test.assert(world:isAlive(live))
-        test.assert(not world:isAlive(pending))
+        assert.raises(loadInvalid, "tecs.random")
+        assert(world:isAlive(live))
+        assert(not world:isAlive(pending))
         equalWords(stream:state(), state)
     end
     world:commit()
-    test.assert(world:isAlive(pending))
+    assert(world:isAlive(pending))
 end
 
 function suite.acceptsTheLegacyPayloadAndUnsignedStateWords(): nil
     const world = ecs.newWorld()
     world:seedRandom(0)
     const saved = world:saveSnapshot()
-    test.equal(saved.data[1].key, "tecs.random")
+    assert.eq(saved.data[1].key, "tecs.random")
     saved.data[1].value = {seed = 42, streams = {loot = {1782179806, 3659676363, 1046902905, 2627504192}}}
     world:loadSnapshot(saved)
     const expected = random.Xoshiro128()
@@ -237,13 +236,13 @@ end
 
 function suite.reservesThePersistedKey(): nil
     const world = ecs.newWorld()
-    test.raises(
+    assert.raises(
         function(): nil
             world:addSnapshotHandler({name = "tecs.random"})
         end,
         "reserved"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             world:saveSnapshot({customData = {["tecs.random"] = {}}})
         end,
@@ -269,7 +268,7 @@ function suite.restoresBeforeUserSnapshotHandlersRun(): nil
     const saved = world:saveSnapshot()
     loot:next()
     world:loadSnapshot(saved)
-    test.assert(restored)
+    assert(restored)
 end
 
 function suite.roundTripsThroughJsonWithoutLosingSignedWords(): nil

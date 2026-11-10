@@ -3,7 +3,6 @@ local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
 local ecs = require("tecs.ecs")
 local hostpump = require("nupp.host.pump")
-local test = require("nupp.test")
 
 local suite = {}
 
@@ -179,20 +178,20 @@ end
 
 function suite.reportsNoOutputWithoutABackend(): nil
     local mixer = audio.newAudio({backend = audiobackend.silent()})
-    test.assert(not mixer.available)
-    test.equal(mixer:play(newSound(freshName())), 0)
-    test.equal(mixer:sounding(), 0)
+    assert(not mixer.available)
+    assert.eq(mixer:play(newSound(freshName())), 0)
+    assert.eq(mixer:sounding(), 0)
 end
 
 function suite.answersZeroForAnAbsentClip(): nil
     local recorder = newRecorder()
     local mixer = audio.newAudio({backend = recorder.backend})
-    test.equal(mixer:play(nil), 0)
-    test.equal(countOf(recorder, audiobackend.PLAY), 0)
+    assert.eq(mixer:play(nil), 0)
+    assert.eq(countOf(recorder, audiobackend.PLAY), 0)
 end
 
 function suite.rejectsAVoiceCeilingOutsideItsRange(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             audio.newAudio({maxVoices = 0, backend = audiobackend.silent()})
         end,
@@ -202,31 +201,31 @@ end
 
 function suite.internsSoundAndGroupNamesBothWays(): nil
     local id = audio.soundId("test/audio/interned.ogg")
-    test.equal(audio.soundId("test/audio/interned.ogg"), id)
-    test.equal(audio.soundName(id), "test/audio/interned.ogg")
-    test.equal(audio.soundName(0), nil)
+    assert.eq(audio.soundId("test/audio/interned.ogg"), id)
+    assert.eq(audio.soundName(id), "test/audio/interned.ogg")
+    assert.eq(audio.soundName(0), nil)
     -- The deprecated names answer the same registry.
-    test.equal(audio.clipId("test/audio/interned.ogg"), id)
-    test.equal(audio.clipPath(id), "test/audio/interned.ogg")
+    assert.eq(audio.clipId("test/audio/interned.ogg"), id)
+    assert.eq(audio.clipPath(id), "test/audio/interned.ogg")
 
     local group = audio.groupId("interned")
-    test.equal(audio.groupId("interned"), group)
-    test.equal(audio.groupName(group), "interned")
-    test.equal(audio.groupName(0), nil)
+    assert.eq(audio.groupId("interned"), group)
+    assert.eq(audio.groupName(group), "interned")
+    assert.eq(audio.groupName(0), nil)
 
-    test.raises(
+    assert.raises(
         function(): nil
             audio.soundId("")
         end,
         "name cannot be empty"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             audio.clipId("")
         end,
         "clip path"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             audio.groupId("")
         end,
@@ -237,40 +236,40 @@ end
 function suite.playsASoundThroughItsDecoderRegisteringItOnce(): nil
     local recorder = newRecorder()
     local mixer = audio.newAudio({backend = recorder.backend})
-    test.equal(#mixer:decoders(), 0)
+    assert.eq(#mixer:decoders(), 0)
     local first = newSound(freshName())
     local second = newSound(freshName())
 
     local handle = mixer:play(first, {gain = 0.5})
-    test.assert(handle > 0)
-    test.assert(mixer:play(second) > 0)
-    test.assert(mixer:play(first) > 0)
+    assert(handle > 0)
+    assert(mixer:play(second) > 0)
+    assert(mixer:play(first) > 0)
     -- One Decoder, registered on its first Sound's first play.
-    test.equal(#recorder.registered, 1)
-    test.equal(recorder.registered[1], VTABLE)
-    test.equal(#mixer:decoders(), 1)
-    test.equal(mixer:decoders()[1], "test")
+    assert.eq(#recorder.registered, 1)
+    assert.eq(recorder.registered[1], VTABLE)
+    assert.eq(#mixer:decoders(), 1)
+    assert.eq(mixer:decoders()[1], "test")
 
     -- Each start opens its Playback from the Sound's own parameters.
-    test.equal(#recorder.opened, 3)
+    assert.eq(#recorder.opened, 3)
     local opened = recorder.opened[1]
-    test.equal(opened.decoder, DECODER_ID)
-    test.equal(opened.handle, handle)
-    test.equal(opened.params, first.params)
-    test.equal(opened.bytes, first.bytes)
-    test.equal(recorder.opened[2].params, second.params)
+    assert.eq(opened.decoder, DECODER_ID)
+    assert.eq(opened.handle, handle)
+    assert.eq(opened.params, first.params)
+    assert.eq(opened.bytes, first.bytes)
+    assert.eq(recorder.opened[2].params, second.params)
 
     mixer:flush()
     local command = assert(lastOf(recorder, audiobackend.PLAY))
-    test.equal(command.clip, idOf(first))
-    test.equal(command.flags & audiobackend.SYNTH, audiobackend.SYNTH)
+    assert.eq(command.clip, idOf(first))
+    assert.eq(command.flags & audiobackend.SYNTH, audiobackend.SYNTH)
 
     -- A Sound it played is one it knows, by name.
-    test.equal(mixer:sound(first.name), first)
-    test.equal(mixer:sound("test/audio/never-played.ogg"), nil)
-    test.equal(#mixer:sounds(), 2)
+    assert.eq(mixer:sound(first.name), first)
+    assert.eq(mixer:sound("test/audio/never-played.ogg"), nil)
+    assert.eq(#mixer:sounds(), 2)
     local info = assert(mixer:voiceList()[1])
-    test.equal(info.clip, first.name)
+    assert.eq(info.clip, first.name)
 
     -- A second Decoder registers on its own first play, under its own id.
     recorder.backend.registerDecoder = function(vtable: any): (integer?, string?)
@@ -278,11 +277,11 @@ function suite.playsASoundThroughItsDecoderRegisteringItOnce(): nil
 
         return DECODER_ID + 1
     end
-    test.assert(mixer:play(newSound(freshName(), "other")) > 0)
-    test.equal(#recorder.registered, 2)
-    test.equal(assert(recorder.opened[#recorder.opened]).decoder, DECODER_ID + 1)
-    test.equal(#mixer:decoders(), 2)
-    test.equal(mixer:decoders()[2], "other")
+    assert(mixer:play(newSound(freshName(), "other")) > 0)
+    assert.eq(#recorder.registered, 2)
+    assert.eq(assert(recorder.opened[#recorder.opened]).decoder, DECODER_ID + 1)
+    assert.eq(#mixer:decoders(), 2)
+    assert.eq(mixer:decoders()[2], "other")
 end
 
 function suite.refusesASoundWhoseDecoderTheBackendRefuses(): nil
@@ -296,30 +295,30 @@ function suite.refusesASoundWhoseDecoderTheBackendRefuses(): nil
     local mixer = audio.newAudio({backend = recorder.backend})
     local sound = newSound(freshName())
 
-    test.equal(mixer:play(sound), 0)
+    assert.eq(mixer:play(sound), 0)
     mixer:flush()
-    test.equal(countOf(recorder, audiobackend.PLAY), 0)
-    test.equal(#recorder.opened, 0)
-    test.equal(#mixer:decoders(), 0)
+    assert.eq(countOf(recorder, audiobackend.PLAY), 0)
+    assert.eq(#recorder.opened, 0)
+    assert.eq(#mixer:decoders(), 0)
     local events = mixer:events()
     local last = assert(events[#events])
-    test.equal(last.event, "refuse")
-    test.equal(last.reason, "decoder")
-    test.equal(last.sound, sound.name)
-    test.equal(mixer:stats().refused, 1)
+    assert.eq(last.event, "refuse")
+    assert.eq(last.reason, "decoder")
+    assert.eq(last.sound, sound.name)
+    assert.eq(mixer:stats().refused, 1)
 
     -- A refusal is not remembered: the next play asks again.
-    test.equal(mixer:play(sound), 0)
-    test.equal(asked[1], 2)
+    assert.eq(mixer:play(sound), 0)
+    assert.eq(asked[1], 2)
 end
 
 function suite.refusesEverySoundOnABackendThatTakesNoDecoders(): nil
     local recorder = newRecorder()
     recorder.backend.registerDecoder = nil
     local mixer = audio.newAudio({backend = recorder.backend})
-    test.equal(mixer:play(newSound(freshName())), 0)
+    assert.eq(mixer:play(newSound(freshName())), 0)
     local events = mixer:events()
-    test.equal(assert(events[#events]).reason, "decoder")
+    assert.eq(assert(events[#events]).reason, "decoder")
 end
 
 function suite.takesAStartOnABackendThatOpensNothing(): nil
@@ -327,8 +326,8 @@ function suite.takesAStartOnABackendThatOpensNothing(): nil
     recorder.backend.openDecoded = nil
     local mixer = audio.newAudio({backend = recorder.backend})
     local handle = mixer:play(newSound(freshName()))
-    test.assert(handle > 0)
-    test.assert(mixer:playing(handle))
+    assert(handle > 0)
+    assert(mixer:playing(handle))
 end
 
 function suite.stopsAVoiceWhosePlaybackDidNotOpen(): nil
@@ -342,8 +341,8 @@ function suite.stopsAVoiceWhosePlaybackDidNotOpen(): nil
         return false, "the bytes are not audio"
     end
     local mixer = audio.newAudio({backend = recorder.backend})
-    test.equal(mixer:play(newSound(freshName())), 0)
-    test.equal(mixer:sounding(), 0)
+    assert.eq(mixer:play(newSound(freshName())), 0)
+    assert.eq(mixer:sounding(), 0)
 end
 
 function suite.reReadsASoundThroughItsReload(): nil
@@ -359,20 +358,20 @@ function suite.reReadsASoundThroughItsReload(): nil
     end
 
     local unknown, unknownReason = mixer:reload(sound.name)
-    test.assert(not unknown)
-    test.matches(assert(unknownReason), "nothing has played or added")
+    assert(not unknown)
+    assert.matches(assert(unknownReason), "nothing has played or added")
 
-    test.equal(mixer:addSound(sound), idOf(sound))
+    assert.eq(mixer:addSound(sound), idOf(sound))
     local ok, reason = mixer:reload(sound.name)
-    test.assert(ok)
-    test.equal(reason, nil)
-    test.equal(reloads[1], 1)
-    test.equal(sound.duration, 2)
+    assert(ok)
+    assert.eq(reason, nil)
+    assert.eq(reloads[1], 1)
+    assert.eq(sound.duration, 2)
 
     local fixed = loaded(mixer)
     local refused, refusedReason = mixer:reload(fixed.name)
-    test.assert(not refused)
-    test.matches(assert(refusedReason), "cannot be re%-read")
+    assert(not refused)
+    assert.matches(assert(refusedReason), "cannot be re%-read")
 end
 
 function suite.carriesASoundThroughASnapshotByName(): nil
@@ -391,12 +390,12 @@ function suite.carriesASoundThroughASnapshotByName(): nil
     local otherMixer = audio.install(other, {backend = otherRecorder.backend})
     other:loadSnapshot(snapshot)
     other:update(0)
-    test.equal(countOf(otherRecorder, audiobackend.PLAY), 0)
+    assert.eq(countOf(otherRecorder, audiobackend.PLAY), 0)
 
     -- The row names the Sound, so it starts once this mixer knows it.
     otherMixer:addSound(newSound(name))
     other:update(0)
-    test.equal(assert(lastOf(otherRecorder, audiobackend.PLAY)).clip, audio.soundId(name))
+    assert.eq(assert(lastOf(otherRecorder, audiobackend.PLAY)).clip, audio.soundId(name))
 end
 
 function suite.sendsOnePlayCarryingEveryStartingSetting(): nil
@@ -405,21 +404,21 @@ function suite.sendsOnePlayCarryingEveryStartingSetting(): nil
     local clip = loaded(mixer)
 
     local handle = mixer:play(clip, {gain = 0.5, pitch = 1.5, loop = true, loopStart = 2, start = 1, fadeIn = 0.25,})
-    test.assert(handle > 0)
+    assert(handle > 0)
     mixer:flush()
 
     local command = assert(lastOf(recorder, audiobackend.PLAY))
-    test.equal(command.handle, handle)
-    test.equal(command.clip, idOf(clip))
-    test.equal(command.gain, 0.5)
-    test.equal(command.pitch, 1.5)
-    test.equal(command.loopStart, 2)
-    test.equal(command.start, 1)
-    test.equal(command.fade, 0.25)
-    test.equal(command.flags % 2, audiobackend.LOOP)
-    test.assert(mixer:playing(handle))
-    test.assert(mixer:looping(handle))
-    test.equal(mixer:sounding(), 1)
+    assert.eq(command.handle, handle)
+    assert.eq(command.clip, idOf(clip))
+    assert.eq(command.gain, 0.5)
+    assert.eq(command.pitch, 1.5)
+    assert.eq(command.loopStart, 2)
+    assert.eq(command.start, 1)
+    assert.eq(command.fade, 0.25)
+    assert.eq(command.flags % 2, audiobackend.LOOP)
+    assert(mixer:playing(handle))
+    assert(mixer:looping(handle))
+    assert.eq(mixer:sounding(), 1)
 end
 
 function suite.keepsAStaleHandleFromReachingTheVoiceThatReplacedIt(): nil
@@ -429,12 +428,12 @@ function suite.keepsAStaleHandleFromReachingTheVoiceThatReplacedIt(): nil
 
     local first = mixer:play(clip)
     mixer:stop(first)
-    test.assert(not mixer:playing(first))
+    assert(not mixer:playing(first))
 
     local second = mixer:play(clip)
-    test.assert(second > 0)
-    test.notEqual(second, first)
-    test.assert(mixer:playing(second))
+    assert(second > 0)
+    assert.ne(second, first)
+    assert(mixer:playing(second))
 
     mixer:flush()
     clear(recorder)
@@ -442,8 +441,8 @@ function suite.keepsAStaleHandleFromReachingTheVoiceThatReplacedIt(): nil
     mixer:stop(first)
     mixer:pause(first)
     mixer:flush()
-    test.equal(#recorder.log, 0)
-    test.assert(mixer:playing(second))
+    assert.eq(#recorder.log, 0)
+    assert(mixer:playing(second))
 end
 
 function suite.declinesRatherThanStealingWhenEveryVoiceIsBusy(): nil
@@ -453,13 +452,13 @@ function suite.declinesRatherThanStealingWhenEveryVoiceIsBusy(): nil
 
     local first = mixer:play(clip)
     local second = mixer:play(clip)
-    test.assert(first > 0)
-    test.assert(second > 0)
-    test.equal(mixer:play(clip), 0)
-    test.equal(mixer:sounding(), 2)
-    test.assert(mixer:playing(first))
-    test.assert(mixer:playing(second))
-    test.equal(mixer:maxVoices(), 2)
+    assert(first > 0)
+    assert(second > 0)
+    assert.eq(mixer:play(clip), 0)
+    assert.eq(mixer:sounding(), 2)
+    assert(mixer:playing(first))
+    assert(mixer:playing(second))
+    assert.eq(mixer:maxVoices(), 2)
 end
 
 function suite.holdsAFadingVoiceUntilTheBackendReportsItFinished(): nil
@@ -472,21 +471,21 @@ function suite.holdsAFadingVoiceUntilTheBackendReportsItFinished(): nil
     mixer:stop(handle, 0.5)
     mixer:flush()
     local stop = assert(lastOf(recorder, audiobackend.STOP))
-    test.equal(stop.handle, handle)
-    test.equal(stop.fade, 0.5)
+    assert.eq(stop.handle, handle)
+    assert.eq(stop.fade, 0.5)
     -- Still sounding: the fade is the backend's to run.
-    test.assert(mixer:playing(handle))
-    test.equal(mixer:update(0), 1)
+    assert(mixer:playing(handle))
+    assert.eq(mixer:update(0), 1)
 
     -- A second stop does not shorten a fade in progress.
     clear(recorder)
     mixer:stop(handle, 0.1)
     mixer:flush()
-    test.equal(countOf(recorder, audiobackend.STOP), 0)
+    assert.eq(countOf(recorder, audiobackend.STOP), 0)
 
     recorder.finished[1] = handle
-    test.equal(mixer:update(0), 0)
-    test.assert(not mixer:playing(handle))
+    assert.eq(mixer:update(0), 0)
+    assert(not mixer:playing(handle))
 end
 
 function suite.freesASlotWithinTheCallWhenAStopHasNoFade(): nil
@@ -496,10 +495,10 @@ function suite.freesASlotWithinTheCallWhenAStopHasNoFade(): nil
     local handle = mixer:play(clip)
 
     mixer:stop(handle)
-    test.assert(not mixer:playing(handle))
-    test.equal(mixer:sounding(), 0)
+    assert(not mixer:playing(handle))
+    assert.eq(mixer:sounding(), 0)
     mixer:flush()
-    test.equal(assert(lastOf(recorder, audiobackend.STOP)).fade, 0)
+    assert.eq(assert(lastOf(recorder, audiobackend.STOP)).fade, 0)
 end
 
 function suite.ignoresAFinishedHandleForARecycledSlot(): nil
@@ -514,8 +513,8 @@ function suite.ignoresAFinishedHandleForARecycledSlot(): nil
     -- The backend reports the voice it was told to stop, after the slot has
     -- already been taken again.
     recorder.finished[1] = first
-    test.equal(mixer:update(0), 1)
-    test.assert(mixer:playing(second))
+    assert.eq(mixer:update(0), 1)
+    assert(mixer:playing(second))
 end
 
 function suite.stopsEverythingWithAndWithoutAFade(): nil
@@ -528,11 +527,11 @@ function suite.stopsEverythingWithAndWithoutAFade(): nil
     clear(recorder)
     mixer:stopAll(0.2)
     mixer:flush()
-    test.equal(countOf(recorder, audiobackend.STOP), 2)
-    test.equal(mixer:sounding(), 2)
+    assert.eq(countOf(recorder, audiobackend.STOP), 2)
+    assert.eq(mixer:sounding(), 2)
 
     mixer:stopAll()
-    test.equal(mixer:sounding(), 0)
+    assert.eq(mixer:sounding(), 0)
 end
 
 function suite.sendsGainPitchAndLoopOnlyWhenTheyMove(): nil
@@ -547,16 +546,16 @@ function suite.sendsGainPitchAndLoopOnlyWhenTheyMove(): nil
     mixer:setPitch(handle, 2)
     mixer:setLoop(handle, true)
     mixer:flush()
-    test.equal(#recorder.log, 0)
+    assert.eq(#recorder.log, 0)
 
     mixer:setGain(handle, 0.25)
     mixer:setPitch(handle, 0.5)
     mixer:setLoop(handle, false)
     mixer:flush()
-    test.equal(assert(lastOf(recorder, audiobackend.SET_GAIN)).gain, 0.25)
-    test.equal(assert(lastOf(recorder, audiobackend.SET_PITCH)).pitch, 0.5)
-    test.equal(assert(lastOf(recorder, audiobackend.SET_LOOP)).flags, 0)
-    test.assert(not mixer:looping(handle))
+    assert.eq(assert(lastOf(recorder, audiobackend.SET_GAIN)).gain, 0.25)
+    assert.eq(assert(lastOf(recorder, audiobackend.SET_PITCH)).pitch, 0.5)
+    assert.eq(assert(lastOf(recorder, audiobackend.SET_LOOP)).flags, 0)
+    assert(not mixer:looping(handle))
 end
 
 function suite.stampsEveryVoiceCommandWithTheTimeItWasGiven(): nil
@@ -566,9 +565,9 @@ function suite.stampsEveryVoiceCommandWithTheTimeItWasGiven(): nil
     local handle = mixer:play(clip, {at = 1.25, resample = "nearest"})
     mixer:flush()
     local play = assert(lastOf(recorder, audiobackend.PLAY))
-    test.equal(play.at, 1.25)
-    test.equal(play.flags // audiobackend.NEAREST % 2, 1)
-    test.equal(mixer:resample(handle), "nearest")
+    assert.eq(play.at, 1.25)
+    assert.eq(play.flags // audiobackend.NEAREST % 2, 1)
+    assert.eq(mixer:resample(handle), "nearest")
 
     clear(recorder)
     mixer:setGain(handle, 0.5, 1.5)
@@ -578,22 +577,22 @@ function suite.stampsEveryVoiceCommandWithTheTimeItWasGiven(): nil
     mixer:setStereo(handle, 0.25, 0.75, 2.25)
     mixer:setResample(handle, "linear", 2.5)
     mixer:flush()
-    test.equal(assert(lastOf(recorder, audiobackend.SET_GAIN)).at, 1.5)
-    test.equal(assert(lastOf(recorder, audiobackend.SET_PITCH)).at, 1.5)
-    test.equal(assert(lastOf(recorder, audiobackend.SET_LOOP)).at, 1.75)
-    test.equal(assert(lastOf(recorder, audiobackend.SET_POSITION)).at, 2)
-    test.equal(assert(lastOf(recorder, audiobackend.SET_STEREO)).at, 2.25)
+    assert.eq(assert(lastOf(recorder, audiobackend.SET_GAIN)).at, 1.5)
+    assert.eq(assert(lastOf(recorder, audiobackend.SET_PITCH)).at, 1.5)
+    assert.eq(assert(lastOf(recorder, audiobackend.SET_LOOP)).at, 1.75)
+    assert.eq(assert(lastOf(recorder, audiobackend.SET_POSITION)).at, 2)
+    assert.eq(assert(lastOf(recorder, audiobackend.SET_STEREO)).at, 2.25)
     local resample = assert(lastOf(recorder, audiobackend.SET_RESAMPLE))
-    test.equal(resample.at, 2.5)
-    test.equal(resample.flags, 0)
-    test.equal(mixer:resample(handle), "linear")
-    test.equal(mixer:resample(0), nil)
+    assert.eq(resample.at, 2.5)
+    assert.eq(resample.flags, 0)
+    assert.eq(mixer:resample(handle), "linear")
+    assert.eq(mixer:resample(0), nil)
 
     -- A command sent with no time carries none, even from a reused record.
     clear(recorder)
     mixer:setGain(handle, 0.25)
     mixer:flush()
-    test.equal(assert(lastOf(recorder, audiobackend.SET_GAIN)).at, 0)
+    assert.eq(assert(lastOf(recorder, audiobackend.SET_GAIN)).at, 0)
 end
 
 function suite.sendsATimedValueEvenWhenItRepeatsTheLastOne(): nil
@@ -608,14 +607,14 @@ function suite.sendsATimedValueEvenWhenItRepeatsTheLastOne(): nil
     mixer:setPitch(handle, 3, 1)
     mixer:setResample(handle, "linear", 1)
     mixer:flush()
-    test.equal(countOf(recorder, audiobackend.SET_PITCH), 2)
-    test.equal(countOf(recorder, audiobackend.SET_RESAMPLE), 1)
+    assert.eq(countOf(recorder, audiobackend.SET_PITCH), 2)
+    assert.eq(countOf(recorder, audiobackend.SET_RESAMPLE), 1)
     -- An untimed repeat of the last value sent is still skipped.
     clear(recorder)
     mixer:setPitch(handle, 3)
     mixer:setResample(handle, "linear")
     mixer:flush()
-    test.equal(#recorder.log, 0)
+    assert.eq(#recorder.log, 0)
 end
 
 function suite.holdsATimedStopsSlotUntilTheBackendReportsItFinished(): nil
@@ -628,13 +627,13 @@ function suite.holdsATimedStopsSlotUntilTheBackendReportsItFinished(): nil
     mixer:stop(handle, nil, 3)
     mixer:flush()
     local stop = assert(lastOf(recorder, audiobackend.STOP))
-    test.equal(stop.at, 3)
-    test.equal(stop.fade, 0)
-    test.assert(mixer:playing(handle))
-    test.equal(mixer:update(0), 1)
+    assert.eq(stop.at, 3)
+    assert.eq(stop.fade, 0)
+    assert(mixer:playing(handle))
+    assert.eq(mixer:update(0), 1)
     recorder.finished[1] = handle
-    test.equal(mixer:update(0), 0)
-    test.assert(not mixer:playing(handle))
+    assert.eq(mixer:update(0), 0)
+    assert(not mixer:playing(handle))
 end
 
 function suite.holdsATimedStartIntoAPausedGroupOnItsOwnFrame(): nil
@@ -647,17 +646,17 @@ function suite.holdsATimedStartIntoAPausedGroupOnItsOwnFrame(): nil
     mixer:flush()
     -- The Bus holds it from its first frame, with no pause of its own to
     -- race the start.
-    test.equal(assert(lastOf(recorder, audiobackend.PLAY)).at, 4)
-    test.equal(countOf(recorder, audiobackend.PAUSE), 0)
-    test.assert(mixer:paused(handle))
+    assert.eq(assert(lastOf(recorder, audiobackend.PLAY)).at, 4)
+    assert.eq(countOf(recorder, audiobackend.PAUSE), 0)
+    assert(mixer:paused(handle))
 end
 
 function suite.readsTheOutputClockAndFrequencyFromTheBackend(): nil
     -- A backend with no clock reads as zero.
     local recorder = newRecorder()
     local mixer = audio.newAudio({backend = recorder.backend})
-    test.equal(mixer:now(), 0)
-    test.equal(mixer:frequency(), 48000)
+    assert.eq(mixer:now(), 0)
+    assert.eq(mixer:frequency(), 48000)
 
     local backend = newRecorder().backend
     local frames = {0}
@@ -666,19 +665,19 @@ function suite.readsTheOutputClockAndFrequencyFromTheBackend(): nil
     end
     local clocked = audio.newAudio({backend = backend})
     frames[1] = 1200
-    test.equal(clocked:now(), 0.025)
+    assert.eq(clocked:now(), 0.025)
     clocked:destroy()
-    test.equal(clocked:now(), 0)
+    assert.eq(clocked:now(), 0)
 
     local silent = audio.newAudio({backend = audiobackend.silent()})
-    test.equal(silent:now(), 0)
-    test.equal(silent:frequency(), 0)
+    assert.eq(silent:now(), 0)
+    assert.eq(silent:frequency(), 0)
     -- Taken and dropped like any other command.
-    test.equal(silent:play(nil, {at = 1}), 0)
+    assert.eq(silent:play(nil, {at = 1}), 0)
 
     -- What `newAudio` falls back to reports the configured frequency, so a
     -- count of frames over it is still a time.
-    test.equal(audiobackend.silent(44100).frequency, 44100)
+    assert.eq(audiobackend.silent(44100).frequency, 44100)
 end
 
 function suite.refusesATimeThatIsNotFinite(): nil
@@ -686,19 +685,19 @@ function suite.refusesATimeThatIsNotFinite(): nil
     local mixer = audio.newAudio({backend = recorder.backend})
     local clip = loaded(mixer)
     local handle = mixer:play(clip)
-    test.raises(
+    assert.raises(
         function(): nil
             mixer:play(clip, {at = 1 / 0})
         end,
         "finite"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             mixer:setGain(handle, 0.5, 0 / 0)
         end,
         "finite"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             mixer:stop(handle, 0, -1 / 0)
         end,
@@ -714,16 +713,16 @@ function suite.logsRefusalsAndCountsThem(): nil
     local mixer = audio.newAudio({backend = recorder.backend, maxVoices = 1})
     local clip = loaded(mixer)
     local first = mixer:play(clip, {group = "sfx"})
-    test.equal(mixer:play(clip), 0)
+    assert.eq(mixer:play(clip), 0)
     mixer:stop(first)
     local events = mixer:events()
-    test.equal(#events, 3)
-    test.equal(events[1].event, "start")
-    test.equal(events[1].group, "sfx")
-    test.equal(events[2].event, "refuse")
-    test.equal(events[2].reason, "voices")
-    test.equal(events[3].event, "stop")
-    test.equal(mixer:stats().refused, 1)
+    assert.eq(#events, 3)
+    assert.eq(events[1].event, "start")
+    assert.eq(events[1].group, "sfx")
+    assert.eq(events[2].event, "refuse")
+    assert.eq(events[2].reason, "voices")
+    assert.eq(events[3].event, "stop")
+    assert.eq(mixer:stats().refused, 1)
     mixer:destroy()
 end
 
@@ -734,14 +733,14 @@ function suite.ticksUpdateOnlyWhenTheGameDidNot(): nil
     mixer:play(clip)
     -- The tick flushes what the game queued, as update does.
     mixer:tick(0.016)
-    test.assert(#recorder.log >= 1)
+    assert(#recorder.log >= 1)
     local sent = #recorder.log
     mixer:play(clip)
     mixer:update(0.016)
-    test.equal(#recorder.log, sent + 1)
+    assert.eq(#recorder.log, sent + 1)
     -- Already updated this frame: the tick leaves it.
     mixer:tick(0.016)
-    test.equal(#recorder.log, sent + 1)
+    assert.eq(#recorder.log, sent + 1)
     mixer:destroy()
 end
 
@@ -750,22 +749,22 @@ function suite.stealsTheOldestOverATracksPolyphonyAndRefusesAnEqualOverTheBudget
     local mixer = audio.newAudio({backend = recorder.backend, maxVoices = 3})
     local clip = loaded(mixer)
     local track = mixer:track({polyphony = 2})
-    test.equal(track:polyphony(), 2)
+    assert.eq(track:polyphony(), 2)
     local first = track:play(clip)
     local second = track:play(clip)
     local third = track:play(clip)
-    test.assert(third ~= 0)
-    test.assert(not mixer:playing(first), "the oldest went")
-    test.assert(mixer:playing(second))
-    test.equal(track:sounding(), 2)
-    test.equal(mixer:stats().steals, 1)
+    assert(third ~= 0)
+    assert(not mixer:playing(first), "the oldest went")
+    assert(mixer:playing(second))
+    assert.eq(track:sounding(), 2)
+    assert.eq(mixer:stats().steals, 1)
     -- One more on the default Track fills the budget; another of equal
     -- priority is refused, and a higher one steals the lowest.
-    test.assert(mixer:play(clip) ~= 0)
-    test.equal(mixer:play(clip), 0)
+    assert(mixer:play(clip) ~= 0)
+    assert.eq(mixer:play(clip), 0)
     local urgent = mixer:play(clip, {priority = 5})
-    test.assert(urgent ~= 0)
-    test.equal(mixer:stats().steals, 2)
+    assert(urgent ~= 0)
+    assert.eq(mixer:stats().steals, 2)
     local logged = mixer:events()
     local steals = 0
     for _, entry in ipairs(logged) do
@@ -773,7 +772,7 @@ function suite.stealsTheOldestOverATracksPolyphonyAndRefusesAnEqualOverTheBudget
             steals = steals + 1
         end
     end
-    test.equal(steals, 2)
+    assert.eq(steals, 2)
     mixer:destroy()
 end
 
@@ -787,33 +786,33 @@ function suite.routesATrackAndItsEffectsThroughTheCommands(): nil
     filter:set("frequency", 400, 2)
     mixer:flush()
     local insert = assert(lastOf(recorder, audiobackend.EFFECT_INSERT))
-    test.equal(insert.target, track.id)
-    test.equal(insert.data, filter.id)
+    assert.eq(insert.target, track.id)
+    assert.eq(insert.data, filter.id)
     local param = assert(lastOf(recorder, audiobackend.EFFECT_PARAM))
-    test.equal(param.gain, 400)
-    test.equal(param.at, 2)
-    test.equal(filter:get("frequency"), 400)
-    test.equal(assert(lastOf(recorder, audiobackend.SEND)).gain, 0.25)
-    test.raises(
+    assert.eq(param.gain, 400)
+    assert.eq(param.at, 2)
+    assert.eq(filter:get("frequency"), 400)
+    assert.eq(assert(lastOf(recorder, audiobackend.SEND)).gain, 0.25)
+    assert.raises(
         function(): nil
             filter:set("resonance", 1)
         end,
         "no parameter"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             effects.filter({shape = "comb"})
         end,
         "no shape"
     )
     filter:remove()
-    test.equal(#track:effects(), 0)
+    assert.eq(#track:effects(), 0)
     track:destroy()
     mixer:flush()
-    test.equal(assert(lastOf(recorder, audiobackend.TRACK_DESTROY)).target, track.id)
-    test.equal(track:play(loaded(mixer)), 0, "a destroyed Track refuses")
+    assert.eq(assert(lastOf(recorder, audiobackend.TRACK_DESTROY)).target, track.id)
+    assert.eq(track:play(loaded(mixer)), 0, "a destroyed Track refuses")
     local master = mixer:masterBus()
-    test.raises(
+    assert.raises(
         function(): nil
             master:destroy()
         end,
@@ -837,31 +836,31 @@ function suite.placesAnEmitterTrackAgainstTheListenerAndSendsItToItsZone(): nil
     -- The row's position is the transform less the listener's, over the
     -- scale, with world y flipped into the listener's frame.
     local row = assert(world:get(emitter, audio.TrackComponent))
-    test.equal(row.x, 3)
-    test.equal(row.y, 4)
-    test.assert(row.voice > 0)
+    assert.eq(row.x, 3)
+    assert.eq(row.y, 4)
+    assert(row.voice > 0)
     -- The voice sounds on an emitter Track of its own, placed there.
     local play = assert(lastOf(recorder, audiobackend.PLAY))
-    test.assert(play.target ~= 0, "an emitter Track, not the default")
-    test.equal(play.flags & audiobackend.SPATIAL, 0, "the Track is placed, not the voice")
+    assert(play.target ~= 0, "an emitter Track, not the default")
+    assert.eq(play.flags & audiobackend.SPATIAL, 0, "the Track is placed, not the voice")
     local placed = assert(lastOf(recorder, audiobackend.TRACK_SET))
-    test.equal(placed.param, audiobackend.TRACK_POSITION)
-    test.equal(placed.x, 3)
-    test.equal(placed.y, 4)
+    assert.eq(placed.param, audiobackend.TRACK_POSITION)
+    assert.eq(placed.x, 3)
+    assert.eq(placed.y, 4)
     -- At the zone's centre it sends at the zone's level.
     local send = assert(lastOf(recorder, audiobackend.SEND))
-    test.equal(send.target, play.target)
-    test.equal(send.param, mixer:bus("cave").id)
-    test.equal(send.gain, 0.5)
+    assert.eq(send.target, play.target)
+    assert.eq(send.param, mixer:bus("cave").id)
+    assert.eq(send.gain, 0.5)
 
     -- Moving the listener moves the Track, not the voice.
     clear(recorder)
     world:update(0)
-    test.equal(countOf(recorder, audiobackend.TRACK_SET), 0, "nothing moved, nothing sent")
+    assert.eq(countOf(recorder, audiobackend.TRACK_SET), 0, "nothing moved, nothing sent")
     -- Stopping the row destroys its Track with its voice.
     assert(world:getMut(emitter, audio.TrackComponent)).playing = false
     world:update(0)
-    test.equal(assert(lastOf(recorder, audiobackend.TRACK_DESTROY)).target, play.target)
+    assert.eq(assert(lastOf(recorder, audiobackend.TRACK_DESTROY)).target, play.target)
 end
 
 function suite.playsASoundAssetThroughItsHandle(): nil
@@ -901,18 +900,18 @@ function suite.playsASoundAssetThroughItsHandle(): nil
 
     local first = mixer:play(requested)
     local second = mixer:play(requested)
-    test.assert(first ~= 0 and second ~= 0)
-    test.equal(made[1], 1, "one Sound for both plays")
-    test.equal(#recorder.registered, 1)
+    assert(first ~= 0 and second ~= 0)
+    assert.eq(made[1], 1, "one Sound for both plays")
+    assert.eq(#recorder.registered, 1)
     -- The handle's Sound joins the mixer's, by name.
-    test.equal(assert(mixer:sound(name)).name, name)
-    test.equal(#mixer:sounds(), 1)
+    assert.eq(assert(mixer:sound(name)).name, name)
+    assert.eq(#mixer:sounds(), 1)
     mixer:destroy()
     loader:shutdown()
 end
 
 function suite.refusesAnOutputItDoesNotKnow(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             audio.newAudio({output = "speakers" as any})
         end,
@@ -934,10 +933,10 @@ function suite.spreadsPitchAroundTheRequestedRate(): nil
         local command = recorder.log[index]
         if command.kind == audiobackend.PLAY then
             seen[#seen + 1] = command.pitch
-            test.assert(command.pitch >= 0.9 and command.pitch <= 1.1)
+            assert(command.pitch >= 0.9 and command.pitch <= 1.1)
         end
     end
-    test.equal(#seen, 8)
+    assert.eq(#seen, 8)
     -- The variance actually varies rather than answering the same rate twice.
     local distinct = false
     for index = 2, #seen do
@@ -945,7 +944,7 @@ function suite.spreadsPitchAroundTheRequestedRate(): nil
             distinct = true
         end
     end
-    test.assert(distinct)
+    assert(distinct)
 end
 
 function suite.restoresAndReseedsWorldManagedPitchVariance(): nil
@@ -964,17 +963,17 @@ function suite.restoresAndReseedsWorldManagedPitchVariance(): nil
     clear(recorder)
     mixer:play(clip, {pitchVariance = 0.1})
     mixer:flush()
-    test.equal(assert(lastOf(recorder, audiobackend.PLAY)).pitch, expected)
+    assert.eq(assert(lastOf(recorder, audiobackend.PLAY)).pitch, expected)
     world:seedRandom(42)
     clear(recorder)
     mixer:play(clip, {pitchVariance = 0.1})
     mixer:flush()
-    test.equal(assert(lastOf(recorder, audiobackend.PLAY)).pitch, expected)
+    assert.eq(assert(lastOf(recorder, audiobackend.PLAY)).pitch, expected)
     const after = unrelated:state()
     for index = 1, 4 do
-        test.equal(after[index], before[index])
+        assert.eq(after[index], before[index])
     end
-    test.assert(world:randomStream("tecs.audio") ~= unrelated)
+    assert(world:randomStream("tecs.audio") ~= unrelated)
 end
 
 function suite.holdsOnePlacementPerVoice(): nil
@@ -986,29 +985,29 @@ function suite.holdsOnePlacementPerVoice(): nil
     mixer:setPosition(handle, 1, 2, 3)
     mixer:flush()
     local placed = assert(lastOf(recorder, audiobackend.SET_POSITION))
-    test.equal(placed.x, 1)
-    test.equal(placed.y, 2)
-    test.equal(placed.z, 3)
-    test.assert(assert(mixer:voiceList()[1]).spatial)
+    assert.eq(placed.x, 1)
+    assert.eq(placed.y, 2)
+    assert.eq(placed.z, 3)
+    assert(assert(mixer:voiceList()[1]).spatial)
 
     clear(recorder)
     mixer:setStereo(handle, 0.8, 0.2)
     mixer:flush()
     local panned = assert(lastOf(recorder, audiobackend.SET_STEREO))
-    test.equal(panned.x, 0.8)
-    test.equal(panned.y, 0.2)
+    assert.eq(panned.x, 0.8)
+    assert.eq(panned.y, 0.2)
     local info = assert(mixer:voiceList()[1])
-    test.assert(info.stereo)
-    test.assert(not info.spatial)
+    assert(info.stereo)
+    assert(not info.spatial)
 
     clear(recorder)
     mixer:clearSpatial(handle)
     mixer:flush()
-    test.equal(countOf(recorder, audiobackend.CLEAR_PLACEMENT), 1)
+    assert.eq(countOf(recorder, audiobackend.CLEAR_PLACEMENT), 1)
     -- Nothing to clear the second time.
     mixer:clearSpatial(handle)
     mixer:flush()
-    test.equal(countOf(recorder, audiobackend.CLEAR_PLACEMENT), 1)
+    assert.eq(countOf(recorder, audiobackend.CLEAR_PLACEMENT), 1)
 end
 
 function suite.readsAndMovesAVoicePositionThroughTheBackend(): nil
@@ -1017,10 +1016,10 @@ function suite.readsAndMovesAVoicePositionThroughTheBackend(): nil
     local clip = loaded(mixer)
     local handle = mixer:play(clip)
 
-    test.equal(mixer:tell(handle), 0.25)
-    test.assert(mixer:seek(handle, 1))
-    test.equal(mixer:tell(0), nil)
-    test.assert(not mixer:seek(0, 1))
+    assert.eq(mixer:tell(handle), 0.25)
+    assert(mixer:seek(handle, 1))
+    assert.eq(mixer:tell(0), nil)
+    assert(not mixer:seek(0, 1))
 end
 
 function suite.pausesAndResumesOneVoiceWithoutHolderCounting(): nil
@@ -1033,16 +1032,16 @@ function suite.pausesAndResumesOneVoiceWithoutHolderCounting(): nil
     mixer:pause(handle)
     mixer:pause(handle)
     mixer:flush()
-    test.equal(countOf(recorder, audiobackend.PAUSE), 1)
-    test.assert(mixer:paused(handle))
+    assert.eq(countOf(recorder, audiobackend.PAUSE), 1)
+    assert(mixer:paused(handle))
     -- A paused voice has not finished.
-    test.equal(mixer:sounding(), 1)
+    assert.eq(mixer:sounding(), 1)
 
     mixer:resume(handle)
     mixer:resume(handle)
     mixer:flush()
-    test.equal(countOf(recorder, audiobackend.RESUME), 1)
-    test.assert(not mixer:paused(handle))
+    assert.eq(countOf(recorder, audiobackend.RESUME), 1)
+    assert(not mixer:paused(handle))
 end
 
 function suite.composesGroupGainAndMuteOverEachVoiceGain(): nil
@@ -1057,26 +1056,26 @@ function suite.composesGroupGainAndMuteOverEachVoiceGain(): nil
     mixer:flush()
     -- One command for the Bus's fader, none for its voices.
     local gain = assert(lastOf(recorder, audiobackend.BUS_SET))
-    test.equal(gain.target, sfx.id)
-    test.equal(gain.param, audiobackend.BUS_GAIN)
-    test.equal(gain.gain, 0.5)
-    test.equal(countOf(recorder, audiobackend.SET_GAIN), 0)
-    test.equal(mixer:groupGain("sfx"), 0.5)
+    assert.eq(gain.target, sfx.id)
+    assert.eq(gain.param, audiobackend.BUS_GAIN)
+    assert.eq(gain.gain, 0.5)
+    assert.eq(countOf(recorder, audiobackend.SET_GAIN), 0)
+    assert.eq(mixer:groupGain("sfx"), 0.5)
 
     clear(recorder)
     mixer:setGroupMuted("sfx", true)
     mixer:flush()
     local mute = assert(lastOf(recorder, audiobackend.BUS_SET))
-    test.equal(mute.param, audiobackend.BUS_MUTE)
-    test.equal(mute.gain, 1)
-    test.assert(mixer:groupMuted("sfx"))
+    assert.eq(mute.param, audiobackend.BUS_MUTE)
+    assert.eq(mute.gain, 1)
+    assert(mixer:groupMuted("sfx"))
 
     clear(recorder)
     mixer:setGroupMuted("sfx", false)
     mixer:flush()
-    test.equal(assert(lastOf(recorder, audiobackend.BUS_SET)).gain, 0)
-    test.equal(assert(mixer:voiceList()[1]).applied, 0.5, "the voice keeps its own gain")
-    test.assert(mixer:playing(handle))
+    assert.eq(assert(lastOf(recorder, audiobackend.BUS_SET)).gain, 0)
+    assert.eq(assert(mixer:voiceList()[1]).applied, 0.5, "the voice keeps its own gain")
+    assert(mixer:playing(handle))
 end
 
 function suite.appliesAGroupSettingToAVoiceThatJoinsLater(): nil
@@ -1094,21 +1093,21 @@ function suite.appliesAGroupSettingToAVoiceThatJoinsLater(): nil
     -- The group is a Bus: the voice keeps its own gain and sounds on the
     -- Bus's default Track, whose fader and pause the backend applies.
     local play = assert(lastOf(recorder, audiobackend.PLAY))
-    test.equal(play.gain, 1)
-    test.equal(play.target, music:track().id)
-    test.equal(countOf(recorder, audiobackend.PAUSE), 0)
-    test.assert(mixer:paused(handle), "a voice under a paused Bus is held")
-    test.assert(mixer:groupPaused("music"))
-    test.equal(music:gain(), 0.25)
+    assert.eq(play.gain, 1)
+    assert.eq(play.target, music:track().id)
+    assert.eq(countOf(recorder, audiobackend.PAUSE), 0)
+    assert(mixer:paused(handle), "a voice under a paused Bus is held")
+    assert(mixer:groupPaused("music"))
+    assert.eq(music:gain(), 0.25)
 
     clear(recorder)
     mixer:resumeGroup("music")
     mixer:flush()
     local resume = assert(lastOf(recorder, audiobackend.BUS_SET))
-    test.equal(resume.param, audiobackend.BUS_PAUSE)
-    test.equal(resume.gain, 0)
-    test.assert(not mixer:paused(handle))
-    test.assert(not mixer:groupPaused("music"))
+    assert.eq(resume.param, audiobackend.BUS_PAUSE)
+    assert.eq(resume.gain, 0)
+    assert(not mixer:paused(handle))
+    assert(not mixer:groupPaused("music"))
 end
 
 function suite.stopsAGroupWithoutDiscardingItsSettings(): nil
@@ -1123,9 +1122,9 @@ function suite.stopsAGroupWithoutDiscardingItsSettings(): nil
     clear(recorder)
     mixer:stopGroup("sfx")
     mixer:flush()
-    test.equal(countOf(recorder, audiobackend.STOP), 2)
-    test.equal(mixer:sounding(), 1)
-    test.equal(mixer:groupGain("sfx"), 0.5)
+    assert.eq(countOf(recorder, audiobackend.STOP), 2)
+    assert.eq(mixer:sounding(), 1)
+    assert.eq(mixer:groupGain("sfx"), 0.5)
 end
 
 function suite.listsGroupsThatHaveSettingsOrVoices(): nil
@@ -1136,9 +1135,9 @@ function suite.listsGroupsThatHaveSettingsOrVoices(): nil
     mixer:play(clip, {group = "sfx"})
 
     local names = mixer:groups()
-    test.equal(#names, 2)
-    test.equal(names[1], "ambient")
-    test.equal(names[2], "sfx")
+    assert.eq(#names, 2)
+    assert.eq(names[1], "ambient")
+    assert.eq(names[2], "sfx")
 end
 
 function suite.dropsANewVoiceAtAKeyCeiling(): nil
@@ -1149,17 +1148,17 @@ function suite.dropsANewVoiceAtAKeyCeiling(): nil
 
     local first = mixer:play(clip, {key = "footstep"})
     local second = mixer:play(clip, {key = "footstep"})
-    test.assert(first > 0)
-    test.assert(second > 0)
-    test.equal(mixer:play(clip, {key = "footstep"}), 0)
-    test.equal(mixer:keyCount("footstep"), 2)
+    assert(first > 0)
+    assert(second > 0)
+    assert.eq(mixer:play(clip, {key = "footstep"}), 0)
+    assert.eq(mixer:keyCount("footstep"), 2)
     -- The ceiling never steals: both older voices are untouched.
-    test.assert(mixer:playing(first))
-    test.assert(mixer:playing(second))
+    assert(mixer:playing(first))
+    assert(mixer:playing(second))
 
     mixer:stop(first)
-    test.equal(mixer:keyCount("footstep"), 1)
-    test.assert(mixer:play(clip, {key = "footstep"}) > 0)
+    assert.eq(mixer:keyCount("footstep"), 1)
+    assert(mixer:play(clip, {key = "footstep"}) > 0)
 end
 
 function suite.holdsAKeyBackUntilItsCooldownPasses(): nil
@@ -1168,21 +1167,21 @@ function suite.holdsAKeyBackUntilItsCooldownPasses(): nil
     local clip = loaded(mixer)
     mixer:setLimit("footstep", {cooldown = 0.05})
 
-    test.assert(mixer:play(clip, {key = "footstep"}) > 0)
-    test.equal(mixer:play(clip, {key = "footstep"}), 0)
+    assert(mixer:play(clip, {key = "footstep"}) > 0)
+    assert.eq(mixer:play(clip, {key = "footstep"}), 0)
 
     -- The cooldown advances against the time passed to `update`, so a mixer
     -- nothing steps never advances one.
     mixer:update(0.02)
-    test.equal(mixer:play(clip, {key = "footstep"}), 0)
+    assert.eq(mixer:play(clip, {key = "footstep"}), 0)
     mixer:update(0.05)
-    test.assert(mixer:play(clip, {key = "footstep"}) > 0)
+    assert(mixer:play(clip, {key = "footstep"}) > 0)
 
-    test.equal(#mixer:keys(), 1)
-    test.equal(mixer:keys()[1], "footstep")
-    test.equal(assert(mixer:limit("footstep")).cooldown, 0.05)
+    assert.eq(#mixer:keys(), 1)
+    assert.eq(mixer:keys()[1], "footstep")
+    assert.eq(assert(mixer:limit("footstep")).cooldown, 0.05)
     mixer:setLimit("footstep", nil)
-    test.equal(mixer:limit("footstep"), nil)
+    assert.eq(mixer:limit("footstep"), nil)
 end
 
 function suite.scalesAndMutesTheWholeOutput(): nil
@@ -1191,26 +1190,26 @@ function suite.scalesAndMutesTheWholeOutput(): nil
 
     mixer:setMasterGain(0.5)
     mixer:flush()
-    test.equal(assert(lastOf(recorder, audiobackend.SET_MASTER_GAIN)).gain, 0.5)
-    test.equal(mixer:masterGain(), 0.5)
+    assert.eq(assert(lastOf(recorder, audiobackend.SET_MASTER_GAIN)).gain, 0.5)
+    assert.eq(mixer:masterGain(), 0.5)
 
     clear(recorder)
     mixer:setMuted(true)
     mixer:setMuted(true)
     mixer:flush()
-    test.equal(countOf(recorder, audiobackend.SET_MASTER_GAIN), 1)
-    test.equal(assert(lastOf(recorder, audiobackend.SET_MASTER_GAIN)).gain, 0)
-    test.assert(mixer:muted())
+    assert.eq(countOf(recorder, audiobackend.SET_MASTER_GAIN), 1)
+    assert.eq(assert(lastOf(recorder, audiobackend.SET_MASTER_GAIN)).gain, 0)
+    assert(mixer:muted())
 
     -- Setting the level while muted changes what an unmute returns to and
     -- nothing audible now.
     clear(recorder)
     mixer:setMasterGain(0.25)
     mixer:flush()
-    test.equal(countOf(recorder, audiobackend.SET_MASTER_GAIN), 0)
+    assert.eq(countOf(recorder, audiobackend.SET_MASTER_GAIN), 0)
     mixer:setMuted(false)
     mixer:flush()
-    test.equal(assert(lastOf(recorder, audiobackend.SET_MASTER_GAIN)).gain, 0.25)
+    assert.eq(assert(lastOf(recorder, audiobackend.SET_MASTER_GAIN)).gain, 0.25)
 end
 
 function suite.releasesVoicesAndTheOutputOnDestroy(): nil
@@ -1219,13 +1218,13 @@ function suite.releasesVoicesAndTheOutputOnDestroy(): nil
     local clip = loaded(mixer)
     mixer:play(clip)
 
-    test.equal(#mixer:decoders(), 1)
-    test.equal(#mixer:sounds(), 1)
+    assert.eq(#mixer:decoders(), 1)
+    assert.eq(#mixer:sounds(), 1)
     mixer:destroy()
-    test.equal(#mixer:sounds(), 0)
-    test.equal(mixer:sounding(), 0)
-    test.assert(not mixer.available)
-    test.assert(recorder.closed[1])
+    assert.eq(#mixer:sounds(), 0)
+    assert.eq(mixer:sounding(), 0)
+    assert(not mixer.available)
+    assert(recorder.closed[1])
 end
 
 function suite.startsFollowsAndStopsAVoiceFromTheSoundComponent(): nil
@@ -1239,27 +1238,27 @@ function suite.startsFollowsAndStopsAVoiceFromTheSoundComponent(): nil
     world:update(0)
 
     local sound = assert(world:get(entity, audio.SoundComponent))
-    test.assert(sound.voice > 0)
-    test.assert(mixer:playing(sound.voice))
-    test.assert(assert(mixer:voiceList()[1]).owned)
+    assert(sound.voice > 0)
+    assert(mixer:playing(sound.voice))
+    assert(assert(mixer:voiceList()[1]).owned)
 
     -- The pass follows gain without restarting the voice.
     clear(recorder)
     assert(world:getMut(entity, audio.SoundComponent)).gain = 0.5
     world:update(0)
-    test.equal(assert(lastOf(recorder, audiobackend.SET_GAIN)).gain, 0.5)
-    test.equal(countOf(recorder, audiobackend.PLAY), 0)
+    assert.eq(assert(lastOf(recorder, audiobackend.SET_GAIN)).gain, 0.5)
+    assert.eq(countOf(recorder, audiobackend.PLAY), 0)
 
     -- Clearing `playing` stops the voice and returns the row to zero rather
     -- than to finished, so setting it again starts a second one.
     assert(world:getMut(entity, audio.SoundComponent)).playing = false
     world:update(0)
-    test.equal(assert(world:get(entity, audio.SoundComponent)).voice, 0)
-    test.equal(mixer:sounding(), 0)
+    assert.eq(assert(world:get(entity, audio.SoundComponent)).voice, 0)
+    assert.eq(mixer:sounding(), 0)
 
     assert(world:getMut(entity, audio.SoundComponent)).playing = true
     world:update(0)
-    test.assert(assert(world:get(entity, audio.SoundComponent)).voice > 0)
+    assert(assert(world:get(entity, audio.SoundComponent)).voice > 0)
 end
 
 function suite.marksARowFinishedOnceItsVoiceEnds(): nil
@@ -1276,10 +1275,10 @@ function suite.marksARowFinishedOnceItsVoiceEnds(): nil
     recorder.finished[1] = handle
     mixer:update(0)
     world:update(0)
-    test.equal(assert(world:get(entity, audio.SoundComponent)).voice, -1)
+    assert.eq(assert(world:get(entity, audio.SoundComponent)).voice, -1)
     -- A finished one-shot stays spent until the game asks again.
     world:update(0)
-    test.equal(assert(world:get(entity, audio.SoundComponent)).voice, -1)
+    assert.eq(assert(world:get(entity, audio.SoundComponent)).voice, -1)
 end
 
 function suite.takesBackTheVoiceOfADespawnedEntity(): nil
@@ -1291,12 +1290,12 @@ function suite.takesBackTheVoiceOfADespawnedEntity(): nil
     local entity = world:spawn(audio.SoundComponent(idOf(clip)))
     world:commit()
     world:update(0)
-    test.equal(mixer:sounding(), 1)
+    assert.eq(mixer:sounding(), 1)
 
     world:despawn(entity)
     world:commit()
     world:update(0)
-    test.equal(mixer:sounding(), 0)
+    assert.eq(mixer:sounding(), 0)
 end
 
 function suite.silencesADisabledEntityAndStartsItAgainOnEnabling(): nil
@@ -1308,20 +1307,20 @@ function suite.silencesADisabledEntityAndStartsItAgainOnEnabling(): nil
     local entity = world:spawn(audio.SoundComponent(idOf(clip)))
     world:commit()
     world:update(0)
-    test.equal(mixer:sounding(), 1)
+    assert.eq(mixer:sounding(), 1)
 
     world:set(entity, ecs.Disabled)
     world:commit()
     world:update(0)
-    test.equal(mixer:sounding(), 0)
+    assert.eq(mixer:sounding(), 0)
     -- The handle is cleared rather than left naming a voice that has gone, so
     -- the sound returns with the entity instead of reading as spent.
-    test.equal(assert(world:get(entity, audio.SoundComponent)).voice, 0)
+    assert.eq(assert(world:get(entity, audio.SoundComponent)).voice, 0)
 
     world:remove(entity, ecs.Disabled)
     world:commit()
     world:update(0)
-    test.equal(mixer:sounding(), 1)
+    assert.eq(mixer:sounding(), 1)
 end
 
 function suite.carriesTheClipPathAndGroupNameThroughASnapshot(): nil
@@ -1346,23 +1345,23 @@ function suite.carriesTheClipPathAndGroupNameThroughASnapshot(): nil
     world:clearEntities()
 
     world:loadSnapshot(snapshot)
-    test.equal(mixer:masterGain(), 0.5)
-    test.equal(mixer:groupGain("sfx"), 0.25)
-    test.assert(mixer:groupMuted("sfx"))
-    test.assert(mixer:groupPaused("sfx"))
+    assert.eq(mixer:masterGain(), 0.5)
+    assert.eq(mixer:groupGain("sfx"), 0.25)
+    assert(mixer:groupMuted("sfx"))
+    assert(mixer:groupPaused("sfx"))
 
     local restored = assert(world:get(entity, audio.SoundComponent))
-    test.equal(restored.clip, idOf(clip))
-    test.equal(restored.group, group)
-    test.equal(restored.gain, 0.5)
-    test.assert(restored.loop)
-    test.equal(restored.pitch, 2)
-    test.assert(restored.spatial)
-    test.equal(restored.x, 1)
-    test.equal(restored.z, 3)
+    assert.eq(restored.clip, idOf(clip))
+    assert.eq(restored.group, group)
+    assert.eq(restored.gain, 0.5)
+    assert(restored.loop)
+    assert.eq(restored.pitch, 2)
+    assert(restored.spatial)
+    assert.eq(restored.x, 1)
+    assert.eq(restored.z, 3)
     -- A snapshot records that an entity has a sound, not how far through it the
     -- backend had got.
-    test.equal(restored.voice, 0)
+    assert.eq(restored.voice, 0)
 end
 
 function suite.returnsAnOmittedGroupToItsDefaultsOnLoad(): nil
@@ -1375,14 +1374,14 @@ function suite.returnsAnOmittedGroupToItsDefaultsOnLoad(): nil
     mixer:setGroupMuted("later", true)
     world:loadSnapshot(snapshot)
 
-    test.equal(mixer:groupGain("later"), 1)
-    test.assert(not mixer:groupMuted("later"))
+    assert.eq(mixer:groupGain("later"), 1)
+    assert(not mixer:groupMuted("later"))
 end
 
 function suite.refusesASecondMixerInOneWorld(): nil
     local world = ecs.newWorld()
     audio.install(world, {backend = newRecorder().backend})
-    test.raises(
+    assert.raises(
         function(): nil
             audio.install(world, {backend = newRecorder().backend})
         end,
@@ -1392,11 +1391,11 @@ end
 
 function suite.answersTheMixerInstalledIntoAWorld(): nil
     local world = ecs.newWorld()
-    test.equal(audio.of(world), nil)
+    assert.eq(audio.of(world), nil)
     local mixer = audio.install(world, {backend = newRecorder().backend})
-    test.equal(audio.of(world), mixer)
+    assert.eq(audio.of(world), mixer)
     mixer:destroy()
-    test.equal(audio.of(world), nil)
+    assert.eq(audio.of(world), nil)
 end
 
 function suite.aReopenedOutputKeepsTheMixerAvailableAndItsVoices(): nil
@@ -1427,11 +1426,11 @@ function suite.aReopenedOutputKeepsTheMixerAvailableAndItsVoices(): nil
     local mixer = audio.newAudio({backend = recorder.backend})
     local clip = loaded(mixer)
     local handle = mixer:play(clip)
-    test.assert(handle > 0)
+    assert(handle > 0)
 
     -- An unchanged count costs no status record.
-    test.equal(mixer:update(), 1)
-    test.equal(asked[1], 0)
+    assert.eq(mixer:update(), 1)
+    assert.eq(asked[1], 0)
 
     -- The headset turns its microphone on: dropped, then reopened at its new
     -- format, both inside one frame.
@@ -1440,34 +1439,34 @@ function suite.aReopenedOutputKeepsTheMixerAvailableAndItsVoices(): nil
     status.reason = "the output's format changed from 48000 Hz, 2 channels to 24000 Hz, 1 channel"
     status.frequency = 24000
     status.channels = 1
-    test.equal(mixer:update(), 1)
-    test.equal(asked[1], 1)
-    test.assert(mixer.available)
-    test.equal(mixer.failureReason, nil)
-    test.assert(mixer:playing(handle))
-    test.assert(mixer:play(clip) > 0)
+    assert.eq(mixer:update(), 1)
+    assert.eq(asked[1], 1)
+    assert(mixer.available)
+    assert.eq(mixer.failureReason, nil)
+    assert(mixer:playing(handle))
+    assert(mixer:play(clip) > 0)
 
     local report = mixer:output()
-    test.equal(report.state, "playing")
-    test.equal(report.reopens, 1)
-    test.equal(report.frequency, 24000)
-    test.equal(report.channels, 1)
-    test.matches(assert(report.reason), "24000 Hz")
+    assert.eq(report.state, "playing")
+    assert.eq(report.reopens, 1)
+    assert.eq(report.frequency, 24000)
+    assert.eq(report.channels, 1)
+    assert.matches(assert(report.reason), "24000 Hz")
     mixer:destroy()
 end
 
 function suite.answersAnOutputReportForABackendWithNone(): nil
     local mixer = audio.newAudio({backend = newRecorder().backend})
     local report = mixer:output()
-    test.equal(report.state, "playing")
-    test.equal(report.frequency, 48000)
-    test.equal(report.channels, 2)
-    test.equal(report.drops, 0)
+    assert.eq(report.state, "playing")
+    assert.eq(report.frequency, 48000)
+    assert.eq(report.channels, 2)
+    assert.eq(report.drops, 0)
     mixer:destroy()
-    test.equal(mixer:output().state, "offline")
+    assert.eq(mixer:output().state, "offline")
 
     local silent = audio.newAudio({backend = audiobackend.silent()})
-    test.equal(silent:output().state, "offline")
+    assert.eq(silent:output().state, "offline")
     silent:destroy()
 end
 
@@ -1480,19 +1479,19 @@ function suite.outputLossClearsVoicesAndDoesNotReplay(): nil
     local mixer = audio.newAudio({backend = recorder.backend})
     local clip = loaded(mixer)
     local handle = mixer:play(clip)
-    test.assert(handle > 0)
+    assert(handle > 0)
     failure[1] = "output disconnected"
-    test.equal(mixer:update(), 0)
-    test.equal(mixer.available, false)
-    test.equal(mixer.failureReason, "output disconnected")
-    test.equal(mixer:play(clip), 0)
-    test.equal(recorder.log[#recorder.log].kind, audiobackend.STOP)
+    assert.eq(mixer:update(), 0)
+    assert.eq(mixer.available, false)
+    assert.eq(mixer.failureReason, "output disconnected")
+    assert.eq(mixer:play(clip), 0)
+    assert.eq(recorder.log[#recorder.log].kind, audiobackend.STOP)
     failure[1] = ""
-    test.equal(mixer:update(), 0)
-    test.equal(mixer.available, false)
+    assert.eq(mixer:update(), 0)
+    assert.eq(mixer.available, false)
     mixer:destroy()
     mixer:destroy()
-    test.equal(mixer:update(), 0)
+    assert.eq(mixer:update(), 0)
 end
 
 return suite

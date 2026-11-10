@@ -3,7 +3,6 @@ local files = require("nupp.io.files")
 local fonts = require("tecs.gfx.fonts")
 local gfx = require("tecs.gfx")
 local images = require("tecs.gfx.images")
-local test = require("nupp.test")
 local text = require("tecs.gfx.text")
 
 local suite = {}
@@ -20,9 +19,9 @@ local shared: fonts.Font? = nil
 local function font(): fonts.Font
     if shared == nil then
         const bytes, reason = files.read(SOURCE)
-        test.assert(bytes, reason)
+        assert(bytes, reason)
         const loaded, failure = fonts.newTTF({bytes = bytes as string, name = "texttest/mono", size = 24})
-        test.assert(loaded, failure)
+        assert(loaded, failure)
         shared = loaded
     end
 
@@ -57,7 +56,7 @@ local function quads(borrows world: ecs.World, entity: integer): {number}
 end
 
 local function close(actual: number, expected: number, message: string): nil
-    test.assert(
+    assert(
         math.abs(actual - expected) < 0.001,
         message .. ": " .. tostring(actual) .. " vs " .. tostring(expected)
     )
@@ -77,12 +76,12 @@ end
 function suite.measuresNothingWithoutAFontAndNothingForAnEmptyString(): nil
     const fontless = text.newText("hello", nil, 20)
     const width, height = text.measureText(fontless)
-    test.equal(width, 0.0)
-    test.equal(height, 0.0)
+    assert.eq(width, 0.0)
+    assert.eq(height, 0.0)
 
     const empty = text.newText("", font(), 20)
     const emptyWidth, emptyHeight = text.measureText(empty)
-    test.equal(emptyWidth, 0.0)
+    assert.eq(emptyWidth, 0.0)
     -- An empty string is still one line box, which is what keeps an empty
     -- label the same height as a filled one.
     close(emptyHeight, font().lineHeight * 20, "an empty string is one line tall")
@@ -131,7 +130,7 @@ function suite.overridesTheAuthoredWrapWidthForOneMeasurementOnly(): nil
     const item = text.newText("alpha beta", font(), size, "left", 0)
     const wrapped = text.measureText(item, step * 6)
     close(wrapped, step * 5, "the override wrapped the measurement")
-    test.equal(item.wrapWidth, 0.0)
+    assert.eq(item.wrapWidth, 0.0)
     const unwrapped = text.measureText(item)
     close(unwrapped, step * 10, "the authored value is untouched")
 end
@@ -159,15 +158,15 @@ function suite.placesOneGlyphEntityPerDrawnCharacter(): nil
 
     -- Three drawn glyphs: the space carries an advance and no ink.
     const held = text.glyphsOf(world, entity)
-    test.equal(#held, 3)
+    assert.eq(#held, 3)
     for index = 1, #held do
-        test.assert(world:has(held[index], gfx.TextGlyph), "a placed glyph carries the tag")
-        test.assert(world:has(held[index], gfx.Renderable2D), "a placed glyph is renderable")
+        assert(world:has(held[index], gfx.TextGlyph), "a placed glyph carries the tag")
+        assert(world:has(held[index], gfx.Renderable2D), "a placed glyph is renderable")
         const tint = world:get(held[index], gfx.Tint)
-        test.equal((tint as gfx.Tint).r, 1.0)
-        test.equal((tint as gfx.Tint).g, 0.5)
+        assert.eq((tint as gfx.Tint).r, 1.0)
+        assert.eq((tint as gfx.Tint).g, 0.5)
         const sprite = world:get(held[index], gfx.Sprite)
-        test.equal((sprite as gfx.Sprite).image, fonts.imageOf(font()))
+        assert.eq((sprite as gfx.Sprite).image, fonts.imageOf(font()))
     end
 
     const item = world:get(entity, gfx.Text) as text.Text
@@ -175,7 +174,7 @@ function suite.placesOneGlyphEntityPerDrawnCharacter(): nil
     -- The glyphs march to the right of the entity's position.
     const first = text.glyphAt(world, entity, 1)
     const third = text.glyphAt(world, entity, 3)
-    test.assert((first as number) > 100.0, "the block starts at the entity")
+    assert((first as number) > 100.0, "the block starts at the entity")
     close((third as number) - (first as number), unit(20) * 3, "the third glyph is three advances along")
 end
 
@@ -185,11 +184,11 @@ function suite.drawsNothingForAnEmptyStringOrAMissingFont(): nil
     const fontless = world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), gfx.Text("hello", nil, 20))
     world:update(0)
 
-    test.equal(#text.glyphsOf(world, empty), 0)
-    test.equal(#text.glyphsOf(world, fontless), 0)
-    test.equal(text.glyphAt(world, empty, 1), nil)
+    assert.eq(#text.glyphsOf(world, empty), 0)
+    assert.eq(#text.glyphsOf(world, fontless), 0)
+    assert.eq(text.glyphAt(world, empty, 1), nil)
     const item = world:get(fontless, gfx.Text) as text.Text
-    test.equal(item.width, 0.0)
+    assert.eq(item.width, 0.0)
 end
 
 function suite.drawsTheMissingGlyphBoxForAnUnmappedCodepoint(): nil
@@ -199,10 +198,10 @@ function suite.drawsTheMissingGlyphBoxForAnUnmappedCodepoint(): nil
     world:update(0)
 
     const held = text.glyphsOf(world, entity)
-    test.equal(#held, 1)
+    assert.eq(#held, 1)
     const _x, _y, width, height = text.glyphAt(world, entity, 1)
-    test.assert((width as number) > 0.0, "notdef draws a box")
-    test.assert((height as number) > 0.0, "notdef draws a box")
+    assert((width as number) > 0.0, "notdef draws a box")
+    assert((height as number) > 0.0, "notdef draws a box")
 end
 
 function suite.movesEachLineWithinTheBlockForCenterAndRightAlignment(): nil
@@ -264,8 +263,8 @@ function suite.carriesTheLayerAndHeightOntoEveryGlyph(): nil
     world:update(0)
     for _, glyph in ipairs(text.glyphsOf(world, entity)) do
         const transform = world:get(glyph as integer, ecs.Transform2D) as ecs.Transform2D
-        test.equal(transform.layer, 7)
-        test.equal(transform.z, 0.25)
+        assert.eq(transform.layer, 7)
+        assert.eq(transform.z, 0.25)
     end
 end
 
@@ -278,26 +277,26 @@ function suite.laysOutOnlyWhatChanged(): nil
     const first = world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), gfx.Text("one", font(), 20))
     const second = world:spawn(ecs.Transform2D(0, 40), gfx.Tint(1, 1, 1, 1), gfx.Text("two", font(), 20))
     world:update(0)
-    test.equal(text.layouts(world), 2)
+    assert.eq(text.layouts(world), 2)
 
     -- Nothing changed, so nothing is laid out again.
     world:update(0)
-    test.equal(text.layouts(world), 2)
+    assert.eq(text.layouts(world), 2)
 
     const item = world:getMut(first, gfx.Text) as text.Text
     item.text = "one more"
     world:update(0)
-    test.equal(text.layouts(world), 3)
-    test.equal(#text.glyphsOf(world, first), 7)
-    test.equal(#text.glyphsOf(world, second), 3)
+    assert.eq(text.layouts(world), 3)
+    assert.eq(#text.glyphsOf(world, first), 7)
+    assert.eq(#text.glyphsOf(world, second), 3)
 
     -- Moving the block rebuilds it, because a glyph carries an absolute place.
     const transform = world:getMut(second, ecs.Transform2D) as ecs.Transform2D
     transform.x = 25.0
     world:update(0)
-    test.equal(text.layouts(world), 4)
+    assert.eq(text.layouts(world), 4)
     const x = text.glyphAt(world, second, 1)
-    test.assert((x as number) > 25.0, "the moved block moved its glyphs")
+    assert((x as number) > 25.0, "the moved block moved its glyphs")
 end
 
 function suite.reusesGlyphEntitiesWhenTheLengthHolds(): nil
@@ -310,18 +309,18 @@ function suite.reusesGlyphEntitiesWhenTheLengthHolds(): nil
     item.text = "xyz"
     world:update(0)
     const after = text.glyphsOf(world, entity)
-    test.equal(#after, #before)
+    assert.eq(#after, #before)
     for index = 1, #before do
-        test.equal(after[index], before[index])
+        assert.eq(after[index], before[index])
     end
 
     -- A shorter string hands the surplus back.
     const again = world:getMut(entity, gfx.Text) as text.Text
     again.text = "x"
     world:update(0)
-    test.equal(#text.glyphsOf(world, entity), 1)
-    test.equal(world:isAlive(before[2]), false)
-    test.equal(world:isAlive(before[3]), false)
+    assert.eq(#text.glyphsOf(world, entity), 1)
+    assert.eq(world:isAlive(before[2]), false)
+    assert.eq(world:isAlive(before[3]), false)
 end
 
 function suite.despawnsTheGlyphsWhenTheTextGoesAway(): nil
@@ -329,14 +328,14 @@ function suite.despawnsTheGlyphsWhenTheTextGoesAway(): nil
     const entity = world:spawn(ecs.Transform2D(0, 0), gfx.Tint(1, 1, 1, 1), gfx.Text("abc", font(), 20))
     world:update(0)
     const held = text.glyphsOf(world, entity)
-    test.equal(#held, 3)
+    assert.eq(#held, 3)
 
     world:despawn(entity)
     world:update(0)
     for index = 1, #held do
-        test.equal(world:isAlive(held[index]), false)
+        assert.eq(world:isAlive(held[index]), false)
     end
-    test.equal(#text.glyphsOf(world, entity), 0)
+    assert.eq(#text.glyphsOf(world, entity), 0)
 end
 
 function suite.sweepsGlyphsWhoseTextLostItsComponent(): nil
@@ -350,7 +349,7 @@ function suite.sweepsGlyphsWhoseTextLostItsComponent(): nil
     world:commit()
     world:update(0)
     for index = 1, #held do
-        test.equal(world:isAlive(held[index]), false)
+        assert.eq(world:isAlive(held[index]), false)
     end
 end
 
@@ -368,19 +367,19 @@ function suite.despawnsGlyphEntitiesNoLiveTextOwns(): nil
     )
     world:commit()
     world:update(0)
-    test.equal(world:isAlive(orphan), false)
+    assert.eq(world:isAlive(orphan), false)
 end
 
 function suite.placesEveryTextAgainWhenAnAtlasIsRepacked(): nil
     const bytes, reason = files.read(SOURCE)
-    test.assert(bytes, reason)
+    assert(bytes, reason)
     const small, failure = fonts.newTTF({
         bytes = bytes as string,
         name = "texttest/growth",
         raster = "alpha",
         size = 8,
     })
-    test.assert(small, failure)
+    assert(small, failure)
     const tiny = small as fonts.Font
 
     const world = newWorld()
@@ -398,12 +397,12 @@ function suite.placesEveryTextAgainWhenAnAtlasIsRepacked(): nil
         fonts.glyph(tiny, codepoint)
         codepoint = codepoint + 1
     end
-    test.assert(fonts.atlasSize(tiny) > startWidth, "the atlas outgrew its first page")
+    assert(fonts.atlasSize(tiny) > startWidth, "the atlas outgrew its first page")
 
     world:update(0)
-    test.assert(text.layouts(world) > laidOut, "the repack forced a layout")
+    assert(text.layouts(world) > laidOut, "the repack forced a layout")
     const after = (world:get(glyph, gfx.Sprite) as gfx.Sprite).u1
-    test.notEqual(after, before)
+    assert.ne(after, before)
 end
 
 function suite.buildsTheSameGlyphsForTheSameTextEveryRun(): nil
@@ -418,11 +417,11 @@ function suite.buildsTheSameGlyphsForTheSameTextEveryRun(): nil
         world:update(0)
         runs[#runs + 1] = quads(world, entity)
     end
-    test.assert(#runs[1] > 0, "the sample text drew something")
+    assert(#runs[1] > 0, "the sample text drew something")
     for run = 2, #runs do
-        test.equal(#runs[run], #runs[1])
+        assert.eq(#runs[run], #runs[1])
         for index = 1, #runs[1] do
-            test.equal(runs[run][index], runs[1][index])
+            assert.eq(runs[run][index], runs[1][index])
         end
     end
 end
@@ -443,14 +442,14 @@ function suite.snapshotsTheAuthoredFieldsAndResolvesTheFontByName(): nil
         for index = 1, count as integer do
             seen = seen + 1
             const item = column[index]
-            test.equal(item.text, "save me")
-            test.equal(item.size, 21.0)
-            test.equal(item.align, "right")
-            test.equal(item.wrapWidth, 90.0)
-            test.equal(item.font, font())
+            assert.eq(item.text, "save me")
+            assert.eq(item.size, 21.0)
+            assert.eq(item.align, "right")
+            assert.eq(item.wrapWidth, 90.0)
+            assert.eq(item.font, font())
         end
     end
-    test.equal(seen, 1)
+    assert.eq(seen, 1)
 end
 
 function suite.reportsWhetherTheAtlasHasReachedTheBackend(): nil
@@ -460,29 +459,29 @@ function suite.reportsWhetherTheAtlasHasReachedTheBackend(): nil
     const item = world:get(entity, gfx.Text) as text.Text
     const image = fonts.imageOf(font())
     if images.stateOf(image) ~= "resident" then
-        test.equal(text.isReady(item), false)
+        assert.eq(text.isReady(item), false)
         for _, command in ipairs(images.drain()) do
             images.complete((command as images.UploadImageCommand).image, command.serial, true, nil)
         end
     end
-    test.equal(text.isReady(item), true)
-    test.equal(text.isReady(text.newText("no font", nil, 20)), false)
+    assert.eq(text.isReady(item), true)
+    assert.eq(text.isReady(text.newText("no font", nil, 20)), false)
 end
 
 function suite.rejectsAnAlignmentAndAWrapWidthTheLayoutCannotUse(): nil
-    test.raises(
+    assert.raises(
         function(): nil
             text.newText("hi", font(), 20, "middle" as text.Align)
         end,
         "is not an alignment"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             text.newText("hi", font(), 20, "left", -1)
         end,
         "cannot be negative"
     )
-    test.raises(
+    assert.raises(
         function(): nil
             gfx.Text("hi", font(), 20, "middle" as text.Align)
         end,
@@ -491,9 +490,9 @@ function suite.rejectsAnAlignmentAndAWrapWidthTheLayoutCannotUse(): nil
 end
 
 function suite.roundsACoordinateForAScreenSpaceLabel(): nil
-    test.equal(text.snap(10.4), 10.0)
-    test.equal(text.snap(10.5), 11.0)
-    test.equal(text.snap(-3.2), -3.0)
+    assert.eq(text.snap(10.4), 10.0)
+    assert.eq(text.snap(10.5), 11.0)
+    assert.eq(text.snap(-3.2), -3.0)
 end
 
 --- Captures both placement and atlas/tint data for a label.
@@ -538,16 +537,16 @@ function suite.initializesTheWholeGlyphBatchBeforeSpawnObservers(): nil
         end
         observed = observed + 1
         const held = text.glyphsOf(world, owner)
-        test.equal(#held, 12)
+        assert.eq(#held, 12)
         for _, id in ipairs(held) do
-            test.assert(world:isAlive(id))
-            test.assert(assert(world:get(id, ecs.Transform2D)).scaleX > 0)
-            test.equal(assert(world:get(id, gfx.Sprite)).image, fonts.imageOf(font()))
+            assert(world:isAlive(id))
+            assert(assert(world:get(id, ecs.Transform2D)).scaleX > 0)
+            assert.eq(assert(world:get(id, gfx.Sprite)).image, fonts.imageOf(font()))
         end
     end)
     owner = world:spawn(gfx.Text("abcdefghijkl", font(), 20), ecs.Transform2D(50, 80))
     world:update(0)
-    test.equal(observed, 12)
+    assert.eq(observed, 12)
     world:shutdown()
 end
 
@@ -582,9 +581,9 @@ function suite.keepsDeferredPlacementsSeparateForMultipleLabels(): nil
     world:update(0)
     for index, id in ipairs(owners) do
         const actual = glyphData(world, id)
-        test.equal(#actual, #expected[index])
+        assert.eq(#actual, #expected[index])
         for field, value in ipairs(expected[index]) do
-            test.equal(actual[field], value)
+            assert.eq(actual[field], value)
         end
     end
     world:shutdown()
@@ -609,23 +608,23 @@ function suite.growsAndRepairsGlyphsUsingFragmentedEntitySlots(): nil
     assert(world:getMut(owner, gfx.Text)).text = "abcde"
     world:update(0)
     const held = text.glyphsOf(world, owner)
-    test.equal(#held, 5)
-    test.equal(held[1], previous[1])
+    assert.eq(#held, 5)
+    assert.eq(held[1], previous[1])
     const reference = newWorld()
     const expected = reference:spawn(gfx.Text("abcde", font(), 20), ecs.Transform2D())
     reference:update(0)
     const actualData, expectedData = glyphData(world, owner), glyphData(reference, expected)
     for index, value in ipairs(expectedData) do
-        test.equal(actualData[index], value)
+        assert.eq(actualData[index], value)
     end
-    test.equal(world.liveCount, 12)
+    assert.eq(world.liveCount, 12)
     const layouts = text.layouts(world)
     world:update(0)
-    test.equal(text.layouts(world), layouts)
+    assert.eq(text.layouts(world), layouts)
     world:despawn(owner)
     world:update(0)
     for _, id in ipairs(held) do
-        test.equal(world:isAlive(id), false)
+        assert.eq(world:isAlive(id), false)
     end
     world:shutdown();
     reference:shutdown()
