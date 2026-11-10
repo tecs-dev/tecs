@@ -1,0 +1,5 @@
+# Every text file is LF in every checkout. `nupp fmt`, rustfmt, stylua and
+# prettier write LF and the format checks hold the tree to what they write, so a
+# checkout that translates line endings, which is Git for Windows by default,
+# reads every source as unformatted. Binary assets are detected and left alone.
+* text=auto eol=lf
