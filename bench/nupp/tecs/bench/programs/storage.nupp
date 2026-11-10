@@ -2,8 +2,7 @@
 -- Every loop uses the same two-double layout and arithmetic. Setup is untimed.
 const ecs2 = require("tecs.ecs")
 
-local ffi = require("ffi")
-local buffer = require("string.buffer")
+local bytes = require("bytes")
 local ffistorage = require("tecs.internal.ffistorage")
 local harness = require("tecs.bench.harness")
 
@@ -107,7 +106,7 @@ harness.measure(derived, warmup, samples, derivedLoop)
 
 -- Compare direct buffer copies with bounded native-column copies.
 -- Neither materializes a string or row table.
-const bytes = buffer.new(count * 16)
+local rows = bytes.Buffer.create(count * 16)
 const storage = assert(ffistorage.find(native.componentId))
 local column: any
 for candidate in nativeQuery:iter() do
@@ -115,16 +114,26 @@ for candidate in nativeQuery:iter() do
 end
 const raw = harness.newStage("direct raw save")
 const nativeRaw = harness.newStage("native raw save")
-harness.measure(raw, warmup, samples, function(): nil
-    bytes:reset()
-    @unsafe do
-        bytes:putcdata(ffi.cast<voidptr>(baseline), count * 16)
+-- Timed here rather than through `harness.measure`, whose repeatable callback
+-- cannot hold the reused buffer exclusively.
+for sample = 1, warmup + samples do
+    rows:reset()
+    const started = os.monotonic()
+    ffistorage.appendBytes(rows, baseline, count * 16)
+    const elapsed = os.monotonic() - started
+    if sample > warmup then
+        harness.mark(raw, elapsed)
     end
-end)
-harness.measure(nativeRaw, warmup, samples, function(): nil
-    bytes:reset()
-    ffistorage.writeRows(storage, column, 1, count, bytes)
-end)
+end
+for sample = 1, warmup + samples do
+    rows:reset()
+    const started = os.monotonic()
+    ffistorage.writeRows(storage, column, 1, count, rows)
+    const elapsed = os.monotonic() - started
+    if sample > warmup then
+        harness.mark(nativeRaw, elapsed)
+    end
+end
 
 local function repeatLoops(run: function(): nil): nil
     for _ = 1, 100 do

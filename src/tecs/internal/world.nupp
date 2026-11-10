@@ -30,7 +30,7 @@ local query = require("tecs.internal.query")
 local randomstreams = require("tecs.internal.randomstreams")
 local snapshotvalue = require("tecs.internal.snapshotvalue")
 local snapshotcodec = require("tecs.internal.snapshotcodec")
-local buffer = require("string.buffer")
+local bytes = require("bytes")
 
 --- A frame system body.
 ---
@@ -262,8 +262,9 @@ export record Snapshot
     --- Read-only. Identifies binary output when a native buffer was requested.
     format: ("binary" | "table")?
 
-    --- Read-only. Holds binary output; later saves into the same buffer overwrite it.
-    buffer: buffer.Buffer?
+    --- Read-only. Holds the encoded binary snapshot when `format` is `"binary"`. The
+    --- string is the caller's to keep, write to a file or pass to `loadSnapshot`.
+    bytes: string?
 
     --- Read-only. Preserves fixed-step remainder and disabled phase names in table
     --- output.
@@ -295,10 +296,7 @@ export type SnapshotOptions = {
     --- output.
     format: ("binary" | "table")?,
 
-    --- Caller-writable. Supplies reusable binary output storage, reset at save time.
-    buffer: buffer.Buffer?,
-
-    --- Caller-writable. Writes binary output to this file and also returns its buffer.
+    --- Caller-writable. Writes binary output to this file as well as returning it.
     path: string?
 }
 
@@ -834,24 +832,54 @@ export record World
     --- Saves committed entities and durable world metadata in table or native binary
     --- form.
     --- @param self The world to save; staged mutations publish first.
-    --- @param options The optional format, reusable output, file, filters and custom
-    ---     metadata.
-    --- @return Returns a detached table snapshot or a tagged binary buffer, according
-    ---     to format.
+    --- @param options The optional format, file, filters and custom metadata.
+    --- @return Returns a detached table snapshot, or with `format = "binary"` one whose
+    ---     `bytes` holds the encoded snapshot.
     --- @raises string during publication or another suspended dispatch, for invalid
     ---     options, duplicate or reserved metadata, unencodable values, or failed file
     ---     output.
     saveSnapshot: function(exclusive self: World, options: SnapshotOptions?): Snapshot
 
+    --- Saves a native binary snapshot into a buffer the caller owns and reuses.
+    ---
+    --- The buffer is reset first, so it holds exactly this snapshot afterwards, and no
+    --- per-save string is made unless `options.path` asks for a file.
+    --- @param self The world to save; staged mutations publish first.
+    --- @param output The [`bytes.Buffer`](bytes.Buffer) to replace with the encoded
+    ---     snapshot.
+    --- @param options The optional file, filters and custom metadata; `format` must be
+    ---     nil or `"binary"`.
+    --- @return Returns the saved snapshot prelude.
+    --- @raises string under the same conditions as `saveSnapshot`, or for a table
+    ---     format.
+    saveSnapshotInto: function(
+        exclusive self: World,
+        exclusive output: bytes.Buffer,
+        options: SnapshotOptions?
+    ): SnapshotPrelude
+
     --- Replaces entity state while retaining registered runtime setup.
     --- @param self The destination with component and state definitions already
     ---     registered.
-    --- @param snapshot The current or version-one table, tagged output, byte string or
-    ---     non-consuming buffer.
+    --- @param snapshot The current or version-one table, a binary snapshot, or its
+    ---     encoded byte string.
     --- @return Returns the validated snapshot prelude.
     --- @raises string during publication or another suspended dispatch, or for invalid
     ---     framing, identities, schemas, state or codecs.
     loadSnapshot: function(exclusive self: World, snapshot: any): SnapshotPrelude
+
+    --- Replaces entity state from a binary snapshot held in a buffer, as
+    --- `loadSnapshot` does from its bytes.
+    ---
+    --- The buffer is only read: it keeps its contents, so one saved checkpoint can be
+    --- loaded again. Its unread bytes are copied once to parse them.
+    --- @param self The destination with component and state definitions already
+    ---     registered.
+    --- @param input The [`bytes.Buffer`](bytes.Buffer) holding exactly one encoded
+    ---     snapshot.
+    --- @return Returns the validated snapshot prelude.
+    --- @raises string under the same conditions as `loadSnapshot`.
+    loadSnapshotFrom: function(exclusive self: World, borrows input: bytes.Buffer): SnapshotPrelude
 
     addSnapshotHandler: function(exclusive self: World, handler: SnapshotHandler): nil
     observe: function<E is Emittable>(
@@ -3963,14 +3991,20 @@ local function addSnapshotData(target: {SnapshotDataEntry}, seen: {[string]: boo
     target[#target + 1] = SnapshotDataEntry(key = key, value = snapshotvalue.clone(value))
 end
 
-function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): Snapshot
+-- Saves table output, or binary output into `output` when one is given. Raises at
+-- level 3, which is the public method's caller.
+local function saveSnapshotWith(
+    exclusive self: World,
+    options: SnapshotOptions?,
+    exclusive output: bytes.Buffer?
+): Snapshot
     if self.committing or (self.updating and (not self.runningSystem or self.systemThread ~= coroutine.running())) then
-        error("world.saveSnapshot: cannot save during publication or a suspended world update", 2)
+        error("world.saveSnapshot: cannot save during publication or a suspended world update", 3)
     end
     self:commit()
-    const binary = options ~= nil and options.format == "binary"
-    if options ~= nil and not binary and (options.buffer ~= nil or options.path ~= nil) then
-        error("snapshot buffer and path require format = binary", 2)
+    const binary = output ~= nil
+    if options ~= nil and not binary and options.path ~= nil then
+        error("snapshot path requires format = binary", 3)
     end
     const eventData: {[string]: any} = {}
     const excluded: {components.Component} = {}
@@ -3994,7 +4028,7 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
         for index = 1, #options.layers do
             const layer = options.layers[index]
             if layer < 0 or layer > 31 or layer % 1 ~= 0 then
-                error("snapshot layers must be integers from zero through 31", 2)
+                error("snapshot layers must be integers from zero through 31", 3)
             end
             selectedLayers[layer] = true
         end
@@ -4052,7 +4086,7 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
     local dataSeen: {[string]: boolean} = {}
     for key, value in pairs(eventData) do
         if key == randomstreams.snapshotKey or key == "__tecs.pipeline" or key == "__tecs.stateStack" then
-            error("snapshot data uses a reserved key", 2)
+            error("snapshot data uses a reserved key", 3)
         end
         addSnapshotData(data, dataSeen, key, value)
     end
@@ -4075,7 +4109,7 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
         for index = 1, #keys do
             local key = keys[index]
             if key == randomstreams.snapshotKey or key == "__tecs.pipeline" or key == "__tecs.stateStack" then
-                error("world.saveSnapshot: " .. key .. " is reserved for world-managed state", 2)
+                error("world.saveSnapshot: " .. key .. " is reserved for world-managed state", 3)
             end
             addSnapshotData(data, dataSeen, key, custom[key])
         end
@@ -4097,10 +4131,9 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
         end
     end
 
-    if binary then
+    if output ~= nil then
         addSnapshotData(data, dataSeen, "__tecs.pipeline", pipelineState)
         addSnapshotData(data, dataSeen, "__tecs.stateStack", self:listStates())
-        const output = assert(options).buffer or buffer.new()
         const prelude = snapshotcodec.write(
             self.archetypes,
             selection,
@@ -4109,16 +4142,16 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
             data,
             output
         )
-        if assert(options).path ~= nil then
-            const target = assert(assert(options).path)
+        if options ~= nil and options.path ~= nil then
+            const target = assert(options.path)
             local file, reason = io.open(target, "wb")
             if file == nil then
-                error("snapshot write failed: " .. (reason or target), 2)
+                error("snapshot write failed: " .. (reason or target), 3)
             end
             const written, problem = file:write(output:tostring())
             const closed, failure = file:close()
             if written == nil or closed == false then
-                error("snapshot write failed: " .. (problem or failure or target), 2)
+                error("snapshot write failed: " .. (problem or failure or target), 3)
             end
         end
         return Snapshot(
@@ -4130,8 +4163,7 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
             archetypes = {},
             data = {},
             states = {},
-            format = "binary",
-            buffer = output
+            format = "binary"
         )
     end
 
@@ -4145,6 +4177,36 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
         data = data,
         states = self:listStates(),
         pipeline = pipelineState
+    )
+end
+
+function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): Snapshot
+    if options == nil or options.format ~= "binary" then
+        return saveSnapshotWith(self, options, nil)
+    end
+    const output = bytes.Buffer.create()
+    const saved = saveSnapshotWith(self, options, output)
+    saved.bytes = output:tostring()
+
+    return saved
+end
+
+function World.saveSnapshotInto(
+    exclusive self: World,
+    exclusive output: bytes.Buffer,
+    options: SnapshotOptions?
+): SnapshotPrelude
+    if options ~= nil and options.format == "table" then
+        error("world.saveSnapshotInto: writes binary output; format must be nil or binary", 2)
+    end
+    const saved = saveSnapshotWith(self, options, output)
+
+    return events.SnapshotPrelude(
+        version = saved.version,
+        nextEntityId = saved.nextEntityId,
+        entityCount = saved.entityCount,
+        archetypeCount = saved.archetypeCount,
+        componentTable = saved.componentTable
     )
 end
 
@@ -4239,20 +4301,16 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
     end
     local decoded: snapshotcodec.Decoded? = nil
     local snapshot: Snapshot
-    if type(source) == "string"
-        or type(source) == "cdata"
-        or type(source) == "userdata"
-        or (type(source) == "table" and source.format == "binary")
-    then
-        local bytes: string
+    if type(source) == "string" or (type(source) == "table" and source.format == "binary") then
+        local encoded: string
         if type(source) == "string" then
-            bytes = source as string
-        elseif type(source) == "table" then
-            bytes = (source.buffer as buffer.Buffer):tostring()
+            encoded = source as string
+        elseif type(source.bytes) == "string" then
+            encoded = source.bytes as string
         else
-            bytes = (source as buffer.Buffer):tostring()
+            error("world.loadSnapshot: a binary snapshot needs its bytes", 2)
         end
-        decoded = snapshotcodec.read(bytes, self.allocator.maxSlotCount)
+        decoded = snapshotcodec.read(encoded, self.allocator.maxSlotCount)
         const prelude = decoded.prelude
         const saved: {SnapshotArchetype} = {}
         for index = 1, #decoded.frames do
@@ -4281,7 +4339,7 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
         )
     else
         if type(source) ~= "table" then
-            error("snapshot source must be a table, string or buffer", 2)
+            error("snapshot source must be a table or a binary snapshot string", 2)
         end
         if source.format == "table" and source.snapshot ~= nil then
             source = source.snapshot
@@ -4713,6 +4771,10 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
     self:commit()
 
     return prelude
+end
+
+function World.loadSnapshotFrom(exclusive self: World, borrows input: bytes.Buffer): SnapshotPrelude
+    return self:loadSnapshot(input:tostring())
 end
 
 --- Registers a named custom snapshot participant.

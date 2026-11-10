@@ -27,26 +27,34 @@ local prelude = world:loadSnapshot(snapshot)
 print(prelude.entityCount)
 ```
 
-Use binary output for checkpoints and save files with native components:
+Use binary output for checkpoints and save files with native components.
+`format = "binary"` returns a snapshot whose `bytes` field holds the encoding:
 
 ```nupp
-local buffer = require("string.buffer")
-local output = buffer.new()
-local saved = world:saveSnapshot({format = "binary", buffer = output})
+local saved = world:saveSnapshot({format = "binary"})
 world:loadSnapshot(saved)
-world:loadSnapshot(output:tostring())
+world:loadSnapshot(saved.bytes)
 ```
 
-The optional `path` writes binary output to a file and still returns the buffer.
-Reusing a buffer replaces its prior snapshot; loading a buffer does not consume
-it. The version-one framing uses native double ID arrays and column-major
-FFI copies. Matching raw layouts copy directly into their final columns without
-constructing a value per row. Changed scalar layouts use saved fingerprints for
-field-name migration. Custom codecs always take the codec path.
+A game that checkpoints often can keep one `bytes.Buffer` and save into it.
+`saveSnapshotInto` replaces the buffer's contents with the new snapshot and makes
+no string per save, and `loadSnapshotFrom` reads a buffer without consuming it:
 
-Loading accepts detached tables, column-indexed tables, tagged
-table/binary outputs, byte strings and buffers. Install the named component and
-state definitions before loading. Save and load may run inside an active system
+```nupp
+local checkpoint = bytes.Buffer.create()
+world:saveSnapshotInto(checkpoint)
+world:loadSnapshotFrom(checkpoint)
+```
+
+The optional `path` writes binary output to a file as well. The version-one
+framing uses native double ID arrays and column-major FFI copies. Matching raw
+layouts copy directly into their final columns without constructing a value per
+row. Changed scalar layouts use saved fingerprints for field-name migration.
+Custom codecs always take the codec path.
+
+Loading accepts detached tables, column-indexed tables, tagged table and binary
+outputs, and their byte strings. Install the named component and state
+definitions before loading. Save and load may run inside an active system
 after leaving any query loop; they reject publication callbacks and attempts to
 operate on another suspended dispatch.
 
@@ -56,26 +64,26 @@ without a filter includes disabled and paused entities.
 
 ## Where a save goes
 
-`nupp.io.files` owns the writable roots and names them from one application
-identity. A game names itself once, before it creates its application, and then
-asks for the data root and joins under it. `tecs.application.newApplication`
-names the identity `"tecs", "tecs"` when a game named none.
+Nupp owns the writable roots and names them from one application identity. A
+game names itself once with `os.setappid`, before it creates its application,
+and then asks `os.appdir` for a root and joins under it.
+`tecs.application.newApplication` names the identity `"tecs", "tecs"` when a game
+named none.
 
 ```nupp
-const disk = require("nupp.io.files")
-
-disk.setApplicationIdentity("Ex Nihilo", "Starfarer")
-const saves = assert(disk.dataPath()):join("saves")
-const output = require("string.buffer").new()
-world:saveSnapshot({format = "binary", buffer = output})
-assert(disk.writeAtomic(saves:join("slot1.bin"), output:tostring()))
+os.setappid("Ex Nihilo", "Starfarer")
+const saves = assert(os.appdir("data")):join("saves")
+assert(os.mkdir(saves))
+const saved = world:saveSnapshot({format = "binary"})
+assert(os.writeatomic(saves:join("slot1.bin"), assert(saved.bytes)))
 ```
 
-A joined path refuses a component that would leave the root, so a slot named
-from player input cannot reach a directory the game does not own. `dataPath`
-holds what a player would miss, `cachePath` holds what the game can rebuild and
-the operating system may empty between runs, and `tecs.files.assetPath` resolves
-shipped content, which is never a place to write.
+A joined path does not refuse `..`, so check a slot name that comes from player
+input before joining it, or the save can land outside the root. `os.appdir("data")`
+holds what a player would miss, `os.appdir("cache")` holds what the game can
+rebuild and the operating system may empty between runs, and
+`tecs.files.assetPath` resolves shipped content, which is never a place to
+write.
 
 ## Durable world state
 

@@ -17,7 +17,6 @@ local audio = require("tecs.audio")
 local screenshot = require("tecs.gfx.screenshot")
 local json = require("serde.json")
 local profile = require("debug.profile")
-local buffer = require("string.buffer")
 
 local function register(
     name: string,
@@ -345,9 +344,7 @@ register(
     function(args: {[string]: any}): {[string]: any}
         local destination = artifact(args.name or "snapshot.bin")
         local world = bindings.requireWorld()
-        local output = buffer.new()
-        world:saveSnapshot({format = "binary", buffer = output})
-        local bytes = output:tostring()
+        const bytes = assert(world:saveSnapshot({format = "binary"}).bytes)
         local ok, reason = os.writeatomic(destination, bytes)
         assert(ok, tostring(reason))
 

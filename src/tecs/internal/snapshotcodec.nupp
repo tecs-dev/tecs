@@ -1,14 +1,19 @@
 module tecs.internal.snapshotcodec
 
 --[[
-Version-one snapshot framing. Dense native columns use
-one buffer append and one restore copy. Parsing retains the input owner until
-publication completes; no entity-sized native objects are allocated on that path.
+Version-one snapshot framing. Values are LuaJIT binary serialization written
+through `serde.native`, and dense native columns are raw bytes between them: one
+buffer reservation to save and one restore copy. Parsing retains the encoded
+string until publication completes; no entity-sized native objects are allocated
+on that path.
 The schema slow path is cached by saved fingerprint and projects named fields.
 ]]
 
 local ffi = require("ffi")
-local buffer = require("string.buffer")
+-- `serde.native` is required before `bytes` on purpose: in the other order a whole-
+-- project `nupp check` currently resolves `bytes` to unknown in this module.
+local native = require("serde.native")
+local bytes = require("bytes")
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
 local events = require("tecs.internal.events")
@@ -41,7 +46,7 @@ export record Decoded
     prelude: events.SnapshotPrelude
     frames: {Frame}
     data: {Data}
-    owner: buffer.Buffer
+    owner: string
 end
 
 local record Plan
@@ -78,7 +83,7 @@ export function write(
     layers: {[integer]: boolean}?,
     nextId: integer,
     data: {Data},
-    output: buffer.Buffer
+    exclusive output: bytes.Buffer
 ): events.SnapshotPrelude
     const plans: {Plan} = {}
     const entries: {events.SnapshotComponentEntry} = {}
@@ -139,21 +144,27 @@ export function write(
         ::nextSource::
     end
     output:reset()
-    output:encode(1):encode(nextId):encode(total):encode(#plans):encode(#entries)
+    native.encodevalueinto(1, output)
+    native.encodevalueinto(nextId, output)
+    native.encodevalueinto(total, output)
+    native.encodevalueinto(#plans, output)
+    native.encodevalueinto(#entries, output)
     for index = 1, #entries do
-        output:encode(entries[index].name):encode(entries[index].fingerprint)
+        native.encodevalueinto(entries[index].name, output)
+        native.encodevalueinto(entries[index].fingerprint, output)
     end
     local ids: any = nil
     local capacity: integer = 0
     for index = 1, #plans do
         const plan = plans[index]
-        output:encode(#plan.columns):encode(plan.count)
+        native.encodevalueinto(#plan.columns, output)
+        native.encodevalueinto(plan.count, output)
         for column = 1, #plan.indices do
-            output:encode(plan.indices[column])
+            native.encodevalueinto(plan.indices[column], output)
         end
-        output:encode(0)
+        native.encodevalueinto(0, output)
         if plan.rows == nil then
-            output:putcdata(entitycolumn.pointer(plan.source.entities) as voidptr, plan.count * 8)
+            ffistorage.appendBytes(output, entitycolumn.pointer(plan.source.entities), plan.count * 8)
         else
             if capacity < plan.count then
                 ids = ffi.new("double[?]", plan.count)
@@ -162,7 +173,7 @@ export function write(
             for row = 1, plan.count do
                 ids[row - 1] = plan.source.entities[assert(plan.rows)[row]]
             end
-            output:putcdata(ids as voidptr, plan.count * 8)
+            ffistorage.appendBytes(output, ids, plan.count * 8)
         end
         for column = 1, #plan.columns do
             const component = plan.columns[column]
@@ -186,17 +197,18 @@ export function write(
                         if relationship ~= nil and components.targetOf(component) == nil then
                             const edges = archetype.edgeValues(plan.source, sourceRow - 1, relationship)
                             if relationship.exclusive then
-                                output:encode(serialize(component, edges[1]))
+                                native.encodevalueinto(serialize(component, edges[1]), output)
                             else
                                 const saved: {any} = {}
                                 for edge = 1, #edges do
                                     saved[edge] = serialize(component, edges[edge])
                                 end
-                                output:encode({edges = saved})
+                                native.encodevalueinto({edges = saved}, output)
                             end
                         else
-                            output:encode(
-                                serialize(component, archetype.valueAt(plan.source, sourceRow - 1, component))
+                            native.encodevalueinto(
+                                serialize(component, archetype.valueAt(plan.source, sourceRow - 1, component)),
+                                output
                             )
                         end
                     end
@@ -205,9 +217,11 @@ export function write(
         end
     end
     for index = 1, #data do
-        output:encode(true):encode(data[index].key):encode(data[index].value)
+        native.encodevalueinto(true, output)
+        native.encodevalueinto(data[index].key, output)
+        native.encodevalueinto(data[index].value, output)
     end
-    output:encode(false)
+    native.encodevalueinto(false, output)
 
     return events.SnapshotPrelude(
         version = 1,
@@ -218,8 +232,8 @@ export function write(
     )
 end
 
-local function integer(input: buffer.Buffer, label: string, maximum: integer): integer
-    const value = input:decode()
+local function integer(exclusive input: bytes.Buffer, label: string, maximum: integer): integer
+    const value = native.decodevaluefrom(input)
     if type(value) ~= "number" or value < 0 or value % 1 ~= 0 or value > maximum then
         error("snapshot has invalid " .. label, 3)
     end
@@ -282,26 +296,29 @@ local function savedSchema(fingerprint: string): ffistorage.Storage
     return storage
 end
 
---- Parses and bounds-checks framing while retaining native column spans in the input
---- owner.
-export function read(bytes: string, maximum: integer): Decoded
-    const input = buffer.new()
-    input:set(bytes)
+--- Parses and bounds-checks framing while retaining native column spans in the encoded
+--- string, which the result keeps alive.
+export function read(encoded: string, maximum: integer): Decoded
+    -- Values decode from a buffer over a copy of the bytes, while native columns are
+    -- addressed in the string itself at the same offset, so no decoded frame holds a
+    -- pointer into storage that this function releases.
+    const input = bytes.Buffer.create(encoded)
+    const base: any = ffi.cast("const uint8_t *", encoded)
     const version = integer(input, "version", 1)
     if version ~= 1 then
         error("unsupported snapshot version", 2)
     end
     const nextId = integer(input, "next entity id", maximum + 1)
     const total = integer(input, "entity count", maximum)
-    const frameCount = integer(input, "archetype count", #bytes)
-    const componentCount = integer(input, "component count", #bytes)
+    const frameCount = integer(input, "archetype count", #encoded)
+    const componentCount = integer(input, "component count", #encoded)
     const entries: {events.SnapshotComponentEntry} = {}
     const definitions: {components.Component} = {}
     const layouts: {[integer]: ffistorage.Storage} = {}
     const names: {[string]: boolean} = {}
     for index = 1, componentCount do
-        const name = input:decode()
-        const fingerprint = input:decode()
+        const name = native.decodevaluefrom(input)
+        const fingerprint = native.decodevaluefrom(input)
         if type(name) ~= "string" or names[name] then
             error("invalid or repeated snapshot component name", 2)
         end
@@ -345,7 +362,7 @@ export function read(bytes: string, maximum: integer): Decoded
             if #input < count * 8 then
                 error("truncated snapshot entity ids", 2)
             end
-            ffi.copy(ids, input:ref(), count * 8)
+            ffi.copy(ids, base + (#encoded - #input), count * 8)
             input:skip(count * 8)
             for column = 1, #columns do
                 const selected = columns[column]
@@ -354,15 +371,14 @@ export function read(bytes: string, maximum: integer): Decoded
                     if #input < length then
                         error("truncated snapshot FFI column", 2)
                     end
-                    -- The frame retains bytes, so this pointer survives parser
-                    -- advancement and is never a borrowed buffer view escaping its
-                    -- lexical scope.
-                    selected.pointer = (ffi.cast("const uint8_t *", bytes) as any) + (#bytes - #input)
+                    -- The frame retains the encoded string, so this pointer survives
+                    -- parser advancement and never addresses the parse buffer.
+                    selected.pointer = base + (#encoded - #input)
                     input:skip(length)
                 else
                     const values: {any} = {}
                     for row = 1, count do
-                        values[row] = input:decode()
+                        values[row] = native.decodevaluefrom(input)
                     end
                     selected.values = values
                 end
@@ -391,11 +407,11 @@ export function read(bytes: string, maximum: integer): Decoded
                                 selected.scratch = ffi.new(layout.element)
                             end
                             const scratch = selected.scratch
-                            ffi.copy(scratch, input:ref(), layout.width)
+                            ffi.copy(scratch, base + (#encoded - #input), layout.width)
                             input:skip(layout.width)
                             assert(selected.values)[row] = ffistorage.serialize(layout, scratch)
                         else
-                            assert(selected.values)[row] = input:decode()
+                            assert(selected.values)[row] = native.decodevaluefrom(input)
                         end
                     end
                     mask = mask // 2
@@ -406,25 +422,25 @@ export function read(bytes: string, maximum: integer): Decoded
                 columns[column].storage = nil
             end
         end
-        frames[#frames + 1] = Frame(owner = bytes, ids = ids as number[?], count = count, columns = columns)
+        frames[#frames + 1] = Frame(owner = encoded, ids = ids as number[?], count = count, columns = columns)
     end
     if counted ~= total then
         error("snapshot counts do not match its contents", 2)
     end
     const data: {Data} = {}
     while true do
-        const present = input:decode()
+        const present = native.decodevaluefrom(input)
         if present == false then
             break
         end
         if present ~= true then
             error("invalid snapshot data framing", 2)
         end
-        const key = input:decode()
+        const key = native.decodevaluefrom(input)
         if type(key) ~= "string" then
             error("invalid snapshot data key", 2)
         end
-        data[#data + 1] = Data(key = key, value = input:decode())
+        data[#data + 1] = Data(key = key, value = native.decodevaluefrom(input))
     end
     if #input ~= 0 then
         error("snapshot has trailing bytes", 2)
@@ -440,7 +456,7 @@ export function read(bytes: string, maximum: integer): Decoded
         ),
         frames = frames,
         data = data,
-        owner = input
+        owner = encoded
     )
 end
 
