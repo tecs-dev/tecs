@@ -50,7 +50,7 @@ lane owns adding a quad origin, and a pivot becomes a component when it does.
 
 local components = require("tecs.internal.components")
 local rendercomponents = require("tecs.internal.rendercomponents")
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 local log = require("debug.log")
 
 -- "tecs.gfx" is the category the graphics modules already log under, and a
@@ -1310,7 +1310,7 @@ end
 export function fromAseprite(options: AsepriteOptions): Sheet
     local source = options.json
     if source is string then
-        const decoded, malformed = json.decode(source)
+        const decoded, malformed = json.decodevalue(source)
         if malformed ~= nil then
             error("gfx.sheet.fromAseprite: the export is not JSON: " .. malformed, 2)
         end

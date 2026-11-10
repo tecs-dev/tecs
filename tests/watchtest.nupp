@@ -1,4 +1,3 @@
-local disk = require("nupp.io.files")
 local watch = require("tecs.watch")
 
 local suite = {}
@@ -338,15 +337,15 @@ end
 function suite.readsARealFileThroughTheDefaultSource(): nil
     fresh()
     do
-        local scratch = assert(disk.createTemporaryDirectory(disk.TemporaryOptions(prefix = "tecs-watch-")))
-        local path = scratch:toString() .. "/shader.wgsl"
-        assert(disk.write(path, "one"))
+        local scratch = assert(os.mktempdir("tecs-watch-"))
+        local path = tostring(scratch) .. "/shader.wgsl"
+        assert(assert(io.open(path, "wb")):write("one"))
 
         watch.add(path)
         watch.install({settle = 0, intervalSeconds = 0})
         assert.eq(watch.scan(), 0)
 
-        assert(disk.write(path, "a longer body than the first"))
+        assert(assert(io.open(path, "wb")):write("a longer body than the first"))
         assert.eq(watch.scan(), 1)
 
         local seen = ""
@@ -356,7 +355,7 @@ function suite.readsARealFileThroughTheDefaultSource(): nil
         assert.eq(watch.dispatch(), 1)
         assert.eq(seen, path)
 
-        assert(disk.remove(path))
+        assert(os.remove(path))
     end
     fresh()
 end

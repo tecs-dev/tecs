@@ -1,6 +1,6 @@
 const {type Snapshot} = require("tecs.ecs")
 const ecs = require("tecs.ecs")
-const json = require("nupp.codec.json")
+const json = require("serde.json")
 
 
 local suite = {}
@@ -275,10 +275,10 @@ function suite.roundTripsThroughJsonWithoutLosingSignedWords(): nil
     world:seedRandom(42)
     const stream = world:randomStream("game.loot")
     stream:next()
-    const encoded = json.encode(world:saveSnapshot())
+    const encoded = json.encodevalue(world:saveSnapshot())
     const restored = ecs.newWorld()
     -- JSON decoding is the dynamic serialization boundary; loadSnapshot validates it.
-    restored:loadSnapshot(json.decode(encoded) as Snapshot)
+    restored:loadSnapshot(json.decodevalue(encoded) as Snapshot)
     sameDraws(stream, restored:randomStream("game.loot"))
 end
 

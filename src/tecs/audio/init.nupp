@@ -180,7 +180,7 @@ local audiosynth = require("tecs.internal.audiosynth")
 local ecs = require("tecs.ecs")
 local effectspecs = require("tecs.audio.effects")
 local timelines = require("tecs.audio.timeline")
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 local log = require("debug.log")
 
 --- This logger name is a compatibility surface: a developer types it into a
@@ -3832,7 +3832,7 @@ function Audio.listening(borrows self: Audio): Listening?
     if text == nil then
         return nil
     end
-    local value = json.decode(text) as {[string]: any}?
+    local value = json.decodevalue(text) as {[string]: any}?
     if value == nil then
         return nil
     end

@@ -15,7 +15,7 @@ naming rules. `tecs.mcp` re-exports everything here; nothing else should require
 this module directly.
 ]]
 
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 local log = require("debug.log")
 
 -- The externally typed logger name is `tecs.mcp`, independent of the module
@@ -176,21 +176,21 @@ export function describe(): any
         list[#list + 1] = entry
     end
 
-    return json.asArray(list)
+    return json.asarray(list)
 end
 
 --- Returns the encoded tool listing a transport publishes.
 --- @return the JSON text of the listing
 export function describeJSON(): string
-    return json.encode(describe())
+    return json.encodevalue(describe())
 end
 
 local function reply(id: any, result: {[string]: any}): string
-    return json.encode({jsonrpc = "2.0", id = id ?? json.NULL, result = result}, json.NULL)
+    return json.encodevalue({jsonrpc = "2.0", id = id ?? json.NULL, result = result}, json.NULL)
 end
 
 local function fail(id: any, code: integer, message: string): string
-    return json.encode({jsonrpc = "2.0", id = id ?? json.NULL, error = {code = code, message = message}}, json.NULL)
+    return json.encodevalue({jsonrpc = "2.0", id = id ?? json.NULL, error = {code = code, message = message}}, json.NULL)
 end
 
 --- Runs one tool handler and returns the JSON-RPC result object for it.
@@ -224,7 +224,7 @@ export function callTool(tool: Tool, arguments: {[string]: any}, parked: boolean
     end
     local structured = (payload or {}) as {[string]: any}
 
-    return {structuredContent = structured, content = {{type = "text", text = json.encode(structured)}}}
+    return {structuredContent = structured, content = {{type = "text", text = json.encodevalue(structured)}}}
 end
 
 --- Runs one JSON-RPC request and returns the response text.
@@ -236,7 +236,7 @@ end
 --- @return the response as JSON text, which reports bad input in band rather
 ---     than by raising
 export function dispatch(text: string): string
-    local value, malformed = json.decode(text, json.NULL)
+    local value, malformed = json.decodevalue(text, json.NULL)
     if malformed ~= nil then
         return fail(json.NULL, PARSE_ERROR, "invalid JSON")
     end

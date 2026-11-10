@@ -11,22 +11,21 @@ local screenshot = require("tecs.gfx.screenshot")
 local registry = require("tecs.internal.mcpregistry")
 local schemas = require("tecs.internal.mcpschemas")
 local entityworld = require("tecs.internal.world")
-local json = require("nupp.codec.json")
-local files = require("nupp.io.files")
+local json = require("serde.json")
 local suite = {}
 
 -- The snapshot tools write under the application data root, which
 -- `nupp.io.files` resolves from a process-wide identity. A host names one
 -- through `tecs.application`; a suite that binds a world without an application
 -- names it here.
-if files.applicationIdentity() == nil then
-    files.setApplicationIdentity("tecs", "tecs")
+if os.appid() == nil then
+    os.setappid("tecs", "tecs")
 end
 
 local function call(name: string, arguments: {[string]: any}?): any
-    local reply = json.decode(
+    local reply = json.decodevalue(
         mcp.dispatch(
-            json.encode({
+            json.encodevalue({
                 jsonrpc = "2.0",
                 id = 1,
                 method = "tools/call",
@@ -59,7 +58,7 @@ local function equalTree(actual: any, expected: any): nil
 end
 
 function suite.restoredInputSchemasMatchTheHistoricalWireListing(): nil
-    local historical = json.decode(assert(files.read("tests/fixtures/mcp/historical-tools.json")))
+    local historical = json.decodevalue(assert(assert(io.open("tests/fixtures/mcp/historical-tools.json", "rb")):read("a")))
     local checked = 0
     for _, tool in ipairs(historical.tools) do
         if schemas.inputs[tool.name] ~= nil then
@@ -153,7 +152,7 @@ function suite.realPhysicsInspectionAndRaycast(): nil
     world:update(1 / 60)
     assert.eq(content("physics_info").bodies, 1)
     assert.eq(content("physics_raycast", {x1 = 0, y1 = 20, x2 = 40, y2 = 20}).entity, body)
-    assert(files.remove(saved.path))
+    assert(os.remove(saved.path))
     world:shutdown()
     mcp.bind(nil)
 end
@@ -184,10 +183,10 @@ function suite.snapshotToolRoundTripPreservesBinaryHandlerDataAndNumericKeys(): 
     assert.eq(restored[4.5], false)
     assert.eq(world:get(entity, ecs.Name), "saved")
     assert.eq(call("snapshot_save", {name = "../escape.bin"}).isError, true)
-    assert(files.write(saved.path, "invalid"))
+    assert(assert(io.open(saved.path, "wb")):write("invalid"))
     assert.eq(call("snapshot_load", {path = saved.path}).isError, true)
     assert.eq(world:getStats().entities, 1)
-    assert(files.remove(saved.path))
+    assert(os.remove(saved.path))
     mcp.bind(nil)
 end
 
@@ -279,8 +278,8 @@ function suite.profileToolsWriteAReportAndCanStartAgain(): nil
     assert.eq(call("profile_start").isError, true)
     local report = content("profile_stop", {name = "mcp-contract-profile-test.collapsed"})
     assert.eq(report.samples, 0)
-    assert.eq(assert(files.read(report.path)), "")
-    assert(files.remove(report.path))
+    assert.eq(assert(assert(io.open(report.path, "rb")):read("a")), "")
+    assert(os.remove(report.path))
     assert.eq(call("profile_stop").isError, true)
 end
 
@@ -395,14 +394,14 @@ function suite.screenshotToolWritesTheNextRenderedFrame(): nil
     screenshot.complete(id, 1, 1, "\1\2\3\255", "PNG-BYTES", nil)
     local server = assert(mcp.listen(0))
     mcp.poll(server)
-    assert.eq(assert(files.read(requested.path)), "PNG-BYTES")
+    assert.eq(assert(assert(io.open(requested.path, "rb")):read("a")), "PNG-BYTES")
     local written = content("screenshot_info", {id = requested.id})
     assert.eq(written.ready, true)
     assert.eq(written.saved, true)
     assert.eq(written.width, 1)
     assert.eq(written.height, 1)
     assert.eq(written.bytes, 9)
-    assert(files.remove(requested.path))
+    assert(os.remove(requested.path))
 
     -- A failed readback is reported rather than written.
     local failing = content("screenshot", {name = "mcp-screenshot-failed.png"})

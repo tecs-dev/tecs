@@ -34,7 +34,7 @@ nothing, because the bytes on disk are the bytes that were already there.
 ## What is watched
 
 Every watched path is registered explicitly through `add`. Content reads use
-`nupp.io.files`, which does not maintain a process-wide set of paths. The caller
+`io.open`, which does not maintain a process-wide set of paths. The caller
 that loaded a file therefore decides whether to watch it. No root fence is
 needed because every watched path is named directly.
 
@@ -49,14 +49,13 @@ waiting for the next save.
 
 ## Polling rather than platform notification
 
-This polls `nupp.io.files.info` and does not use a platform change-notification
+This polls `os.stat` and does not use a platform change-notification
 service. A notification says a write happened, not that the writer finished,
 so the settle policy would still have to stat the file. Polling also keeps
 platform notification threads outside the Lua virtual machine and fits the
 bounded set of paths a game explicitly registered.
 ]]
 
-local files = require("nupp.io.files")
 local log = require("debug.log")
 
 --- One settled content change.
@@ -88,7 +87,7 @@ export type Source = function(path: string): (integer, number)
 --- queues immediately. `capacity` bounds distinct pending paths and defaults to
 --- 1024. `clock` reads seconds from a monotonic origin and defaults to
 --- `nupp.time`, and `source` reads one path's state and defaults to
---- `nupp.io.files.info`. The last two exist for a test or a headless tool that
+--- `os.stat`. The last two exist for a test or a headless tool that
 --- drives its own time and its own filesystem; a game supplies neither.
 export type Config = {
     intervalSeconds: number?,
@@ -159,17 +158,17 @@ local dispatchedCount: integer = 0
 local queue: {Change} = {}
 local queued: {[string]: boolean} = {}
 
---- Reads one path through `nupp.io.files`, the default `Source`.
+--- Reads one path through `os.stat`, the default `Source`.
 --- @param path the path to describe
 --- @return the byte length, or -1 when nothing usable is there
---- @return seconds since the Unix epoch, or -1 when nothing usable is there
+--- @return milliseconds since the Unix epoch, or -1 when nothing usable is there
 local function defaultSource(path: string): (integer, number)
-    local info = files.info(path)
-    if info == nil or info.kind ~= "file" then
+    const kind, size, modified = os.stat(path)
+    if kind ~= "file" then
         return -1, -1
     end
 
-    return info.size, info.modified
+    return assert(size), assert(modified)
 end
 
 --- Reads the monotonic clock in seconds, the default `Config.clock`.

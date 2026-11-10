@@ -1,14 +1,14 @@
 local ecs = require("tecs.ecs")
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 local mcp = require("tecs.mcp")
 local sandbox = require("tecs.internal.mcpsandbox")
 
 local suite = {}
 
 local function call(name: string, arguments: {[string]: any}): {[string]: any}
-    local response = json.decode(
+    local response = json.decodevalue(
         mcp.dispatch(
-            json.encode({
+            json.encodevalue({
                 jsonrpc = "2.0",
                 id = 1,
                 method = "tools/call",
@@ -80,7 +80,7 @@ function suite.describesValuesJSONCannotCarry(): nil
     assert.eq(sandbox.describe(3) as integer, 3)
     assert.eq(sandbox.describe("text") as string, "text")
     assert(sandbox.describe(nil) == json.NULL)
-    assert(json.isArray(sandbox.describe({})))
+    assert(json.isarray(sandbox.describe({})))
 end
 
 function suite.summarizesATableNestedPastTheDepthCap(): nil

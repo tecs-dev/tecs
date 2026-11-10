@@ -70,7 +70,6 @@ state keyed on the handle watches to know its copy is stale. A failed reload
 leaves the resident payload exactly as it was and answers `false, reason`.
 ]]
 
-local files = require("nupp.io.files")
 local log = require("debug.log")
 
 --- Where one acquisition stands.
@@ -281,9 +280,17 @@ export function readJob(path: string): (Job?, string?)
                 return "pending"
             end
             finished = true
-            local bytes, reason = files.read(path)
+            local file, reason = io.open(path, "rb")
+            if file == nil then
+                return "failed", nil, reason or ("cannot read " .. path)
+            end
+            const bytes = file:read("a")
+            const closed, failure = file:close()
             if bytes == nil then
-                return "failed", nil, reason?.message ?? ("cannot read " .. path)
+                return "failed", nil, "cannot read " .. path
+            end
+            if not closed then
+                return "failed", nil, failure or ("cannot read " .. path)
             end
 
             return "ready", bytes

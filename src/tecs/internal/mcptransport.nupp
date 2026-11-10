@@ -24,7 +24,7 @@ coroutine unwinds. The server record holds neither, which is what keeps a
 server value ordinary rather than affine out through `tecs.mcp`.
 ]]
 
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 local log = require("debug.log")
 local suspensionHost = require("coroutine.host")
 local suspensionContract = require("coroutine.host")
@@ -239,7 +239,7 @@ end
 --- no game state behind them, so they are answered here on the connection's own
 --- coroutine and never make `poll` report that it ran a handler.
 local function answer(exclusive self: Server, body: string): string?
-    local value, malformed = json.decode(body, json.NULL)
+    local value, malformed = json.decodevalue(body, json.NULL)
     if malformed ~= nil or type(value) ~= "table" then
         return registry.dispatch(body)
     end
@@ -264,7 +264,7 @@ local function answer(exclusive self: Server, body: string): string?
     local arguments = params.arguments
     local queued = Request(
         name = name,
-        arguments = arguments ~= nil and json.encode(arguments) or "{}",
+        arguments = arguments ~= nil and json.encodevalue(arguments) or "{}",
         task = assert(coroutine.running()),
         payload = nil,
         isError = false,
@@ -284,12 +284,12 @@ local function answer(exclusive self: Server, body: string): string?
         end
         result.content = {{type = "text", text = queued.payload ?? ""}}
     else
-        local structured, malformed = json.decode(queued.payload ?? "{}", json.NULL)
+        local structured, malformed = json.decodevalue(queued.payload ?? "{}", json.NULL)
         result.structuredContent = malformed == nil and structured or {}
         result.content = {{type = "text", text = queued.payload ?? "{}"}}
     end
 
-    return json.encode({jsonrpc = "2.0", id = request.id, result = result}, json.NULL)
+    return json.encodevalue({jsonrpc = "2.0", id = request.id, result = result}, json.NULL)
 end
 
 --- Serves one connection until the peer closes it or the server stops.

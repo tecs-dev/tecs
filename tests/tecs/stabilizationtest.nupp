@@ -6,7 +6,7 @@ local framepacket = require("tecs.internal.framepacket")
 local hostpump = require("os.host")
 local gfx = require("tecs.gfx")
 local host = require("tecs.host")
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 local mcp = require("tecs.mcp")
 local net = require("io.net")
 local physics = require("tecs.physics")
@@ -74,7 +74,7 @@ local function callOverHTTP(session: host.Session, name: string): {[string]: any
     local response: {[string]: any}? = nil
     local state = pump:start(function(): boolean
         local stream = assert(net.connect({host = "127.0.0.1", port = port}))
-        const body = json.encode({
+        const body = json.encodevalue({
             jsonrpc = "2.0",
             id = 1,
             method = "tools/call",
@@ -87,7 +87,7 @@ local function callOverHTTP(session: host.Session, name: string): {[string]: any
             if split ~= nil then
                 const length = tonumber(received:match("[Cc]ontent%-[Ll]ength:%s*(%d+)"))
                 if length ~= nil and #received - split - 3 >= length then
-                    const decoded = json.decode(received:sub(split + 4), json.NULL) as {[string]: any}
+                    const decoded = json.decodevalue(received:sub(split + 4), json.NULL) as {[string]: any}
                     response = decoded.result as {[string]: any}
                     break
                 end

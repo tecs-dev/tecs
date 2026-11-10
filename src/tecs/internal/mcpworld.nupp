@@ -28,7 +28,7 @@ const world2 = require("tecs.internal.world")
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
 local ecs = require("tecs.ecs")
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 local bindings = require("tecs.internal.mcpbindings")
 local registry = require("tecs.internal.mcpregistry")
 
@@ -237,14 +237,14 @@ registry.register({
                 -- meaning, which is worth saying rather than leaving inferred
                 -- from an empty list.
                 tag = kind.storageType == "tag",
-                fields = #fields > 0 and json.asArray(fields) or json.EMPTY_ARRAY,
+                fields = #fields > 0 and json.asarray(fields) or json.EMPTY_ARRAY,
                 -- Declared here and carried by nothing is a real state, so it
                 -- reads as absent rather than as a name that does not exist.
                 present = present[kind.componentId] == true
             }
         end
 
-        return {components = json.asArray(described), bound = world ~= nil}
+        return {components = json.asarray(described), bound = world ~= nil}
     end
 })
 
@@ -296,7 +296,7 @@ registry.register({
             end
         end
 
-        return {matched = total, returned = #rows, entities = #rows > 0 and json.asArray(rows) or json.EMPTY_ARRAY}
+        return {matched = total, returned = #rows, entities = #rows > 0 and json.asarray(rows) or json.EMPTY_ARRAY}
     end
 })
 
