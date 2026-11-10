@@ -130,7 +130,7 @@ end
 -- The server is plain rather than `exclusive`, because the handler resumes
 -- through it on later turns and so outlives a call-scoped borrow of it.
 local function newHandler(self: Server): suspensionContract.Handler
-    return new suspensionContract.Handler(
+    return suspensionContract.Handler(
         park = function(
             _: suspensionContract.Handler,
             waiting: suspensionContract.Waiting,
@@ -263,7 +263,7 @@ local function answer(exclusive self: Server, body: string): string?
     end
 
     local arguments = params.arguments
-    local queued = new Request(
+    local queued = Request(
         name = name,
         arguments = arguments ~= nil and json.encode(arguments) or "{}",
         task = assert(coroutine.running()),
@@ -406,7 +406,7 @@ export function listen(port: integer, toolsJSON: string): (Server?, string?)
         return nil, why?.message ?? "the listener could not bind"
     end
 
-    local self = new Server(
+    local self = Server(
         port = listener:port(),
         toolsJSON = toolsJSON,
         tasks = {},

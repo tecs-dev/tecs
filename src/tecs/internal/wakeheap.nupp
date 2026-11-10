@@ -22,7 +22,7 @@ end
 --- Creates an empty heap.
 --- @return the empty heap
 export function new(): Heap
-    return new Heap(keys = {}, sequences = {}, values = {}, size = 0)
+    return Heap(keys = {}, sequences = {}, values = {}, size = 0)
 end
 
 --- Discards every entry while retaining the heap's tables.

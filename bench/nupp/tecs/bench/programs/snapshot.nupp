@@ -42,30 +42,30 @@ end
 const Position = ecs.newComponent(Vector, {
     name = "bench.SnapshotPosition",
     construct = function(x: number, y: number): Vector
-        return new Vector(x, y)
+        return Vector(x, y)
     end,
     default = function(): Vector
-        return new Vector(0, 0)
+        return Vector(0, 0)
     end,
 })
 
 const Velocity = ecs.newComponent(Vector, {
     name = "bench.SnapshotVelocity",
     construct = function(x: number, y: number): Vector
-        return new Vector(x, y)
+        return Vector(x, y)
     end,
     default = function(): Vector
-        return new Vector(0, 0)
+        return Vector(0, 0)
     end,
 })
 
 const Vitality = ecs.newComponent(Health, {
     name = "bench.SnapshotHealth",
     construct = function(current: integer, maximum: integer): Health
-        return new Health(current, maximum)
+        return Health(current, maximum)
     end,
     default = function(): Health
-        return new Health(100, 100)
+        return Health(100, 100)
     end,
 })
 

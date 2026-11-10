@@ -64,10 +64,10 @@ export function validate(value: View): nil
 end
 
 export function make(options: Options): View
-    const value = new View(
+    const value = View(
         camera2D = options.camera2D,
         camera3D = options.camera3D,
-        lighting = options.lighting ?? new meshes.Lighting(),
+        lighting = options.lighting ?? meshes.Lighting(),
         x = options.x ?? 0,
         y = options.y ?? 0,
         width = options.width ?? 1,
@@ -128,11 +128,11 @@ export const Component: components.TableComponent<View> = components.newComponen
             height = saved.height as number,
             order = saved.order as integer,
             enabled = saved.enabled as boolean,
-            camera2D = c2 ~= nil and new rendercomponents.Camera2D(c2.x, c2.y, c2.zoom, c2.rotation) or nil,
+            camera2D = c2 ~= nil and rendercomponents.Camera2D(c2.x, c2.y, c2.zoom, c2.rotation) or nil,
             camera3D = c3 ~= nil and camera3d.newCamera3D(c3) or nil
         })
     end,
     default = function(): View
-        return new View(camera2D = new rendercomponents.Camera2D(0, 0, 1, 0), lighting = new meshes.Lighting())
+        return View(camera2D = rendercomponents.Camera2D(0, 0, 1, 0), lighting = meshes.Lighting())
     end,
 })

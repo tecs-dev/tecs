@@ -122,7 +122,7 @@ export function write(
                 const storage = ffistorage.find(component.componentId)
                 entries[
                     entry
-                ] = new events.SnapshotComponentEntry(
+                ] = events.SnapshotComponentEntry(
                     name = component.componentName,
                     fingerprint = storage ~= nil
                     and storage.rawCodec
@@ -134,7 +134,7 @@ export function write(
             indices[#indices + 1] = entry
             ::nextComponent::
         end
-        plans[#plans + 1] = new Plan(source = source, columns = columns, indices = indices, rows = rows, count = count)
+        plans[#plans + 1] = Plan(source = source, columns = columns, indices = indices, rows = rows, count = count)
         total = total + count
         ::nextSource::
     end
@@ -209,7 +209,7 @@ export function write(
     end
     output:encode(false)
 
-    return new events.SnapshotPrelude(
+    return events.SnapshotPrelude(
         version = 1,
         nextEntityId = nextId,
         entityCount = total,
@@ -313,7 +313,7 @@ export function read(bytes: string, maximum: integer): Decoded
         if fingerprint ~= nil and type(fingerprint) ~= "string" then
             error("invalid snapshot fingerprint", 2)
         end
-        entries[index] = new events.SnapshotComponentEntry(name = name, fingerprint = fingerprint as string?)
+        entries[index] = events.SnapshotComponentEntry(name = name, fingerprint = fingerprint as string?)
         definitions[index] = component
         if fingerprint ~= nil then
             const current = ffistorage.find(component.componentId)
@@ -337,7 +337,7 @@ export function read(bytes: string, maximum: integer): Decoded
             seen[entry] = true
             columns[
                 column
-            ] = new Column(component = definitions[entry], storage = layouts[entry], pointer = nil, scratch = nil)
+            ] = Column(component = definitions[entry], storage = layouts[entry], pointer = nil, scratch = nil)
         end
         const mode = integer(input, "frame mode", 1)
         const ids: any = ffi.new("double[?]", math.max(1, count))
@@ -406,7 +406,7 @@ export function read(bytes: string, maximum: integer): Decoded
                 columns[column].storage = nil
             end
         end
-        frames[#frames + 1] = new Frame(owner = bytes, ids = ids as number[?], count = count, columns = columns)
+        frames[#frames + 1] = Frame(owner = bytes, ids = ids as number[?], count = count, columns = columns)
     end
     if counted ~= total then
         error("snapshot counts do not match its contents", 2)
@@ -424,14 +424,14 @@ export function read(bytes: string, maximum: integer): Decoded
         if type(key) ~= "string" then
             error("invalid snapshot data key", 2)
         end
-        data[#data + 1] = new Data(key = key, value = input:decode())
+        data[#data + 1] = Data(key = key, value = input:decode())
     end
     if #input ~= 0 then
         error("snapshot has trailing bytes", 2)
     end
 
-    return new Decoded(
-        prelude = new events.SnapshotPrelude(
+    return Decoded(
+        prelude = events.SnapshotPrelude(
             version = version,
             nextEntityId = nextId,
             entityCount = total,

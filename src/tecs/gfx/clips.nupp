@@ -77,10 +77,10 @@ export const ClipComponent: ecs.ComponentDefinition<Clip> = ecs.newComponent(Cli
     -- `index` key the default snapshot codec writes under it.
     name = "Clip",
     construct = function(index: integer?): Clip
-        return new Clip(index ?? 0)
+        return Clip(index ?? 0)
     end,
     default = function(): Clip
-        return new Clip(0)
+        return Clip(0)
     end,
 })
 

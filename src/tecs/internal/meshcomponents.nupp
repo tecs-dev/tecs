@@ -33,7 +33,7 @@ export const Transform3DComponent: components.FFIComponent<Transform3D> = compon
         scaleY: number?,
         scaleZ: number?
     ): Transform3D
-        return new Transform3D(
+        return Transform3D(
             x ?? 0,
             y ?? 0,
             z ?? 0,
@@ -47,7 +47,7 @@ export const Transform3DComponent: components.FFIComponent<Transform3D> = compon
         )
     end,
     default = function(): Transform3D
-        return new Transform3D()
+        return Transform3D()
     end,
 })
 @derive(nupp.derive.Debug)
@@ -60,10 +60,10 @@ end
 export const Bounds3DComponent: components.FFIComponent<Bounds3D> = components.newFFIComponent({
     name = "Bounds3D",
     construct = function(x: number?, y: number?, z: number?, radius: number?): Bounds3D
-        return new Bounds3D(x ?? 0, y ?? 0, z ?? 0, radius ?? 1)
+        return Bounds3D(x ?? 0, y ?? 0, z ?? 0, radius ?? 1)
     end,
     default = function(): Bounds3D
-        return new Bounds3D()
+        return Bounds3D()
     end,
 })
 @derive(nupp.derive.Debug)
@@ -74,10 +74,10 @@ end
 export const MeshComponent: components.FFIComponent<Mesh> = components.newFFIComponent({
     name = "Mesh",
     construct = function(model: integer?, index: integer?): Mesh
-        return new Mesh(model ?? 0, index ?? 0)
+        return Mesh(model ?? 0, index ?? 0)
     end,
     default = function(): Mesh
-        return new Mesh()
+        return Mesh()
     end,
     save = function(value: Mesh): any
         return {asset = registry.name(value.model), index = value.index}
@@ -88,7 +88,7 @@ export const MeshComponent: components.FFIComponent<Mesh> = components.newFFICom
             index: integer
         }
 
-        return new Mesh(saved.asset ~= nil and registry.find(saved.asset) or 0, saved.index)
+        return Mesh(saved.asset ~= nil and registry.find(saved.asset) or 0, saved.index)
     end,
 
 })
@@ -100,10 +100,10 @@ end
 export const MeshMaterialComponent: components.FFIComponent<MeshMaterial> = components.newFFIComponent({
     name = "MeshMaterial",
     construct = function(model: integer?, index: integer?): MeshMaterial
-        return new MeshMaterial(model ?? 0, index ?? 0)
+        return MeshMaterial(model ?? 0, index ?? 0)
     end,
     default = function(): MeshMaterial
-        return new MeshMaterial()
+        return MeshMaterial()
     end,
     save = function(value: MeshMaterial): any
         return {asset = registry.name(value.model), index = value.index}
@@ -114,7 +114,7 @@ export const MeshMaterialComponent: components.FFIComponent<MeshMaterial> = comp
             index: integer
         }
 
-        return new MeshMaterial(saved.asset ~= nil and registry.find(saved.asset) or 0, saved.index)
+        return MeshMaterial(saved.asset ~= nil and registry.find(saved.asset) or 0, saved.index)
     end,
 
 })
@@ -125,10 +125,10 @@ end
 export const MeshSkinComponent: components.TableComponent<MeshSkin> = components.newComponent({
     name = "MeshSkin",
     construct = function(matrices: {number}): MeshSkin
-        return new MeshSkin(matrices = matrices)
+        return MeshSkin(matrices = matrices)
     end,
     default = function(): MeshSkin
-        return new MeshSkin(matrices = {})
+        return MeshSkin(matrices = {})
     end,
 })
 @derive(nupp.derive.Debug)
@@ -138,10 +138,10 @@ end
 export const MeshMorphComponent: components.TableComponent<MeshMorph> = components.newComponent({
     name = "MeshMorph",
     construct = function(weights: {number}): MeshMorph
-        return new MeshMorph(weights = weights)
+        return MeshMorph(weights = weights)
     end,
     default = function(): MeshMorph
-        return new MeshMorph(weights = {})
+        return MeshMorph(weights = {})
     end,
 })
 export const Renderable3D = components.newTagComponent({
@@ -180,10 +180,10 @@ export const PointLight3DComponent: components.FFIComponent<PointLight3D> = comp
         intensity: number?,
         flags: integer?
     ): PointLight3D
-        return new PointLight3D(radius ?? 10, r ?? 1, g ?? 1, b ?? 1, intensity ?? 1, flags ?? 0)
+        return PointLight3D(radius ?? 10, r ?? 1, g ?? 1, b ?? 1, intensity ?? 1, flags ?? 0)
     end,
     default = function(): PointLight3D
-        return new PointLight3D()
+        return PointLight3D()
     end,
 })
 
@@ -226,7 +226,7 @@ export const SpotLight3DComponent: components.FFIComponent<SpotLight3D> = compon
         intensity: number?,
         flags: integer?
     ): SpotLight3D
-        return new SpotLight3D(
+        return SpotLight3D(
             radius ?? 10,
             innerAngle ?? math.rad(20),
             outerAngle ?? math.rad(30),
@@ -238,6 +238,6 @@ export const SpotLight3DComponent: components.FFIComponent<SpotLight3D> = compon
         )
     end,
     default = function(): SpotLight3D
-        return new SpotLight3D()
+        return SpotLight3D()
     end,
 })

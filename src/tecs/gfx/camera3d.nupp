@@ -180,7 +180,7 @@ export function newCamera3D(options: Options?): Camera3D
     const far = options.far or 1000.0
     validateProjection(verticalFov, near, far)
 
-    local self = new Camera3D()
+    local self = Camera3D()
     self.x = options.x or 0.0
     self.y = options.y or 0.0
     self.z = options.z or 0.0

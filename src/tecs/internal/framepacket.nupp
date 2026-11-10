@@ -404,7 +404,7 @@ export function new(value: world.World): Extractor
         return lightEntities[left] < lightEntities[right]
     end
 
-    return new Extractor(
+    return Extractor(
         world = value,
         drawCapacity = 64,
         lightCapacity = 64,
@@ -628,7 +628,7 @@ local function collect(exclusive self: Extractor): nil
                             authoredPrevious ~= nil
                         )
                         self.chunkKinds[rows] = hasChunk
-                        const tileSprite = hasChunk and new rendercomponents.Sprite(chunk.tileset, 0, 0, 1, 1) or nil
+                        const tileSprite = hasChunk and rendercomponents.Sprite(chunk.tileset, 0, 0, 1, 1) or nil
                         if hasChunk then
                             run.tileBytes = tilechunk.packed(chunk)
                         end
@@ -889,7 +889,7 @@ local function sceneChanged(exclusive self: Extractor, eye: View, snapshot: bool
             const count = assert(last) - assert(first) + 1
             local run = self.runs[assert(runKey)]
             if run == nil or run.archetype ~= active then
-                run = new Run(
+                run = Run(
                     archetype = active,
                     offset = total,
                     length = count as integer,
@@ -1278,7 +1278,7 @@ end
 local function encode(exclusive self: Extractor, width: integer, height: integer, residentRevision: integer?): string
     assert(width > 0 and height > 0, "framepacket: viewport dimensions must be positive")
     const cameraX, cameraY, zoom, rotation = view(self, width, height)
-    const eye = new View(width = width, height = height, x = cameraX, y = cameraY, zoom = zoom, rotation = rotation)
+    const eye = View(width = width, height = height, x = cameraX, y = cameraY, zoom = zoom, rotation = rotation)
     const previous = self.sceneRevision
     const matched = self.cacheValid and residentRevision ~= nil and residentRevision == previous
     const changed = sceneChanged(self, eye, residentRevision == nil)

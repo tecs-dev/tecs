@@ -423,7 +423,7 @@ export const SoundComponent: ecs.ComponentDefinition<Emitter> = ecs.newComponent
         z: number?,
         group: integer?
     ): Emitter
-        return new Emitter(
+        return Emitter(
             clip or 0,
             playing ~= false,
             gain or 1,
@@ -438,7 +438,7 @@ export const SoundComponent: ecs.ComponentDefinition<Emitter> = ecs.newComponent
         )
     end,
     default = function(): Emitter
-        return new Emitter(0, true, 1, false, 1, false, 0, 0, 0, 0, 0)
+        return Emitter(0, true, 1, false, 1, false, 0, 0, 0, 0, 0)
     end,
     save = function(value: Emitter): any
         -- These saved keys are a compatibility surface: a file written by an
@@ -472,7 +472,7 @@ export const SoundComponent: ecs.ComponentDefinition<Emitter> = ecs.newComponent
         -- A file written before `playing` existed carries no answer, and the
         -- one that matches what it recorded is that the sound was on.
 
-        return new Emitter(
+        return Emitter(
             clip,
             saved.playing ~= false,
             (saved.gain as number?) or 1,
@@ -515,16 +515,16 @@ export const ListenerComponent: ecs.ComponentDefinition<Listener> = ecs.newCompo
     -- This persisted component name is a compatibility surface.
     name = "Listener",
     construct = function(scale: number?): Listener
-        return new Listener(scale or 1)
+        return Listener(scale or 1)
     end,
     default = function(): Listener
-        return new Listener(1)
+        return Listener(1)
     end,
     save = function(value: Listener): any
         return {scale = value.scale}
     end,
     load = function(value: any): Listener
-        return new Listener(((value as {[string]: any}).scale as number?) or 1)
+        return Listener(((value as {[string]: any}).scale as number?) or 1)
     end,
 })
 
@@ -552,10 +552,10 @@ export const ReverbZoneComponent: ecs.ComponentDefinition<ReverbZone> = ecs.newC
     -- This persisted component name is a compatibility surface.
     name = "ReverbZone",
     construct = function(bus: integer?, radius: number?, level: number?): ReverbZone
-        return new ReverbZone(bus or 0, radius or 1, level or 0.5)
+        return ReverbZone(bus or 0, radius or 1, level or 0.5)
     end,
     default = function(): ReverbZone
-        return new ReverbZone(0, 1, 0.5)
+        return ReverbZone(0, 1, 0.5)
     end,
     save = function(value: ReverbZone): any
         return {bus = groupNames[value.bus], radius = value.radius, level = value.level}
@@ -564,7 +564,7 @@ export const ReverbZoneComponent: ecs.ComponentDefinition<ReverbZone> = ecs.newC
         local fields = value as {[string]: any}
         local name = fields.bus as string?
 
-        return new ReverbZone(
+        return ReverbZone(
             name ~= nil and groupId(name) or 0,
             (fields.radius as number?) or 1,
             (fields.level as number?) or 0.5
@@ -1673,7 +1673,7 @@ local function record(
     self.sequence = sequence
     local time = (at ~= nil and at > 0) and at or self:now()
     local known = soundNames[clip]
-    local entry = new Event(
+    local entry = Event(
         sequence = sequence,
         time = time,
         event = event,
@@ -1868,7 +1868,7 @@ local function claim(
     if key ~= nil then
         local bucket = self.buckets[key]
         if bucket == nil then
-            bucket = new Bucket(count = 0, last = 0)
+            bucket = Bucket(count = 0, last = 0)
             self.buckets[key] = bucket
         end
         bucket.count = bucket.count + 1
@@ -1948,7 +1948,7 @@ end
 
 --- Makes a Bus handle without telling the backend, which `Audio.bus` does.
 local function newBus(borrows self: Audio, name: string, id: integer, parent: string?): Bus
-    return new Bus(
+    return Bus(
         name = name,
         id = id,
         owner = self.registry,
@@ -1964,7 +1964,7 @@ end
 
 --- Makes a Track handle without telling the backend.
 local function newTrack(borrows self: Audio, id: integer, bus: string, limit: integer): Track
-    return new Track(
+    return Track(
         id = id,
         owner = self.registry,
         busName = bus,
@@ -2040,7 +2040,7 @@ local function insertEffect(
         set.param = param
         set.gain = value
     end
-    local effect = new Effect(
+    local effect = Effect(
         id = id,
         name = spec.name,
         owner = self.registry,
@@ -2615,7 +2615,7 @@ export function newAudio(config: Config?): Audio
     for slot = 1, maxVoices do
         voices[
             slot
-        ] = new Voice(
+        ] = Voice(
             clip = 0,
             gain = 1,
             applied = -1,
@@ -2652,7 +2652,7 @@ export function newAudio(config: Config?): Audio
         finished[slot] = 0
     end
 
-    local self = new Audio(
+    local self = Audio(
         closed = false,
         available = backend.available,
         backend = backend,
@@ -2669,7 +2669,7 @@ export function newAudio(config: Config?): Audio
         soundsById = {},
         decoderNames = {},
         decoderIds = {},
-        variance = new random.Xoshiro128(),
+        variance = random.Xoshiro128(),
         elapsed = 0,
         pending = {},
         pendingCount = 0,
@@ -2848,7 +2848,7 @@ function Audio.output(borrows self: Audio): audiobackend.OutputStatus
         channels = self.backend.channels
     end
 
-    return new audiobackend.OutputStatus(
+    return audiobackend.OutputStatus(
         state = state,
         drops = 0,
         reopens = 0,
@@ -3592,7 +3592,7 @@ function Audio.voiceList(borrows self: Audio): {VoiceInfo}
         if voice.sounding then
             list[
                 #list + 1
-            ] = new VoiceInfo(
+            ] = VoiceInfo(
                 handle = handleOf(self, slot),
                 clip = soundNames[voice.clip],
                 gain = voice.gain,
@@ -4396,7 +4396,7 @@ local function listen(
                         end
                         self.zones[
                             #self.zones + 1
-                        ] = new Zone(bus = bus, x = x, y = y, z = z, radius = zone.radius / unit, level = zone.level)
+                        ] = Zone(bus = bus, x = x, y = y, z = z, radius = zone.radius / unit, level = zone.level)
                     end
                 end
             end
@@ -4795,7 +4795,7 @@ export function openMicrophone(config: MicrophoneConfig?): (Microphone?, string?
         return nil, reason or "no recording device opened"
     end
 
-    return new Microphone(frequency = capture.frequency, channels = capture.channels, capture = capture)
+    return Microphone(frequency = capture.frequency, channels = capture.channels, capture = capture)
 end
 
 function Microphone.failure(borrows self: Microphone): string?

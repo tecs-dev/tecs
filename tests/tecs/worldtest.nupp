@@ -268,10 +268,10 @@ function suite.spawnsUpdatesAndMovesTableComponents(): nil
     local position = components.newComponent({
         name = "test.WorldPosition",
         construct = function(x: number, y: number): Position
-            return new Position(x = x, y = y)
+            return Position(x = x, y = y)
         end,
         default = function(): Position
-            return new Position(x = 0, y = 0)
+            return Position(x = 0, y = 0)
         end
     })
     local visible = components.newTagComponent({name = "test.WorldPositionVisible"})
@@ -298,10 +298,10 @@ function suite.usesFreshTableDefaultsPerEntity(): nil
     local state = components.newComponent({
         name = "test.WorldDefaultPosition",
         construct = function(x: number): Position
-            return new Position(x = x, y = 0)
+            return Position(x = x, y = 0)
         end,
         default = function(): Position
-            return new Position(x = 0, y = 0)
+            return Position(x = 0, y = 0)
         end
     })
     local value = world.new(3)
@@ -319,10 +319,10 @@ function suite.exposesTypedColumnsDuringQueryIteration(): nil
     local position = components.newComponent({
         name = "test.WorldQueriedPosition",
         construct = function(x: number, y: number): Position
-            return new Position(x = x, y = y)
+            return Position(x = x, y = y)
         end,
         default = function(): Position
-            return new Position(x = 0, y = 0)
+            return Position(x = 0, y = 0)
         end
     })
     local value = world.new(3)

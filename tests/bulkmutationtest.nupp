@@ -11,10 +11,10 @@ end
 const position = ecs.newComponent(Point, {
     name = "test.BulkPosition",
     construct = function(x: number): Point
-        return new Point(x = x)
+        return Point(x = x)
     end,
     default = function(): Point
-        return new Point(x = 0)
+        return Point(x = 0)
     end
 })
 const tag = ecs.newTagComponent({name = "test.BulkTag"})
@@ -582,10 +582,10 @@ function suite.batchDefaultsStillRunForEveryEntityAndEachReset(): nil
         name = "test.BulkUniqueDefault",
         default = function(): Point
             sequence += 1
-            return new Point(x = sequence)
+            return Point(x = sequence)
         end,
         construct = function(): Point
-            return new Point(x = 0)
+            return Point(x = 0)
         end
     })
     const world = ecs.newWorld()
@@ -603,13 +603,13 @@ function suite.failingBulkDefaultsDoNotExchangeLiveSourceColumns(): nil
     const fragile = ecs.newComponent(Point, {
         name = "test.BulkFailingDefault",
         construct = function(): Point
-            return new Point(x = 0)
+            return Point(x = 0)
         end,
         default = function(): Point
             if fail then
                 error("bulk default failed")
             end
-            return new Point(x = 0)
+            return Point(x = 0)
         end
     })
     const world = ecs.newWorld()

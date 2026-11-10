@@ -94,5 +94,5 @@ end
 --- Creates an empty reverse relationship index.
 --- @return the empty index
 export function new(): InverseIndex
-    return new InverseIndex(inverse = {})
+    return InverseIndex(inverse = {})
 end

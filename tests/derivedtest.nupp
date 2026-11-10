@@ -34,7 +34,7 @@ ecs.newComponent(Requiring, {requires = {Velocity}})
 
 function suite.configuredDerivedRequirementsAndTransientPolicyApplyToRawValues(): nil
     const world = ecs.newWorld()
-    const id = world:spawn(new Requiring())
+    const id = world:spawn(Requiring())
     world:commit()
     test.assert(world:has(id, Velocity))
     const loaded = ecs.newWorld()
@@ -47,7 +47,7 @@ end
 
 function suite.stagedNativeRowsAreCapturedBeforeTheirStorageChanges(): nil
     const world = ecs.newWorld()
-    const source = world:spawn(new Velocity(3, 4))
+    const source = world:spawn(Velocity(3, 4))
     world:commit()
     const copied = world:spawn(assert(world:get(source, Velocity)))
     assert(world:getMut(source, Velocity)).x = 99
@@ -108,7 +108,7 @@ end
 
 function suite.derivedValuesPreserveTypedNativeAndManagedColumns(): nil
     const world = ecs.newWorld()
-    const id = world:spawn(new Velocity(10, 20), new Description(text = "Player"))
+    const id = world:spawn(Velocity(10, 20), Description(text = "Player"))
     world:commit()
     const velocity: Velocity = assert(readDerived(world, id, Velocity))
     test.equal(velocity.x, 10)
@@ -128,7 +128,7 @@ end
 function suite.derivedRelationshipsCarryTypedNativePayloads(): nil
     const world = ecs.newWorld()
     const target = world:spawn()
-    const id = world:spawn(new Spring(target, 0.5))
+    const id = world:spawn(Spring(target, 0.5))
     world:commit()
     test.equal(assert(readEdge(world, id, Spring)).stiffness, 0.5)
     test.equal(world:relationshipSources(Spring, target)[1], id)
@@ -198,7 +198,7 @@ function suite.factoriesRejectMismatchedDerivesAndIncompleteCodecs(): nil
         ecs.newRelationship(Follow, {
             name = "test.Derived.IncompleteCodec",
             load = function(value: any): Follow
-                return new Follow(target = value.target as integer)
+                return Follow(target = value.target as integer)
             end,
         })
     end)
@@ -211,14 +211,14 @@ function suite.batchDefaultsAndMutationsUseDerivedDeclarations(): nil
     world:commit()
     const query = world:newQuery({include = {Velocity}})
     test.equal(query:count(), 256)
-    world:batchSet(query, new Pinned(value = 9))
+    world:batchSet(query, Pinned(value = 9))
     world:commit()
     test.equal(world:newQuery({include = {Pinned}}):count(), 256)
     world:batchRemove(query, Pinned)
     world:commit()
     test.equal(world:newQuery({include = {Pinned}}):count(), 0)
     const bundle = world:newBundle("derived", {required = {Velocity}, with = {[Pinned] = true}})
-    const id = bundle:spawn(new Velocity())
+    const id = bundle:spawn(Velocity())
     world:commit()
     test.equal(assert(world:get(id, Pinned)).value, 7)
     world:shutdown()
@@ -228,10 +228,10 @@ function suite.managedAndNativeEdgesRoundTripWithoutHandwrittenCodecs(): nil
     const world = ecs.newWorld()
     const target = world:spawn()
     const id = world:spawn(
-        new Velocity(3, 4),
-        new Description(text = "saved"),
-        new Follow(target = target),
-        new Spring(target, 0.75)
+        Velocity(3, 4),
+        Description(text = "saved"),
+        Follow(target = target),
+        Spring(target, 0.75)
     )
     for _, format in ipairs({"table", "binary"}) do
         const snapshot = world:saveSnapshot({format = format as "table" | "binary"})

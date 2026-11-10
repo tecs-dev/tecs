@@ -192,7 +192,7 @@ export function newCamera2D(options: {
     rotation: number?
 }?): Camera2D
     const value = options or {}
-    const camera = new rendercomponents.Camera2D(value.x ?? 0, value.y ?? 0, value.zoom ?? 1, value.rotation ?? 0)
+    const camera = rendercomponents.Camera2D(value.x ?? 0, value.y ?? 0, value.zoom ?? 1, value.rotation ?? 0)
     assert(camera.zoom > 0, "camera zoom must be positive")
     for _, number in ipairs({camera.x, camera.y, camera.zoom, camera.rotation}) do
         assert(number == number and math.abs(number) < math.huge, "camera values must be finite")

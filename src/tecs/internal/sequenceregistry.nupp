@@ -96,7 +96,7 @@ export function restore(data: {[string]: any}): sequencetypes.Program
             return existing
         end
     end
-    local program = new sequencetypes.Program(
+    local program = sequencetypes.Program(
         name = name,
         version = restoredVersion,
         clock = (data.clock as sequencetypes.ClockId?) or "fixed",

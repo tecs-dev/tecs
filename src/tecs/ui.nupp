@@ -156,7 +156,7 @@ export const Layout: ComponentDefinition<LayoutValue> = ecs.newComponent(LayoutV
     transient = true,
     construct = function(options: LayoutOptions?): LayoutValue
         local values = options or {}
-        return new LayoutValue(
+        return LayoutValue(
             values.x ?? 0,
             values.y ?? 0,
             values.width ?? 0,
@@ -166,7 +166,7 @@ export const Layout: ComponentDefinition<LayoutValue> = ecs.newComponent(LayoutV
         )
     end,
     default = function(): LayoutValue
-        return new LayoutValue(0, 0, 0, 0, 0, 0)
+        return LayoutValue(0, 0, 0, 0, 0, 0)
     end,
 })
 
@@ -183,10 +183,10 @@ export const Style: ComponentDefinition<StyleValue> = ecs.newComponent(StyleValu
     name = "UiStyle",
     requires = {Node, Layout, gfx.Clip, ecs.Transform2D, ecs.RelativeTransform2D},
     construct = function(style: StyleOptions?): StyleValue
-        return new StyleValue(style = style or {})
+        return StyleValue(style = style or {})
     end,
     default = function(): StyleValue
-        return new StyleValue(style = {})
+        return StyleValue(style = {})
     end,
 })
 
@@ -225,7 +225,7 @@ export const Root: ComponentDefinition<RootValue> = ecs.newComponent(RootValue, 
     requires = {Style},
     construct = function(options: RootOptions?): RootValue
         local values = options or {}
-        return new RootValue(
+        return RootValue(
             space = values.space ?? "screen",
             width = values.width ?? 0,
             height = values.height ?? 0,
@@ -234,7 +234,7 @@ export const Root: ComponentDefinition<RootValue> = ecs.newComponent(RootValue, 
         )
     end,
     default = function(): RootValue
-        return new RootValue(space = "screen", width = 0, height = 0, pixelDensity = 1, sizing = "auto")
+        return RootValue(space = "screen", width = 0, height = 0, pixelDensity = 1, sizing = "auto")
     end,
 })
 
@@ -251,10 +251,10 @@ export type Paint = PaintValue
 export const Paint: ComponentDefinition<PaintValue> = ecs.newComponent(PaintValue, {
     name = "UiPaint",
     construct = function(stretch: boolean?): PaintValue
-        return new PaintValue(stretch == true)
+        return PaintValue(stretch == true)
     end,
     default = function(): PaintValue
-        return new PaintValue(false)
+        return PaintValue(false)
     end,
 })
 
@@ -297,7 +297,7 @@ export const Intrinsic: ComponentDefinition<IntrinsicValue> = ecs.newComponent(I
     requires = {Style},
     construct = function(options: IntrinsicOptions?): IntrinsicValue
         local values = options or {}
-        return new IntrinsicValue(
+        return IntrinsicValue(
             source = values.source ?? "custom",
             width = values.width ?? 0,
             height = values.height ?? 0,
@@ -307,7 +307,7 @@ export const Intrinsic: ComponentDefinition<IntrinsicValue> = ecs.newComponent(I
         )
     end,
     default = function(): IntrinsicValue
-        return new IntrinsicValue(source = "custom", width = 0, height = 0, minWidth = 0, scale = 1, wrap = false)
+        return IntrinsicValue(source = "custom", width = 0, height = 0, minWidth = 0, scale = 1, wrap = false)
     end,
 })
 
@@ -343,10 +343,10 @@ export const Scroll: ComponentDefinition<ScrollValue> = ecs.newComponent(ScrollV
     requires = {Style},
     construct = function(options: ScrollOptions?): ScrollValue
         local values = options or {}
-        return new ScrollValue(values.x ?? 0, values.y ?? 0, values.contentWidth ?? 0, values.contentHeight ?? 0)
+        return ScrollValue(values.x ?? 0, values.y ?? 0, values.contentWidth ?? 0, values.contentHeight ?? 0)
     end,
     default = function(): ScrollValue
-        return new ScrollValue(0, 0, 0, 0)
+        return ScrollValue(0, 0, 0, 0)
     end,
 })
 
@@ -407,7 +407,7 @@ export const InteractionState: ComponentDefinition<InteractionStateValue> = ecs.
     transient = true,
     construct = function(options: InteractionStateOptions?): InteractionStateValue
         local values = options or {}
-        return new InteractionStateValue(
+        return InteractionStateValue(
             values.hovered ?? false,
             values.pressed ?? false,
             values.focused ?? false,
@@ -415,7 +415,7 @@ export const InteractionState: ComponentDefinition<InteractionStateValue> = ecs.
         )
     end,
     default = function(): InteractionStateValue
-        return new InteractionStateValue(false, false, false, false)
+        return InteractionStateValue(false, false, false, false)
     end,
 })
 
@@ -455,7 +455,7 @@ export const Interaction: ComponentDefinition<InteractionValue> = ecs.newCompone
     requires = {Style, InteractionState},
     construct = function(options: InteractionOptions?): InteractionValue
         local values = options or {}
-        return new InteractionValue(
+        return InteractionValue(
             values.enabled ?? true,
             values.focusable ?? true,
             values.tabIndex ?? 0,
@@ -464,7 +464,7 @@ export const Interaction: ComponentDefinition<InteractionValue> = ecs.newCompone
         )
     end,
     default = function(): InteractionValue
-        return new InteractionValue(true, true, 0, 0, false)
+        return InteractionValue(true, true, 0, 0, false)
     end,
 })
 
@@ -474,7 +474,7 @@ export const Scrollbar: ComponentDefinition<ScrollbarValue> = ecs.newComponent(S
     requires = {Style, Paint, Interaction},
     construct = function(options: ScrollbarOptions?): ScrollbarValue
         local values = options or {}
-        return new ScrollbarValue(
+        return ScrollbarValue(
             axis = values.axis ?? "vertical",
             thickness = values.thickness ?? 6,
             inset = values.inset ?? 2,
@@ -482,7 +482,7 @@ export const Scrollbar: ComponentDefinition<ScrollbarValue> = ecs.newComponent(S
         )
     end,
     default = function(): ScrollbarValue
-        return new ScrollbarValue(axis = "vertical", thickness = 6, inset = 2, minLength = 18)
+        return ScrollbarValue(axis = "vertical", thickness = 6, inset = 2, minLength = 18)
     end,
 })
 
@@ -626,7 +626,7 @@ local function emit(
     if entity == 0 then
         return false
     end
-    local value = new Event(
+    local value = Event(
         kind = kind,
         target = entity,
         currentTarget = entity,
@@ -1204,7 +1204,7 @@ local function bounds(borrows world: World, state: State, entity: integer): Hit?
         left, top, right, bottom = math.min(left, x), math.min(top, y), math.max(right, x), math.max(bottom, y)
     end
 
-    return new Hit(entity = entity, left = left, top = top, right = right, bottom = bottom, order = pose.z)
+    return Hit(entity = entity, left = left, top = top, right = right, bottom = bottom, order = pose.z)
 end
 
 local function geometry(exclusive world: World, state: State, ids: {integer}): nil
@@ -1327,7 +1327,7 @@ local function pointerFor(state: State, id: string, kind: string): Pointer
     if p then
         return p
     end
-    p = new Pointer(
+    p = Pointer(
         id = id,
         kind = kind,
         x = 0,
@@ -1691,7 +1691,7 @@ export function install(exclusive world: World, options: Options?): nil
         "invalid UI clip range"
     )
     assert((values.dragThreshold or 4) >= 0 and (values.wheelStep or 40) >= 0, "invalid UI interaction settings")
-    local state = new State(
+    local state = State(
         tree = uinative.create(),
         cameras = world:newQuery({
             include = {gfx.Camera2D, gfx.ActiveCamera}

@@ -106,7 +106,7 @@ end
 local function jet(x: number, y: number, dx: number, dy: number): Jet
     const length = math.sqrt(dx * dx + dy * dy)
 
-    return new Jet(x = x, y = y, dx = dx / length, dy = dy / length)
+    return Jet(x = x, y = y, dx = dx / length, dy = dy / length)
 end
 
 const JETS: {

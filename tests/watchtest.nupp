@@ -13,7 +13,7 @@ local record World
     seconds: number
 end
 
-local scene: World = new World(state = {}, seconds = 0)
+local scene: World = World(state = {}, seconds = 0)
 
 --- Puts one path's size and modification time where a scan will read them.
 --- @param path the path to describe
@@ -339,7 +339,7 @@ end
 function suite.readsARealFileThroughTheDefaultSource(): nil
     fresh()
     do
-        local scratch = assert(disk.createTemporaryDirectory(new disk.TemporaryOptions(prefix = "tecs-watch-")))
+        local scratch = assert(disk.createTemporaryDirectory(disk.TemporaryOptions(prefix = "tecs-watch-")))
         local path = scratch:toString() .. "/shader.wgsl"
         assert(disk.write(path, "one"))
 

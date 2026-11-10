@@ -217,7 +217,7 @@ function suite.audioToolsPlayAndReloadASoundTheMixerKnows(): nil
     local mixer = audio.install(world, {backend = backend})
     test.equal(#content("audio").decoders, 0)
     local reloads = {0}
-    local sound = new audio.Sound(
+    local sound = audio.Sound(
         name = "mcp/known.wav",
         duration = 1,
         decoder = "test",

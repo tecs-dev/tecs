@@ -144,7 +144,7 @@ export function serve(port: integer): nil
                 previous = current
                 with
                     scratch = assert(
-                        files.createTemporaryDirectory(new files.TemporaryOptions(directory = commands.root .. "/out"))
+                        files.createTemporaryDirectory(files.TemporaryOptions(directory = commands.root .. "/out"))
                     )
                 do
                     const fresh = scratch:toString() .. "/site"

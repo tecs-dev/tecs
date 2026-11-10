@@ -8,7 +8,7 @@ local suite = {}
 local function state(id: integer, title: string, width: integer?, height: integer?): window.HostState
     local logicalWidth = width or 800
     local logicalHeight = height or 600
-    return new window.HostState(
+    return window.HostState(
         id = id,
         title = title,
         width = logicalWidth,

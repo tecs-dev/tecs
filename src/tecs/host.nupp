@@ -208,7 +208,7 @@ local function hostState(
     cursorVisible: boolean,
     cursorGrab: string
 ): window.HostState
-    return new window.HostState(
+    return window.HostState(
         id = id,
         title = title,
         width = width,
@@ -497,7 +497,7 @@ end
 --- @raises string when application configuration is invalid.
 export function newSession(config: application.Config?): Session
     const app = application.newApplication(config)
-    const session = new Session(
+    const session = Session(
         app = app,
         input = events.newMessageBus(),
         hosted = nupphost.attached(),

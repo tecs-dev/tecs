@@ -276,7 +276,7 @@ export function new(id: integer, values: {components.Component}, queue: DirtyQue
         return left.componentId < right.componentId
     end)
 
-    return new Archetype(
+    return Archetype(
         id = id,
         signature = signatureOf(values),
         componentIds = membership,
@@ -1010,7 +1010,7 @@ export function valuesForMove(
                     columns[#columns + 1] = component
                 end
             end
-            plan = new MovePlan(components = columns, values = {})
+            plan = MovePlan(components = columns, values = {})
             source.movePlans[target] = plan
         end
         for index = 1, #plan.components do

@@ -299,7 +299,7 @@ export function create(gravityY: number?): Reference
             local generation = existing ~= nil and existing.generation + 1 or 0
             bodies[
                 slotIndex
-            ] = new Slot(
+            ] = Slot(
                 live = true,
                 generation = generation,
                 entity = command.entity,
@@ -319,7 +319,7 @@ export function create(gravityY: number?): Reference
             local previous = colliders[shapeIndex]
             colliders[
                 shapeIndex
-            ] = new Link(
+            ] = Link(
                 live = true,
                 generation = previous ~= nil and previous.generation + 1 or 0,
                 entity = command.entity,
@@ -340,7 +340,7 @@ export function create(gravityY: number?): Reference
                 local previous = colliders[shapeIndex]
                 colliders[
                     shapeIndex
-                ] = new Link(
+                ] = Link(
                     live = true,
                     generation = previous ~= nil and previous.generation + 1 or 0,
                     entity = command.def.entity,
@@ -363,7 +363,7 @@ export function create(gravityY: number?): Reference
                 local previous = joints[jointIndex]
                 joints[
                     jointIndex
-                ] = new Link(
+                ] = Link(
                     live = true,
                     generation = previous ~= nil and previous.generation + 1 or 0,
                     entity = command.entity,
@@ -536,7 +536,7 @@ export function create(gravityY: number?): Reference
     end
 
     local function resolveEntities(entities: {integer}): contract.EntityHandles
-        local result = new contract.EntityHandles(
+        local result = contract.EntityHandles(
             bodyIndex1 = {},
             bodyGeneration = {},
             colliderIndex1 = {},
@@ -641,7 +641,7 @@ export function create(gravityY: number?): Reference
             if parts[1] == "B" and #parts == 11 then
                 bodies[
                     index(parts[2])
-                ] = new Slot(
+                ] = Slot(
                     live = parts[3] == "1",
                     generation = index(parts[4]),
                     entity = index(parts[5]),
@@ -660,7 +660,7 @@ export function create(gravityY: number?): Reference
             elseif parts[1] == "C" and #parts == 6 then
                 colliders[
                     index(parts[2])
-                ] = new Link(
+                ] = Link(
                     live = parts[3] == "1",
                     generation = index(parts[4]),
                     entity = index(parts[5]),
@@ -669,7 +669,7 @@ export function create(gravityY: number?): Reference
             elseif parts[1] == "J" and #parts == 6 then
                 joints[
                     index(parts[2])
-                ] = new Link(
+                ] = Link(
                     live = parts[3] == "1",
                     generation = index(parts[4]),
                     entity = index(parts[5]),
@@ -689,7 +689,7 @@ export function create(gravityY: number?): Reference
         joints = {}
     end
 
-    local simulation = new contract.Simulation(
+    local simulation = contract.Simulation(
         id = id,
         subStepCount = 4,
         workerCount = 1,
@@ -731,13 +731,13 @@ export function create(gravityY: number?): Reference
         return total
     end
 
-    return new Reference(
+    return Reference(
         simulation = simulation,
         log = log,
         pushEvent = function(entityA: integer, entityB: integer, started: boolean, sensor: boolean): nil
             pending[
                 #pending + 1
-            ] = new PendingEvent(entityA = entityA, entityB = entityB, started = started, sensor = sensor)
+            ] = PendingEvent(entityA = entityA, entityB = entityB, started = started, sensor = sensor)
         end,
         bodyCount = function(): integer
             local total: integer = 0

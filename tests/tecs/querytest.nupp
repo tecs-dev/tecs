@@ -44,14 +44,14 @@ function suite.exposesTypedRawColumnsOnMatchingArchetypes(): nil
     local position = components.newComponent({
         name = "test.QueryPosition",
         construct = function(x: number): QueryPoint
-            return new QueryPoint(x = x)
+            return QueryPoint(x = x)
         end,
         default = function(): QueryPoint
-            return new QueryPoint(x = 0)
+            return QueryPoint(x = 0)
         end
     })
     local candidate = archetype.new(1, {position})
-    archetype.append(candidate, 7, {[position.componentId] = new QueryPoint(x = 11)})
+    archetype.append(candidate, 7, {[position.componentId] = QueryPoint(x = 11)})
     local positions: {QueryPoint} = assert(candidate:get(position))
     test.equal(positions[1].x, 11)
 end

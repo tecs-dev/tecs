@@ -337,7 +337,7 @@ export function newPlayer(mixer: audio.Audio, driver: Driver, handle: assets.Han
     checkOptions("newPlayer", options)
     local start = math.min((options and options.start) or 0, driver.duration)
     local clock = driver.now() + LEAD
-    local player = new Player(
+    local player = Player(
         driver = driver,
         handle = handle,
         revision = handle ~= nil and handle:revision() or 0,

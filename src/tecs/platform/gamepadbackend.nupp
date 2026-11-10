@@ -137,13 +137,13 @@ end
 --- that exists to avoid per-device calls gives the saving straight back.
 --- @return a fresh caller-owned observation record
 export function newEvent(): Event
-    return new Event(kind = 0, device = 0, code = 0, value = 0)
+    return Event(kind = 0, device = 0, code = 0, value = 0)
 end
 
 --- Returns the info a device that is not there reports.
 --- @return a fresh caller-owned info record describing nothing
 export function missing(): Info
-    return new Info(connected = false, forceFeedback = false, power = "unknown", percent = -1)
+    return Info(connected = false, forceFeedback = false, power = "unknown", percent = -1)
 end
 
 --- Returns a backend with no devices and no platform source.
@@ -152,7 +152,7 @@ end
 --- answers, nothing is ever attached, and rumble reports that it did not run.
 --- @return a fresh backend that observes nothing
 export function none(): Backend
-    return new Backend(
+    return Backend(
         available = false,
         poll = function(): integer
             return 0

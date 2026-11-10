@@ -51,7 +51,7 @@ local function newStubCapture(
         return frames
     end
 
-    return new audiobackend.Capture(
+    return audiobackend.Capture(
         frequency = frequency,
         channels = channels,
         availableFrames = function(): integer
@@ -138,7 +138,7 @@ local function newStub(listed: {audiobackend.Device}, capacityFrames: integer): 
     local refusal = {""}
     local capture = newStubCapture(48000, 1, capacityFrames, closed)
 
-    local devices = new audiobackend.Devices(
+    local devices = audiobackend.Devices(
         playback = function(): ({audiobackend.Device}, string?)
             return listed
         end,
@@ -161,7 +161,7 @@ local function newStub(listed: {audiobackend.Device}, capacityFrames: integer): 
         end
     )
 
-    return new Stub(
+    return Stub(
         devices = devices,
         capture = capture,
         listed = listed,
@@ -185,8 +185,8 @@ end
 function suite.reportsEveryFieldTheListingCarries(): nil
     local stub = newStub(
         {
-            new audiobackend.Device(id = 1, name = "Built-in Microphone", frequency = 48000, channels = 1),
-            new audiobackend.Device(id = 2, name = "USB Audio", frequency = 44100, channels = 2),
+            audiobackend.Device(id = 1, name = "Built-in Microphone", frequency = 48000, channels = 1),
+            audiobackend.Device(id = 2, name = "USB Audio", frequency = 44100, channels = 2),
         },
         16
     )

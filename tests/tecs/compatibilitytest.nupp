@@ -100,7 +100,7 @@ end
 --- A device-free audio backend, so installing a mixer names its systems and its
 --- snapshot handler without opening an output.
 local function silentBackend(): audiobackend.Backend
-    return new audiobackend.Backend(
+    return audiobackend.Backend(
         available = false,
         frequency = 48000,
         channels = 2,

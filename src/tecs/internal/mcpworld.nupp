@@ -152,7 +152,7 @@ local function construct(kind: ecs.Component, values: {[string]: any}?): compone
             end
         end
 
-        return new components.TableInstance(componentType = definition, value = instance)
+        return components.TableInstance(componentType = definition, value = instance)
     end
     if kind.storageType == "relationship" then
         local definition = kind as components.RelationshipComponent

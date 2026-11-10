@@ -114,7 +114,7 @@ local function newPlayback(
         children[index] = newPlayback(runSlot.timeline, runSlot.mode, runSlot.passCount, 1, 0)
     end
 
-    return new Playback(
+    return Playback(
         timeline = timeline,
         state = tweeneval.newState(timeline.stateSize),
         children = children,
@@ -407,7 +407,7 @@ export function install(): nil
     installed = true
     sequenceregistry.registerEvaluator(
         EVALUATOR,
-        new sequencetypes.Evaluator(
+        sequencetypes.Evaluator(
             -- One resolve per program constant, shared by every playback of it:
             -- easing names become functions and target identifiers become targets
             -- once, not once per entity.

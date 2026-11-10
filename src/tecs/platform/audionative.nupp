@@ -461,7 +461,7 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
 
     local function output(): audiobackend.OutputStatus
         if closed[1] then
-            return new audiobackend.OutputStatus(
+            return audiobackend.OutputStatus(
                 state = "offline",
                 drops = 0,
                 reopens = 0,
@@ -490,7 +490,7 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
             end
         end
 
-        return new audiobackend.OutputStatus(
+        return audiobackend.OutputStatus(
             state = state,
             drops = extra.output_drops(device) as integer,
             reopens = extra.output_reopens(device) as integer,
@@ -500,7 +500,7 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
         )
     end
 
-    return new audiobackend.Backend(
+    return audiobackend.Backend(
         failure = function(): string?
             if not closed[1] and extra.failed(device) ~= 0 then
                 return "the output stream failed; destroy and recreate the audio mixer"
@@ -653,7 +653,7 @@ local function wrap(openDevice: function(): voidptr?, absent: string): (audiobac
                     local record = meterBlock[index]
                     out[
                         #out + 1
-                    ] = new audiobackend.MeterReading(
+                    ] = audiobackend.MeterReading(
                         bus = record.bus ~= 0,
                         id = record.id as integer,
                         peak = record.peak as number,
@@ -827,7 +827,7 @@ local function listDevices(recording: boolean): ({audiobackend.Device}, string?)
         end
         out[
             index + 1
-        ] = new audiobackend.Device(
+        ] = audiobackend.Device(
             id = tecs_audio_devices_id(list, slot) as integer,
             name = name,
             frequency = tecs_audio_devices_frequency(list, slot) as integer,
@@ -970,7 +970,7 @@ local function wrapCapture(
         return total
     end
 
-    return new audiobackend.Capture(
+    return audiobackend.Capture(
         failure = function(): string?
             if not closed[1] and tecs_audio_microphone_failed(microphone) ~= 0 then
                 return "the input stream failed; close and reopen the microphone"
@@ -1035,7 +1035,7 @@ end
 ---
 --- @return a provider naming the platform's devices and opening its microphones
 export function devices(): audiobackend.Devices
-    return new audiobackend.Devices(
+    return audiobackend.Devices(
         playback = function(): ({audiobackend.Device}, string?)
             return listDevices(false)
         end,
@@ -1076,7 +1076,7 @@ end
 ---
 --- @return a provider naming no devices and opening device-free captures
 export function offlineDevices(): audiobackend.Devices
-    return new audiobackend.Devices(
+    return audiobackend.Devices(
         playback = function(): ({audiobackend.Device}, string?)
             return {}, "an offline provider names no devices"
         end,

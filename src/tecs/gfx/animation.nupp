@@ -134,7 +134,7 @@ export const AnimationComponent: ecs.ComponentDefinition<Animation> = ecs.newCom
         loop: boolean?,
         playing: boolean?
     ): Animation
-        return new Animation(
+        return Animation(
             sheetId ?? 0,
             tag ?? 0,
             speed ?? DEFAULT_SPEED,
@@ -146,7 +146,7 @@ export const AnimationComponent: ecs.ComponentDefinition<Animation> = ecs.newCom
         )
     end,
     default = function(): Animation
-        return new Animation(0, 0, DEFAULT_SPEED, 0.0, 0, true, true, 0)
+        return Animation(0, 0, DEFAULT_SPEED, 0.0, 0, true, true, 0)
     end,
     -- A sheet id and a tag id are this process's answers, decided by the order
     -- sheets were built in. What crosses a save is the pair of names, resolved
@@ -181,7 +181,7 @@ export const AnimationComponent: ecs.ComponentDefinition<Animation> = ecs.newCom
             end
         end
 
-        return new Animation(
+        return Animation(
             id,
             tag,
             (stored.speed as number?) ?? DEFAULT_SPEED,
@@ -384,7 +384,7 @@ local function encode(query: ecs.Query, borrows world: ecs.World, clock: number,
             const active = candidate as archetype.Archetype
             local run = runs[active.id]
             if run == nil then
-                run = new EncodedRun()
+                run = EncodedRun()
                 runs[active.id] = run
             end
             if run.structural ~= active:structuralCount()
@@ -579,7 +579,7 @@ export function plugin(exclusive world: ecs.World): nil
                 const active = candidate as archetype.Archetype
                 for row = 1, count as integer do
                     const entity = active.entities[row]
-                    phases[#phases + 1] = new SavedPhase(entity = entity, time = timeOf(running, entity))
+                    phases[#phases + 1] = SavedPhase(entity = entity, time = timeOf(running, entity))
                 end
             end
 

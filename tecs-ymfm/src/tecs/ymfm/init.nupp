@@ -239,7 +239,7 @@ local function model(
     lastPort: integer,
     memory: {Memory}?
 ): Model
-    return new Model(
+    return Model(
         clock = clock,
         divider = divider,
         lastRegister = lastRegister,
@@ -553,7 +553,7 @@ export function new(mixer: audio.Audio, options: Options?): (Fm?, string?)
         error("tecs.ymfm.new: the native library knows no chip named " .. chip, 2)
     end
 
-    return new Fm(
+    return Fm(
         rate = rateOf(found, clock),
         chip = chip,
         clock = clock,

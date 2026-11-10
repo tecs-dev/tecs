@@ -52,7 +52,7 @@ local function decode(section: string): Graph
     for index = 1, reader:readUint32() as integer do
         targets[
             index
-        ] = new Target(
+        ] = Target(
             name = names[(reader:readUint32() as integer) + 1],
             format = reader:readUint32() as integer,
             scale = reader:readFloat32(),
@@ -84,7 +84,7 @@ local function decode(section: string): Graph
         end
         decoded[
             index
-        ] = new Pass(
+        ] = Pass(
             name = name,
             depth = depth,
             hasDepthClear = hasDepthClear,
@@ -97,7 +97,7 @@ local function decode(section: string): Graph
     test.assert(reader:atEnd(), "the section holds nothing the decoder did not read")
     nupp.drop(reader)
 
-    return new Graph(targets = targets, passes = decoded)
+    return Graph(targets = targets, passes = decoded)
 end
 
 local function passNames(): {string}

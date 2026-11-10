@@ -156,5 +156,5 @@ end
 --- Creates independently mutable lighting settings with the documented defaults.
 --- @return caller-owned settings to attach to a View
 export function newLighting(): Lighting
-    return new Lighting()
+    return Lighting()
 end

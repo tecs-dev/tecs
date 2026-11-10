@@ -25,7 +25,7 @@ end
 -- The world is plain rather than `exclusive`, because the collector holds it
 -- for its own lifetime rather than for this call.
 export function new(value: world.World): Collector
-    return new Collector(
+    return Collector(
         world = value,
         query = value:newQuery({
             include = {views.Component}
@@ -51,7 +51,7 @@ function Collector.frame(exclusive self: Collector, width: integer, height: inte
             explicit = true
             if values[index].enabled then
                 views.validate(values[index])
-                selected[#selected + 1] = new Selected(entity = active.entities[index], value = values[index])
+                selected[#selected + 1] = Selected(entity = active.entities[index], value = values[index])
             end
         end
     end

@@ -215,7 +215,7 @@ local function restoreEvaluator(
 end
 
 local function restoreCursor(row: {[string]: any}, program: sequencetypes.Program): sequencetypes.Cursor
-    return new sequencetypes.Cursor(
+    return sequencetypes.Cursor(
         slot = row.slot as integer,
         generation = row.generation as integer,
         alive = true,

@@ -26,16 +26,16 @@ end
 const point = ecs.newComponent(Point, {
     name = "test.FFI.Point",
     construct = function(x: number, y: number): Point
-        return new Point(x, y)
+        return Point(x, y)
     end,
     default = function(): Point
-        return new Point(3, 7)
+        return Point(3, 7)
     end,
     save = function(value: Point): any
         return {x = value.x, y = value.y}
     end,
     load = function(value: any): Point
-        return new Point(value.x as number, value.y as number)
+        return Point(value.x as number, value.y as number)
     end
 })
 
@@ -120,10 +120,10 @@ function suite.sharedStructLayoutsKeepDistinctComponentIdentity(): nil
     const twin = ecs.newComponent(Point, {
         name = "test.FFI.Twin",
         construct = function(x: number): Point
-            return new Point(x, 0)
+            return Point(x, 0)
         end,
         default = function(): Point
-            return new Point()
+            return Point()
         end
     })
     const world = ecs.newWorld()
@@ -148,20 +148,20 @@ function suite.mixedColumnsAndRequiredTransientDefaultsSurviveMoves(): nil
     const label = ecs.newComponent(Label, {
         name = "test.FFI.Label",
         construct = function(text: string): Label
-            return new Label(text = text)
+            return Label(text = text)
         end,
         default = function(): Label
-            return new Label(text = "default")
+            return Label(text = "default")
         end
     })
     const transient = ecs.newComponent(Point, {
         name = "test.FFI.Transient",
         transient = true,
         construct = function(): Point
-            return new Point(5, 9)
+            return Point(5, 9)
         end,
         default = function(): Point
-            return new Point(5, 9)
+            return Point(5, 9)
         end
     })
     const required = ecs.newTagComponent({name = "test.FFI.NativeRequirements", requires = {transient, point(7, 11)}})
@@ -242,10 +242,10 @@ function suite.invalidFactoriesFailBeforeRegistration(): nil
             ecs.newComponent(Point, {
                 name = "test.FFI.NoCodec",
                 construct = function(): Point
-                    return new Point()
+                    return Point()
                 end,
                 default = function(): Point
-                    return new Point()
+                    return Point()
                 end,
                 save = function(value: Point): any
                     return {value.x, value.y}
@@ -260,8 +260,8 @@ function suite.rawStorageRelocatesWithABulkCopy(): nil
     const storage = assert(ffistorage.find(point.componentId))
     const source = ffistorage.allocate(storage, 2) as Point[?]
     @unsafe do
-        source[1] = new Point(13, 17)
-        source[2] = new Point(19, 23)
+        source[1] = Point(13, 17)
+        source[2] = Point(19, 23)
     end
     const target = ffistorage.resize(storage, source, 2, 100) as Point[?]
     @unsafe do
@@ -280,10 +280,10 @@ end
 const arrays = ecs.newComponent(ArrayValue, {
     name = "test.FFI.Arrays",
     construct = function(): ArrayValue
-        return new ArrayValue()
+        return ArrayValue()
     end,
     default = function(): ArrayValue
-        return new ArrayValue()
+        return ArrayValue()
     end
 })
 
@@ -362,13 +362,13 @@ end
 function suite.registrationRejectsPointerAndNestedLayouts(): nil
     test.raises(
         function(): nil
-            ffistorage.new(new PointerValue())
+            ffistorage.new(PointerValue())
         end,
         "require paired snapshot codecs"
     )
     test.raises(
         function(): nil
-            ffistorage.new(new NestedValue())
+            ffistorage.new(NestedValue())
         end,
         "require paired snapshot codecs"
     )
@@ -404,7 +404,7 @@ function suite.rawResizeAndIntegerDecodingRejectOverflow(): nil
 end
 
 function suite.customBackingIsRootedAndUsedAgainOnGrowth(): nil
-    const storage = ffistorage.new(new Point())
+    const storage = ffistorage.new(Point())
     local allocations: integer = 0
     ffistorage.setAllocator(storage, function(bytes: integer, alignment: integer): (any, any)
         allocations = allocations + 1
@@ -438,7 +438,7 @@ function suite.nativeRelationshipsKeepWildcardAndTargetViewsAliased(): nil
     const relationship = ecs.newRelationship(Edge, {
         name = "test.FFI.DenseEdge",
         construct = function(target: integer, weight: number): Edge
-            return new Edge(target, weight)
+            return Edge(target, weight)
         end,
         reverseIndex = true
     })
@@ -474,7 +474,7 @@ function suite.stagedNativeEdgesOutliveTheirSourceRow(): nil
     const relationship = ecs.newRelationship(Edge, {
         name = "test.FFI.CapturedEdges",
         construct = function(target: integer, weight: number): Edge
-            return new Edge(target, weight)
+            return Edge(target, weight)
         end
     })
     const tag = ecs.newTagComponent({name = "test.FFI.CapturedEdgesTag"})
@@ -499,7 +499,7 @@ function suite.sparseNativeEdgesAndRequirementsSurviveRestore(): nil
         name = "test.FFI.SparseEdge",
         sparse = true,
         construct = function(target: integer, weight: number): Edge
-            return new Edge(target, weight)
+            return Edge(target, weight)
         end,
         requires = {required},
         reverseIndex = true

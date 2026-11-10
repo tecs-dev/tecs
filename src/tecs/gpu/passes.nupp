@@ -262,7 +262,7 @@ export function declareTarget(spec: TargetSpec): nil
         error("passes: target '" .. name .. "' needs a scale above zero and at most one", 2)
     end
 
-    const target = new Target(
+    const target = Target(
         name = name,
         format = format,
         scale = scale,
@@ -358,7 +358,7 @@ end
 
 --- Builds the held pass from a caller's spec.
 local function build(spec: PassSpec): Pass
-    return new Pass(
+    return Pass(
         shader = spec.shader,
         parameters = table.clone(spec.parameters or {}),
         name = spec.name,

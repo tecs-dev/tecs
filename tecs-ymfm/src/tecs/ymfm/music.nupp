@@ -220,7 +220,7 @@ local function finish(builder: registerlog.Builder, name: string): (RegisterLog?
         end
         chips[
             index
-        ] = new LogChip(
+        ] = LogChip(
             chip = chip.model as chipfm.Chip,
             clock = chip.clock,
             second = chip.second,
@@ -232,7 +232,7 @@ local function finish(builder: registerlog.Builder, name: string): (RegisterLog?
     local tags: Tags? = nil
     local fields = builder.tags
     if fields ~= nil then
-        tags = new Tags(
+        tags = Tags(
             title = fields[1] or "",
             titleJapanese = fields[2] or "",
             game = fields[3] or "",
@@ -250,7 +250,7 @@ local function finish(builder: registerlog.Builder, name: string): (RegisterLog?
     local loopTick = builder.loopTick
     local length = math.max(builder.length, builder.ticks[builder.count])
 
-    return new RegisterLog(
+    return RegisterLog(
         format = builder.format as Format,
         version = builder.version,
         rate = rate,
@@ -334,7 +334,7 @@ end
 --- 65 536 commands a pass, so `handle:value() as
 --- tecs.ymfm.music.RegisterLog` is the cast its caller writes. The
 --- collector owns the log.
-export const kind: assets.Kind = new assets.Kind(
+export const kind: assets.Kind = assets.Kind(
     name = assets.MUSIC_FM,
     open = function(path: string): (assets.Job?, string?)
         local read, reason = assets.readJob(path)
@@ -343,7 +343,7 @@ export const kind: assets.Kind = new assets.Kind(
         end
         local parser: registerlog.Parser? = nil
 
-        return new assets.Job(
+        return assets.Job(
             poll = function(): (assets.Status, any?, string?)
                 local current = parser
                 if current == nil then
@@ -485,7 +485,7 @@ local function driver(
         return tick / log.rate
     end
 
-    result = new music.Driver(
+    result = music.Driver(
         duration = log.duration,
         loopStart = log.loopStart,
         loopEnd = nil,

@@ -89,13 +89,13 @@ local function newHarness(available: boolean, decoders: boolean): Harness
             params: string,
             bytes: string
         ): (boolean, string?)
-            opened[#opened + 1] = new Opened(decoder = decoder, handle = handle, params = params, bytes = bytes)
+            opened[#opened + 1] = Opened(decoder = decoder, handle = handle, params = params, bytes = bytes)
 
             return true
         end
     end
 
-    return new Harness(backend = backend, commands = commands, opened = opened, clock = clock)
+    return Harness(backend = backend, commands = commands, opened = opened, clock = clock)
 end
 
 local function lastCommand(harness: Harness, kind: integer): audiobackend.Command?
@@ -130,7 +130,7 @@ local function sentBy(harness: Harness, mixer: audio.Audio): {Sent}
             local op = command.data // OP
             local rest = command.data % OP
             local kind = op == 0 and "write" or op == 2 and "reset" or op == 3 and "port" or "unknown"
-            found[#found + 1] = new Sent(
+            found[#found + 1] = Sent(
                 handle = command.handle,
                 kind = kind,
                 a = rest % 65536,

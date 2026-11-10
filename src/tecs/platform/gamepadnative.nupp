@@ -186,7 +186,7 @@ local function wrap(openContext: function(): voidptr?, absent: function(): strin
         return ffi.string(value)
     end
 
-    return new gamepadbackend.Backend(
+    return gamepadbackend.Backend(
         available = tecs_gamepad_available(context) ~= 0,
         poll = function(): integer
             return tecs_gamepad_poll(context) as integer
@@ -228,7 +228,7 @@ local function wrap(openContext: function(): voidptr?, absent: function(): strin
                 return gamepadbackend.missing()
             end
 
-            return new gamepadbackend.Info(
+            return gamepadbackend.Info(
                 connected = info.connected ~= 0,
                 forceFeedback = info.forceFeedback ~= 0,
                 power = powerState(info.powerState as integer),

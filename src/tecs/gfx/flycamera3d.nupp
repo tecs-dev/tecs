@@ -190,7 +190,7 @@ export function new(source: input.Input, target: window.Window, camera: Camera3D
     const forwardY = math.max(-1.0, math.min(1.0, rawForwardY))
     const forwardZ = -(1.0 - 2.0 * (qx * qx + qy * qy))
 
-    local self = new Controller(
+    local self = Controller(
         camera = camera,
         _input = source,
         _window = target,

@@ -23,19 +23,19 @@ end
 const native = ecs2.newComponent(NativePoint, {
     name = "bench.NativePoint",
     construct = function(): NativePoint
-        return new NativePoint(0, 1)
+        return NativePoint(0, 1)
     end,
     default = function(): NativePoint
-        return new NativePoint(0, 1)
+        return NativePoint(0, 1)
     end
 })
 const managed = ecs2.newComponent(ManagedPoint, {
     name = "bench.ManagedPoint",
     construct = function(): ManagedPoint
-        return new ManagedPoint(x = 0, y = 1)
+        return ManagedPoint(x = 0, y = 1)
     end,
     default = function(): ManagedPoint
-        return new ManagedPoint(x = 0, y = 1)
+        return ManagedPoint(x = 0, y = 1)
     end
 })
 const nativeWorld = ecs2.newWorld({maxEntities = count + 64})

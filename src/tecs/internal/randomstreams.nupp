@@ -59,7 +59,7 @@ end
 --- Creates an empty registry with the compatibility default seed.
 --- @return Returns a registry owned by the calling world.
 export function newRegistry(): Registry
-    return new Registry(seed = defaultSeed, streams = {})
+    return Registry(seed = defaultSeed, streams = {})
 end
 
 --- Returns or creates a stream using only its name and the world seed.
@@ -71,7 +71,7 @@ export function stream(exclusive registry: Registry, name: string): random.Xoshi
     if existing ~= nil then
         return assert(registry.streams[name])
     end
-    const generator = new random.Xoshiro128(streamSeed(registry.seed, name))
+    const generator = random.Xoshiro128(streamSeed(registry.seed, name))
     registry.streams[name] = generator
 
     return generator
@@ -96,7 +96,7 @@ export function save(borrows registry: Registry): State
         streams[name] = generator:state()
     end
 
-    return new State(seed = registry.seed, streams = streams)
+    return State(seed = registry.seed, streams = streams)
 end
 
 local function word(value: any): integer
@@ -148,7 +148,7 @@ export function prepare(value: any): State
         streams[name as string] = words
     end
 
-    return new State(seed = seed, streams = streams)
+    return State(seed = seed, streams = streams)
 end
 
 --- Restores saved streams and restarts unsaved streams without replacing objects.
@@ -166,7 +166,7 @@ export function restore(exclusive registry: Registry, borrows state: State): nil
     end
     for name, words in pairs(state.streams) do
         if registry.streams[name] == nil then
-            const generator = new random.Xoshiro128()
+            const generator = random.Xoshiro128()
             generator:setState(words)
             registry.streams[name] = generator
         end

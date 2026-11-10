@@ -320,7 +320,7 @@ export const Tilemap: ComponentDefinition<TilemapValue> = ecs.newComponent(Tilem
     requires = {ecs.Transform2D},
     construct = function(options: Options?): TilemapValue
         local values = options or {}
-        return new TilemapValue(
+        return TilemapValue(
             path = values.path or "",
             map = values.map,
             collision = values.collision == true,
@@ -328,7 +328,7 @@ export const Tilemap: ComponentDefinition<TilemapValue> = ecs.newComponent(Tilem
         )
     end,
     default = function(): TilemapValue
-        return new TilemapValue(path = "", map = nil, collision = false, objectsSpawned = false)
+        return TilemapValue(path = "", map = nil, collision = false, objectsSpawned = false)
     end,
 })
 
@@ -356,10 +356,10 @@ export type TileSource = TileSourceValue
 export const TileSource: ComponentDefinition<TileSourceValue> = ecs.newComponent(TileSourceValue, {
     name = "TileSource",
     construct = function(id: integer, name: string, class: string?, properties: {[string]: any}?): TileSourceValue
-        return new TileSourceValue(localId = id, tilesetName = name, class = class or "", properties = properties or {})
+        return TileSourceValue(localId = id, tilesetName = name, class = class or "", properties = properties or {})
     end,
     default = function(): TileSourceValue
-        return new TileSourceValue(localId = 0, tilesetName = "", class = "", properties = {})
+        return TileSourceValue(localId = 0, tilesetName = "", class = "", properties = {})
     end,
 })
 
@@ -605,7 +605,7 @@ local function cellRow(
         bodies = collisionBodies(world, root, map, layer, cell, set, tile)
     end
 
-    return new Row(
+    return Row(
         entity = entity,
         collisions = bodies,
         layer = layer,
@@ -673,7 +673,7 @@ local function addStatic(
             input,
             gfx.Tint(layer.tint[1] / 255, layer.tint[2] / 255, layer.tint[3] / 255, layer.opacity * layer.tint[4] / 255)
         )
-        const row = new Row(
+        const row = Row(
             entity = entity,
             collisions = {},
             layer = layer,
@@ -691,7 +691,7 @@ local function addStatic(
             flipH = false,
             flipV = false
         )
-        chunk = new Chunk(row = row, value = input, cells = {}, tileset = cell.tileset, layerIndex = layerIndex)
+        chunk = Chunk(row = row, value = input, cells = {}, tileset = cell.tileset, layerIndex = layerIndex)
         instance.chunks[group] = chunk
         instance.rows[group] = row
     end
@@ -747,7 +747,7 @@ end
 local function build(exclusive world: World, root: integer, value: TilemapValue, map: Map): Instance
     clear(world, root)
     local pose = assert(world:get(root, ecs.Transform2D))
-    local result = new Instance(
+    local result = Instance(
         map = map,
         rows = {},
         chunks = {},
@@ -789,7 +789,7 @@ local function build(exclusive world: World, root: integer, value: TilemapValue,
                 )
                 result.rows[
                     "image:" .. index
-                ] = new Row(
+                ] = Row(
                     entity = entity,
                     collisions = {},
                     layer = layer,
@@ -957,7 +957,7 @@ local function repeats(exclusive world: World, state: State, root: integer, inst
                         )
                         instance.rows[
                             name
-                        ] = new Row(
+                        ] = Row(
                             entity = entity,
                             collisions = {},
                             layer = layer,
@@ -1152,7 +1152,7 @@ export function install(exclusive world: World): nil
     if world.resources:get(stateKey) then
         return
     end
-    local state = new State(
+    local state = State(
         maps = world:newQuery({
             include = {Tilemap, ecs.Transform2D}
         }),

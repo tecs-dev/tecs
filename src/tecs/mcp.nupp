@@ -254,7 +254,7 @@ export function listen(port: integer?): (Server?, string?)
         return nil, why ?? "the listener could not bind"
     end
 
-    return new Server(
+    return Server(
         port = endpoint.port,
         endpoint = endpoint,
         publishedRevision = registry.currentRevision(),

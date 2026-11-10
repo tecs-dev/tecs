@@ -155,8 +155,8 @@ function suite.releasesAnUnusedListenerOnShutdown(): nil
 end
 
 function suite.keepsDiagnosticsAliveDuringAParkedUpdateWithoutMutatingTheWorld(): nil
-    const kind = new assets.Kind(name = "test.debug.parked", open = function(_path: string): (assets.Job?, string?)
-        return new assets.Job(
+    const kind = assets.Kind(name = "test.debug.parked", open = function(_path: string): (assets.Job?, string?)
+        return assets.Job(
             poll = function(): (assets.Status, any?, string?)
                 return "pending", nil, nil
             end,
@@ -253,10 +253,10 @@ function suite.parksAssetLoadingDuringStartupAndResumesOnAHostTurn(): nil
     local ready = false
     local completed = false
     local releases = 0
-    const kind = new assets.Kind(
+    const kind = assets.Kind(
         name = "test.startup.asset",
         open = function(_path: string): (assets.Job?, string?)
-            return new assets.Job(
+            return assets.Job(
                 poll = function(): (assets.Status, any?, string?)
                     if ready then
                         return "ready", "payload", nil
@@ -296,8 +296,8 @@ end
 function suite.cancelsAPendingAssetBeforeClosingTheApplication(): nil
     local cancels = 0
     local escaped = false
-    const kind = new assets.Kind(name = "test.cancel.asset", open = function(_path: string): (assets.Job?, string?)
-        return new assets.Job(
+    const kind = assets.Kind(name = "test.cancel.asset", open = function(_path: string): (assets.Job?, string?)
+        return assets.Job(
             poll = function(): (assets.Status, any?, string?)
                 return "pending", nil, nil
             end,

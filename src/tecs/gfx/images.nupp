@@ -164,7 +164,7 @@ local function intern(name: string): Entry
         return existing
     end
     count = count + 1
-    local entry = new Entry(
+    local entry = Entry(
         id = count,
         name = name,
         state = "unknown",
@@ -320,7 +320,7 @@ export function upload(options: UploadOptions): integer
     entry.serial = nextSerial
     pending[
         #pending + 1
-    ] = new UploadImageCommand(
+    ] = UploadImageCommand(
         kind = "uploadImage",
         serial = nextSerial,
         image = entry.id,
@@ -352,7 +352,7 @@ export function release(name: string): boolean, string?
     entry.state = "released"
     entry.reason = nil
     entry.serial = nextSerial
-    pending[#pending + 1] = new ReleaseImageCommand(kind = "releaseImage", serial = nextSerial, image = entry.id)
+    pending[#pending + 1] = ReleaseImageCommand(kind = "releaseImage", serial = nextSerial, image = entry.id)
 
     return true, nil
 end
@@ -435,7 +435,7 @@ export function setMaterialMaps(image: integer, maps: MaterialMaps): nil
     entry.mapSerial = nextSerial
     pending[
         #pending + 1
-    ] = new MaterialMapsCommand(
+    ] = MaterialMapsCommand(
         kind = "setMaterialMaps",
         serial = nextSerial,
         image = image,

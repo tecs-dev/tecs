@@ -200,7 +200,7 @@ export function new(maxSlotCount: integer?): IdAllocator
         )
     end
 
-    return new IdAllocator(
+    return IdAllocator(
         slots = carray(EntitySlot, math.min(count, 64) + 1),
         capacity = math.min(count, 64),
         highWater = 0,

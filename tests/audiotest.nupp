@@ -35,7 +35,7 @@ local function newRecorder(): Recorder
     local opened: {Opened} = {}
     local closed = {false}
 
-    local backend = new audiobackend.Backend(
+    local backend = audiobackend.Backend(
         available = true,
         frequency = 48000,
         channels = 2,
@@ -80,7 +80,7 @@ local function newRecorder(): Recorder
             return DECODER_ID
         end,
         openDecoded = function(decoder: integer, handle: integer, params: string, bytes: string): (boolean, string?)
-            opened[#opened + 1] = new Opened(decoder = decoder, handle = handle, params = params, bytes = bytes)
+            opened[#opened + 1] = Opened(decoder = decoder, handle = handle, params = params, bytes = bytes)
 
             return true
         end,
@@ -95,7 +95,7 @@ local function newRecorder(): Recorder
         end
     )
 
-    return new Recorder(
+    return Recorder(
         backend = backend,
         log = log,
         finished = finished,
@@ -148,7 +148,7 @@ local VTABLE: any = {"test decoder"}
 
 --- Makes a Sound a Decoder named `decoder` plays, the way an extension does.
 local function newSound(name: string, decoder: string?): audio.Sound
-    local made = new audio.Sound(
+    local made = audio.Sound(
         name = name,
         duration = 1,
         decoder = decoder or "test",
@@ -869,10 +869,10 @@ function suite.playsASoundAssetThroughItsHandle(): nil
     local mixer = audio.newAudio({backend = recorder.backend})
     local name = freshName()
     local made = {0}
-    local kind = new assets.Kind(
+    local kind = assets.Kind(
         name = assets.SOUND .. ".test",
         open = function(path: string): (assets.Job?, string?)
-            return new assets.Job(
+            return assets.Job(
                 poll = function(): (assets.Status, any?, string?)
                     made[1] = made[1] + 1
 
@@ -1401,7 +1401,7 @@ end
 
 function suite.aReopenedOutputKeepsTheMixerAvailableAndItsVoices(): nil
     local recorder = newRecorder()
-    local status = new audiobackend.OutputStatus(
+    local status = audiobackend.OutputStatus(
         state = "playing",
         drops = 0,
         reopens = 0,
@@ -1415,7 +1415,7 @@ function suite.aReopenedOutputKeepsTheMixerAvailableAndItsVoices(): nil
     end
     recorder.backend.output = function(): audiobackend.OutputStatus
         asked[1] = asked[1] + 1
-        return new audiobackend.OutputStatus(
+        return audiobackend.OutputStatus(
             state = status.state,
             drops = status.drops,
             reopens = status.reopens,

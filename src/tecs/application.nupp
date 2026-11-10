@@ -265,7 +265,7 @@ export function newApplication(config: Config?): Application
     local inputState = input.install(world)
     local windowState = platformwindow.newWindow(config and config.window)
 
-    const app = new Application(
+    const app = Application(
         world = world,
         assets = assets.newAssets(),
         debugServer = nil,

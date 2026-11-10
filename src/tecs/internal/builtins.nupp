@@ -93,10 +93,10 @@ export const TTLComponent: components.FFIComponent<TTL> = components.newFFICompo
             error("TTL: startingTime must be at least remaining", 3)
         end
 
-        return new TTL(total, left)
+        return TTL(total, left)
     end,
     default = function(): TTL
-        return new TTL(0, 0)
+        return TTL(0, 0)
     end,
 })
 
@@ -165,7 +165,7 @@ export const RelativeTransform2DComponent: components.FFIComponent<RelativeTrans
         originX: number?,
         originY: number?
     ): RelativeTransform2D
-        return new RelativeTransform2D(
+        return RelativeTransform2D(
             x or 0,
             y or 0,
             z or 0,
@@ -177,7 +177,7 @@ export const RelativeTransform2DComponent: components.FFIComponent<RelativeTrans
         )
     end,
     default = function(): RelativeTransform2D
-        return new RelativeTransform2D(0, 0, 0, 0, 1, 1, 0, 0)
+        return RelativeTransform2D(0, 0, 0, 0, 1, 1, 0, 0)
     end,
 })
 
@@ -379,7 +379,7 @@ export function install(exclusive world: entityworld.World): nil
         end,
     })
 
-    const state = new Hierarchy(
+    const state = Hierarchy(
         scratch = rendercomponents.Transform2DComponent.defaultFactory(),
         resolved = {},
         visiting = {},

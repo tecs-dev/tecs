@@ -396,14 +396,14 @@ local function register<C is Component>(component: C): C
 end
 
 function ScalarComponent.__call<T>(self: ScalarComponent<T>, value: T): ScalarInstance<T>
-    return new ScalarInstance(componentType = self, value = value)
+    return ScalarInstance(componentType = self, value = value)
 end
 
 RelationshipComponent.__call = function(self: RelationshipComponent, target: integer): RelationshipInstance
     if target < 1 or target > 9007199254740991 then
         error("relationship target must be a packed entity id", 2)
     end
-    return new RelationshipInstance(componentType = self, value = new RelationshipValue(target = target))
+    return RelationshipInstance(componentType = self, value = RelationshipValue(target = target))
 end
 
 function RelationshipComponent.targeting(self: RelationshipComponent, target: integer): RelationshipComponent
@@ -426,7 +426,7 @@ function RelationshipComponent.targeting(self: RelationshipComponent, target: in
     if selected ~= nil then
         return selected
     end
-    selected = new RelationshipComponent(
+    selected = RelationshipComponent(
         componentId = componentids.allocate(),
         componentName = self.componentName .. "->" .. tostring(target),
         storageType = "relationship",
@@ -502,7 +502,7 @@ local function prepareRequires(required: {Input}?): {Requirement}
                 targets[target] = true
             end
         end
-        result[#result + 1] = new Requirement(component = component, value = value, explicit = explicit)
+        result[#result + 1] = Requirement(component = component, value = value, explicit = explicit)
     end
 
     return result
@@ -561,7 +561,7 @@ export function newTagComponent(options: TagComponentOptions): TagComponent
     local name = options.name
     validateName(name, "newTagComponent")
     local component = register(
-        new TagComponent(
+        TagComponent(
             componentId = componentids.allocate(),
             componentName = name,
             storageType = "tag",
@@ -581,7 +581,7 @@ local function createScalar<T>(
 ): ScalarComponent<T>
     validateName(name, "newScalarComponent")
     return register(
-        new ScalarComponent(
+        ScalarComponent(
             componentId = componentids.allocate(),
             componentName = name,
             storageType = "scalar",
@@ -667,7 +667,7 @@ export function newComponent<T>(options: TableComponentOptions<T>): TableCompone
         },
         {
             __call = function(self: TableComponent<T>, ...: any): TableInstance<T>
-                return new TableInstance(componentType = self, value = self.construct(...))
+                return TableInstance(componentType = self, value = self.construct(...))
             end,
         }
     ) as TableComponent<T>
@@ -710,7 +710,7 @@ export function newFFIComponent<T>(options: TableComponentOptions<T>, witness: a
     ffistorage.register(component.componentId, storage)
     setmetatable(component as table, {
         __call = function(self: FFIComponent<T>, ...: any): FFIInstance<T, FFIComponent<T>>
-            return new FFIInstance(componentType = self, value = self.construct(...))
+            return FFIInstance(componentType = self, value = self.construct(...))
         end
     })
 
@@ -730,7 +730,7 @@ export function newRelationship(options: RelationshipOptions): RelationshipCompo
     if options.cascadeDelete and not options.exclusive then
         error("newRelationship: cascadeDelete requires exclusive = true", 2)
     end
-    local relationship = new RelationshipComponent(
+    local relationship = RelationshipComponent(
         componentId = componentids.allocate(),
         componentName = options.name,
         storageType = "relationship",
@@ -799,7 +799,7 @@ export function newDataRelationship<T>(options: DataRelationshipOptions<T>): Dat
                     error("relationship constructor changed its target", 2)
                 end
 
-                return new TableInstance(componentType = self as TableComponent<T>, value = value)
+                return TableInstance(componentType = self as TableComponent<T>, value = value)
             end
         }
     ) as DataRelationship<T>
@@ -865,7 +865,7 @@ export function newFFIRelationship<T>(options: FFIRelationshipOptions<T>): FFIRe
                 error("relationship constructor changed its target", 2)
             end
 
-            return new FFIInstance(componentType = self, value = value)
+            return FFIInstance(componentType = self, value = value)
         end
     })
 

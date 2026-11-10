@@ -276,7 +276,7 @@ export function readJob(path: string): (Job?, string?)
     end
     local finished = false
 
-    return new Job(
+    return Job(
         poll = function(): (Status, any?, string?)
             if finished then
                 return "pending"
@@ -301,7 +301,7 @@ end
 --- the cast its caller writes. The collector owns the string and the kind frees
 --- nothing. Releasing the handle still matters: it is what tells the loader the
 --- asset is no longer resident.
-export const bytes: Kind = new Kind(name = DOCUMENT, open = readJob, release = nil)
+export const bytes: Kind = Kind(name = DOCUMENT, open = readJob, release = nil)
 
 -------------------------------------------------------------------------------
 -- Entries
@@ -372,7 +372,7 @@ local function settle(self: Assets, entry: Entry, status: Status, payload: any?,
         if holders == 0 then
             freePayload(entry)
         else
-            local handle = new Handle(
+            local handle = Handle(
                 path = entry.path,
                 kind = entry.kindName,
                 refs = holders,
@@ -504,7 +504,7 @@ end
 ---
 --- @return the running loader
 export function newAssets(): Assets
-    local loader = new Assets(
+    local loader = Assets(
         entries = {},
         order = {},
         inFlight = 0,
@@ -558,7 +558,7 @@ function Assets.request(self: Assets, kind: Kind, path: string): (Handle?, strin
         if job == nil then
             return nil, reason or ("cannot load " .. path)
         end
-        entry = new Entry(
+        entry = Entry(
             owner = self,
             key = key,
             path = path,
@@ -575,7 +575,7 @@ function Assets.request(self: Assets, kind: Kind, path: string): (Handle?, strin
         self.order[#self.order + 1] = entry
         self.inFlight = self.inFlight + 1
     end
-    local waiter = new Waiter(live = true, claimed = false, resume = nil)
+    local waiter = Waiter(live = true, claimed = false, resume = nil)
     entry.waiters[#entry.waiters + 1] = waiter
     if entry.status == "pending" then
         park(entry, waiter, self.pump, "tecs.assets.request")
@@ -621,7 +621,7 @@ function Assets.reload(self: Assets, kind: Kind, handle: Handle): (boolean, stri
     -- named handle rather than in a handle of its own, and two callers cannot
     -- both perform that swap on one payload.
     self.serial = self.serial + 1
-    local entry = new Entry(
+    local entry = Entry(
         owner = self,
         key = kind.name .. "\0" .. handle.path .. "\0replace\0" .. tostring(self.serial),
         path = handle.path,
@@ -637,7 +637,7 @@ function Assets.reload(self: Assets, kind: Kind, handle: Handle): (boolean, stri
     self.entries[entry.key] = entry
     self.order[#self.order + 1] = entry
     self.inFlight = self.inFlight + 1
-    local waiter = new Waiter(live = true, claimed = false, resume = nil)
+    local waiter = Waiter(live = true, claimed = false, resume = nil)
     entry.waiters[#entry.waiters + 1] = waiter
     if entry.status == "pending" then
         park(entry, waiter, self.pump, "tecs.assets.reload")
@@ -689,7 +689,7 @@ function Assets.drain(exclusive self: Assets): (boolean, string?)
         error("assets.drain: the loader has shut down", 2)
     end
     while self.inFlight > 0 do
-        local waiter = new Waiter(live = true, claimed = false, resume = nil)
+        local waiter = Waiter(live = true, claimed = false, resume = nil)
         self.drainers[#self.drainers + 1] = waiter
         local pump = self.pump
         -- The loop condition above already read the count, and nothing runs

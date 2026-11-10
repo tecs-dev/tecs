@@ -12,10 +12,10 @@ local function positionComponent(name: string): ecs.ComponentDefinition<Snapshot
     return ecs.newComponent(SnapshotPosition, {
         name = name,
         construct = function(x: number, label: string): SnapshotPosition
-            return new SnapshotPosition(x = x, label = label)
+            return SnapshotPosition(x = x, label = label)
         end,
         default = function(): SnapshotPosition
-            return new SnapshotPosition(x = 0, label = "")
+            return SnapshotPosition(x = 0, label = "")
         end,
     })
 end
@@ -85,10 +85,10 @@ function suite.usesCustomComponentSnapshotHooks(): nil
     local position = ecs.newComponent(SnapshotPosition, {
         name = "test.SnapshotCustom",
         construct = function(x: number, label: string): SnapshotPosition
-            return new SnapshotPosition(x = x, label = label)
+            return SnapshotPosition(x = x, label = label)
         end,
         default = function(): SnapshotPosition
-            return new SnapshotPosition(x = 0, label = "")
+            return SnapshotPosition(x = 0, label = "")
         end,
         save = function(value: SnapshotPosition): any
             return {packed = tostring(value.x) .. ":" .. value.label}
@@ -96,7 +96,7 @@ function suite.usesCustomComponentSnapshotHooks(): nil
         load = function(value: any): SnapshotPosition
             local packed = assert((value as {[string]: string}).packed)
             local divider = assert(packed:find(":"))
-            return new SnapshotPosition(
+            return SnapshotPosition(
                 x = assert(tonumber(packed:sub(1, divider - 1))),
                 label = packed:sub(divider + 1)
             )

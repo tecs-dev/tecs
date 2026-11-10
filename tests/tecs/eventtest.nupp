@@ -131,7 +131,7 @@ function suite.deliversAnInstanceTheCallerHoldsAndKeepsItsWrites(): nil
     value:observe(0, Message, function(event: Message): nil
         event.text = event.text .. "!"
     end)
-    local held = new Message(text = "hello")
+    local held = Message(text = "hello")
     value:deliver(0, Message, held)
     test.equal(held.text, "hello!")
 end

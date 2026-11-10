@@ -40,11 +40,11 @@ local record Family
 end
 
 local function family(id: integer, name: string, clockAt: integer, model: string?, alternate: string?): Family
-    return new Family(id = id, name = name, clockAt = clockAt, model = model, alternate = alternate, reason = nil)
+    return Family(id = id, name = name, clockAt = clockAt, model = model, alternate = alternate, reason = nil)
 end
 
 local function foreign(id: integer, name: string, clockAt: integer, reason: string?): Family
-    return new Family(
+    return Family(
         id = id,
         name = name,
         clockAt = clockAt,
@@ -366,7 +366,7 @@ end
 local function streamOf(exclusive state: State, id: integer): Stream
     local stream = state.streams[id]
     if stream == nil then
-        stream = new Stream(
+        stream = Stream(
             chipType = 0x02,
             port = 0,
             command = 0x2A,
@@ -505,11 +505,11 @@ local function dataBlock(exclusive state: State, kind: integer, data: string, fl
     if kind < 0x40 then
         local bank = state.banks[kind]
         if bank == nil then
-            bank = new Bank(parts = {}, blocks = {}, size = 0, joined = nil)
+            bank = Bank(parts = {}, blocks = {}, size = 0, joined = nil)
             state.banks[kind] = bank
         end
         bank.parts[#bank.parts + 1] = data
-        bank.blocks[#bank.blocks + 1] = new Block(start = bank.size, length = #data)
+        bank.blocks[#bank.blocks + 1] = Block(start = bank.size, length = #data)
         bank.size = bank.size + #data
         bank.joined = nil
     elseif kind == 0x7F then
@@ -527,7 +527,7 @@ local function dataBlock(exclusive state: State, kind: integer, data: string, fl
         end
         state.tables[
             compression
-        ] = new Table(
+        ] = Table(
             subtype = byte(data, 2) as integer,
             bitsOut = bitsOut,
             bitsIn = byte(data, 4) as integer,
@@ -865,7 +865,7 @@ export function parser(bytes: string, name: string): (registerlog.Parser?, strin
     end
     local loop = field(0x1C, 4)
     local gd3 = field(0x14, 4)
-    local state = new State(
+    local state = State(
         bytes = bytes,
         name = name,
         builder = builder,
@@ -885,7 +885,7 @@ export function parser(bytes: string, name: string): (registerlog.Parser?, strin
         done = false
     )
 
-    return new registerlog.Parser(step = function(budget: integer): (registerlog.Status, registerlog.Builder?, string?)
+    return registerlog.Parser(step = function(budget: integer): (registerlog.Status, registerlog.Builder?, string?)
         local reason = run(state, budget)
         if reason ~= nil then
             return "failed", nil, reason
