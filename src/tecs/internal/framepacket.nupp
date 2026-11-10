@@ -207,7 +207,6 @@ local cameraselection = require("tecs.internal.cameraselection")
 local rendercomponents = require("tecs.internal.rendercomponents")
 local world = require("tecs.internal.world")
 local zone = require("debug.profile.zone")
-local array = require("nupp.mem.array")
 local ffi = require("ffi")
 local frametable = require("tecs.gfx.frametable")
 
@@ -350,7 +349,7 @@ export record Extractor
     @private cachedCasters: integer
     @private cachedBatchBytes: string
     @private screenSpace: boolean
-    @private instanceWords: array.Array<uint32>
+    @private instanceWords: table.Array<uint32>
     @private orderChanged: boolean
     @private rowCount: integer
     @private sorted: integer
@@ -456,7 +455,7 @@ export function new(value: world.World): Extractor
         cachedCasters = 0,
         cachedBatchBytes = "",
         screenSpace = false,
-        instanceWords = array.scalar(array.uint32, 256),
+        instanceWords = table.Array.scalar(table.Array.uint32, 256),
         orderChanged = true,
         rowCount = 0,
         sorted = 0,
@@ -1158,7 +1157,7 @@ local function packInstances(exclusive self: Extractor, eye: View, full: boolean
         while capacity < wordsNeeded do
             capacity = capacity * 2
         end
-        self.instanceWords = array.scalar(array.uint32, capacity)
+        self.instanceWords = table.Array.scalar(table.Array.uint32, capacity)
     end
     self.ranges:clear()
     local output = self.instanceWords:write()
