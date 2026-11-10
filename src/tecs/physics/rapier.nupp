@@ -29,7 +29,7 @@ local ffi = require("ffi")
 local contract = require("tecs.physics.contract")
 local nativelibrary = require("tecs.internal.nativelibrary")
 
-nativelibrary.open("tecs_physics", "TECS_PHYSICS_LIBRARY")
+const library = nativelibrary.open("tecs_physics", "TECS_PHYSICS_LIBRARY")
 
 cdef struct TecsPhysicsHandle
     index: uint32
@@ -201,19 +201,24 @@ cdef struct TecsPhysicsBatch
     eventCount: uint64
 end
 
-cdef function tecsPhysicsWorldCreate(gravityX: float, gravityY: float, substeps: uint32, workerCount: uint32): voidptr
+cdef function tecsPhysicsWorldCreate(
+    gravityX: float,
+    gravityY: float,
+    substeps: uint32,
+    workerCount: uint32
+): voidptr from library
 
-cdef function tecsPhysicsWorldDestroy(exclusive world: voidptr)
+cdef function tecsPhysicsWorldDestroy(exclusive world: voidptr) from library
 
-cdef function tecsPhysicsSubstepCount(borrows world: voidptr): uint32
+cdef function tecsPhysicsSubstepCount(borrows world: voidptr): uint32 from library
 
-cdef function tecsPhysicsWorkerCount(borrows world: voidptr): uint32
+cdef function tecsPhysicsWorkerCount(borrows world: voidptr): uint32 from library
 
-cdef function tecsPhysicsDefaultWorkerCount(): uint32
+cdef function tecsPhysicsDefaultWorkerCount(): uint32 from library
 
-cdef function tecsPhysicsStep(exclusive world: voidptr, exclusive batch: TecsPhysicsBatch*): int32
+cdef function tecsPhysicsStep(exclusive world: voidptr, exclusive batch: TecsPhysicsBatch*): int32 from library
 
-cdef function tecsPhysicsDrain(borrows world: voidptr, exclusive batch: TecsPhysicsBatch*): int32
+cdef function tecsPhysicsDrain(borrows world: voidptr, exclusive batch: TecsPhysicsBatch*): int32 from library
 
 cdef function tecsPhysicsRaycast(
     borrows world: voidptr,
@@ -224,7 +229,7 @@ cdef function tecsPhysicsRaycast(
     categoryBits: uint32,
     maskBits: uint32,
     exclusive output: TecsPhysicsRayHit*
-): int32
+): int32 from library
 
 cdef function tecsPhysicsResolveEntities(
     borrows world: voidptr,
@@ -233,15 +238,23 @@ cdef function tecsPhysicsResolveEntities(
     exclusive bodies: TecsPhysicsHandle*,
     exclusive colliders: TecsPhysicsHandle*,
     exclusive joints: TecsPhysicsHandle*
-): int32
+): int32 from library
 
-cdef function tecsPhysicsSnapshotBegin(exclusive world: voidptr): uint64
+cdef function tecsPhysicsSnapshotBegin(exclusive world: voidptr): uint64 from library
 
-cdef function tecsPhysicsSnapshotRead(borrows world: voidptr, exclusive output: uint8*, capacity: uint64): uint64
+cdef function tecsPhysicsSnapshotRead(
+    borrows world: voidptr,
+    exclusive output: uint8*,
+    capacity: uint64
+): uint64 from library
 
-cdef function tecsPhysicsSnapshotRestore(exclusive world: voidptr, borrows bytes: cstring, length: uint64): int32
+cdef function tecsPhysicsSnapshotRestore(
+    exclusive world: voidptr,
+    borrows bytes: cstring,
+    length: uint64
+): int32 from library
 
-cdef function tecsPhysicsLastError(): cstring
+cdef function tecsPhysicsLastError(): cstring from library
 
 const STATUS_OK: integer = 0
 const STATUS_TRUNCATED: integer = 1

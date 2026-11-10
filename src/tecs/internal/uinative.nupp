@@ -10,13 +10,13 @@ into Rust and copies changed boxes back; no callback enters Nupp from Rust.
 local ffi = require("ffi")
 local readCString: function(value: any): string = ffi.string as any
 local nativelibrary = require("tecs.internal.nativelibrary")
-nativelibrary.open("tecs_ui", "TECS_UI_LIBRARY")
+const library = nativelibrary.open("tecs_ui", "TECS_UI_LIBRARY")
 
-cdef function tecsUiTreeCreate(): voidptr?
-cdef function tecsUiTreeDestroy(borrows tree: voidptr)
-cdef function tecsUiTreeSync(borrows tree: voidptr, borrows input: cstring, length: uint64): voidptr?
-cdef function tecsUiResultDestroy(borrows value: voidptr)
-cdef function tecsUiError(): cstring
+cdef function tecsUiTreeCreate(): voidptr? from library
+cdef function tecsUiTreeDestroy(borrows tree: voidptr) from library
+cdef function tecsUiTreeSync(borrows tree: voidptr, borrows input: cstring, length: uint64): voidptr? from library
+cdef function tecsUiResultDestroy(borrows value: voidptr) from library
+cdef function tecsUiError(): cstring from library
 
 --- Creates an owned Taffy tree, released by `destroy` at world shutdown.
 export function create(): voidptr
