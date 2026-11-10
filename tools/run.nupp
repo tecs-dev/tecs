@@ -1,11 +1,15 @@
 local path = require("nupp.io.path")
 local process = require("nupp.io.process")
+local system = require("nupp.system")
 
 -- Enter the tooling project before compiling its modules. The game manifest
 -- must never acquire the process-launch capabilities its development tools use.
 const root = assert(path.currentDirectory()):toString()
 const compilerRoot = os.getenv("NUPP_COMPILER_ROOT")
-local args = {compilerRoot and compilerRoot .. "/bin/nupp" or "nupp", "run", "tecs/dev/main.nupp"}
+-- A checkout's `bin/nupp` is a shell script Windows cannot start; `bin/nupp.cmd`
+-- runs it under Git Bash.
+const launcher = system.platform == "windows" and "/bin/nupp.cmd" or "/bin/nupp"
+local args = {compilerRoot and compilerRoot .. launcher or "nupp", "run", "tecs/dev/main.nupp"}
 for _, value in ipairs({...} as {string}) do
     args[#args + 1] = value
 end

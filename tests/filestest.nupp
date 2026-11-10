@@ -17,8 +17,8 @@ end
 function suite.resolvesTheAssetRootFromAnOverrideAndJoinsWithoutChecking(): nil
     restore()
     files.setAssetRoot("/tmp/tecs-assets")
-    test.equal(files.assetRoot(), "/tmp/tecs-assets/")
-    test.equal(files.assetPath("levels/one.json"), "/tmp/tecs-assets/levels/one.json")
+    test.equal(files.assetRoot(), "/tmp/tecs-assets" .. SEPARATOR)
+    test.equal(files.assetPath("levels/one.json"), "/tmp/tecs-assets" .. SEPARATOR .. "levels/one.json")
 
     -- A root that already ends in a separator does not collect a second one.
     files.setAssetRoot("/tmp/tecs-assets/")
@@ -37,12 +37,12 @@ end
 function suite.forgetsTheCachedAssetRootOnReset(): nil
     restore()
     files.setAssetRoot("/tmp/first")
-    test.equal(files.assetRoot(), "/tmp/first/")
+    test.equal(files.assetRoot(), "/tmp/first" .. SEPARATOR)
     files.reset()
 
     -- Nothing set the override back, so the root falls through to wherever the
     -- executable running this suite was loaded from.
-    test.assert(files.assetRoot() ~= "/tmp/first/")
+    test.assert(files.assetRoot() ~= "/tmp/first" .. SEPARATOR)
     restore()
 end
 
