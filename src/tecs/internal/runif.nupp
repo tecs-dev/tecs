@@ -21,7 +21,6 @@ Predicates are runtime closures, not snapshot data; loading an entity snapshot
 does not rewind their elapsed time.
 ]]
 
-local random = require("nupp.random")
 local world = require("tecs.internal.world")
 
 local function validateDuration(value: number, name: string, positive: boolean): nil
@@ -63,7 +62,7 @@ end
 --- @return Returns a new timer, firing at most once per call. The first interval is
 ---     unjittered; later intervals clamp to at least one percent of the base interval.
 --- @raises string for invalid durations or nonzero jitter without a generator.
-export function every(interval: number, jitter: number?, generator: random.Xoshiro128?): world.RunIf
+export function every(interval: number, jitter: number?, generator: math.Xoshiro128?): world.RunIf
     validateDuration(interval, "every", true)
     const variance = jitter or 0
     validateDuration(variance, "every jitter", false)

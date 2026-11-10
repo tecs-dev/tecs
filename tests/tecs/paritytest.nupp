@@ -22,7 +22,6 @@ local buffer = require("string.buffer")
 local ffi = require("ffi")
 local fixedtracking = require("tecs.internal.fixedtracking")
 local entityworld = require("tecs.internal.world")
-local tasks = require("nupp.tasks")
 local suite = {}
 
 function suite.observesArchetypeRowsAndTracksResidue(): nil
@@ -541,7 +540,7 @@ function suite.customPipelineOwnsDispatchControlsAndSnapshotClock(): nil
         fixedTimeDropped = 0,
         fixedStepsDropped = 0,
         phaseStates = {true},
-        update = function(self: Pipeline, dt: number, exclusive world: World, borrows scope: tasks.Scope): nil
+        update = function(self: Pipeline, dt: number, exclusive world: World, borrows scope: coroutine.Scope): nil
             self:run("Update", dt, world, scope)
         end,
         run = function(
@@ -549,7 +548,7 @@ function suite.customPipelineOwnsDispatchControlsAndSnapshotClock(): nil
             phase: string,
             dt: number,
             exclusive world: World,
-            borrows scope: tasks.Scope
+            borrows scope: coroutine.Scope
         ): nil
             if not self.phaseStates[1] then
                 return

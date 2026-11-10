@@ -1,6 +1,5 @@
 const ecs = require("tecs.ecs")
 const {type World} = require("tecs.ecs")
-const {type Scope} = require("nupp.tasks")
 
 
 const tag = ecs.newTagComponent({name = "test.ConditionalBarrier"})
@@ -113,7 +112,7 @@ function suite.keepsTheViewStableAcrossIterationAndSuspension(): nil
     world:commit()
     world:addSystem({
         phase = ecs.phases.Update,
-        run = function(_dt: number, exclusive _world: World, borrows scope: Scope): nil
+        run = function(_dt: number, exclusive _world: World, borrows scope: coroutine.Scope): nil
             local visited = 0
             for candidate in query:iter() do
                 for row = 1, #assert(candidate).entities do
@@ -161,7 +160,7 @@ function suite.publishesChildWorkSettlingAfterDispatch(): nil
     local finished = false
     world:addSystem({
         phase = ecs.phases.Last,
-        run = function(_dt: number, exclusive _world: World, borrows scope: Scope): nil
+        run = function(_dt: number, exclusive _world: World, borrows scope: coroutine.Scope): nil
             scope:spawn(function(): nil
                 const id = world:spawn(tag)
                 world:enqueueCommit()
@@ -179,7 +178,7 @@ function suite.clearsRequestsAfterAnAwaitedChildFailure(): nil
     const query = world:newQuery({include = {tag}})
     world:addSystem({
         phase = ecs.phases.Update,
-        run = function(_dt: number, exclusive _world: World, borrows scope: Scope): nil
+        run = function(_dt: number, exclusive _world: World, borrows scope: coroutine.Scope): nil
             world:spawn(tag)
             world:enqueueCommit()
             const child = scope:spawn(function(): nil

@@ -1,7 +1,6 @@
 local files = require("nupp.io.files")
-local suspension = require("nupp.suspension")
 local assets = require("tecs.assets")
-local hostpump = require("nupp.host.pump")
+local hostpump = require("os.host")
 local hostcancellation = require("tecs.internal.hostcancellation")
 local suite = {}
 
@@ -106,7 +105,7 @@ end
 --- as one inside a world update does. `turns` bounds the loop so a test that
 --- deadlocks fails rather than hangs.
 local function underPump(body: function(): boolean, turns: integer?): (boolean, integer)
-    local pump = hostpump.newPump()
+    local pump = hostpump.Pump()
     local state = pump:start(body)
     local passes: integer = 0
     local limit = turns or 64
@@ -193,7 +192,7 @@ function suite.sharesOneAcquisitionBetweenOverlappingRequests(): nil
     local loader = assets.newAssets()
     local first: assets.Handle? = nil
     local second: assets.Handle? = nil
-    local pump = hostpump.newPump()
+    local pump = hostpump.Pump()
     local outer = pump:start(function(): boolean
         first = loader:request(kind.kind, "shared.png")
 
@@ -201,7 +200,7 @@ function suite.sharesOneAcquisitionBetweenOverlappingRequests(): nil
     end)
     assert.eq(outer as string, "parked")
     -- A second request while the first is parked joins the same acquisition.
-    local inner = hostpump.newPump()
+    local inner = hostpump.Pump()
     inner:start(function(): boolean
         second = loader:request(kind.kind, "shared.png")
 
@@ -414,7 +413,7 @@ function suite.cancelsAnInFlightRequestWhenTheHostStops(): nil
     local kind = scripted("test.asset")
     local script = succeeds(kind, "slow.png", 8)
     local loader = assets.newAssets()
-    local pump = hostpump.newPump()
+    local pump = hostpump.Pump()
     local unwound = false
     local state = pump:start(function(): boolean
         local succeeded, failure = pcall(function(): nil
@@ -442,13 +441,13 @@ function suite.keepsASharedAcquisitionWhenOneCallerGivesUp(): nil
     local script = succeeds(kind, "shared.png", 4)
     local loader = assets.newAssets()
     local staying: assets.Handle? = nil
-    local stay = hostpump.newPump()
+    local stay = hostpump.Pump()
     stay:start(function(): boolean
         staying = loader:request(kind.kind, "shared.png")
 
         return true
     end)
-    local leaving = hostpump.newPump()
+    local leaving = hostpump.Pump()
     leaving:start(function(): boolean
         local succeeded = pcall(function(): nil
             loader:request(kind.kind, "shared.png")
@@ -474,7 +473,7 @@ function suite.freesAnAcquisitionEveryCallerAbandoned(): nil
     local kind = scripted("test.asset")
     succeeds(kind, "orphan.png", 2)
     local loader = assets.newAssets()
-    local pump = hostpump.newPump()
+    local pump = hostpump.Pump()
     pump:start(function(): boolean
         pcall(function(): nil
             loader:request(kind.kind, "orphan.png")
@@ -495,7 +494,7 @@ function suite.resumesParkedRequestsWhenTheLoaderShutsDown(): nil
     succeeds(kind, "slow.png", 8)
     local loader = assets.newAssets()
     local reason: string? = nil
-    local pump = hostpump.newPump()
+    local pump = hostpump.Pump()
     local state = pump:start(function(): boolean
         local handle, failure = loader:request(kind.kind, "slow.png")
         assert(handle == nil, "a shut-down loader produced a handle")
@@ -520,8 +519,8 @@ function suite.drainsEveryAcquisitionInFlight(): nil
     succeeds(kind, "one.png", 2)
     succeeds(kind, "two.png", 5)
     local loader = assets.newAssets()
-    local first = hostpump.newPump()
-    local second = hostpump.newPump()
+    local first = hostpump.Pump()
+    local second = hostpump.Pump()
     first:start(function(): boolean
         loader:request(kind.kind, "one.png")
 
@@ -534,7 +533,7 @@ function suite.drainsEveryAcquisitionInFlight(): nil
     end)
     assert.eq(loader:pending(), 2)
     local drained = false
-    local drainer = hostpump.newPump()
+    local drainer = hostpump.Pump()
     local state = drainer:start(function(): boolean
         drained = loader:drain()
 
@@ -625,7 +624,7 @@ function suite.stopsPollingOnceTheLoaderShutsDown(): nil
     assert(not loader:running())
     -- The readiness pump is released with the loader, so a later host pass drives
     -- nothing on its behalf.
-    suspension.poll()
+    coroutine.host.poll()
     assert.eq(loader:pending(), 0)
     -- Shutting down twice is shutting down once.
     loader:shutdown()

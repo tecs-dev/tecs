@@ -71,8 +71,7 @@ leaves the resident payload exactly as it was and answers `false, reason`.
 ]]
 
 local files = require("nupp.io.files")
-local suspension = require("nupp.suspension")
-local log = require("nupp.log")
+local log = require("debug.log")
 
 --- Where one acquisition stands.
 export type Status = "pending" | "ready" | "failed"
@@ -240,7 +239,7 @@ export record Assets
     @private drainers: {Waiter}
 
     --- Engine-owned. Holds the registered readiness pump until shutdown.
-    @private pump: suspension.Source?
+    @private pump: coroutine.Source?
 
     --- Engine-owned. Reports whether this loader still accepts requests.
     @private open: boolean
@@ -475,8 +474,8 @@ end
 --- The loader reaches this through `entry.owner` rather than through a
 --- parameter, because the cancellation this answers with outlives the call and
 --- may therefore capture nothing the caller only lent it.
-local function park(entry: Entry, waiter: Waiter, pump: suspension.Source?, operation: string): nil
-    suspension.suspend(operation, function(resume: function(boolean), context: suspension.Context): (function()?)
+local function park(entry: Entry, waiter: Waiter, pump: coroutine.Source?, operation: string): nil
+    coroutine.suspend(operation, function(resume: function(boolean), context: coroutine.Context): (function()?)
         if waiter.claimed or not waiter.live or entry.status ~= "pending" then
             resume(true)
 
@@ -514,14 +513,14 @@ export function newAssets(): Assets
         pump = nil,
         open = true
     )
-    loader.pump = suspension.source(
+    loader.pump = coroutine.source(
         "tecs.assets",
         10,
         function(): integer
             return drive(loader)
         end,
         nil,
-        function(_: suspension.Source): boolean
+        function(_: coroutine.Source): boolean
             return loader.inFlight > 0
         end
     )
@@ -695,9 +694,9 @@ function Assets.drain(exclusive self: Assets): (boolean, string?)
         -- The loop condition above already read the count, and nothing runs
         -- between there and here, so the subscription re-reads nothing and
         -- captures only values it owns.
-        suspension.suspend("tecs.assets.drain", function(
+        coroutine.suspend("tecs.assets.drain", function(
             resume: function(boolean),
-            context: suspension.Context
+            context: coroutine.Context
         ): (function()?)
             waiter.resume = resume
             if pump ~= nil then

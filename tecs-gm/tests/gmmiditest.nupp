@@ -3,7 +3,7 @@ local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
 local files = require("nupp.io.files")
 local gm = require("tecs.gm")
-local hostpump = require("nupp.host.pump")
+local hostpump = require("os.host")
 local midi = require("tecs.gm.midi")
 local music = require("tecs.audio.sequencer")
 
@@ -71,7 +71,7 @@ end
 
 --- Runs `body` under a host pump until it settles.
 local function underPump(body: function(): boolean): nil
-    local pump = hostpump.newPump()
+    local pump = hostpump.Pump()
     local state = pump:start(body)
     local passes: integer = 0
     while state == "parked" and passes < 256 do

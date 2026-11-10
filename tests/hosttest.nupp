@@ -7,7 +7,6 @@ local host = require("tecs.host")
 local platformevents = require("tecs.platform.events")
 local images = require("tecs.gfx.images")
 local window = require("tecs.platform.window")
-local suspension = require("nupp.suspension")
 
 local suite = {}
 
@@ -302,7 +301,7 @@ function suite.resumesAParkedUpdateOnALaterHostTurn(): nil
             if resumed then
                 return
             end
-            resumed = suspension.suspend("host test wait", function(resume, context): function()
+            resumed = coroutine.suspend("host test wait", function(resume, context): function()
                 context:source("test.host.parked", 50, function(): integer
                     polls = polls + 1
                     if polls == 2 then
@@ -337,7 +336,7 @@ function suite.shutdownUnwindsAParkedUpdateWithoutReportingACrash(): nil
         name = "test.host.cancel",
         phase = ecs.phases.Update,
         run = function(): nil
-            suspension.suspend("host test never ready", function(_resume): function()
+            coroutine.suspend("host test never ready", function(_resume): function()
                 return function(): nil
                 end
             end)

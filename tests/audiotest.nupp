@@ -2,7 +2,7 @@ local assets = require("tecs.assets")
 local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
 local ecs = require("tecs.ecs")
-local hostpump = require("nupp.host.pump")
+local hostpump = require("os.host")
 
 local suite = {}
 
@@ -885,7 +885,7 @@ function suite.playsASoundAssetThroughItsHandle(): nil
     )
     local loader = assets.newAssets()
     local handle: assets.Handle? = nil
-    local pump = hostpump.newPump()
+    local pump = hostpump.Pump()
     local state = pump:start(function(): boolean
         handle = loader:request(kind, name)
 

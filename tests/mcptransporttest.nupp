@@ -1,9 +1,7 @@
 local ecs = require("tecs.ecs")
 local json = require("nupp.codec.json")
 local mcp = require("tecs.mcp")
-local net = require("nupp.io.net")
-local tasks = require("nupp.tasks")
-local time = require("nupp.time")
+local net = require("io.net")
 
 local suite = {}
 
@@ -51,7 +49,7 @@ end
 
 --- Runs `client` while the server is polled once a millisecond beside it.
 ---
---- `tasks.gather` runs both bodies as coroutines under one handler, so the
+--- `coroutine.gather` runs both bodies as coroutines under one handler, so the
 --- client's socket waits are what let the server's polls happen and the other
 --- way round. Nothing outside this process is involved.
 --- @param client what to run against the bound port
@@ -61,11 +59,11 @@ local function withServer<T>(client: function(port: integer): T): T
     local server = assert(mcp.listen(0))
     local port = server.port
     local finished = false
-    local answers, failures = tasks.gather({
+    local answers, failures = coroutine.gather({
         function(): any
             while not finished do
                 mcp.poll(server)
-                time.sleep(1)
+                coroutine.sleep(1)
             end
             -- One last turn, so a connection that is mid-close still moves.
             mcp.poll(server)

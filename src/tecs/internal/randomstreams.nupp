@@ -6,7 +6,6 @@ Generation and state transitions belong to `nupp.random`; this module owns
 only the Tecs stream naming and persistence contract.
 ]]
 
-local random = require("nupp.random")
 
 -- This persisted key and seed derivation are compatibility surfaces from Teal.
 
@@ -21,7 +20,7 @@ export record Registry
     seed: integer
 
     --- Engine-owned. Retains generators so captured references survive restoration.
-    streams: {[string]: random.Xoshiro128}
+    streams: {[string]: math.Xoshiro128}
 end
 
 --- Carries detached, validated state between snapshot preparation and restore.
@@ -66,12 +65,12 @@ end
 --- @param registry The world-owned stream registry.
 --- @param name The non-empty name validated by the public world method.
 --- @return Returns the cached Nupp generator.
-export function stream(exclusive registry: Registry, name: string): random.Xoshiro128
+export function stream(exclusive registry: Registry, name: string): math.Xoshiro128
     const existing = registry.streams[name]
     if existing ~= nil then
         return assert(registry.streams[name])
     end
-    const generator = random.Xoshiro128(streamSeed(registry.seed, name))
+    const generator = math.Xoshiro128(streamSeed(registry.seed, name))
     registry.streams[name] = generator
 
     return generator
@@ -159,15 +158,15 @@ export function restore(exclusive registry: Registry, borrows state: State): nil
     for name, generator in pairs(registry.streams) do
         const words = state.streams[name]
         if words ~= nil then
-            generator:setState(words)
+            generator:setstate(words)
         else
             generator:reseed(streamSeed(state.seed, name))
         end
     end
     for name, words in pairs(state.streams) do
         if registry.streams[name] == nil then
-            const generator = random.Xoshiro128()
-            generator:setState(words)
+            const generator = math.Xoshiro128()
+            generator:setstate(words)
             registry.streams[name] = generator
         end
     end

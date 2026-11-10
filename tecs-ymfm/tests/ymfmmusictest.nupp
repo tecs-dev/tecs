@@ -3,7 +3,7 @@ local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
 local compression = require("nupp.compression")
 local files = require("nupp.io.files")
-local hostpump = require("nupp.host.pump")
+local hostpump = require("os.host")
 local musicfm = require("tecs.ymfm.music")
 
 -- The chip index the native library knows a chip by, which a chip's
@@ -201,7 +201,7 @@ end
 
 --- Runs `body` under a host pump until it settles.
 local function underPump(body: function(): boolean): nil
-    local pump = hostpump.newPump()
+    local pump = hostpump.Pump()
     local state = pump:start(body)
     local passes: integer = 0
     while state == "parked" and passes < 256 do

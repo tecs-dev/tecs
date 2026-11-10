@@ -1,6 +1,5 @@
 local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
-local time = require("nupp.time")
 
 local suite = {}
 
@@ -136,10 +135,10 @@ function suite.keepsTimeOnAVoidOutput(): nil
     assert.eq(assert(backend.output)().state, "void")
     local mixer = audio.newAudio({backend = backend, maxVoices = 4})
     assert(mixer.available)
-    local started = time.now()
+    local started = os.monotonic()
     while mixer:now() < 0.05 do
-        assert(time.now() - started < 5000, "the void clock never moved")
-        time.sleep(10)
+        assert(os.monotonic() - started < 5000, "the void clock never moved")
+        coroutine.sleep(10)
         mixer:update(0.01)
     end
     mixer:destroy()

@@ -61,7 +61,7 @@ local images = require("tecs.gfx.images")
 local query = require("tecs.internal.query")
 local rendercomponents = require("tecs.internal.rendercomponents")
 
-const utf8 = require("nupp.text.utf8")
+const utf8 = require("utf8")
 const cos, sin = math.cos, math.sin
 const floor = math.floor
 
@@ -266,7 +266,7 @@ local function decode(font: fonts.Font, value: string): nil
     local count: integer = 0
     local at: integer = 1
     while true do
-        const codepoint, nextAt = utf8.decodeAt(value, at)
+        const codepoint, nextAt = utf8.decodeat(value, at)
         if codepoint == nil then
             break
         end
