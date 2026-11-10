@@ -49,8 +49,7 @@ component columns at the following barrier. Existing glyphs retain their IDs
 shortening a label releases only its surplus, and unchanged labels do no layout
 or glyph-creation work.
 ]]
-const {type Key} = require("nupp.util")
-const util = require("nupp.util")
+const {type Key} = require("types")
 const world2 = require("tecs.internal.world")
 
 local ecs = require("tecs.ecs")
@@ -231,7 +230,7 @@ export const TextGlyph: components.Component = ecs.newTagComponent({name = "Text
 --- The world resource the layout system keeps its ownership tables in.
 ---
 --- The key name reaches the resource registry and is a compatibility surface.
-local stateKey: Key<Install> = util.newKey("tecs.text.state")
+local stateKey: Key<Install> = types.Key("tecs.text.state")
 
 -------------------------------------------------------------------------------
 -- Shaping

@@ -37,7 +37,8 @@ export function run(args: {string}, env: {[string]: string}?, cwd: string?): nil
         stdout = "inherit",
         stderr = "inherit"
     }
-    with child = spawn(options) do
+    do
+        local child = spawn(options)
         const status = child:wait()
         if not status:succeeded() then
             os.exit(status.exitCode == 0 and 1 or status.exitCode)
@@ -48,7 +49,8 @@ end
 --- Captures both streams, draining them together until the child exits.
 export function capture(args: {string}, env: {[string]: string}?, clearEnv: boolean?, cwd: string?): process.Result
     const options: process.Options = {args = args, cwd = cwd or root, env = env, clearEnv = clearEnv}
-    with child = spawn(options) do
+    do
+        local child = spawn(options)
         return assert(child:communicate())
     end
 end
@@ -62,7 +64,8 @@ export function runTogether(invocations: {Invocation}): integer
     -- The group retains each process's exact affine cleanup policy. The table only
     -- keeps checked aliases, whose cleanup policy cannot currently be named here.
     local children: {any} = {}
-    with group = nupp.managedGroup() do
+    do
+        local group = nupp.managedGroup()
         for _, invocation in ipairs(invocations) do
             const options: process.Options = {
                 args = invocation.args,

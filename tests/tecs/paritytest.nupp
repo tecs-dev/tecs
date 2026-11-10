@@ -17,7 +17,7 @@ const {type SystemInfo} = require("tecs.ecs")
 const files = require("nupp.io.files")
 
 local archetype = require("tecs.internal.archetype")
-local events = require("nupp.events")
+local events = require("events")
 local buffer = require("string.buffer")
 local ffi = require("ffi")
 local fixedtracking = require("tecs.internal.fixedtracking")
@@ -708,7 +708,8 @@ function suite.binarySnapshotFileMatchesItsReusableBuffer(): nil
     const world = ecs.newWorld()
     const id = world:spawn(ecs.Transform3D(3, 4, 5))
     world:commit()
-    with temporary = assert(files.createTemporaryFile()) do
+    do
+        local temporary = assert(files.createTemporaryFile())
         const output = buffer.new()
         world:saveSnapshot({format = "binary", buffer = output, path = temporary:toString()})
         const bytes = assert(files.read(temporary:toString()))

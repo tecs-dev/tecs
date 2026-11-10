@@ -43,10 +43,9 @@ game named none, so an engine test and an unnamed tool write somewhere stable.
 ]]
 
 const files = require("nupp.io.files")
-const paths = require("nupp.io.path")
 
 --- The platform's own separator, which is what a resolved root ends with.
-const SEPARATOR: string = paths.separator()
+const SEPARATOR: string = io.sep()
 
 -- Compatibility surface. `TECS_ASSETS` is what a developer exports to run a
 -- build straight out of a source tree, and `__tecsContent` is the global a host

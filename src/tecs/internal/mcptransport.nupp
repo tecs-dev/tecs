@@ -294,7 +294,8 @@ end
 
 --- Serves one connection until the peer closes it or the server stops.
 local function serve(exclusive self: Server, takes stream: net.Stream): nil
-    with stream = stream do
+    do
+        local stream = stream
         stream:setNoDelay(true)
         while not self.destroyed do
             local head, why = readHead(stream)
@@ -351,7 +352,8 @@ local function spawn(exclusive self: Server, takes stream: net.Stream?, takes li
         takes connection: net.Stream?,
         takes accepting: net.Listener?
     ): nil
-        with installation = suspensionHost.install(server.handler) do
+        do
+            local installation = suspensionHost.install(server.handler)
             if connection == nil then
                 acceptLoop(server, assert(accepting))
             else
@@ -372,7 +374,8 @@ end
 --- addressing the old one. Owning the listener here also puts its close on the
 --- path that already unwinds, which is what `destroy` resumes.
 acceptLoop = function(exclusive self: Server, takes listener: net.Listener): nil
-    with listener = listener do
+    do
+        local listener = listener
         while not self.destroyed do
             local stream, why = listener:accept()
             if stream == nil then

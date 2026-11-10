@@ -16,7 +16,7 @@ not survive a snapshot. That is why the runtime below exists rather than
 reaching for `nupp.tasks` for the sequence's own control flow.
 ]]
 
-local events = require("nupp.events")
+local events = require("events")
 local wakeheap = require("tecs.internal.wakeheap")
 local entityworld = require("tecs.internal.world")
 local query = require("tecs.internal.query")
@@ -432,7 +432,7 @@ end
 ---
 --- Observers watch this one declaration and filter on the emission's `name`,
 --- rather than each name being an event type of its own.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "SequenceEmission")
 export record Emission
     --- Read-only. Carries the name supplied to `sequence.emit`.

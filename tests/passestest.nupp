@@ -92,7 +92,7 @@ local function decode(section: string): Graph
             outputs = outputs
         )
     end
-    assert(reader:atEnd(), "the section holds nothing the decoder did not read")
+    assert(reader:atend(), "the section holds nothing the decoder did not read")
     own.drop(reader)
 
     return Graph(targets = targets, passes = decoded)

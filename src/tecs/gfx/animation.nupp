@@ -52,7 +52,7 @@ playback carries on and shows the new frames from its next step.
 ]]
 
 local ecs = require("tecs.ecs")
-local events = require("nupp.events")
+local events = require("events")
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
 local rendercomponents = require("tecs.internal.rendercomponents")
@@ -207,7 +207,7 @@ export const AnimationEvents: ecs.Component = ecs.newTagComponent({name = "Anima
 --- Playback stops and holds that frame, so this fires once per playthrough and
 --- never again until something restarts it.
 -- This event name is a compatibility surface.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "Completed")
 export record Completed
     --- Read-only. Identifies the entity whose animation ended a cycle.
@@ -227,7 +227,7 @@ end
 --- to cover several cycles wraps the time once and reports one loop, so
 --- counting these is not a way to count playthroughs.
 -- This event name is a compatibility surface.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "Looped")
 export record Looped
     --- Read-only. Identifies the entity whose animation ended a cycle.

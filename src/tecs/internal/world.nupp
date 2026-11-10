@@ -11,20 +11,17 @@ query layers will build on.
 This module orders ECS systems, but owns no private task or completion runtime.
 Systems suspend through `nupp.tasks`; parallel work belongs to `nupp.workers`.
 ]]
-const {type Source} = require("nupp.events")
-const {type Observers} = require("nupp.events")
-const {type Store} = require("nupp.util")
+const {type Store} = require("types")
 const {type DoubleArray} = require("tecs.internal.entitycolumn")
-const {type Emittable} = require("nupp.events")
-const {type Observer} = require("nupp.events")
-const util = require("nupp.util")
+const {type Emittable} = require("events")
+const {type Observer} = require("events")
 
 local ffi = require("ffi")
 local archetype = require("tecs.internal.archetype")
 local components = require("tecs.internal.components")
 local derived = require("tecs.internal.derived")
 local events = require("tecs.internal.events")
-local nuppevents = require("nupp.events")
+local nuppevents = require("events")
 local ffistorage = require("tecs.internal.ffistorage")
 local idallocator = require("tecs.internal.idallocator")
 local inverseindex = require("tecs.internal.inverseindex")
@@ -445,9 +442,9 @@ end
 
 --- A world containing entity identities and staged structural work.
 ---
---- A world is an event source: observers register against it by address and
+--- A world delivers events: observers register against it by address and
 --- receive only the event they observed.
-export record World is Source<integer>
+export record World
     @private allocator: idallocator.IdAllocator
     @private archetypes: {archetype.Archetype}
     @private archetypeById: {[integer]: archetype.Archetype}
@@ -527,9 +524,9 @@ export record World is Source<integer>
     archetypeCount: integer
     systemCount: integer
 
-    --- Observer registrations by address and event; `observers.count` is how
+    --- Observer registrations by address and event; `observers:count()` is how
     --- many are live.
-    observers: Observers<integer>
+    observers: nuppevents.MessageBus<integer>
 
     resources: Store
 
@@ -1005,8 +1002,8 @@ export function new(
         liveCount = 0,
         archetypeCount = 1,
         systemCount = 0,
-        observers = nuppevents.newObservers(),
-        resources = util.newStore()
+        observers = nuppevents.MessageBus(),
+        resources = types.Store.create()
     )
 end
 
@@ -2507,7 +2504,7 @@ function World.observe<E is Emittable>(
     callback: Observer<E>,
     id: string?
 ): nil
-    nuppevents.observe(self, address, event, callback, id)
+    self.observers:observe(address, event, callback, id)
     if address ~= 0 then
         self.observedEntities[address] = true
     end
@@ -2527,7 +2524,7 @@ function World.observeOnce<E is Emittable>(
     callback: Observer<E>,
     id: string?
 ): nil
-    nuppevents.observeOnce(self, address, event, callback, id)
+    self.observers:once(address, event, callback, id)
     if address ~= 0 then
         self.observedEntities[address] = true
     end
@@ -2549,7 +2546,7 @@ function World.stopObserving<E is Emittable>(
     event: Type<E>,
     callbackOrId: Observer<E> | string
 ): boolean
-    return nuppevents.stopObserving(self, address, event, callbackOrId)
+    return self.observers:stop(address, event, callbackOrId)
 end
 
 --- Reports whether an address has an observer for an event.
@@ -2558,7 +2555,7 @@ end
 --- @param event the event declaration
 --- @return whether at least one observer is registered
 function World.hasObservers<E is Emittable>(borrows self: World, address: integer, event: Type<E>): boolean
-    return nuppevents.hasObservers(self, address, event)
+    return self.observers:contains(address, event)
 end
 
 --- Constructs an event into the world's storage and delivers it to one address.
@@ -2578,7 +2575,7 @@ function World.emit<E is Emittable>(
     event: Type<E>,
     ...: unpackof Construction(E)
 ): nil
-    nuppevents.emit(self, address, event, ...)
+    self.observers:emit(address, event, ...)
 end
 
 --- Delivers an event instance the caller already holds.
@@ -2591,14 +2588,14 @@ end
 --- @param instance the instance to deliver
 --- @raises any what an observer raised
 function World.deliver<E is Emittable>(exclusive self: World, address: integer, event: Type<E>, instance: E): nil
-    nuppevents.deliver(self, address, event, instance)
+    self.observers:deliver(address, event, instance)
 end
 
 --- Clears every event observer at one address.
 --- @param self the world to modify
 --- @param address the world or entity address to clear
 function World.clearObservers(exclusive self: World, address: integer): nil
-    nuppevents.clearAddress(self, address)
+    self.observers:clear(address)
     if address ~= 0 then
         self.observedEntities[address] = nil
     end
@@ -2971,7 +2968,7 @@ local function publishSpawn(exclusive world: World, pending: PendingSpawn): nil
 end
 
 local function publishDespawnEvents(exclusive world: World, id: integer, source: archetype.Archetype, row: integer): nil
-    if world.observers.count == 0 then
+    if world.observers:count() == 0 then
         return
     end
     local requestedDespawns: {integer} = {}
@@ -3063,7 +3060,7 @@ local function publishMutationBatch(exclusive world: World, batch: MutationBatch
     if whole and batch.despawn then
         -- Ordinary sources with no incoming relationships need no per-row
         -- swap removal or edge dispatch. Observers still see committed rows.
-        if world.observers.count > 0 then
+        if world.observers:count() > 0 then
             for row = 1, batch.count do
                 const id = source.entities[row]
                 publishDespawnEvents(world, id, source, row - 1)
@@ -3403,7 +3400,7 @@ function World.clearEntities(exclusive self: World): nil
     -- own observers at address zero stay, which is what keeps a subsystem's
     -- lifecycle observers and a game's global ones across a clear.
     for address in pairs(self.observedEntities) do
-        nuppevents.clearAddress(self, address)
+        self.observers:clear(address)
     end
     self.observedEntities = {}
     self.liveCount = 0
@@ -5245,7 +5242,8 @@ function World.startup(exclusive self: World): nil
     self:commit()
     self.updating = true
     local succeeded, failure = pcall(function(): nil
-        with scope = coroutine.scope() do
+        do
+            local scope = coroutine.scope()
             if self.pipeline ~= nil then
                 runCustomPipeline(self, phases.StartupGroup, 0, scope)
             else
@@ -5273,7 +5271,8 @@ function World.shutdown(exclusive self: World): nil
     self:commit()
     self.updating = true
     local succeeded, failure = pcall(function(): nil
-        with scope = coroutine.scope() do
+        do
+            local scope = coroutine.scope()
             if self.pipeline ~= nil then
                 runCustomPipeline(self, phases.ShutdownGroup, 0, scope)
             else
@@ -5307,7 +5306,8 @@ function World.runPhase(exclusive self: World, phase: phases.Selection, dt: numb
     self:commit()
     self.updating = true
     local succeeded, failure = pcall(function(): nil
-        with scope = coroutine.scope() do
+        do
+            local scope = coroutine.scope()
             if self.pipeline ~= nil then
                 runCustomPipeline(self, phase, elapsed, scope)
             else
@@ -5345,7 +5345,8 @@ function World.update(exclusive self: World, dt: number): nil
     self:commit()
     self.updating = true
     local succeeded, failure = pcall(function(): nil
-        with scope = coroutine.scope() do
+        do
+            local scope = coroutine.scope()
             if self.pipeline ~= nil then
                 runCustomPipeline(self, nil, dt, scope)
             else

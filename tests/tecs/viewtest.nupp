@@ -20,7 +20,7 @@ local function packets(bytes: string): {string}, {integer}, integer
         packets[index] = reader:readbytes(reader:readuint32() as integer)
         reader:skip(reader:readuint32() as integer)
     end
-    assert(reader:atEnd())
+    assert(reader:atend())
     own.drop(reader)
 
     return packets, ids, revision

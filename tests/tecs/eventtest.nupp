@@ -1,11 +1,11 @@
 local components = require("tecs.internal.components")
 local ecs = require("tecs.ecs")
-local events = require("nupp.events")
+local events = require("events")
 local world = require("tecs.internal.world")
 local suite = {}
 
 --- A test event: a declaration, constructed by the world into pooled storage.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "test.EventMessage")
 local record Message
     text: string
@@ -18,7 +18,7 @@ function suite.constructsAndDeliversTypedAddressedEvents(): nil
         0,
         Message,
         function(event: Message): nil
-            assert.eq(value.observers.count, 1)
+            assert.eq(value.observers:count(), 1)
             seen = event.text
         end,
         "listener"
@@ -27,7 +27,7 @@ function suite.constructsAndDeliversTypedAddressedEvents(): nil
     assert.eq(seen, "hello")
     value:emit(0, Message, text = "named")
     assert.eq(seen, "named")
-    assert.eq(value.observers.count, 1)
+    assert.eq(value.observers:count(), 1)
     assert.eq(events.name(Message), "test.EventMessage")
 end
 
@@ -77,7 +77,7 @@ function suite.stopsAnObserverNotYetReachedDuringDelivery(): nil
     value:emit(0, Message, "two")
     assert.eq(firstCalls, 2)
     assert.eq(secondCalls, 0)
-    assert.eq(value.observers.count, 1)
+    assert.eq(value.observers:count(), 1)
 end
 
 function suite.removesEveryRegistrationOfACallback(): nil
@@ -96,7 +96,7 @@ function suite.removesEveryRegistrationOfACallback(): nil
     assert(not value:stopObserving(0, Message, count))
     value:emit(0, Message, "none")
     assert.eq(calls, 2)
-    assert.eq(value.observers.count, 0)
+    assert.eq(value.observers:count(), 0)
 end
 
 function suite.consumesAOnceObserverBeforeItRuns(): nil
@@ -147,7 +147,7 @@ function suite.finishesCurrentDeliveryWhenItsAddressIsCleared(): nil
     value:emit(0, Message, "first")
     assert(secondRan)
     assert(not value:hasObservers(0, Message))
-    assert.eq(value.observers.count, 0)
+    assert.eq(value.observers:count(), 0)
 end
 
 function suite.clearsEntityObserversButPreservesWorldObservers(): nil
@@ -162,7 +162,7 @@ function suite.clearsEntityObserversButPreservesWorldObservers(): nil
     value:commit()
     assert(value:hasObservers(0, Message))
     assert(not value:hasObservers(entity, Message))
-    assert.eq(value.observers.count, 1)
+    assert.eq(value.observers:count(), 1)
 end
 
 function suite.clearingEveryEntityKeepsTheWorldsObservers(): nil
@@ -180,7 +180,7 @@ function suite.clearingEveryEntityKeepsTheWorldsObservers(): nil
     assert(value:hasObservers(0, Message))
     assert(not value:hasObservers(first, Message))
     assert(not value:hasObservers(second, Message))
-    assert.eq(value.observers.count, 1)
+    assert.eq(value.observers:count(), 1)
 end
 
 function suite.recoversEmitBookkeepingAfterAnObserverRaises(): nil
@@ -200,7 +200,7 @@ function suite.recoversEmitBookkeepingAfterAnObserverRaises(): nil
         "expected observer failure"
     )
     assert(value:stopObserving(0, Message, "failing"))
-    assert.eq(value.observers.count, 0)
+    assert.eq(value.observers:count(), 0)
     local delivered: string = ""
     value:observe(0, Message, function(event: Message): nil
         delivered = event.text
