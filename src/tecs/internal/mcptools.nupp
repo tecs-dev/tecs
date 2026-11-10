@@ -21,8 +21,7 @@ one.
 ]]
 
 local ecs = require("tecs.ecs")
-local files = require("nupp.io.files")
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 local platformevents = require("tecs.platform.events")
 local bindings = require("tecs.internal.mcpbindings")
 local registry = require("tecs.internal.mcpregistry")
@@ -125,7 +124,7 @@ registry.register({
             frame = app ~= nil and app.frame or json.NULL,
             elapsed = app ~= nil and app.elapsed or json.NULL,
             suspended = app ~= nil and app.suspended or json.NULL,
-            eventKinds = json.asArray(KINDS)
+            eventKinds = json.asarray(KINDS)
         }
     end
 })
@@ -158,20 +157,18 @@ registry.register({
             return {lines = json.EMPTY_ARRAY, offset = 0, path = json.NULL}
         end
 
-        local handle = files.open(path, "r")
+        local handle = io.open(path, "rb")
         if handle == nil then
             return {lines = json.EMPTY_ARRAY, offset = 0, path = path}
         end
 
         local after = math.floor(tonumber(arguments.after) or 0) as integer
-        local size = handle:size() or 0
+        local size = handle:seek("end") or 0
         if after > size then
             -- The file was truncated under the cursor, so start again.
             after = 0
         end
-        handle:seek(after, "set")
-        -- The open file is itself the reader, so closing it is the one
-        -- release this needs.
+        handle:seek("set", after)
         local window = handle:read(WINDOW) or ""
         handle:close()
 
@@ -190,7 +187,7 @@ registry.register({
             end
         end
 
-        return {path = path, offset = after + #window, lines = #lines > 0 and json.asArray(lines) or json.EMPTY_ARRAY}
+        return {path = path, offset = after + #window, lines = #lines > 0 and json.asarray(lines) or json.EMPTY_ARRAY}
     end
 })
 
@@ -384,7 +381,7 @@ registry.register({
     handler = function(arguments: {[string]: any}): {[string]: any}?
         local kind = arguments.kind as string?
         if kind == nil then
-            return {kinds = json.asArray(KINDS)}
+            return {kinds = json.asarray(KINDS)}
         end
 
         local event = buildEvent(kind, arguments)
@@ -440,7 +437,7 @@ end
 --- Reports the state stack the way every `states` tool carries it.
 local function stackData(stack: {string}): {[string]: any}
     return {
-        states = #stack > 0 and json.asArray(stack) or json.EMPTY_ARRAY,
+        states = #stack > 0 and json.asarray(stack) or json.EMPTY_ARRAY,
         depth = #stack,
         top = stack[#stack] ?? json.NULL
     }
@@ -518,7 +515,7 @@ registry.register({
         end
 
         return {
-            systems = #rows > 0 and json.asArray(rows) or json.EMPTY_ARRAY,
+            systems = #rows > 0 and json.asarray(rows) or json.EMPTY_ARRAY,
             total = #rows,
             registered = #listed,
             message = `${tostring(#rows)} of ${tostring(#listed)} systems`
@@ -712,7 +709,7 @@ registry.register({
 
         local count, values = collect(pcall(chunk, bindings.requireWorld()))
 
-        return {returned = count, values = count > 0 and json.asArray(values) or json.EMPTY_ARRAY}
+        return {returned = count, values = count > 0 and json.asarray(values) or json.EMPTY_ARRAY}
     end
 })
 

@@ -1,6 +1,6 @@
 local application = require("tecs.application")
 local ecs = require("tecs.ecs")
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 local mcp = require("tecs.mcp")
 local net = require("io.net")
 
@@ -58,7 +58,7 @@ end
 --- One HTTP tool call against the loopback endpoint.
 local function callOverHTTP(port: integer, name: string, arguments: {[string]: any}?): {[string]: any}
     local stream = assert(net.connect({host = "127.0.0.1", port = port}))
-    local payload = json.encode({
+    local payload = json.encodevalue({
         jsonrpc = "2.0",
         id = 1,
         method = "tools/call",
@@ -90,7 +90,7 @@ local function callOverHTTP(port: integer, name: string, arguments: {[string]: a
     end
     stream:close()
 
-    local response = json.decode(received:sub(headEnd + 1), json.NULL) as {[string]: any}
+    local response = json.decodevalue(received:sub(headEnd + 1), json.NULL) as {[string]: any}
     local result = response.result as {[string]: any}
     local content = result.content as {{[string]: any}}
     assert(result.isError == nil, `${name} failed: ${content ~= nil and content[1].text or "?"}`)
@@ -235,9 +235,9 @@ function suite.answersWhileTheApplicationIsCrashedAndResumesIt(): nil
     mcp.setCrashed(failure)
 
     -- A world tool reports the traceback rather than answering.
-    local blocked = json.decode(
+    local blocked = json.decodevalue(
         mcp.dispatch(
-            json.encode({
+            json.encodevalue({
                 jsonrpc = "2.0",
                 id = 1,
                 method = "tools/call",
@@ -251,9 +251,9 @@ function suite.answersWhileTheApplicationIsCrashedAndResumesIt(): nil
 
     -- `clear_crash` is one of the tools that survives a crash, and it lets the
     -- loop simulate again.
-    local cleared = json.decode(
+    local cleared = json.decodevalue(
         mcp.dispatch(
-            json.encode({
+            json.encodevalue({
                 jsonrpc = "2.0",
                 id = 2,
                 method = "tools/call",

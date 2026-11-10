@@ -1,5 +1,4 @@
 local ecs = require("tecs.ecs")
-local files = require("nupp.io.files")
 local fonts = require("tecs.gfx.fonts")
 local gfx = require("tecs.gfx")
 local images = require("tecs.gfx.images")
@@ -18,8 +17,7 @@ local shared: fonts.Font? = nil
 --- `n` advances wide whatever the characters are.
 local function font(): fonts.Font
     if shared == nil then
-        const bytes, reason = files.read(SOURCE)
-        assert(bytes, reason)
+        const bytes = assert(assert(io.open(SOURCE, "rb")):read("a"))
         const loaded, failure = fonts.newTTF({bytes = bytes as string, name = "texttest/mono", size = 24})
         assert(loaded, failure)
         shared = loaded
@@ -371,8 +369,7 @@ function suite.despawnsGlyphEntitiesNoLiveTextOwns(): nil
 end
 
 function suite.placesEveryTextAgainWhenAnAtlasIsRepacked(): nil
-    const bytes, reason = files.read(SOURCE)
-    assert(bytes, reason)
+    const bytes = assert(assert(io.open(SOURCE, "rb")):read("a"))
     const small, failure = fonts.newTTF({
         bytes = bytes as string,
         name = "texttest/growth",

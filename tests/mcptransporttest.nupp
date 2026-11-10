@@ -1,5 +1,5 @@
 local ecs = require("tecs.ecs")
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 local mcp = require("tecs.mcp")
 local net = require("io.net")
 
@@ -110,7 +110,7 @@ function suite.answersInitializeOverHTTPWithoutTheFrame(): nil
         return answer
     end)
 
-    local response = json.decode(body, json.NULL) as {[string]: any}
+    local response = json.decodevalue(body, json.NULL) as {[string]: any}
     local result = response.result as {[string]: any}
 
     assert.eq(result.protocolVersion as string, "2025-06-18")
@@ -136,7 +136,7 @@ function suite.roundTripsAToolCallThroughTheFrame(): nil
         return answer
     end)
 
-    local response = json.decode(body, json.NULL) as {[string]: any}
+    local response = json.decodevalue(body, json.NULL) as {[string]: any}
     local result = (response.result as {[string]: any}).structuredContent as {[string]: any}
 
     assert.eq(response.id as integer, 9)
@@ -164,7 +164,7 @@ function suite.reportsAFailingToolOverHTTPRatherThanClosingTheConnection(): nil
         return answer
     end)
 
-    local result = (json.decode(body, json.NULL) as {[string]: any}).result as {[string]: any}
+    local result = (json.decodevalue(body, json.NULL) as {[string]: any}).result as {[string]: any}
     local content = result.content as {{[string]: any}}
 
     assert(result.isError == true)
@@ -179,7 +179,7 @@ function suite.servesTheRegistryListingOverHTTP(): nil
         return answer
     end)
 
-    local listed = ((json.decode(body, json.NULL) as {[string]: any}).result as {[string]: any}).tools
+    local listed = ((json.decodevalue(body, json.NULL) as {[string]: any}).result as {[string]: any}).tools
     local tools = listed as {{[string]: any}}
     local names: {[string]: boolean} = {}
     for index = 1, #tools do
@@ -278,7 +278,7 @@ function suite.blocksAWorldToolOverHTTPAfterACrash(): nil
     end)
     mcp.setCrashed(nil)
 
-    local result = (json.decode(body, json.NULL) as {[string]: any}).result as {[string]: any}
+    local result = (json.decodevalue(body, json.NULL) as {[string]: any}).result as {[string]: any}
     local content = result.content as {{[string]: any}}
 
     assert(result.isError == true)

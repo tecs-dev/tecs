@@ -3,21 +3,21 @@ module tecs.files
 --[[
 Where a game reads its shipped content from.
 
-`nupp.io.files` owns every filesystem operation and every writable root:
-reading, writing, atomic commits, directory streams, temporaries, metadata, and
-the platform's own configuration, data and cache directories for one named
-application. This module keeps the one thing Nupp cannot supply, because it is a
+Nupp owns every filesystem operation and every writable root: `io.open` reads
+and writes, and `os` holds atomic commits, directory streams, temporaries,
+metadata, and the platform's own configuration, data and cache directories for
+one named application. This module keeps the one thing Nupp cannot supply, because it is a
 property of the product rather than of the platform: where this build's content
 was installed.
 
 ```nupp
-const disk = require("nupp.io.files")
+os.setappid("Ex Nihilo", "Starfarer")
+const saves = assert(os.appdir("data")):join("saves")
+assert(os.mkdir(saves))
+assert(os.writeatomic(saves:join("slot1.json"), bytes))
 
-disk.setApplicationIdentity("Ex Nihilo", "Starfarer")
-const saves = assert(disk.dataPath()):join("saves")
-disk.writeAtomic(saves:join("slot1.json"), bytes)
-
-const level = disk.read(tecs.files.assetPath("levels/one.json"))
+const level = assert(io.open(tecs.files.assetPath("levels/one.json"), "rb"))
+const text = level:read("a")
 ```
 
 ## The asset root
@@ -25,24 +25,23 @@ const level = disk.read(tecs.files.assetPath("levels/one.json"))
 `assetRoot` is where shipped content lives and is never a place a build may
 write. `TECS_ASSETS` wins, which is how a development run reads straight out of
 a build tree instead of a staged copy. Then the `__tecsContent` global, since a
-host knows the layout it installed and this is not something to sniff for. Then
-the directory the running executable was loaded from, which is where a
-single-directory build puts everything. `assetPath` joins against it without
+host knows the layout it installed and this is not something to sniff for. The
+native host resolves the remaining case before any Nupp runs: it exports
+`TECS_ASSETS` as the `share/tecs/assets` or `assets` directory nearest its own
+executable. `assetPath` joins against the root without
 checking existence, because a path that is about to be read is as valid a
 request as one that is already there.
 
 ## Writable roots
 
-A game names itself through `nupp.io.files.setApplicationIdentity` and then asks
-`nupp.io.files` for `configurationPath`, `dataPath` or `cachePath`, each of
-which is a distinct directory that is created before it is answered. Saves and
-settings belong under `dataPath`, and anything the game can rebuild belongs
-under `cachePath`, which the operating system may empty between any two runs.
+A game names itself through `os.setappid` and then asks `os.appdir` for
+`"config"`, `"data"` or `"cache"`, each of which is a distinct directory that is
+created before it is answered. Saves and settings belong under `"data"`, and
+anything the game can rebuild belongs under `"cache"`, which the operating
+system may empty between any two runs.
 `tecs.application.newApplication` names the identity `"tecs", "tecs"` when a
 game named none, so an engine test and an unnamed tool write somewhere stable.
 ]]
-
-const files = require("nupp.io.files")
 
 --- The platform's own separator, which is what a resolved root ends with.
 const SEPARATOR: string = io.sep()
@@ -115,20 +114,15 @@ end
 --- Returns the root the engine reads shipped content from.
 ---
 --- The root is resolved once and remembered, and `reset` forgets it. An empty
---- answer is not a failure: it means no override named a root and the platform
---- declined to say where the executable is, and a caller falls back to a path
---- relative to the working directory.
+--- answer is not a failure: it means neither `TECS_ASSETS` nor the host named a
+--- root, and a caller falls back to a path relative to the working directory.
 --- @return the root with a trailing separator, or an empty string
 export function assetRoot(): string
     local held = assetsCache
     if held ~= nil then
         return held
     end
-    local override = environment(ASSET_ROOT_VARIABLE) or hostGlobal(CONTENT_GLOBAL)
-    if override == nil then
-        const directory = files.executableDirectory()
-        override = directory and directory:toString()
-    end
+    const override = environment(ASSET_ROOT_VARIABLE) or hostGlobal(CONTENT_GLOBAL)
     local answer = override == nil and "" or terminated(override)
     assetsCache = answer
 
@@ -157,8 +151,7 @@ end
 ---
 --- A test that moves `TECS_ASSETS` between cases needs this. A game does not:
 --- nothing under a running process changes where content was installed. The
---- writable roots are `nupp.io.files`', and `resetApplicationPaths` forgets
---- those.
+--- writable roots are Nupp's, under `os.appdir`.
 export function reset(): nil
     assetsCache = nil
 end

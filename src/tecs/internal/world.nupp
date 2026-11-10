@@ -31,7 +31,6 @@ local randomstreams = require("tecs.internal.randomstreams")
 local snapshotvalue = require("tecs.internal.snapshotvalue")
 local snapshotcodec = require("tecs.internal.snapshotcodec")
 local buffer = require("string.buffer")
-local files = require("nupp.io.files")
 
 --- A frame system body.
 ---
@@ -4111,9 +4110,15 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
             output
         )
         if assert(options).path ~= nil then
-            const ok, reason = files.write(assert(assert(options).path), output:tostring())
-            if not ok then
-                error("snapshot write failed: " .. assert(reason), 2)
+            const target = assert(assert(options).path)
+            local file, reason = io.open(target, "wb")
+            if file == nil then
+                error("snapshot write failed: " .. (reason or target), 2)
+            end
+            const written, problem = file:write(output:tostring())
+            const closed, failure = file:close()
+            if written == nil or closed == false then
+                error("snapshot write failed: " .. (problem or failure or target), 2)
             end
         end
         return Snapshot(

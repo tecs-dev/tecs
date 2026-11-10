@@ -79,7 +79,6 @@ assembler and loads a prebuilt pack, so a changed material body is a rebuild.
 ]]
 
 local components = require("tecs.internal.components")
-local files = require("nupp.io.files")
 
 --- Takes id zero, because an instance with no `Material` writes a zero.
 ---
@@ -169,7 +168,7 @@ export function install(): nil
     end
     for index = 1, #roots do
         const root = roots[index]
-        const matches = files.glob(root .. "*.wgsl")
+        const matches = os.glob(root .. "*.wgsl")
         if matches ~= nil then
             for slot = 1, #matches do
                 const path = matches[slot]

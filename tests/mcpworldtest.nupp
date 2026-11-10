@@ -1,5 +1,5 @@
 local ecs = require("tecs.ecs")
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 local mcp = require("tecs.mcp")
 
 local suite = {}
@@ -24,9 +24,9 @@ local Marked = ecs.newTagComponent({name = "test.mcp.Marked"})
 local Health = ecs.newScalarComponent({name = "test.mcp.Health", kind = "number", default = 100})
 
 local function call(name: string, arguments: {[string]: any}?): {[string]: any}
-    local response = json.decode(
+    local response = json.decodevalue(
         mcp.dispatch(
-            json.encode({
+            json.encodevalue({
                 jsonrpc = "2.0",
                 id = 1,
                 method = "tools/call",

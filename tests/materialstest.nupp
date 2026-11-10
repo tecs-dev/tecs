@@ -1,4 +1,3 @@
-const files = require("nupp.io.files")
 
 local ecs = require("tecs.ecs")
 local gfx = require("tecs.gfx")
@@ -62,12 +61,12 @@ end
 
 function suite.readsMaterialFilesFromAddedRoots(): nil
     materials.reset()
-    local directory = assert(files.createTemporaryDirectory())
-    local root = directory:toString()
-    assert(files.write(root .. "/materialstest.zigzag.wgsl", "fn material() {}"))
+    local directory = assert(os.mktempdir())
+    local root = tostring(directory)
+    assert(assert(io.open(root .. "/materialstest.zigzag.wgsl", "wb")):write("fn material() {}"))
     -- A file that is not a material is ignored, because the glob is the rule
     -- and the pack is built from the same one.
-    assert(files.write(root .. "/notes.txt", "ignored"))
+    assert(assert(io.open(root .. "/notes.txt", "wb")):write("ignored"))
 
     materials.addRoot(root)
     assert.eq(materials.count(), 15)

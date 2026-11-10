@@ -42,8 +42,8 @@ Built-in transforms, tint, shape material, camera, lights, animation, sound,
 physics values and numeric UI components use this storage and derive
 `types.debug`, whose methods work on constructed values and borrowed rows
 without changing column layout. Serialization needs no derive:
-`nupp.serde.binding(Velocity)` selects the declaration's fields for
-`nupp.serde.json.encode` and `decode`. That generic encoding describes physical
+`serde.binding(Velocity)` selects the declaration's fields for
+`serde.json.encode` and `decode`. That generic encoding describes physical
 component fields, whereas world snapshots use the component's registered codecs.
 Asset-bearing built-ins keep their custom name-based codecs and never persist
 process-local IDs as assets.

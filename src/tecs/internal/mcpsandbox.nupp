@@ -21,7 +21,7 @@ by `loadstring` under `setfenv`. Both are reached through the global table
 because the Nupp standard library does not declare them.
 ]]
 
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 
 local globals = _G as {[string]: any}
 
@@ -210,7 +210,7 @@ export function describe(value: any, depth: integer?): any
     end
 
     if isArray then
-        return json.asArray(list)
+        return json.asarray(list)
     end
 
     -- A table that turned out to be mixed loses nothing: the numeric keys were

@@ -1,18 +1,18 @@
 local application = require("tecs.application")
 local ecs = require("tecs.ecs")
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 local mcp = require("tecs.mcp")
 
 local suite = {}
 
 local function decode(text: string): {[string]: any}
-    return json.decode(text, json.NULL) as {[string]: any}
+    return json.decodevalue(text, json.NULL) as {[string]: any}
 end
 
 local function call(name: string, arguments: {[string]: any}?): {[string]: any}
     local response = decode(
         mcp.dispatch(
-            json.encode({
+            json.encodevalue({
                 jsonrpc = "2.0",
                 id = 7,
                 method = "tools/call",
@@ -137,7 +137,7 @@ end
 function suite.reportsMethodNotFoundForAnUnknownTool(): nil
     local response = decode(
         mcp.dispatch(
-            json.encode({
+            json.encodevalue({
                 jsonrpc = "2.0",
                 id = 5,
                 method = "tools/call",

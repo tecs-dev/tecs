@@ -116,7 +116,7 @@ refuse unsupported framing or physics encodings.
 ]]
 
 local ecs = require("tecs.ecs")
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 local bindings = require("tecs.internal.mcpbindings")
 local registry = require("tecs.internal.mcpregistry")
 local sandbox = require("tecs.internal.mcpsandbox")
@@ -297,7 +297,7 @@ export function poll(exclusive self: Server, parked: boolean?): boolean
         return true
     end
 
-    local arguments, malformed = json.decode(request.arguments, json.NULL)
+    local arguments, malformed = json.decodevalue(request.arguments, json.NULL)
     if malformed ~= nil or type(arguments) ~= "table" then
         self.endpoint:respond(request, "invalid tool arguments", true, false)
 
@@ -311,7 +311,7 @@ export function poll(exclusive self: Server, parked: boolean?): boolean
 
         return true
     end
-    self.endpoint:respond(request, json.encode(result.structuredContent), false, false)
+    self.endpoint:respond(request, json.encodevalue(result.structuredContent), false, false)
 
     return true
 end

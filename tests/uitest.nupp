@@ -6,7 +6,6 @@ const {Event} = require("tecs.ui")
 const {type Event} = require("tecs.ui")
 const events = require("tecs.platform.events")
 const text2 = require("tecs.gfx.text")
-const files = require("nupp.io.files")
 const fonts = require("tecs.gfx.fonts")
 
 local suite = {}
@@ -157,7 +156,7 @@ function suite.wrapsTextAndClipsEveryGlyph(): nil
     local world = ecs.newWorld()
     ui.install(world, {width = 300, height = 100})
     text2.install(world)
-    local bytes = assert(files.read("assets/fonts/JetBrainsMono-ExtraBold.ttf"))
+    local bytes = assert(assert(io.open("assets/fonts/JetBrainsMono-ExtraBold.ttf", "rb")):read("a"))
     local font = assert(fonts.newTTF({bytes = bytes, name = "uitest/font", size = 24}))
     local root = world:spawn(ui.Root(), ui.Style({width = 100, height = 30, flexDirection = "column"}), ui.Scroll())
     local label = world:spawn(
@@ -187,7 +186,7 @@ end
 function suite.keepsNaturallySizedTextOnOneLine(): nil
     local world = ecs.newWorld()
     ui.install(world, {width = 400, height = 100})
-    local bytes = assert(files.read("assets/fonts/JetBrainsMono-ExtraBold.ttf"))
+    local bytes = assert(assert(io.open("assets/fonts/JetBrainsMono-ExtraBold.ttf", "rb")):read("a"))
     local font = assert(fonts.newTTF({bytes = bytes, name = "uitest/rounding", size = 32}))
     local root = world:spawn(ui.Root(), ui.Style({width = 400, height = 48, padding = 12}))
     local label = world:spawn(

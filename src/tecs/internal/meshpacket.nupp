@@ -3,7 +3,7 @@ module tecs.internal.meshpacket
 const {type Collector as Collector2} = require("tecs.internal.meshlights")
 const {type Lighting} = require("tecs.gfx.meshes")
 const meshlights = require("tecs.internal.meshlights")
-const json = require("nupp.codec.json")
+const json = require("serde.json")
 
 local world = require("tecs.internal.world")
 local query = require("tecs.internal.query")
@@ -215,7 +215,7 @@ local function settingsOf(lighting: Lighting): string
         end
     end
     if changed then
-        saved.bytes = json.encode(lighting)
+        saved.bytes = json.encodevalue(lighting)
         saved.probe = {}
         for index, value in ipairs(lighting.probe) do
             saved.probe[index] = value

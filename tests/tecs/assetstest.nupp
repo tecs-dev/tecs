@@ -1,4 +1,3 @@
-local files = require("nupp.io.files")
 local assets = require("tecs.assets")
 local hostpump = require("os.host")
 local hostcancellation = require("tecs.internal.hostcancellation")
@@ -572,9 +571,9 @@ end
 -------------------------------------------------------------------------------
 
 function suite.readsAFileThroughTheDocumentKind(): nil
-    local temporary = assert(files.createTemporaryFile(files.TemporaryOptions(suffix = ".asset")))
-    local path = temporary:toString()
-    assert(files.write(path, "level one"))
+    local temporary = assert(os.mktemp(nil, ".asset"))
+    local path = tostring(temporary)
+    assert(assert(io.open(path, "wb")):write("level one"))
     local loader = assets.newAssets()
     local text: string? = nil
     underPump(function(): boolean

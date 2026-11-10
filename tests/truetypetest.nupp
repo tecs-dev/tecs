@@ -1,4 +1,3 @@
-local files = require("nupp.io.files")
 local truetype = require("tecs.gfx.truetype")
 
 local suite = {}
@@ -15,8 +14,7 @@ local function face(): truetype.Face
     if cached ~= nil then
         return cached
     end
-    const bytes, reason = files.read(SOURCE)
-    assert(bytes, reason)
+    const bytes = assert(assert(io.open(SOURCE, "rb")):read("a"))
     const parsed, failure = truetype.parse(bytes as string)
     assert(parsed, failure)
     cached = parsed

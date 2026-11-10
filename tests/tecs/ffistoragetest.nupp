@@ -1,8 +1,7 @@
 const ecs = require("tecs.ecs")
 const {type Archetype} = require("tecs.ecs")
-const serde = require("nupp.serde")
-const serdejson = require("nupp.serde.json")
-const json = require("nupp.codec.json")
+const serde = require("serde")
+const json = require("serde.json")
 const {type Component} = require("tecs.ecs")
 const gfx = require("tecs.gfx")
 const animation = require("tecs.gfx.animation")
@@ -527,10 +526,10 @@ function suite.derivesSurviveNativeStorageRelocationAndRestore(): nil
     for _ = 1, 3 do
         const value = assert(world:get(id, point))
         assert.eq(value:debug(), "Point { x = 11, y = 23 }")
-        const encoded = json.decode(serdejson.encode(points, value)) as {[string]: number}
+        const encoded = json.decodevalue(json.encode(points, value)) as {[string]: number}
         assert.eq(encoded.x, 11)
         assert.eq(encoded.y, 23)
-        const decoded = serdejson.decode(points, serdejson.encode(points, value))
+        const decoded = json.decode(points, json.encode(points, value))
         assert.eq(decoded:debug(), value:debug())
         world:batchSpawn(500, {point})
         world:commit()

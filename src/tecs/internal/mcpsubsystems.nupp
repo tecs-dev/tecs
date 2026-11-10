@@ -15,8 +15,7 @@ local layers = require("tecs.gfx.layers")
 local physics = require("tecs.physics")
 local audio = require("tecs.audio")
 local screenshot = require("tecs.gfx.screenshot")
-local files = require("nupp.io.files")
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 local profile = require("debug.profile")
 local buffer = require("string.buffer")
 
@@ -79,19 +78,19 @@ register("archetypes_list", "List committed archetypes, including empty ones whe
         if args.empty == true or row.entities > 0 then
             total = total + 1
             if #rows < limit then
-                rows[#rows + 1] = {id = row.id, entities = row.entities, components = json.asArray(row.components)}
+                rows[#rows + 1] = {id = row.id, entities = row.entities, components = json.asarray(row.components)}
             end
         end
     end
 
-    return {archetypes = json.asArray(rows), total = total, returned = #rows}
+    return {archetypes = json.asarray(rows), total = total, returned = #rows}
 end)
 register("archetypes_info", "Report one archetype's components and dirty columns.", function(
     args: {[string]: any}
 ): {[string]: any}
     for _, row in ipairs(entityworld.inspectArchetypes(bindings.requireWorld())) do
         if row.id == args.id then
-            return {id = row.id, entities = row.entities, components = json.asArray(row.columns)}
+            return {id = row.id, entities = row.entities, components = json.asarray(row.columns)}
         end
     end
     error("unknown archetype: " .. tostring(args.id))
@@ -112,7 +111,7 @@ register("resources_list", "List occupied world resource keys without serializin
     _args: {[string]: any}
 ): {[string]: any}
     local rows = resourceRows(bindings.requireWorld().resources)
-    return {resources = json.asArray(rows), total = #rows}
+    return {resources = json.asarray(rows), total = #rows}
 end)
 register("resources_info", "Report whether a named world resource is present.", function(
     args: {[string]: any}
@@ -133,7 +132,7 @@ register("materials_list", "List the registered material dispatch names and IDs.
         rows[#rows + 1] = {name = name, id = materials.id(name)}
     end
 
-    return {materials = json.asArray(rows), total = #rows}
+    return {materials = json.asarray(rows), total = #rows}
 end)
 register("materials_info", "Resolve one material name to its dispatch ID.", function(
     args: {[string]: any}
@@ -225,7 +224,7 @@ register("layers_list", "Report all configured layer bands.", function(_args: {[
         rows[#rows + 1] = layerInfo(index)
     end
 
-    return {layers = json.asArray(rows), total = #rows}
+    return {layers = json.asarray(rows), total = #rows}
 end)
 register("layers_info", "Report one layer's placement and sorting.", function(args: {[string]: any}): {[string]: any}
     return layerInfo(integer(args.layer))
@@ -242,7 +241,7 @@ register(
             camera = cameraInfo(),
             frame = app ~= nil and app.frame or 0,
             observations = {gpuCounters = false, readback = true},
-            unavailable = json.asArray({"presented frame ID", "GPU timings", "visible instance count"})
+            unavailable = json.asarray({"presented frame ID", "GPU timings", "visible instance count"})
         }
     end
 )
@@ -308,7 +307,7 @@ register("audio", "Report the world's audio output, mixer and decoder state.", f
         maxVoices = mixer:maxVoices(),
         gain = mixer:masterGain(),
         muted = mixer:muted(),
-        decoders = json.asArray(mixer:decoders())
+        decoders = json.asarray(mixer:decoders())
     }
 end)
 register(
@@ -327,16 +326,17 @@ register(
 
 local function artifact(name: string): string
     assert(name ~= "" and not io.Path.of(name):isabsolute(), "artifact name must be relative to the writable root")
-    const root, reason = files.dataPath()
-    assert(root ~= nil, reason?.message)
-    local located = root as files.ApplicationPath
-    -- The root refuses a component that would leave it, so a name carrying `..`
-    -- raises here rather than resolving somewhere else.
+    const root, reason = os.appdir("data")
+    assert(root ~= nil, tostring(reason))
+    local located: io.Path = root
+    -- A plain path joins `..` like any other component, so a name that would
+    -- leave the writable root raises here rather than resolving somewhere else.
     for segment in name:gmatch("[^/\\\\]+") do
+        assert(segment ~= "..", "artifact name must stay under the writable root")
         located = located:join(segment)
     end
 
-    return located:toString()
+    return tostring(located)
 end
 
 register(
@@ -348,8 +348,8 @@ register(
         local output = buffer.new()
         world:saveSnapshot({format = "binary", buffer = output})
         local bytes = output:tostring()
-        local ok, reason = files.writeAtomic(destination, bytes)
-        assert(ok, reason?.message)
+        local ok, reason = os.writeatomic(destination, bytes)
+        assert(ok, tostring(reason))
 
         return {path = destination, format = "binary", bytes = #bytes}
     end,
@@ -362,13 +362,11 @@ register(
         assert(io.Path.of(args.path):isabsolute(), "snapshot path must be absolute")
         local bytes: string
         do
-            local input, reason = files.open(args.path, "r")
-            assert(input ~= nil, reason?.message)
-            local size, sizeReason = input:size()
-            assert(size ~= nil, sizeReason?.message)
-            local chunk, failure = input:read(size + 1)
-            assert(chunk ~= nil, failure)
-            assert(#chunk == size, "snapshot changed during the read")
+            local input, reason = io.open(args.path, "rb")
+            assert(input ~= nil, reason)
+            const chunk = input:read("a")
+            input:close()
+            assert(chunk ~= nil, "cannot read " .. args.path)
             bytes = chunk
         end
         local world = bindings.requireWorld()
@@ -418,8 +416,8 @@ register(
         end
         local report = taken:stop()
         own.drop(taken)
-        local ok, reason = files.writeAtomic(destination, report.text)
-        assert(ok, reason?.message)
+        local ok, reason = os.writeatomic(destination, report.text)
+        assert(ok, tostring(reason))
 
         return {path = destination, samples = report.samples, stacks = report.stacks, bytes = #report.text}
     end,
@@ -980,7 +978,7 @@ local function contract(tool: registry.Tool): {[string]: any}
 end
 
 local function describe(name: string): {[string]: any}
-    local result: {[string]: any} = {name = name, section = "Tools", verbs = json.asArray({})}
+    local result: {[string]: any} = {name = name, section = "Tools", verbs = json.asarray({})}
     local verbs: {any} = {}
     for _, tool in ipairs(registry.listTools()) do
         if tool.name == name then
@@ -990,7 +988,7 @@ local function describe(name: string): {[string]: any}
         end
     end
     assert(result.action ~= nil or #verbs > 0, "unknown command: " .. name)
-    result.verbs = json.asArray(verbs)
+    result.verbs = json.asarray(verbs)
 
     return result
 end
@@ -1021,7 +1019,7 @@ register(
             end
         end
 
-        return {sections = json.asArray({{name = "Tools", commands = json.asArray(commands)}})}
+        return {sections = json.asarray({{name = "Tools", commands = json.asarray(commands)}})}
     end,
     false,
     true
@@ -1041,7 +1039,7 @@ register(
             end
         end
 
-        return {commands = count, tools = #tools, sections = json.asArray({{name = "Tools", commands = count}})}
+        return {commands = count, tools = #tools, sections = json.asarray({{name = "Tools", commands = count}})}
     end,
     false,
     true

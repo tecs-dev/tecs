@@ -21,7 +21,7 @@ belong to the map through `ChildOf`; snapshots preserve their gameplay state.
 Tile visuals are derived from map data and rebuilt after a snapshot load.
 ]]
 const assetnative = require("tecs.internal.assetnative")
-const json = require("nupp.codec.json")
+const json = require("serde.json")
 const {type ComponentDefinition} = require("tecs.ecs")
 const ecs = require("tecs.ecs")
 const {type World} = require("tecs.ecs")
@@ -31,7 +31,6 @@ const {type Query} = require("tecs.ecs")
 const {type Key} = require("types")
 const images2 = require("tecs.gfx.images")
 const {type MaterialMaps} = require("tecs.gfx.images")
-const files = require("nupp.io.files")
 const {type Sprite} = require("tecs.gfx")
 const gfx = require("tecs.gfx")
 const physics = require("tecs.physics")
@@ -177,7 +176,7 @@ export type Map = {
 ---     unsupported
 export function load(path: string): Map
     local source = assetnative.load(path, 0)
-    local value = assert(json.decode(source))
+    local value = assert(json.decodevalue(source))
     value.revision, value.changes = 0, {}
     local map = value as Map
 
@@ -434,7 +433,7 @@ local function imageOf(source: Image): integer
     local maps: MaterialMaps = {}
     for _, suffix in ipairs({"_n", "_e", "_orm"}) do
         const path = stem .. suffix .. ".png"
-        if files.exists(path) then
+        if os.exists(path) then
             const map = images2.load(path)
             if suffix == "_n" then
                 maps.normalMap = map
