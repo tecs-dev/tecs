@@ -352,7 +352,7 @@ function suite.encodesOneOrderedBatchForRust(): nil
     assert.eq(nearX, 200)
     assert.eq(nearY, 100)
     assert(nearDepth < farDepth, "a higher layer draws nearer")
-    assert(reader:atEnd())
+    assert(reader:atend())
     own.drop(reader)
 end
 
@@ -610,7 +610,7 @@ function suite.encodesAnEmptyScene(): nil
     local read = header(reader)
     assert.eq(read.batches, 0)
     assert.eq(read.instances, 0)
-    assert(reader:atEnd())
+    assert(reader:atend())
     own.drop(reader)
 end
 
@@ -781,7 +781,7 @@ function suite.bulkInstancesMatchScalarRoundingAndOwnTheirBytes(): nil
     world:commit()
     local empty = io.Reader.of(extractor:packet(640, 360)):scalar()
     assert.eq(header(empty).instances, 0)
-    assert(empty:atEnd())
+    assert(empty:atend())
     own.drop(empty)
     -- Returned strings survive subsequent packets and buffer reclamation.
     collectgarbage("collect")

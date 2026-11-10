@@ -47,12 +47,11 @@ A body declared during a frame becomes live during that frame's next fixed
 step, and its `RigidBody` row appears at the end of that step's `FixedUpdate`,
 which is where the solver hands back the slot it assigned.
 ]]
-const {type Key} = require("nupp.util")
-const util = require("nupp.util")
+const {type Key} = require("types")
 const world2 = require("tecs.internal.world")
 
 local ecs = require("tecs.ecs")
-local events = require("nupp.events")
+local events = require("events")
 local contract = require("tecs.physics.contract")
 
 const vec2 = math.vec2
@@ -559,7 +558,7 @@ export const JointBodyB: ecs.Relationship = ecs.newRelationship({
 
 --- Fires at address zero when two bodies begin touching.
 -- This event name is a compatibility surface.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "ContactBegin")
 export record ContactBegin
     --- Read-only. Identifies one body of the pair.
@@ -571,7 +570,7 @@ end
 
 --- Fires at address zero when two bodies stop touching.
 -- This event name is a compatibility surface.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "ContactEnd")
 export record ContactEnd
     --- Read-only. Identifies one body of the pair.
@@ -583,7 +582,7 @@ end
 
 --- Fires at address zero when a body enters a sensor.
 -- This event name is a compatibility surface.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "SensorBegin")
 export record SensorBegin
     --- Read-only. Identifies the sensor.
@@ -595,7 +594,7 @@ end
 
 --- Fires at address zero when a body leaves a sensor.
 -- This event name is a compatibility surface.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "SensorEnd")
 export record SensorEnd
     --- Read-only. Identifies the sensor.
@@ -677,7 +676,7 @@ end
 --- Names the world resource holding physics state.
 ---
 --- The key name is the compatibility surface `SNAPSHOT_KEY` declares.
-const stateKey: Key<State> = util.newKey(SNAPSHOT_KEY)
+const stateKey: Key<State> = types.Key(SNAPSHOT_KEY)
 
 local function toMeters(pixels: number): number
     return pixels / pixelsPerMeter

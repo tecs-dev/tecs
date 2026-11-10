@@ -3,7 +3,7 @@ module tecs.platform.events
 --[[
 Typed platform events produced by the Rust host.
 
-Every kind is its own `nupp.events` declaration, so a world delivers a key
+Every kind is its own `events` declaration, so a world delivers a key
 press to the observers of `KeyDown` and nothing else, and the twelve shapes
 the kinds share are unions of the declarations that carry them. Kind strings
 are a stable external data surface used by recordings and tools. Rust
@@ -12,7 +12,7 @@ translates `winit` events into these records and passes one ordered batch to
 ]]
 
 local ecs = require("tecs.ecs")
-local events = require("nupp.events")
+local events = require("events")
 
 --- A platform event kind supported by the Rust host.
 export type Kind = "quit"
@@ -74,7 +74,7 @@ export function kinds(): {string}
 end
 
 --- A process quit request.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.quit")
 export record Quit
     kind: "quit"
@@ -84,7 +84,7 @@ export record Quit
 end
 
 --- A close request for one window.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.windowCloseRequested")
 export record WindowCloseRequested
     kind: "windowCloseRequested"
@@ -99,7 +99,7 @@ end
 export type QuitEvent = Quit | WindowCloseRequested
 
 --- A logical window resize.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.windowResized")
 export record WindowResized
     kind: "windowResized"
@@ -114,7 +114,7 @@ export record WindowResized
 end
 
 --- A scale-factor change with the resulting logical size.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.windowScaleChanged")
 export record WindowScaleChanged
     kind: "windowScaleChanged"
@@ -134,7 +134,7 @@ end
 export type ResizeEvent = WindowResized | WindowScaleChanged
 
 --- A window gaining focus.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.windowFocusGained")
 export record WindowFocusGained
     kind: "windowFocusGained"
@@ -145,7 +145,7 @@ export record WindowFocusGained
 end
 
 --- A window losing focus.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.windowFocusLost")
 export record WindowFocusLost
     kind: "windowFocusLost"
@@ -161,7 +161,7 @@ end
 export type FocusEvent = WindowFocusGained | WindowFocusLost
 
 --- A key going down.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.keyDown")
 export record KeyDown
     kind: "keyDown"
@@ -177,7 +177,7 @@ export record KeyDown
 end
 
 --- A key coming up.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.keyUp")
 export record KeyUp
     kind: "keyUp"
@@ -198,7 +198,7 @@ end
 export type KeyEvent = KeyDown | KeyUp
 
 --- An absolute pointer position and optional relative movement.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.mouseMotion")
 export record MouseMotion
     kind: "mouseMotion"
@@ -215,7 +215,7 @@ end
 export type PointerMoveEvent = MouseMotion
 
 --- A pointer button going down.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.mouseDown")
 export record MouseDown
     kind: "mouseDown"
@@ -230,7 +230,7 @@ export record MouseDown
 end
 
 --- A pointer button coming up.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.mouseUp")
 export record MouseUp
     kind: "mouseUp"
@@ -250,7 +250,7 @@ end
 export type PointerButtonEvent = MouseDown | MouseUp
 
 --- A normalized pointer wheel movement.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.mouseWheel")
 export record MouseWheel
     kind: "mouseWheel"
@@ -269,7 +269,7 @@ end
 export type WheelEvent = MouseWheel
 
 --- Text committed by the platform input method.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.textInput")
 export record TextInput
     kind: "textInput"
@@ -283,7 +283,7 @@ end
 export type TextEvent = TextInput
 
 --- A finger touching the surface.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.fingerDown")
 export record FingerDown
     kind: "fingerDown"
@@ -303,7 +303,7 @@ export record FingerDown
 end
 
 --- A finger leaving the surface.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.fingerUp")
 export record FingerUp
     kind: "fingerUp"
@@ -323,7 +323,7 @@ export record FingerUp
 end
 
 --- A finger moving on the surface.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.fingerMotion")
 export record FingerMotion
     kind: "fingerMotion"
@@ -343,7 +343,7 @@ export record FingerMotion
 end
 
 --- A touch the platform cancelled.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.fingerCanceled")
 export record FingerCanceled
     kind: "fingerCanceled"
@@ -372,7 +372,7 @@ end
 export type TouchEvent = FingerDown | FingerUp | FingerMotion | FingerCanceled
 
 --- A gamepad appearing.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.gamepadAdded")
 export record GamepadAdded
     kind: "gamepadAdded"
@@ -383,7 +383,7 @@ export record GamepadAdded
 end
 
 --- A gamepad going away.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.gamepadRemoved")
 export record GamepadRemoved
     kind: "gamepadRemoved"
@@ -402,7 +402,7 @@ end
 export type GamepadDeviceEvent = GamepadAdded | GamepadRemoved
 
 --- A gamepad button going down.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.gamepadButtonDown")
 export record GamepadButtonDown
     kind: "gamepadButtonDown"
@@ -415,7 +415,7 @@ export record GamepadButtonDown
 end
 
 --- A gamepad button coming up.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.gamepadButtonUp")
 export record GamepadButtonUp
     kind: "gamepadButtonUp"
@@ -433,7 +433,7 @@ end
 export type GamepadButtonEvent = GamepadButtonDown | GamepadButtonUp
 
 --- A gamepad axis reading.
-@derive(events.Event)
+@derive(events.event)
 @event(name = "tecs.platform.events.gamepadAxis")
 export record GamepadAxis
     kind: "gamepadAxis"

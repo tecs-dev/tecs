@@ -1,6 +1,6 @@
 module tecs.internal.mcpsubsystems
 
-const {type Store} = require("nupp.util")
+const {type Store} = require("types")
 
 -- Subsystem tools. Input schemas and tool names are compatibility surfaces.
 local registry = require("tecs.internal.mcpregistry")
@@ -16,7 +16,6 @@ local physics = require("tecs.physics")
 local audio = require("tecs.audio")
 local screenshot = require("tecs.gfx.screenshot")
 local files = require("nupp.io.files")
-local path = require("nupp.io.path")
 local json = require("nupp.codec.json")
 local profile = require("debug.profile")
 local buffer = require("string.buffer")
@@ -327,7 +326,7 @@ register(
 )
 
 local function artifact(name: string): string
-    assert(name ~= "" and not path.newPath(name):isAbsolute(), "artifact name must be relative to the writable root")
+    assert(name ~= "" and not io.Path.of(name):isabsolute(), "artifact name must be relative to the writable root")
     const root, reason = files.dataPath()
     assert(root ~= nil, reason?.message)
     local located = root as files.ApplicationPath
@@ -360,7 +359,7 @@ register(
     "snapshot_load",
     "Replace the world from a native binary snapshot.",
     function(args: {[string]: any}): {[string]: any}
-        assert(path.newPath(args.path):isAbsolute(), "snapshot path must be absolute")
+        assert(io.Path.of(args.path):isabsolute(), "snapshot path must be absolute")
         local bytes: string
         do
             local input, reason = files.open(args.path, "r")
@@ -906,7 +905,7 @@ register(
     function(args: {[string]: any}): {[string]: any}
         local destination: string
         if args.path ~= nil then
-            assert(path.newPath(args.path):isAbsolute(), "screenshot path must be absolute")
+            assert(io.Path.of(args.path):isabsolute(), "screenshot path must be absolute")
             destination = args.path
         else
             destination = artifact(args.name or "screenshot.png")

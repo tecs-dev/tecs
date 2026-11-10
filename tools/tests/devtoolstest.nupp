@@ -63,7 +63,8 @@ function suite.performanceGateChecksCompleteTailSamples(): nil
 end
 
 function suite.previewResolvesCleanRoutesAndRefusesTraversal(): nil
-    with scratch = assert(files.createTemporaryDirectory()) do
+    do
+        local scratch = assert(files.createTemporaryDirectory())
         const root = scratch:toString()
         assert(files.createDirectory(root .. "/nested"))
         assert(files.write(root .. "/nested/index.html", "example"))
@@ -84,7 +85,8 @@ function suite.benchmarkModulesCannotShadowRuntimeModules(): nil
 end
 
 function suite.taskLauncherPreservesArgumentsAndFailureStatus(): nil
-    with scratch = assert(files.createTemporaryDirectory(files.TemporaryOptions(prefix = "tecs task args "))) do
+    do
+        local scratch = assert(files.createTemporaryDirectory(files.TemporaryOptions(prefix = "tecs task args ")))
         const root = scratch:toString()
         assert(files.createDirectory(root .. "/tools/tecs/dev"))
         assert(files.copy(commands.root .. "/tools/run.nupp", root .. "/tools/run.nupp"))

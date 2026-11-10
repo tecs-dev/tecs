@@ -29,8 +29,8 @@ const {type Input} = require("tecs.input")
 const {type Layer} = require("tecs.input")
 const {type Query} = require("tecs.ecs")
 const {type Event as Event2} = require("tecs.platform.events")
-const {type Key} = require("nupp.util")
-const util = require("nupp.util")
+const {type Key} = require("types")
+const messages = require("events")
 const {type World} = require("tecs.ecs")
 const text = require("tecs.gfx.text")
 const images = require("tecs.gfx.images")
@@ -492,7 +492,7 @@ export const FocusScope = ecs.newTagComponent({name = "UiFocusScope"})
 --- A semantic interaction delivered first to its target, then its ancestors.
 ---
 --- Observed at an entity address, or at address zero after bubbling.
-@derive(nupp.events.Event)
+@derive(messages.event)
 @event(name = "tecs.ui.Event")
 export record Event
     --- Read-only. Identifies the interaction.
@@ -594,7 +594,7 @@ local record State
     inputLayer: Layer?
     updates: integer
 end
-local stateKey: Key<State> = util.newKey("tecs.ui.state")
+local stateKey: Key<State> = types.Key("tecs.ui.state")
 
 local function parentOf(borrows world: World, entity: integer): integer
     local link = world:get(entity, ecs.ChildOf)

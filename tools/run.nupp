@@ -25,7 +25,8 @@ const spawned, problem = process.spawn(options)
 if spawned == nil then
     error("cannot start " .. args[1] .. ": " .. tostring(problem), 0)
 end
-with child = spawned do
+do
+    local child = spawned
     const status = child:wait()
     if not status:succeeded() then
         os.exit(status.exitCode == 0 and 1 or status.exitCode)

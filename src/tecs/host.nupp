@@ -24,9 +24,9 @@ resident or failed, and the packet the host extracts next already says so.
 ]]
 const screenshot = require("tecs.gfx.screenshot")
 const models = require("tecs.gfx.models")
-const events = require("nupp.events")
+const events = require("events")
 const nupphost = require("os.host")
-const span = require("nupp.mem.span")
+const span = require("bytes.span")
 
 local application = require("tecs.application")
 local viewpacket = require("tecs.internal.viewpacket")
@@ -46,14 +46,14 @@ export type FrameState = hostpump.Pump.State | "held"
 export const INPUT_ADDRESS: integer = 1
 
 --- A close request the host pushed on `tecs.input.close`.
-@derive(events.Event)
+@derive(events.event)
 export record CloseInput
     timestamp: number
     sequence: integer
 end
 
 --- A size observation the host pushed on `tecs.input.resize`.
-@derive(events.Event)
+@derive(events.event)
 export record ResizeInput
     --- Read-only. Reports whether the scale factor changed rather than only the size.
     scaleChanged: boolean
@@ -68,7 +68,7 @@ export record ResizeInput
 end
 
 --- A focus transition the host pushed on `tecs.input.focus`.
-@derive(events.Event)
+@derive(events.event)
 export record FocusInput
     focused: boolean
     timestamp: number
@@ -76,7 +76,7 @@ export record FocusInput
 end
 
 --- A keyboard transition the host pushed on `tecs.input.key`.
-@derive(events.Event)
+@derive(events.event)
 export record KeyInput
     down: boolean
     physicalKey: string
@@ -90,7 +90,7 @@ end
 
 --- An absolute pointer position and relative delta the host pushed on
 --- `tecs.input.pointer-move`.
-@derive(events.Event)
+@derive(events.event)
 export record PointerMoveInput
     x: number
     y: number
@@ -101,7 +101,7 @@ export record PointerMoveInput
 end
 
 --- A pointer button transition the host pushed on `tecs.input.pointer-button`.
-@derive(events.Event)
+@derive(events.event)
 export record PointerButtonInput
     down: boolean
     button: integer
@@ -112,7 +112,7 @@ export record PointerButtonInput
 end
 
 --- Normalized wheel movement the host pushed on `tecs.input.wheel`.
-@derive(events.Event)
+@derive(events.event)
 export record WheelInput
     wheelX: number
     wheelY: number
@@ -125,7 +125,7 @@ export record WheelInput
 end
 
 --- Committed input-method text the host pushed on `tecs.input.text`.
-@derive(events.Event)
+@derive(events.event)
 export record TextInput
     text: string
     timestamp: number
@@ -138,7 +138,7 @@ end
 --- `normalY` run from zero to one across the surface. `touchDevice` and
 --- `finger` are strings rather than numbers because both are 64-bit platform
 --- identities that a Lua number would round together.
-@derive(events.Event)
+@derive(events.event)
 export record TouchInput
     --- Read-only. Names one of `fingerDown`, `fingerMotion`, `fingerUp` or
     --- `fingerCanceled`.
@@ -443,7 +443,7 @@ local type UploadImage = function(
     height: integer,
     sampler: integer,
     format: string,
-    borrows pixels: span.ByteSpan
+    borrows pixels: span.Span<uint8>
 ): (boolean?, string?)
 local type ReleaseImage = function(image: integer): (boolean?, string?)
 local type SetMaterialMaps = function(
@@ -472,7 +472,7 @@ local function applyImageCommands(): nil
                 command.height,
                 command.sampler,
                 command.format,
-                span.fromString(pixels)
+                span.fromstring(pixels)
             )
         elseif command is images.MaterialMapsCommand then
             ok, reason = setMaterialMaps(command.image, command.normalMap, command.emissionMap, command.ormMap)
@@ -498,7 +498,7 @@ export function newSession(config: application.Config?): Session
     const app = application.newApplication(config)
     const session = Session(
         app = app,
-        input = events.newMessageBus(),
+        input = events.MessageBus(),
         hosted = nupphost.attached(),
         routes = {},
         events = {},

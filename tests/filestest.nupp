@@ -1,9 +1,8 @@
 local files = require("tecs.files")
-local paths = require("nupp.io.path")
 
 local suite = {}
 
-local SEPARATOR = paths.separator()
+local SEPARATOR = io.sep()
 
 --- Puts the module back the way the suite found it.
 ---

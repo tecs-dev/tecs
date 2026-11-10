@@ -1,12 +1,11 @@
-const {type Key} = require("nupp.util")
-const util = require("nupp.util")
+const {type Key} = require("types")
 
 local ecs = require("tecs.ecs")
 local suite = {}
 
 function suite.storesValuesUnderTypedKeys(): nil
-    local speed: Key<number> = util.newKey("test.store.speed")
-    local store = util.newStore()
+    local speed: Key<number> = types.Key("test.store.speed")
+    local store = types.Store.create()
     store:set(speed, 120)
     local current: number? = store:get(speed)
     assert.eq(current as number, 120)
@@ -15,25 +14,25 @@ function suite.storesValuesUnderTypedKeys(): nil
 end
 
 function suite.registersANameOnceAndFindsItByLookup(): nil
-    local first: Key<string> = util.newKey("test.store.registered")
+    local first: Key<string> = types.Key("test.store.registered")
     local ok = pcall(function(): nil
-        local _: Key<string> = util.newKey("test.store.registered")
+        local _: Key<string> = types.Key("test.store.registered")
     end)
     assert(not ok, "a second declaration of a registered name did not raise")
-    local found = util.Key.find("test.store.registered") as Key<string>
+    local found = types.Key.find("test.store.registered") as Key<string>
     assert.eq(found, first)
     local registered: integer? = nil
-    for id, name in util.Key.registered() do
+    for id, name in types.Key.registered() do
         if name == "test.store.registered" then
             registered = id
         end
     end
     assert.eq(registered as integer, first.id)
-    assert(util.Key.find("test.store.unregistered") == nil)
+    assert(types.Key.find("test.store.unregistered") == nil)
 end
 
 function suite.keepsStoresAndWorldsIndependent(): nil
-    local score: Key<number> = util.newKey("test.store.world.score")
+    local score: Key<number> = types.Key("test.store.world.score")
     local first = ecs.newWorld({maxEntities = 2})
     local second = ecs.newWorld({maxEntities = 2})
     first.resources:set(score, 10)
@@ -43,7 +42,7 @@ function suite.keepsStoresAndWorldsIndependent(): nil
 end
 
 function suite.preservesResourcesWhenEntitiesAreCleared(): nil
-    local label: Key<string> = util.newKey("test.store.clear.label")
+    local label: Key<string> = types.Key("test.store.clear.label")
     local world = ecs.newWorld({maxEntities = 2})
     world.resources:set(label, "ready")
     world:spawn()
@@ -54,7 +53,7 @@ function suite.preservesResourcesWhenEntitiesAreCleared(): nil
 end
 
 function suite.sharesTypedStateBetweenSystems(): nil
-    local frames: Key<number> = util.newKey("test.store.system.frames")
+    local frames: Key<number> = types.Key("test.store.system.frames")
     local world = ecs.newWorld({maxEntities = 2})
     world.resources:set(frames, 0)
     world:addSystem({

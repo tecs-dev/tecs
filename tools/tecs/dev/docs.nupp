@@ -24,7 +24,8 @@ end
 --- Validates the documentation in a temporary directory.
 export function check(): nil
     pages()
-    with scratch = assert(files.createTemporaryDirectory()) do
+    do
+        local scratch = assert(files.createTemporaryDirectory())
         build(scratch:toString() .. "/site")
     end
     print("OK: documentation metadata, build, links and anchors")
@@ -130,7 +131,8 @@ export function serve(port: integer): nil
     build(output)
     io.stdout:setvbuf("line")
     print("Serving http://localhost:" .. port .. "/; rebuilding docs and source changes. Ctrl-C to stop.")
-    with scope = coroutine.scope() do
+    do
+        local scope = coroutine.scope()
         scope:spawn(function(): nil
             local previous = fingerprint()
             while true do
@@ -165,9 +167,11 @@ export function serve(port: integer): nil
                 end
             end
         end)
-        with listener = assert(net.listen({host = "127.0.0.1", port = port})) do
+        do
+            local listener = assert(net.listen({host = "127.0.0.1", port = port}))
             while true do
-                with connection = assert(listener:accept()) do
+                do
+                    local connection = assert(listener:accept())
                     respond(connection, output)
                 end
             end

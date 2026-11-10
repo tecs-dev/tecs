@@ -28,8 +28,7 @@ const {type World} = require("tecs.ecs")
 const {type FFIInstance} = require("tecs.internal.components")
 const {type TileChunk} = require("tecs.gfx")
 const {type Query} = require("tecs.ecs")
-const {type Key} = require("nupp.util")
-const util = require("nupp.util")
+const {type Key} = require("types")
 const images2 = require("tecs.gfx.images")
 const {type MaterialMaps} = require("tecs.gfx.images")
 const files = require("nupp.io.files")
@@ -419,7 +418,7 @@ local record State
     width: number
     height: number
 end
-local stateKey: Key<State> = util.newKey("tecs.tiled.state")
+local stateKey: Key<State> = types.Key("tecs.tiled.state")
 local images: {[string]: integer} = {}
 
 local function imageOf(source: Image): integer
