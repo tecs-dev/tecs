@@ -1416,7 +1416,7 @@ local nextMixer: integer = 0
 ---
 --- @raises string when the mixer has been collected
 local function mixerOf(id: integer): Audio
-    return assert(mixers[id], "tecs.audio: the mixer this belongs to is gone")
+    return (assert(mixers[id], "tecs.audio: the mixer this belongs to is gone"))
 end
 
 --- The mixer each world had installed into it, keyed weakly so a world that
@@ -4247,11 +4247,11 @@ local function hush(hushed: ecs.Query): nil
                 for row = 1, total do
                     if rows[row].voice > 0 then
                         if mutable == nil then
-                            mutable = source:getMut(SoundComponent)
+                            mutable = assert(source:getMut(SoundComponent))
                         end
                         -- Zero rather than finished: a voice the sweep is about to
                         -- take back is not one that ran to its end.
-                        assert(mutable)[row].voice = 0
+                        mutable[row].voice = 0
                     end
                 end
             end
@@ -4360,9 +4360,9 @@ local function listen(
                             end
                             if x ~= entry.x or y ~= entry.y or z ~= entry.z then
                                 if mutable == nil then
-                                    mutable = source:getMut(SoundComponent)
+                                    mutable = assert(source:getMut(SoundComponent))
                                 end
-                                local written = assert(mutable)[row]
+                                local written = mutable[row]
                                 written.x = x
                                 written.y = y
                                 written.z = z
@@ -4436,9 +4436,9 @@ local function reconcile(exclusive self: Audio, sounds: ecs.Query, hushed: ecs.Q
                                 release(self, slotOf(handle))
                             end
                             if mutable == nil then
-                                mutable = source:getMut(SoundComponent)
+                                mutable = assert(source:getMut(SoundComponent))
                             end
-                            assert(mutable)[row].voice = 0
+                            mutable[row].voice = 0
                         end
                     elseif handle == 0 then
                         rowOptions.gain = entry.gain
@@ -4467,9 +4467,9 @@ local function reconcile(exclusive self: Audio, sounds: ecs.Query, hushed: ecs.Q
                         local started = start(self, self.soundsById[entry.clip], rowOptions, true)
                         if started ~= 0 then
                             if mutable == nil then
-                                mutable = source:getMut(SoundComponent)
+                                mutable = assert(source:getMut(SoundComponent))
                             end
-                            assert(mutable)[row].voice = started
+                            mutable[row].voice = started
                             local voice = voices[slotOf(started)]
                             voice.referenced = true
                             voice.strip = strip
@@ -4483,9 +4483,9 @@ local function reconcile(exclusive self: Audio, sounds: ecs.Query, hushed: ecs.Q
                         local voice = voiceOf(self, handle)
                         if voice == nil then
                             if mutable == nil then
-                                mutable = source:getMut(SoundComponent)
+                                mutable = assert(source:getMut(SoundComponent))
                             end
-                            assert(mutable)[row].voice = FINISHED
+                            mutable[row].voice = FINISHED
                         else
                             voice.referenced = true
                             local slot = slotOf(handle)

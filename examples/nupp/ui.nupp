@@ -27,14 +27,14 @@ local function fontAt(size: number, density: number): Font
         return existing
     end
 
-    return assert(
+    return (assert(
         fonts.newTTF({
             source = files.assetPath("fonts/JetBrainsMono-ExtraBold.ttf"),
             name = name,
             size = size * density,
             raster = "alpha"
         })
-    )
+    ))
 end
 
 const COUNT = 4000
@@ -970,7 +970,7 @@ local function install(exclusive app: Application): nil
         run = function(): nil
             const requested = os.getenv("TECS_UI_SCENE") or "compose"
             const choices: {[string]: integer} = {compose = 1, flex = 2, overlay = 3, scroll = 4}
-            selectScene(assert(choices[requested], "TECS_UI_SCENE must be compose, flex, overlay or scroll"))
+            selectScene((assert(choices[requested], "TECS_UI_SCENE must be compose, flex, overlay or scroll")))
         end,
     })
 

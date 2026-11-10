@@ -417,21 +417,21 @@ const INPUT_LIMIT = 1024
 local function routeInput(exclusive session: Session): nil
     const bus = session.input
     const routes = session.routes
-    routes[#routes + 1] = nupphost.route("tecs.input.close", CloseInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
+    routes[#routes + 1] = nupphost.route("tecs.input.close", CloseInput, bus, INPUT_ADDRESS, "dropoldest", INPUT_LIMIT)
     routes[
         #routes + 1
-    ] = nupphost.route("tecs.input.resize", ResizeInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
-    routes[#routes + 1] = nupphost.route("tecs.input.focus", FocusInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
-    routes[#routes + 1] = nupphost.route("tecs.input.key", KeyInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
+    ] = nupphost.route("tecs.input.resize", ResizeInput, bus, INPUT_ADDRESS, "dropoldest", INPUT_LIMIT)
+    routes[#routes + 1] = nupphost.route("tecs.input.focus", FocusInput, bus, INPUT_ADDRESS, "dropoldest", INPUT_LIMIT)
+    routes[#routes + 1] = nupphost.route("tecs.input.key", KeyInput, bus, INPUT_ADDRESS, "dropoldest", INPUT_LIMIT)
     routes[
         #routes + 1
-    ] = nupphost.route("tecs.input.pointer-move", PointerMoveInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
+    ] = nupphost.route("tecs.input.pointer-move", PointerMoveInput, bus, INPUT_ADDRESS, "dropoldest", INPUT_LIMIT)
     routes[
         #routes + 1
-    ] = nupphost.route("tecs.input.pointer-button", PointerButtonInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
-    routes[#routes + 1] = nupphost.route("tecs.input.wheel", WheelInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
-    routes[#routes + 1] = nupphost.route("tecs.input.text", TextInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
-    routes[#routes + 1] = nupphost.route("tecs.input.touch", TouchInput, bus, INPUT_ADDRESS, "dropOldest", INPUT_LIMIT)
+    ] = nupphost.route("tecs.input.pointer-button", PointerButtonInput, bus, INPUT_ADDRESS, "dropoldest", INPUT_LIMIT)
+    routes[#routes + 1] = nupphost.route("tecs.input.wheel", WheelInput, bus, INPUT_ADDRESS, "dropoldest", INPUT_LIMIT)
+    routes[#routes + 1] = nupphost.route("tecs.input.text", TextInput, bus, INPUT_ADDRESS, "dropoldest", INPUT_LIMIT)
+    routes[#routes + 1] = nupphost.route("tecs.input.touch", TouchInput, bus, INPUT_ADDRESS, "dropoldest", INPUT_LIMIT)
 end
 
 -- Each call answers whether the host applied the command and, when it did

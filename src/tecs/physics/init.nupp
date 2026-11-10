@@ -1768,9 +1768,9 @@ local function syncBodyTransforms(state: State, exclusive world: ecs.World): nil
                     local px, py, cosine, sine = simulation.poseOf(handle.index1, handle.generation)
                     if px ~= nil then
                         if transforms == nil then
-                            transforms = archetype:getMut(ecs.Transform2D)
+                            transforms = assert(archetype:getMut(ecs.Transform2D))
                         end
-                        local transform = assert(transforms)[row]
+                        local transform = transforms[row]
                         transform.x = toPixels(px)
                         transform.y = toPixels(py)
                         transform.rotation = vec2.angle(cosine, sine)
