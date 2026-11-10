@@ -524,7 +524,7 @@ export type RelationshipPayload = derived.Edge
 
 @comptime
 local function componentOptions(info: types.derive.Info, edge: boolean): any
-    local result = {name = info.qualifiedName, representation = info.kind, relationship = edge}
+    local result = {name = info.qualifiedname, representation = info.kind, relationship = edge}
     for _, annotation in ipairs(info.annotations) do
         if annotation.name == (edge and "relationship" or "component") then
             for _, argument in ipairs(annotation.arguments) do
@@ -560,7 +560,7 @@ export function Relationship(info: types.derive.Info): types.derive.Result<deriv
     local target = false
     for _, field in ipairs(info.fields) do
         if field.name == "target" then
-            local name = types.describe(field.readType).name
+            local name = types.describe(field.readtype).name
             if name ~= "number" and (info.kind == "struct" or name ~= "integer") then
                 return types.derive.error(
                     "Relationship target must be number in a struct, or number or integer in a record",

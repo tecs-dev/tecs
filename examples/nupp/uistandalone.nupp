@@ -24,14 +24,14 @@ local function fontAt(size: number, density: number): Font
         return existing
     end
 
-    return assert(
+    return (assert(
         fonts.newTTF({
             source = files.assetPath("fonts/JetBrainsMono-ExtraBold.ttf"),
             name = name,
             size = size * density,
             raster = "alpha"
         })
-    )
+    ))
 end
 
 -- The original artwork specifies display RGB; the renderer consumes linear light.

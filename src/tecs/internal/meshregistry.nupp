@@ -18,5 +18,5 @@ export function name(id: integer): string?
 end
 
 export function find(assetName: string): integer
-    return assert(ids[assetName], "load model before restoring its entities: " .. assetName)
+    return (assert(ids[assetName], "load model before restoring its entities: " .. assetName))
 end

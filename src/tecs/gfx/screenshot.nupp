@@ -66,9 +66,9 @@ export function save(capture: Capture, path: string): boolean, string?
         return false, reason
     end
 
-    local file, reason = io.open(path, "wb")
+    local file, unopened = io.open(path, "wb")
     if file == nil then
-        return false, reason
+        return false, unopened
     end
     const written, problem = file:write(bytes)
     const closed, failure = file:close()

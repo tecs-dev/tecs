@@ -329,16 +329,16 @@ end
 function suite.aLoggerNameStampsItsLines(): nil
     local seen: {string} = {}
     local previousLevel = nupplog.setlevel("debug")
-    local previousSink = nupplog.setsink(function(
-        _severity: integer,
+    local previousSink = nupplog.setsink(nupplog.callback(function(
+        _severity: nupplog.Severity,
         module: string,
         _line: integer,
         _message: string
     ): nil
         seen[#seen + 1] = module
-    end)
+    end))
     nupplog.named("tecs.audio"):info("probe")
-    nupplog.setsink(previousSink)
+    own.drop(nupplog.setsink(previousSink))
     nupplog.setlevel(previousLevel)
     assert.eq(#seen, 1)
     assert.eq(seen[1], "tecs.audio")

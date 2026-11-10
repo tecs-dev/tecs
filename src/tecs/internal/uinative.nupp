@@ -20,7 +20,7 @@ cdef function tecsUiError(): cstring
 
 --- Creates an owned Taffy tree, released by `destroy` at world shutdown.
 export function create(): voidptr
-    return assert(tecsUiTreeCreate(), "Taffy could not create a tree")
+    return (assert(tecsUiTreeCreate(), "Taffy could not create a tree"))
 end
 
 --- Applies a tree description and returns changed boxes as JSON.

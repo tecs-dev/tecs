@@ -149,13 +149,13 @@ local function newHandler(self: Server): suspensionContract.Handler
             end
 
             while not waiting:ready() do
-                waiting:onResume(wake)
+                waiting:onresume(wake)
                 if not waiting:ready() then
                     park()
                 end
             end
         end,
-        canPark = function(_: suspensionContract.Handler): boolean
+        canpark = function(_: suspensionContract.Handler): boolean
             return true
         end,
         shutdown = function(_: suspensionContract.Handler): nil
@@ -296,7 +296,7 @@ end
 local function serve(exclusive self: Server, takes stream: net.Stream): nil
     do
         local stream = stream
-        stream:setNoDelay(true)
+        stream:setnodelay(true)
         while not self.destroyed do
             local head, why = readHead(stream)
             if head == nil then

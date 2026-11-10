@@ -30,7 +30,7 @@ const {type Layer} = require("tecs.input")
 const {type Query} = require("tecs.ecs")
 const {type Event as Event2} = require("tecs.platform.events")
 const {type Key} = require("types")
-const messages = require("events")
+const events = require("events")
 const {type World} = require("tecs.ecs")
 const text = require("tecs.gfx.text")
 const images = require("tecs.gfx.images")
@@ -49,7 +49,7 @@ const {type GamepadButtonEvent} = require("tecs.platform.events")
 const {type FocusEvent} = require("tecs.platform.events")
 const {MouseMotion} = require("tecs.platform.events")
 const {type MouseMotion} = require("tecs.platform.events")
-const events = require("tecs.platform.events")
+const platformevents = require("tecs.platform.events")
 const {MouseDown} = require("tecs.platform.events")
 const {type MouseDown} = require("tecs.platform.events")
 const {MouseUp} = require("tecs.platform.events")
@@ -492,7 +492,7 @@ export const FocusScope = ecs.newTagComponent({name = "UiFocusScope"})
 --- A semantic interaction delivered first to its target, then its ancestors.
 ---
 --- Observed at an entity address, or at address zero after bubbling.
-@derive(messages.event)
+@derive(events.event)
 @event(name = "tecs.ui.Event")
 export record Event
     --- Read-only. Identifies the interaction.
@@ -1740,11 +1740,11 @@ export function install(exclusive world: World, options: Options?): nil
     end
 
     world:observe(0, MouseMotion, function(event: MouseMotion): nil
-        queue(events.pointerMoved(event.x, event.y, event.dx, event.dy, event.window, event.timestamp, event.sequence))
+        queue(platformevents.pointerMoved(event.x, event.y, event.dx, event.dy, event.window, event.timestamp, event.sequence))
     end)
     world:observe(0, MouseDown, function(event: MouseDown): nil
         queue(
-            events.pointerButton(
+            platformevents.pointerButton(
                 true,
                 event.button,
                 event.x,
@@ -1758,7 +1758,7 @@ export function install(exclusive world: World, options: Options?): nil
     end)
     world:observe(0, MouseUp, function(event: MouseUp): nil
         queue(
-            events.pointerButton(
+            platformevents.pointerButton(
                 false,
                 event.button,
                 event.x,
@@ -1772,7 +1772,7 @@ export function install(exclusive world: World, options: Options?): nil
     end)
     world:observe(0, MouseWheel, function(event: MouseWheel): nil
         queue(
-            events.wheel(
+            platformevents.wheel(
                 event.wheelX,
                 event.wheelY,
                 event.wheelTicksX,
@@ -1788,7 +1788,7 @@ export function install(exclusive world: World, options: Options?): nil
 
     local function queueTouch(borrows event: TouchEvent): nil
         queue(
-            events.touch(
+            platformevents.touch(
                 event.kind,
                 event.touchDevice,
                 event.finger,
@@ -1820,7 +1820,7 @@ export function install(exclusive world: World, options: Options?): nil
     end)
     world:observe(0, KeyDown, function(event: KeyDown): nil
         queue(
-            events.key(
+            platformevents.key(
                 true,
                 event.physicalKey,
                 event.logicalKey,
@@ -1834,10 +1834,10 @@ export function install(exclusive world: World, options: Options?): nil
         )
     end)
     world:observe(0, GamepadButtonDown, function(event: GamepadButtonDown): nil
-        queue(events.gamepadButton(true, event.which, event.button, event.timestamp, event.sequence))
+        queue(platformevents.gamepadButton(true, event.which, event.button, event.timestamp, event.sequence))
     end)
     world:observe(0, WindowFocusLost, function(event: WindowFocusLost): nil
-        queue(events.focused(false, event.window, event.timestamp, event.sequence))
+        queue(platformevents.focused(false, event.window, event.timestamp, event.sequence))
     end)
     world:observe(0, WindowResized, function(event: ResizeEvent): nil
         if event.width > 0 and event.height > 0 then

@@ -434,7 +434,7 @@ register(
 -------------------------------------------------------------------------------
 
 local function requireMixer(): audio.Audio
-    return assert(audio.of(bindings.requireWorld()), "no audio mixer installed")
+    return (assert(audio.of(bindings.requireWorld()), "no audio mixer installed"))
 end
 
 --- Returns a table of numbers or nested tables JSON can carry as an array.
@@ -727,9 +727,9 @@ register(
         elseif action == "resume" then
             line:resume()
         elseif action == "seek" then
-            line:seek(assert(args.beat, "seek needs a beat"))
+            line:seek((assert(args.beat, "seek needs a beat")))
         elseif action == "tempo" then
-            line:setTempo(assert(args.tempo, "tempo needs a tempo"))
+            line:setTempo((assert(args.tempo, "tempo needs a tempo")))
         else
             error("action must be pause, resume, seek or tempo", 0)
         end

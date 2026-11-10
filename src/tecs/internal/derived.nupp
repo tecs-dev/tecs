@@ -15,7 +15,7 @@ end
 --- @return Returns its native or managed column type.
 @comptime
 export function StorageColumn(T: type): type
-    if types.describe(T).declarationKind == "struct" then
+    if types.describe(T).declarationkind == "struct" then
         return types.carray(T)
     end
     return types.array(T)
