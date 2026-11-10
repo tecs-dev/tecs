@@ -254,7 +254,7 @@ export function new(descriptor: Descriptor?, filterStates: boolean?): Query
         end
     end
 
-    const result = new Query(
+    const result = Query(
         descriptor = {
             name = source.name,
             type = source.type,
@@ -336,7 +336,7 @@ export function addArchetype(value: Query, candidate: archetype.Archetype): nil
         value.archetypeGroups[candidate] = id
         local state = value.grouped[id]
         if state == nil then
-            state = new GroupState(items = {}, positions = {})
+            state = GroupState(items = {}, positions = {})
             value.grouped[id] = state
         end
     end
@@ -404,7 +404,7 @@ function Query.iter(self: Query): (IterFn, Query, archetype.Archetype?)
     return iterStep, self, nil
 end
 
-const emptyGroup = new GroupState(items = {}, positions = {})
+const emptyGroup = GroupState(items = {}, positions = {})
 
 function Query.group(self: Query, groupId: integer): (GroupIterFn, GroupState, archetype.Archetype?)
     return groupStep, self.grouped[groupId] or emptyGroup, nil

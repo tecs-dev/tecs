@@ -16,7 +16,7 @@ export function pick(value: query.Query): rendercomponents.Camera2D?, integer?
                 const entity = active.entities[index]
                 if chosen == nil or entity < chosenEntity then
                     const c = cameras[index]
-                    chosen = new rendercomponents.Camera2D(c.x, c.y, c.zoom, c.rotation)
+                    chosen = rendercomponents.Camera2D(c.x, c.y, c.zoom, c.rotation)
                     chosenEntity = entity
                 end
             end

@@ -64,7 +64,7 @@ export type Options = {
 }
 
 local function make(options: Options): TileChunk
-    const value = new TileChunk()
+    const value = TileChunk()
     value.tileset = options.tileset
     value.tileWidth, value.tileHeight = options.tileWidth or 32, options.tileHeight or 32
     value.columns = options.columns or 16

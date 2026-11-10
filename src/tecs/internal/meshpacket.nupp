@@ -48,7 +48,7 @@ export record Collector
     ): string
 end
 export function new(exclusive value: world.World): Collector
-    return new Collector(
+    return Collector(
         lights = meshlights.new(value),
         query = value:newQuery({
             include = {mesh.Transform3DComponent, mesh.MeshComponent, mesh.Renderable3D},
@@ -64,7 +64,7 @@ local function changed(exclusive self: Collector): boolean
         const active = candidate as archetype.Archetype
         local previous = self.versions[active.id]
         if previous == nil then
-            previous = new Run(values = {}, structure = -1, seen = 0)
+            previous = Run(values = {}, structure = -1, seen = 0)
             self.versions[active.id] = previous
         end
         previous.seen = self.visit
@@ -109,7 +109,7 @@ local function collect(exclusive self: Collector): string
             for index = 1, size as integer do
                 const geometry = geometries[index]
                 const transform, bound, tint = transforms[index], bounds[index], tints[index]
-                local material = new mesh.MeshMaterial()
+                local material = mesh.MeshMaterial()
                 if materials ~= nil then
                     material.model = materials[index].model
                     material.index = materials[index].index
@@ -194,7 +194,7 @@ local settingsCache: {[Lighting]: Settings} = setmetatable({}, {__mode = "k"}) a
 local function settingsOf(lighting: Lighting): string
     local saved = settingsCache[lighting]
     if saved == nil then
-        saved = new Settings()
+        saved = Settings()
         settingsCache[lighting] = saved
     end
     local changed = saved.bytes == "" or #saved.probe ~= #lighting.probe

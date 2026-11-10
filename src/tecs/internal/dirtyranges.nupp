@@ -44,7 +44,7 @@ end
 --- Creates an empty range list.
 --- @return The list, whose storage is retained when cleared.
 export function new(): Ranges
-    return new Ranges(entries = {}, count = 0, collapsed = false, bytes = 0)
+    return Ranges(entries = {}, count = 0, collapsed = false, bytes = 0)
 end
 
 function Ranges.mark(self: Ranges, offset: integer, size: integer): nil

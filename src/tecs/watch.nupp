@@ -225,7 +225,7 @@ export function add(path: string, kind: string?): boolean
         return false
     end
     local size, stamp = source(path)
-    entries[path] = new Entry(kind = named, size = size, stamp = stamp, pendingSize = -1, pendingStamp = -1, steady = 0)
+    entries[path] = Entry(kind = named, size = size, stamp = stamp, pendingSize = -1, pendingStamp = -1, steady = 0)
 
     return true
 end
@@ -380,7 +380,7 @@ local function enqueue(path: string, entry: Entry): boolean
 
         return false
     end
-    queue[#queue + 1] = new Change(path = path, kind = entry.kind)
+    queue[#queue + 1] = Change(path = path, kind = entry.kind)
     queued[path] = true
 
     return true

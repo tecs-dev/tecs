@@ -87,13 +87,13 @@ local function newHarness(available: boolean, decoders: boolean): Harness
             if refusal[1] ~= "" then
                 return false, refusal[1]
             end
-            opened[#opened + 1] = new Opened(decoder = decoder, handle = handle, params = params, bytes = bytes)
+            opened[#opened + 1] = Opened(decoder = decoder, handle = handle, params = params, bytes = bytes)
 
             return true
         end
     end
 
-    return new Harness(
+    return Harness(
         backend = backend,
         commands = commands,
         opened = opened,
@@ -135,7 +135,7 @@ local function sentBy(harness: Harness, mixer: audio.Audio): {Sent}
             local op = data // OP
             local rest = data % OP
             local kind = op == 0 and "message" or op == 1 and "notesOff" or op == 2 and "reset" or "unknown"
-            found[#found + 1] = new Sent(
+            found[#found + 1] = Sent(
                 handle = command.handle,
                 kind = kind,
                 status = rest % 256,
@@ -163,7 +163,7 @@ end
 
 --- A SoundFont the harness never reads: the backend is handed only its id.
 local function font(): gm.SoundFont
-    return new gm.SoundFont(path = "font.sf2", id = 1)
+    return gm.SoundFont(path = "font.sf2", id = 1)
 end
 
 local function made(harness: Harness, options: gm.Options?): (audio.Audio, gm.Synth)

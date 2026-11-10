@@ -349,7 +349,7 @@ local function build(font: Font, codepoint: integer): Glyph
     const advance = face:advanceOf(index) / upem
     const contours, minX, minY, maxX, maxY = truetype.outline(face, index, scale)
 
-    local glyph = new Glyph(
+    local glyph = Glyph(
         index = index,
         advance = advance,
         left = 0.0,
@@ -444,7 +444,7 @@ export function newTTF(options: TTFOptions): Font?, string?
     const cell = ceil(size) as integer + padding * 2
     const side = roundUp(ceil(math.sqrt(128.0) * cell) as integer)
 
-    local font = new Font(
+    local font = Font(
         name = name,
         source = source or "",
         size = size,

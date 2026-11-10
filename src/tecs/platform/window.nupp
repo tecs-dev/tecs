@@ -210,7 +210,7 @@ local function pair(first: integer?, second: integer?, firstName: string, second
 end
 
 local function copyCreate(borrows value: CreateOptions): CreateOptions
-    return new CreateOptions(
+    return CreateOptions(
         title = value.title,
         width = value.width,
         height = value.height,
@@ -230,7 +230,7 @@ local function copyCreate(borrows value: CreateOptions): CreateOptions
 end
 
 local function copyState(borrows value: HostState): HostState
-    return new HostState(
+    return HostState(
         id = value.id,
         title = value.title,
         width = value.width,
@@ -301,7 +301,7 @@ export function newWindow(options: Options?): Window
         error("platform.window: x and y must be supplied together", 2)
     end
 
-    local create = new CreateOptions(
+    local create = CreateOptions(
         title = options and options.title or "tecs",
         width = width,
         height = height,
@@ -318,7 +318,7 @@ export function newWindow(options: Options?): Window
         maxWidth = maxWidth,
         maxHeight = maxHeight
     )
-    local initial = new HostState(
+    local initial = HostState(
         id = 0,
         title = create.title,
         width = create.width,
@@ -339,7 +339,7 @@ export function newWindow(options: Options?): Window
         cursorGrab = "none"
     )
 
-    return new Window(create = create, state = initial, attached = false, nextSerial = 1, pending = {}, failures = {})
+    return Window(create = create, state = initial, attached = false, nextSerial = 1, pending = {}, failures = {})
 end
 
 --- Returns a detached copy of the validated creation request.
@@ -421,47 +421,47 @@ function Window.cursorGrab(borrows self: Window): CursorGrab
 end
 
 function Window.setTitle(exclusive self: Window, title: string): integer
-    return enqueue(self, new SetTitleCommand(kind = "setTitle", serial = serial(self), title = title))
+    return enqueue(self, SetTitleCommand(kind = "setTitle", serial = serial(self), title = title))
 end
 
 function Window.setSize(exclusive self: Window, width: integer, height: integer): integer
     positive(width, "width", 2)
     positive(height, "height", 2)
-    return enqueue(self, new SetSizeCommand(kind = "setSize", serial = serial(self), width = width, height = height))
+    return enqueue(self, SetSizeCommand(kind = "setSize", serial = serial(self), width = width, height = height))
 end
 
 function Window.setPosition(exclusive self: Window, x: integer, y: integer): integer
-    return enqueue(self, new SetPositionCommand(kind = "setPosition", serial = serial(self), x = x, y = y))
+    return enqueue(self, SetPositionCommand(kind = "setPosition", serial = serial(self), x = x, y = y))
 end
 
 function Window.setVisible(exclusive self: Window, visible: boolean): integer
-    return enqueue(self, new SetVisibleCommand(kind = "setVisible", serial = serial(self), visible = visible))
+    return enqueue(self, SetVisibleCommand(kind = "setVisible", serial = serial(self), visible = visible))
 end
 
 function Window.setResizable(exclusive self: Window, resizable: boolean): integer
-    return enqueue(self, new SetResizableCommand(kind = "setResizable", serial = serial(self), resizable = resizable))
+    return enqueue(self, SetResizableCommand(kind = "setResizable", serial = serial(self), resizable = resizable))
 end
 
 function Window.setFullscreen(exclusive self: Window, fullscreen: boolean): integer
     return enqueue(
         self,
-        new SetFullscreenCommand(kind = "setFullscreen", serial = serial(self), fullscreen = fullscreen)
+        SetFullscreenCommand(kind = "setFullscreen", serial = serial(self), fullscreen = fullscreen)
     )
 end
 
 function Window.setCursorVisible(exclusive self: Window, visible: boolean): integer
     return enqueue(
         self,
-        new SetCursorVisibleCommand(kind = "setCursorVisible", serial = serial(self), visible = visible)
+        SetCursorVisibleCommand(kind = "setCursorVisible", serial = serial(self), visible = visible)
     )
 end
 
 function Window.setCursorGrab(exclusive self: Window, mode: CursorGrab): integer
-    return enqueue(self, new SetCursorGrabCommand(kind = "setCursorGrab", serial = serial(self), mode = mode))
+    return enqueue(self, SetCursorGrabCommand(kind = "setCursorGrab", serial = serial(self), mode = mode))
 end
 
 function Window.requestRedraw(exclusive self: Window): integer
-    return enqueue(self, new RequestRedrawCommand(kind = "requestRedraw", serial = serial(self)))
+    return enqueue(self, RequestRedrawCommand(kind = "requestRedraw", serial = serial(self)))
 end
 
 --- Attaches the OS window and atomically installs its initial observed state.
@@ -529,7 +529,7 @@ export function reportFailure(exclusive window: Window, serial: integer, reason:
     if reason == "" then
         error("platform.window.reportFailure: reason must not be empty", 2)
     end
-    window.failures[#window.failures + 1] = new CommandFailure(serial = serial, reason = reason)
+    window.failures[#window.failures + 1] = CommandFailure(serial = serial, reason = reason)
 end
 
 --- Removes the current command failures for game-side diagnostics.

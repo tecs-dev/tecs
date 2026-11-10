@@ -181,10 +181,10 @@ function suite.snapshotNilSerializerOmitsTheComponent(): nil
     const value = ecs.newComponent(Value, {
         name = "test.Parity.NilCodec",
         construct = function(): Value
-            return new Value(x = 1)
+            return Value(x = 1)
         end,
         default = function(): Value
-            return new Value(x = 0)
+            return Value(x = 0)
         end,
         save = function(_value: Value): any
             return nil
@@ -273,16 +273,16 @@ function suite.nativeNestedAndPointerLayoutsUseCustomCodecs(): nil
     const component = ecs.newComponent(Nested, {
         name = "test.Parity.Nested",
         construct = function(x: number): Nested
-            return new Nested(new NestedPose(x), nil)
+            return Nested(NestedPose(x), nil)
         end,
         default = function(): Nested
-            return new Nested()
+            return Nested()
         end,
         save = function(value: Nested): any
             return {x = value.pose.x}
         end,
         load = function(value: any): Nested
-            return new Nested(new NestedPose(value.x as number), nil)
+            return Nested(NestedPose(value.x as number), nil)
         end
     })
     const world = ecs.newWorld()
@@ -358,17 +358,17 @@ function suite.worldAwareDeserializersReceiveTheDestination(): nil
     const value = ecs.newComponent(Value, {
         name = "test.Parity.WorldAware",
         construct = function(): Value
-            return new Value(count = 17)
+            return Value(count = 17)
         end,
         default = function(): Value
-            return new Value(count = 0)
+            return Value(count = 0)
         end,
         save = function(input: Value): any
             return input.count
         end,
         deserialize = function(exclusive world: World, input: any): Value
             seen = world == destination
-            return new Value(count = input as integer)
+            return Value(count = input as integer)
         end
     })
     const id = destination:spawn(value())
@@ -479,7 +479,7 @@ function suite.binaryRelationshipsRestoreDenseNativeAndSparseEdgeSets(): nil
         name = "test.Parity.NativeEdge",
         reverseIndex = true,
         construct = function(target: integer, weight: number): NativeEdge
-            return new NativeEdge(target, weight)
+            return NativeEdge(target, weight)
         end
     })
     const sparse = ecs.newRelationship({name = "test.Parity.SparseEdge", sparse = true, reverseIndex = true})
@@ -687,7 +687,7 @@ function suite.relationshipCodecsReceiveTheDestinationWorld(): nil
         name = "test.Parity.WorldAwareEdge",
         exclusive = true,
         construct = function(target: integer, weight: number): NativeEdge
-            return new NativeEdge(target, weight)
+            return NativeEdge(target, weight)
         end,
         save = function(value: NativeEdge): any
             return {target = value.target, weight = value.weight}
@@ -695,7 +695,7 @@ function suite.relationshipCodecsReceiveTheDestinationWorld(): nil
         deserialize = function(exclusive destination: World, value: any): NativeEdge
             test.assert(destination == world)
             seen = seen + 1
-            return new NativeEdge(value.target as number, value.weight as number)
+            return NativeEdge(value.target as number, value.weight as number)
         end
     })
     const parent = world:spawn()

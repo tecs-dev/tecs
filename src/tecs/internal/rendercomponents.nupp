@@ -56,10 +56,10 @@ export const Transform2DComponent: components.FFIComponent<Transform2D> = compon
         scaleX: number?,
         scaleY: number?
     ): Transform2D
-        return new Transform2D(x or 0, y or 0, z or 0, layer or 1, rotation or 0, scaleX or 1, scaleY or 1)
+        return Transform2D(x or 0, y or 0, z or 0, layer or 1, rotation or 0, scaleX or 1, scaleY or 1)
     end,
     default = function(): Transform2D
-        return new Transform2D(0, 0, 0, 1, 0, 1, 1)
+        return Transform2D(0, 0, 0, 1, 0, 1, 1)
     end,
 })
 
@@ -83,10 +83,10 @@ export const PreviousTransform2DComponent: components.FFIComponent<PreviousTrans
     name = "PreviousTransform2D",
     requires = {Transform2DComponent},
     construct = function(x: number?, y: number?, rotation: number?): PreviousTransform2D
-        return new PreviousTransform2D(x or 0, y or 0, rotation or 0)
+        return PreviousTransform2D(x or 0, y or 0, rotation or 0)
     end,
     default = function(): PreviousTransform2D
-        return new PreviousTransform2D(0, 0, 0)
+        return PreviousTransform2D(0, 0, 0)
     end,
 })
 
@@ -111,10 +111,10 @@ export const TintComponent: components.FFIComponent<Tint> = components.newFFICom
     -- This persisted component name is a compatibility surface.
     name = "Tint",
     construct = function(r: number?, g: number?, b: number?, a: number?): Tint
-        return new Tint(r or 1, g or 1, b or 1, a or 1)
+        return Tint(r or 1, g or 1, b or 1, a or 1)
     end,
     default = function(): Tint
-        return new Tint(1, 1, 1, 1)
+        return Tint(1, 1, 1, 1)
     end,
 })
 
@@ -154,10 +154,10 @@ export const SpriteComponent: components.FFIComponent<Sprite> = components.newFF
     -- snapshot stores the image by name because an id is process-local.
     name = "Sprite",
     construct = function(image: integer?, u0: number?, v0: number?, u1: number?, v1: number?): Sprite
-        return new Sprite(image or 0, u0 or 0, v0 or 0, u1 or 1, v1 or 1)
+        return Sprite(image or 0, u0 or 0, v0 or 0, u1 or 1, v1 or 1)
     end,
     default = function(): Sprite
-        return new Sprite(0, 0, 0, 1, 1)
+        return Sprite(0, 0, 0, 1, 1)
     end,
     save = function(value: Sprite): any
         return {
@@ -176,7 +176,7 @@ export const SpriteComponent: components.FFIComponent<Sprite> = components.newFF
             image = images.id(name)
         end
 
-        return new Sprite(
+        return Sprite(
             image,
             (stored.u0 as number?) or 0,
             (stored.v0 as number?) or 0,
@@ -350,10 +350,10 @@ export const Camera2DComponent: components.FFIComponent<Camera2D> = components.n
     -- This persisted component name is a compatibility surface.
     name = "Camera2D",
     construct = function(x: number?, y: number?, zoom: number?, rotation: number?): Camera2D
-        return new Camera2D(x or 0, y or 0, zoom or 1, rotation or 0)
+        return Camera2D(x or 0, y or 0, zoom or 1, rotation or 0)
     end,
     default = function(): Camera2D
-        return new Camera2D(0, 0, 1, 0)
+        return Camera2D(0, 0, 1, 0)
     end,
 })
 

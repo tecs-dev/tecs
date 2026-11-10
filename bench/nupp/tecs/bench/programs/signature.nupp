@@ -107,7 +107,7 @@ local function bench(name: string, perCall: integer, run: function(variant: arch
             run(MATCHING[index % VARIANTS + 1])
         end
     end)
-    rows[#rows + 1] = new Row(stage = stage, operations = ITERATIONS * perCall)
+    rows[#rows + 1] = Row(stage = stage, operations = ITERATIONS * perCall)
 end
 
 bench("signatureOf", COMPONENTS, function(_variant: archetype.Archetype): nil

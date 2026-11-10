@@ -13,10 +13,10 @@ end
 local Position = ecs.newComponent(Point, {
     name = "test.mcp.Position",
     construct = function(x: number?, y: number?): Point
-        return new Point(x = x or 0, y = y or 0)
+        return Point(x = x or 0, y = y or 0)
     end,
     default = function(): Point
-        return new Point(x = 0, y = 0)
+        return Point(x = 0, y = 0)
     end
 })
 

@@ -82,7 +82,7 @@ export function register(source: sheet.Sheet, tag: integer, slice: integer?): in
     if old ~= nil then
         return old
     end
-    local value = new Playback(source = source, tag = tag, slice = sliceId)
+    local value = Playback(source = source, tag = tag, slice = sliceId)
     plan(value)
     const id = #playbacks + 1
     playbacks[id], ids[key] = value, id

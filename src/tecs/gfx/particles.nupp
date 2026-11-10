@@ -1263,7 +1263,7 @@ end
 local function makeEmitter(options: EmitterOptions): Emitter
     const state = options.state or "playing"
     assert(state == "playing" or state == "paused" or state == "stopped", "invalid particle playback state")
-    return new Emitter(
+    return Emitter(
         effect = options.effect,
         state = state,
         seed = options.seed ?? 1,
@@ -1451,7 +1451,7 @@ local function admit(exclusive pool: Pool, item: Emitter): Holding?
         if range.count >= item.effect.capacity then
             pool.nextToken = pool.nextToken + 1
             assert(pool.nextToken < 4294967295, "particle allocation identity exhausted")
-            local holding = new Holding(
+            local holding = Holding(
                 token = pool.nextToken,
                 value = item,
                 effect = item.effect,
@@ -1473,7 +1473,7 @@ end
 
 local function release(exclusive pool: Pool, holding: Holding): nil
     pool.holdings[holding.value], pool.indices[holding.index] = nil, nil
-    pool.free[#pool.free + 1] = new RangeSlot(base = holding.base, count = holding.count)
+    pool.free[#pool.free + 1] = RangeSlot(base = holding.base, count = holding.count)
     table.sort(pool.free, function(a: RangeSlot, b: RangeSlot): boolean
         return a.base < b.base
     end)
@@ -1584,13 +1584,13 @@ export function plugin(exclusive world: ecs.World, options: PoolOptions?): nil
         "invalid particle pool limits"
     )
     nextPool = nextPool + 1
-    local pool = new Pool(
+    local pool = Pool(
         capacity = capacity,
         maxEmitters = maxEmitters,
         id = nextPool,
         step = world:fixedStepCount(),
         query = world:newQuery({include = {ParticleEmitter, rendercomponents.Transform2DComponent}}),
-        free = {new RangeSlot(base = 0, count = capacity)}
+        free = {RangeSlot(base = 0, count = capacity)}
     )
     pools[world] = pool
     world:addSystem({

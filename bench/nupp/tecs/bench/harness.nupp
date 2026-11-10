@@ -89,7 +89,7 @@ export function newStage(name: string): Stage
         error("harness.newStage: name must not be empty", 2)
     end
 
-    return new Stage(name = name, samples = {})
+    return Stage(name = name, samples = {})
 end
 
 --- Discards a stage's samples while retaining its table.
@@ -175,7 +175,7 @@ export function report(stage: Stage): Report?
     end
     sort(sorted)
 
-    return new Report(
+    return Report(
         name = stage.name,
         p50 = percentile(sorted, 0.50),
         p95 = percentile(sorted, 0.95),

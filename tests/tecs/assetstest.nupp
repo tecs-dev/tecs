@@ -41,8 +41,8 @@ end
 
 --- Builds a kind that settles after a scripted number of readiness passes.
 local function scripted(name: string): Scripted
-    local self = new Scripted(kind = nil as assets.Kind, scripts = {}, freed = {}, opened = 0, refuse = nil)
-    self.kind = new assets.Kind(
+    local self = Scripted(kind = nil as assets.Kind, scripts = {}, freed = {}, opened = 0, refuse = nil)
+    self.kind = assets.Kind(
         name = name,
         open = function(path: string): (assets.Job?, string?)
             self.opened = self.opened + 1
@@ -52,12 +52,12 @@ local function scripted(name: string): Scripted
             end
             local script = self.scripts[path]
             if script == nil then
-                script = new Script(passes = 1, payload = nil, reason = nil, cancelled = false, polls = 0)
-                script.payload = new Payload(text = path, freed = false)
+                script = Script(passes = 1, payload = nil, reason = nil, cancelled = false, polls = 0)
+                script.payload = Payload(text = path, freed = false)
                 self.scripts[path] = script
             end
 
-            return new assets.Job(
+            return assets.Job(
                 poll = function(): (assets.Status, any?, string?)
                     script.polls = script.polls + 1
                     if script.passes > 0 then
@@ -89,13 +89,13 @@ end
 
 --- Arranges for `path` to fail after `passes` readiness passes.
 local function fails(self: Scripted, path: string, passes: integer, reason: string): nil
-    self.scripts[path] = new Script(passes = passes, payload = nil, reason = reason, cancelled = false, polls = 0)
+    self.scripts[path] = Script(passes = passes, payload = nil, reason = reason, cancelled = false, polls = 0)
 end
 
 --- Arranges for `path` to succeed after `passes` readiness passes.
 local function succeeds(self: Scripted, path: string, passes: integer): Script
-    local script = new Script(passes = passes, payload = nil, reason = nil, cancelled = false, polls = 0)
-    script.payload = new Payload(text = path, freed = false)
+    local script = Script(passes = passes, payload = nil, reason = nil, cancelled = false, polls = 0)
+    script.payload = Payload(text = path, freed = false)
     self.scripts[path] = script
 
     return script
@@ -574,7 +574,7 @@ end
 -------------------------------------------------------------------------------
 
 function suite.readsAFileThroughTheDocumentKind(): nil
-    local temporary = assert(files.createTemporaryFile(new files.TemporaryOptions(suffix = ".asset")))
+    local temporary = assert(files.createTemporaryFile(files.TemporaryOptions(suffix = ".asset")))
     local path = temporary:toString()
     assert(files.write(path, "level one"))
     local loader = assets.newAssets()

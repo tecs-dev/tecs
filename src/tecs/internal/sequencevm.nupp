@@ -87,7 +87,7 @@ local function contextFor(state: sequencetypes.WorldState): sequencetypes.Action
     if existing ~= nil then
         return existing
     end
-    local created = new sequencetypes.ActionContext(handle = 0, owner = 0, args = {})
+    local created = sequencetypes.ActionContext(handle = 0, owner = 0, args = {})
     state.context = created
 
     return created

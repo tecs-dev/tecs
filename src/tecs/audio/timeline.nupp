@@ -144,7 +144,7 @@ export function new(
         error("tecs.audio.timeline.new: tempo must be positive and finite", 2)
     end
 
-    return new Timeline(
+    return Timeline(
         clock = clock,
         anchorClock = clock(),
         anchorBeat = (options and options.start) or 0,
@@ -309,7 +309,7 @@ end
 function Timeline.at(exclusive self: Timeline, beat: number, run: function(at: number): nil): Cue
     checkBeat(beat, "at")
     self.sequence = self.sequence + 1
-    local pending = new Pending(beat = beat, sequence = self.sequence, run = run, cancelled = false)
+    local pending = Pending(beat = beat, sequence = self.sequence, run = run, cancelled = false)
     -- Sorted by beat, and by the order they were added within one beat.
     local queue = self.queue
     local index = #queue + 1
@@ -318,7 +318,7 @@ function Timeline.at(exclusive self: Timeline, beat: number, run: function(at: n
     end
     table.insert(queue, index, pending)
 
-    return new Cue(pending = pending, settled = false, handle = 0)
+    return Cue(pending = pending, settled = false, handle = 0)
 end
 
 --- Plays a sound at a beat, on the mixer that made this timeline.

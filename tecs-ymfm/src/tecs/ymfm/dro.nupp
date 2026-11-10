@@ -183,7 +183,7 @@ export function parser(bytes: string, name: string): (registerlog.Parser?, strin
         local count = u32(bytes, 0x0D)
         local builder = registerlog.newBuilder("dro", 2, RATE)
         chips(builder, hardware)
-        state = new State(
+        state = State(
             bytes = bytes,
             name = name,
             builder = builder,
@@ -215,7 +215,7 @@ export function parser(bytes: string, name: string): (registerlog.Parser?, strin
         local length = u32(bytes, 0x11)
         local builder = registerlog.newBuilder("dro", 1, RATE)
         chips(builder, hardware)
-        state = new State(
+        state = State(
             bytes = bytes,
             name = name,
             builder = builder,
@@ -235,7 +235,7 @@ export function parser(bytes: string, name: string): (registerlog.Parser?, strin
         return nil, name .. ": DRO version " .. tostring(major) .. "." .. tostring(minor) .. " is neither 0.1 nor 2.0"
     end
 
-    return new registerlog.Parser(step = function(budget: integer): (registerlog.Status, registerlog.Builder?, string?)
+    return registerlog.Parser(step = function(budget: integer): (registerlog.Status, registerlog.Builder?, string?)
         local reason = run(state, budget)
         if reason ~= nil then
             return "failed", nil, reason

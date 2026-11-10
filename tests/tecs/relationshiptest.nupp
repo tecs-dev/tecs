@@ -229,13 +229,13 @@ end
 
 function suite.preservesTypedEdgePayloadsThroughUpdatesMovesAndSnapshots(): nil
     const construct = function(target: integer, weight: number): WeightedEdge
-        return new WeightedEdge(target = target, weight = weight)
+        return WeightedEdge(target = target, weight = weight)
     end
     const save = function(edge: WeightedEdge): any
         return {target = edge.target, weight = edge.weight}
     end
     const load = function(data: any): WeightedEdge
-        return new WeightedEdge(target = data.target as integer, weight = data.weight as number)
+        return WeightedEdge(target = data.target as integer, weight = data.weight as number)
     end
     for mode = 1, 2 do
         const relationship = ecs.newRelationship(WeightedEdge, {

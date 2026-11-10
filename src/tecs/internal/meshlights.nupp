@@ -22,7 +22,7 @@ export record Collector
     frame: function(exclusive self: Collector): string
 end
 export function new(exclusive value: world.World): Collector
-    return new Collector(
+    return Collector(
         points = value:newQuery({
             include = {mesh.PointLight3DComponent},
             exclude = {components.Disabled}
@@ -40,7 +40,7 @@ function Collector.frame(exclusive self: Collector): string
             const key = active.id * 2 + lane
             local version = self.versions[key]
             if version == nil then
-                version = new Version()
+                version = Version()
                 self.versions[key] = version
             end
             const transform = active:writeCount(mesh.Transform3DComponent)

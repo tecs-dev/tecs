@@ -154,7 +154,7 @@ local function vgm(header: Vgm, commands: string): string
 end
 
 local function header(clocks: {[integer]: integer}, version: integer?): Vgm
-    return new Vgm(version = version or 0x171, clocks = clocks, bytes = {}, loop = nil, tags = nil)
+    return Vgm(version = version or 0x171, clocks = clocks, bytes = {}, loop = nil, tags = nil)
 end
 
 --- A VGM wait.
@@ -193,7 +193,7 @@ end
 --- Writes `bytes` to a temporary file, runs `body` on its path and removes
 --- the file.
 local function temporary(bytes: string, suffix: string, body: function(path: string): nil): nil
-    local file = assert(files.createTemporaryFile(new files.TemporaryOptions(suffix = suffix)))
+    local file = assert(files.createTemporaryFile(files.TemporaryOptions(suffix = suffix)))
     local path = file:toString()
     assert(files.write(path, bytes))
     body(path)
@@ -526,12 +526,12 @@ local function newHarness(): Harness
         return 9
     end
     backend.openDecoded = function(_decoder: integer, handle: integer, params: string, bytes: string): (boolean, string?)
-        opened[#opened + 1] = new Opened(handle = handle, params = params, bytes = bytes)
+        opened[#opened + 1] = Opened(handle = handle, params = params, bytes = bytes)
 
         return true
     end
 
-    return new Harness(backend = backend, commands = commands, opened = opened, clock = clock)
+    return Harness(backend = backend, commands = commands, opened = opened, clock = clock)
 end
 
 --- Flushes the mixer and returns the writes of `kind` it has sent:
@@ -546,7 +546,7 @@ local function sentOf(harness: Harness, mixer: audio.Audio, kind: string): {Sent
             local rest = command.data % OP
             local name = op == 0 and "write" or op == 2 and "reset" or op == 3 and "port" or "unknown"
             if name == kind then
-                found[#found + 1] = new Sent(
+                found[#found + 1] = Sent(
                     voice = command.handle,
                     kind = name,
                     a = rest % 65536,

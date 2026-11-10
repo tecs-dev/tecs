@@ -312,10 +312,10 @@ end
 export const TrackingTargetComponent: components.TableComponent<TrackingTarget> = components.newComponent({
     name = "TweenTrackingTarget",
     construct = function(entity: integer?, key: string?): TrackingTarget
-        return new TrackingTarget(entity = entity or 0, key = key or "")
+        return TrackingTarget(entity = entity or 0, key = key or "")
     end,
     default = function(): TrackingTarget
-        return new TrackingTarget(entity = 0, key = "")
+        return TrackingTarget(entity = 0, key = "")
     end,
 })
 
@@ -489,7 +489,7 @@ local function newTarget(component: components.Component, fields: {string}, mode
         end
     end
 
-    return new Target(
+    return Target(
         id = resolved,
         componentName = component.componentName,
         component = component,
@@ -610,7 +610,7 @@ end
 --- @param fields the fields read, lined up with the target's own
 --- @return the source
 export function sourceOwn(component: components.Component, fields: {string}): TrackSource
-    return new TrackSource(
+    return TrackSource(
         kind = "self",
         componentName = component.componentName,
         component = component,
@@ -628,7 +628,7 @@ export function sourceKey(key: string, component: components.Component, fields: 
     if key == "" then
         error("tween.sourceKey: the key must not be empty", 2)
     end
-    return new TrackSource(
+    return TrackSource(
         kind = "key",
         key = key,
         componentName = component.componentName,
@@ -643,7 +643,7 @@ end
 --- @param fields the fields read, lined up with the target's own
 --- @return the source
 export function sourceTracking(component: components.Component, fields: {string}): TrackSource
-    return new TrackSource(
+    return TrackSource(
         kind = "trackingTarget",
         componentName = component.componentName,
         component = component,
@@ -661,7 +661,7 @@ export function sourceRelated(
     component: components.Component,
     fields: {string}
 ): TrackSource
-    return new TrackSource(
+    return TrackSource(
         kind = "relationship",
         relationshipName = relationship.componentName,
         relationship = relationship,
@@ -749,7 +749,7 @@ export function to(
 ): TimelineNode
     local name = resolveEasing(curve)
 
-    return new TimelineNode(
+    return TimelineNode(
         kind = "to",
         duration = duration,
         easingName = name as EasingName,
@@ -781,7 +781,7 @@ export function adjust(
 ): TimelineNode
     local name = resolveEasing(curve)
 
-    return new TimelineNode(
+    return TimelineNode(
         kind = "adjust",
         duration = duration,
         easingName = name as EasingName,
@@ -812,7 +812,7 @@ export function track(
 ): TimelineNode
     local name = resolveEasing(curve)
 
-    return new TimelineNode(
+    return TimelineNode(
         kind = "track",
         duration = duration,
         easingName = name as EasingName,
@@ -826,7 +826,7 @@ end
 --- @param duration the seconds it occupies, which must be at least zero
 --- @return the operation
 export function wait(duration: number): TimelineNode
-    return new TimelineNode(kind = "wait", duration = duration)
+    return TimelineNode(kind = "wait", duration = duration)
 end
 
 --- Builds an operation that emits a named sequence event.
@@ -837,7 +837,7 @@ end
 --- @param name the name carried on the event
 --- @return the operation
 export function emit(name: string): TimelineNode
-    return new TimelineNode(kind = "emit", name = name)
+    return TimelineNode(kind = "emit", name = name)
 end
 
 --- Builds an operation that runs a nested timeline from its own spec.
@@ -849,7 +849,7 @@ end
 --- @param count the passes a repeating nested timeline makes
 --- @return the operation
 export function run(spec: {TimelineNode}, mode: PlaybackMode?, count: integer?): TimelineNode
-    return new TimelineNode(kind = "run", nested = spec, mode = mode, count = count)
+    return TimelineNode(kind = "run", nested = spec, mode = mode, count = count)
 end
 
 --- Builds an operation that runs its arguments concurrently from a shared
@@ -860,7 +860,7 @@ end
 --- @param branches one block per concurrent branch, each run in sequence
 --- @return the operation
 export function parallel(branches: {{TimelineNode}}): TimelineNode
-    return new TimelineNode(kind = "parallel", branches = branches)
+    return TimelineNode(kind = "parallel", branches = branches)
 end
 
 local compileBlock: function(block: {TimelineNode}, startTime: number, into: Timeline): number
@@ -878,7 +878,7 @@ local function compileSlot(node: TimelineNode, startTime: number, into: Timeline
     local tracking = node.kind == "track"
     into.slots[
         #into.slots + 1
-    ] = new Slot(
+    ] = Slot(
         kind = tracking and "track" or "to",
         target = target,
         source = node.source,
@@ -910,7 +910,7 @@ local function compileNode(node: TimelineNode, startTime: number, into: Timeline
 
         return startTime + duration
     elseif kind == "emit" then
-        into.emits[#into.emits + 1] = new EmitSlot(time = startTime, name = assert(node.name), order = #into.emits + 1)
+        into.emits[#into.emits + 1] = EmitSlot(time = startTime, name = assert(node.name), order = #into.emits + 1)
 
         return startTime
     elseif kind == "run" then
@@ -919,7 +919,7 @@ local function compileNode(node: TimelineNode, startTime: number, into: Timeline
         local duration = child.totalDuration * passCount
         into.runs[
             #into.runs + 1
-        ] = new RunSlot(
+        ] = RunSlot(
             timeline = child,
             startTime = startTime,
             effectiveDuration = duration,
@@ -963,7 +963,7 @@ end
 --- @raises string when an operation is unknown or carries an invalid duration, mode,
 ---     or count
 export function compile(spec: {TimelineNode}): Timeline
-    local timeline = new Timeline(slots = {}, runs = {}, emits = {}, totalDuration = 0, stateSize = 0)
+    local timeline = Timeline(slots = {}, runs = {}, emits = {}, totalDuration = 0, stateSize = 0)
     timeline.totalDuration = compileBlock(spec, 0, timeline)
     timeline.stateSize = #timeline.slots
     table.sort(timeline.emits, function(left: EmitSlot, right: EmitSlot): boolean
@@ -1036,7 +1036,7 @@ export function deserializeSource(data: {[string]: any}?): TrackSource?
     end
     local componentName = data.component as string
 
-    return new TrackSource(
+    return TrackSource(
         kind = data.kind as TrackSourceKind,
         key = data.key as string?,
         relationshipName = relationshipName,
@@ -1117,7 +1117,7 @@ export function deserializeTimeline(data: {[string]: any}): Timeline
         end
         slots[
             index
-        ] = new Slot(
+        ] = Slot(
             kind = (saved.kind as string?) or "to",
             target = deserializeTarget(saved.target as {[string]: any}),
             source = deserializeSource(saved.source as {[string]: any}?),
@@ -1140,7 +1140,7 @@ export function deserializeTimeline(data: {[string]: any}): Timeline
         local saved = savedRuns[index]
         runs[
             index
-        ] = new RunSlot(
+        ] = RunSlot(
             timeline = deserializeTimeline(saved.timeline as {[string]: any}),
             startTime = (saved.startTime as number?) or 0,
             effectiveDuration = (saved.effectiveDuration as number?) or 0,
@@ -1154,14 +1154,14 @@ export function deserializeTimeline(data: {[string]: any}): Timeline
         local saved = savedEmits[index]
         emits[
             index
-        ] = new EmitSlot(
+        ] = EmitSlot(
             time = (saved.time as number?) or 0,
             name = saved.name as string,
             order = (saved.order as integer?) or index
         )
     end
 
-    return new Timeline(
+    return Timeline(
         slots = slots,
         runs = runs,
         emits = emits,

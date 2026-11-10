@@ -67,7 +67,7 @@ end
 --- Writes `bytes` to a temporary WAV file, runs `body` on its path and
 --- removes the file.
 local function temporary(bytes: string, body: function(path: string): nil): nil
-    local file = assert(files.createTemporaryFile(new files.TemporaryOptions(suffix = ".wav")))
+    local file = assert(files.createTemporaryFile(files.TemporaryOptions(suffix = ".wav")))
     local path = file:toString()
     assert(files.write(path, bytes))
     body(path)

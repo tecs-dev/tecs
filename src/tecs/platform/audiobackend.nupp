@@ -493,7 +493,7 @@ export const NEAREST: integer = 32
 --- Creates one zeroed command, for a caller filling a reusable buffer.
 --- @return a command whose every field is at rest
 export function newCommand(): Command
-    return new Command(
+    return Command(
         kind = 0,
         handle = 0,
         clip = 0,
@@ -526,7 +526,7 @@ end
 ---     number on it; omitted, zero, as a backend with no clock at all
 --- @return a backend reporting `available` as false
 export function silent(frequency: integer?): Backend
-    return new Backend(
+    return Backend(
         available = false,
         frequency = frequency or 0,
         channels = 0,
@@ -561,7 +561,7 @@ end
 ---
 --- @return a provider whose listings are empty and whose open always refuses
 export function silentDevices(): Devices
-    return new Devices(
+    return Devices(
         playback = function(): ({Device}, string?)
             return {}, "no audio device support in this build"
         end,

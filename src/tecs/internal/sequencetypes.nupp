@@ -511,7 +511,7 @@ export type PlayOptions = {
 --- Creates a clock at step zero with nothing waiting.
 --- @return the idle clock
 export function newClock(): Clock
-    return new Clock(step = 0, seq = 0, waiting = wakeheap.new(), active = {})
+    return Clock(step = 0, seq = 0, waiting = wakeheap.new(), active = {})
 end
 
 --- Resets a clock to step zero and drops everything waiting on it.

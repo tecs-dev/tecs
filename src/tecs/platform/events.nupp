@@ -474,12 +474,12 @@ export type Event = Quit
 
 --- Constructs a process or window close request.
 export function quit(window: integer?, timestamp: number?, sequence: integer?): QuitEvent
-    return new Quit(kind = "quit", timestamp = timestamp or 0, sequence = sequence or 0, window = window or 0)
+    return Quit(kind = "quit", timestamp = timestamp or 0, sequence = sequence or 0, window = window or 0)
 end
 
 --- Constructs a close request for one window.
 export function closeRequested(window: integer?, timestamp: number?, sequence: integer?): QuitEvent
-    return new WindowCloseRequested(
+    return WindowCloseRequested(
         kind = "windowCloseRequested",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -511,7 +511,7 @@ export function resized(
         error("platform.events.resized: pixel dimensions must be non-negative", 2)
     end
 
-    return new WindowResized(
+    return WindowResized(
         kind = "windowResized",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -537,7 +537,7 @@ export function scaleChanged(
 ): ResizeEvent
     local sized = resized(width, height, window, scaleFactor, timestamp, sequence, pixelWidth, pixelHeight)
 
-    return new WindowScaleChanged(
+    return WindowScaleChanged(
         kind = "windowScaleChanged",
         timestamp = sized.timestamp,
         sequence = sized.sequence,
@@ -553,7 +553,7 @@ end
 --- Constructs a window focus transition.
 export function focused(focused: boolean, window: integer?, timestamp: number?, sequence: integer?): FocusEvent
     if focused then
-        return new WindowFocusGained(
+        return WindowFocusGained(
             kind = "windowFocusGained",
             timestamp = timestamp or 0,
             sequence = sequence or 0,
@@ -562,7 +562,7 @@ export function focused(focused: boolean, window: integer?, timestamp: number?, 
         )
     end
 
-    return new WindowFocusLost(
+    return WindowFocusLost(
         kind = "windowFocusLost",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -587,7 +587,7 @@ export function key(
         error("platform.events.key: physicalKey must not be empty", 2)
     end
     if down then
-        return new KeyDown(
+        return KeyDown(
             kind = "keyDown",
             timestamp = timestamp or 0,
             sequence = sequence or 0,
@@ -601,7 +601,7 @@ export function key(
         )
     end
 
-    return new KeyUp(
+    return KeyUp(
         kind = "keyUp",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -625,7 +625,7 @@ export function pointerMoved(
     timestamp: number?,
     sequence: integer?
 ): PointerMoveEvent
-    return new MouseMotion(
+    return MouseMotion(
         kind = "mouseMotion",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -652,7 +652,7 @@ export function pointerButton(
         error("platform.events.pointerButton: button must be positive", 2)
     end
     if down then
-        return new MouseDown(
+        return MouseDown(
             kind = "mouseDown",
             timestamp = timestamp or 0,
             sequence = sequence or 0,
@@ -665,7 +665,7 @@ export function pointerButton(
         )
     end
 
-    return new MouseUp(
+    return MouseUp(
         kind = "mouseUp",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -690,7 +690,7 @@ export function wheel(
     timestamp: number?,
     sequence: integer?
 ): WheelEvent
-    return new MouseWheel(
+    return MouseWheel(
         kind = "mouseWheel",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -706,7 +706,7 @@ end
 
 --- Constructs committed text input.
 export function text(text: string, window: integer?, timestamp: number?, sequence: integer?): TextEvent
-    return new TextInput(
+    return TextInput(
         kind = "textInput",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -757,7 +757,7 @@ export function touch(
     local at, order, over = timestamp or 0, sequence or 0, window or 0
     local moveX, moveY, nx, ny, force = dx or 0, dy or 0, normalX or 0, normalY or 0, pressure or 0
     if phase == "fingerDown" then
-        return new FingerDown(
+        return FingerDown(
             kind = "fingerDown",
             timestamp = at,
             sequence = order,
@@ -774,7 +774,7 @@ export function touch(
             down = true
         )
     elseif phase == "fingerMotion" then
-        return new FingerMotion(
+        return FingerMotion(
             kind = "fingerMotion",
             timestamp = at,
             sequence = order,
@@ -791,7 +791,7 @@ export function touch(
             down = true
         )
     elseif phase == "fingerUp" then
-        return new FingerUp(
+        return FingerUp(
             kind = "fingerUp",
             timestamp = at,
             sequence = order,
@@ -808,7 +808,7 @@ export function touch(
             down = false
         )
     else
-        return new FingerCanceled(
+        return FingerCanceled(
             kind = "fingerCanceled",
             timestamp = at,
             sequence = order,
@@ -840,7 +840,7 @@ export function gamepadDevice(
     sequence: integer?
 ): GamepadDeviceEvent
     if added then
-        return new GamepadAdded(
+        return GamepadAdded(
             kind = "gamepadAdded",
             timestamp = timestamp or 0,
             sequence = sequence or 0,
@@ -849,7 +849,7 @@ export function gamepadDevice(
         )
     end
 
-    return new GamepadRemoved(
+    return GamepadRemoved(
         kind = "gamepadRemoved",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -878,7 +878,7 @@ export function gamepadButton(
     end
 
     if down then
-        return new GamepadButtonDown(
+        return GamepadButtonDown(
             kind = "gamepadButtonDown",
             timestamp = timestamp or 0,
             sequence = sequence or 0,
@@ -889,7 +889,7 @@ export function gamepadButton(
         )
     end
 
-    return new GamepadButtonUp(
+    return GamepadButtonUp(
         kind = "gamepadButtonUp",
         timestamp = timestamp or 0,
         sequence = sequence or 0,
@@ -919,7 +919,7 @@ export function gamepadAxis(
         error("platform.events.gamepadAxis: axis must be positive", 2)
     end
 
-    return new GamepadAxis(
+    return GamepadAxis(
         kind = "gamepadAxis",
         timestamp = timestamp or 0,
         sequence = sequence or 0,

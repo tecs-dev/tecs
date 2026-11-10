@@ -80,10 +80,10 @@ function suite.exposesTableComponentsThroughThePublicModule(): nil
     local position: ecs.ComponentDefinition<PublicPoint> = ecs.newComponent(PublicPoint, {
         name = "test.PublicPosition",
         construct = function(x: number): PublicPoint
-            return new PublicPoint(x = x)
+            return PublicPoint(x = x)
         end,
         default = function(): PublicPoint
-            return new PublicPoint(x = 0)
+            return PublicPoint(x = 0)
         end
     })
     local world = ecs.newWorld({maxEntities = 2})

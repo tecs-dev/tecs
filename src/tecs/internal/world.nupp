@@ -926,7 +926,7 @@ export function new(
     if nominalFrameTime ~= nil and (not (nominalFrameTime > 0) or nominalFrameTime == math.huge) then
         error("world.new: nominalFrameTime must be positive and finite", 2)
     end
-    const dirtyQueue = new archetype.DirtyQueue(list = {}, epoch = 1)
+    const dirtyQueue = archetype.DirtyQueue(list = {}, epoch = 1)
     local empty = archetype.new(1, {}, dirtyQueue)
     local bySignature: {[string]: archetype.Archetype} = {}
     bySignature[empty.signature] = empty
@@ -941,7 +941,7 @@ export function new(
         phaseIndex = phaseIndex + 1
     end
 
-    return new World(
+    return World(
         allocator = idallocator.new(maxEntities),
         archetypes = {empty},
         archetypeById = {[1] = empty},
@@ -954,12 +954,12 @@ export function new(
         flatSpawns = {},
         flatSpawnCount = 0,
         flatSealedCount = 0,
-        spawnShapes = new SpawnShape(children = {}, defaults = {}),
+        spawnShapes = SpawnShape(children = {}, defaults = {}),
         spawnScratch = {},
         flatMoves = {},
         flatMoveCount = 0,
         flatMovesSealed = 0,
-        moveScratch = new PendingMove(id = 0, target = empty, values = {}, isSealed = true),
+        moveScratch = PendingMove(id = 0, target = empty, values = {}, isSealed = true),
         mutationValues = {},
         emptyValues = {},
         pendingSegments = {},
@@ -971,7 +971,7 @@ export function new(
         pendingDespawns = {},
         pendingDespawnBySlot = {},
         queries = {},
-        queryOwner = new query.Owner(token = true),
+        queryOwner = query.Owner(token = true),
         queryObservers = {},
         relationshipIndexes = {},
         keyIndex = {},
@@ -1082,7 +1082,7 @@ local function reserve(exclusive world: World, id: integer, target: archetype.Ar
         sealPending(world)
     end
     local slot = idallocator.slotOf(id)
-    local pending = new PendingSpawn(id = id, target = target, values = values, isSealed = false)
+    local pending = PendingSpawn(id = id, target = target, values = values, isSealed = false)
     world.pendingDespawnBySlot[slot] = nil
     world.pendingSpawns[#world.pendingSpawns + 1] = pending
     world.pendingSpawnBySlot[slot] = pending
@@ -1235,7 +1235,7 @@ function World.spawn(exclusive self: World, ...: components.Input): integer
         end
         local child = shape.children[component]
         if child == nil then
-            child = new SpawnShape(children = {}, defaults = {})
+            child = SpawnShape(children = {}, defaults = {})
             shape.children[component] = child
         end
         shape = child
@@ -1449,7 +1449,7 @@ local function stageMove(
         for index = 1, #original.components do
             promoted[original.components[index].componentId] = world.flatSpawns[flat + 2 + index]
         end
-        pendingSpawn = new PendingSpawn(id = id, target = target, values = promoted, isSealed = false)
+        pendingSpawn = PendingSpawn(id = id, target = target, values = promoted, isSealed = false)
         world.flatSpawns[flat + 2] = pendingSpawn
         world.pendingSpawnBySlot[slot] = pendingSpawn
     end
@@ -1518,7 +1518,7 @@ local function stageMove(
     if values == world.mutationValues or values == world.emptyValues then
         values = table.clone(values)
     end
-    pending = new PendingMove(id = id, target = target, values = values, isSealed = false)
+    pending = PendingMove(id = id, target = target, values = values, isSealed = false)
     world.pendingMoves[#world.pendingMoves + 1] = pending
     world.pendingMoveBySlot[slot] = pending
 end
@@ -1703,7 +1703,7 @@ sealPending = function(exclusive world: World, writer: BatchWrite?): nil
     end
     world.pendingSegments[
         #world.pendingSegments + 1
-    ] = new PendingSegment(
+    ] = PendingSegment(
         spawns = world.pendingSpawns,
         moves = world.pendingMoves,
         despawns = world.pendingDespawns,
@@ -1827,7 +1827,7 @@ local function queueSpawnBatch(exclusive world: World, batch: SpawnBatch): nil
     end
     world.pendingSegments[
         #world.pendingSegments + 1
-    ] = new PendingSegment(spawns = {}, moves = {}, despawns = {}, spawnBatch = batch)
+    ] = PendingSegment(spawns = {}, moves = {}, despawns = {}, spawnBatch = batch)
 end
 
 function World.batchSpawn(
@@ -1874,7 +1874,7 @@ function World.batchSpawn(
     end
     queueSpawnBatch(
         self,
-        new SpawnBatch(
+        SpawnBatch(
             index = #self.spawnBatches + 1,
             target = target,
             values = supplied,
@@ -1924,7 +1924,7 @@ function World.batchSpawnAt(
     end
     queueSpawnBatch(
         self,
-        new SpawnBatch(
+        SpawnBatch(
             index = #self.spawnBatches + 1,
             target = target,
             values = supplied,
@@ -1982,7 +1982,7 @@ function World.batchSpawnAtRaw(
     end
     queueSpawnBatch(
         self,
-        new SpawnBatch(
+        SpawnBatch(
             index = #self.spawnBatches + 1,
             target = target,
             values = supplied,
@@ -2076,7 +2076,7 @@ local function tryStageBulk(
             end
             batches[
                 #batches + 1
-            ] = new MutationBatch(
+            ] = MutationBatch(
                 index = #world.mutationBatches + #batches + 1,
                 source = source,
                 target = target,
@@ -2107,7 +2107,7 @@ local function tryStageBulk(
         end
         world.pendingSegments[
             #world.pendingSegments + 1
-        ] = new PendingSegment(spawns = {}, moves = {}, despawns = {}, mutationBatch = batch)
+        ] = PendingSegment(spawns = {}, moves = {}, despawns = {}, mutationBatch = batch)
     end
 
     return true
@@ -2165,7 +2165,7 @@ function World.batchSet(
         end
     end
     if callback ~= nil and #ids > 0 then
-        sealPending(self, new BatchWrite(ids = ids, component = component, callback = callback))
+        sealPending(self, BatchWrite(ids = ids, component = component, callback = callback))
     end
 end
 
@@ -2855,7 +2855,7 @@ local function publishMove(exclusive world: World, pending: PendingMove, notices
     if notices ~= nil then
         notices[
             #notices + 1
-        ] = new PendingNotice(target = target, source = source, entity = id, observerLimit = #world.queryObservers)
+        ] = PendingNotice(target = target, source = source, entity = id, observerLimit = #world.queryObservers)
     else
         notifyQueries(world, target, source, targetRow, 1, true)
     end
@@ -3127,7 +3127,7 @@ local function publishMutationBatch(exclusive world: World, batch: MutationBatch
                 end
                 publishMove(
                     world,
-                    new PendingMove(id = id, target = target, values = supplied, isSealed = true),
+                    PendingMove(id = id, target = target, values = supplied, isSealed = true),
                     notices
                 )
                 if writerIds ~= nil then
@@ -3137,7 +3137,7 @@ local function publishMutationBatch(exclusive world: World, batch: MutationBatch
         end
     end
     if writerIds ~= nil then
-        const writer = new BatchWrite(
+        const writer = BatchWrite(
             ids = writerIds,
             component = assert(batch.writeComponent),
             callback = assert(batch.callback)
@@ -3705,11 +3705,11 @@ local function defaultBundleInput(component: components.Component): components.I
         return component
     end
     if component is components.ScalarComponent<any> then
-        return new components.ScalarInstance(componentType = component, value = component.scalarDefault)
+        return components.ScalarInstance(componentType = component, value = component.scalarDefault)
     end
     if (component.storageType == "table" or component.storageType == "ffi") then
         local tableComponent = component as components.TableComponent<any>
-        return new components.TableInstance(componentType = tableComponent, value = tableComponent.defaultFactory())
+        return components.TableInstance(componentType = tableComponent, value = tableComponent.defaultFactory())
     end
     error("Bundle component " .. component.componentName .. " requires an explicit factory", 3)
 end
@@ -3865,7 +3865,7 @@ function World.newBundle(self: World, name: string, definition: BundleDefinition
             error("Bundle component " .. component.componentName .. " requires an explicit factory", 2)
         end
     end
-    local bundle = new Bundle(
+    local bundle = Bundle(
         name = name,
         required = requiredNames,
         defaulted = defaultedNames,
@@ -3966,7 +3966,7 @@ local function addSnapshotData(target: {SnapshotDataEntry}, seen: {[string]: boo
         error("snapshot data key '" .. key .. "' was written twice", 3)
     end
     seen[key] = true
-    target[#target + 1] = new SnapshotDataEntry(key = key, value = snapshotvalue.clone(value))
+    target[#target + 1] = SnapshotDataEntry(key = key, value = snapshotvalue.clone(value))
 end
 
 function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): Snapshot
@@ -4022,7 +4022,7 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
                     savedComponents[#savedComponents + 1] = component
                     if not componentSeen[component.componentName] then
                         componentSeen[component.componentName] = true
-                        componentTable[#componentTable + 1] = new SnapshotComponentEntry(name = component.componentName)
+                        componentTable[#componentTable + 1] = SnapshotComponentEntry(name = component.componentName)
                     end
                 end
             end
@@ -4047,11 +4047,11 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
                         end
                     end
                 end
-                entities[#entities + 1] = new SnapshotEntity(id = source.entities[row], values = values)
+                entities[#entities + 1] = SnapshotEntity(id = source.entities[row], values = values)
                 ::continueSnapshotRow::
             end
             entityCount = entityCount + #entities
-            savedArchetypes[#savedArchetypes + 1] = new SnapshotArchetype(components = names, entities = entities)
+            savedArchetypes[#savedArchetypes + 1] = SnapshotArchetype(components = names, entities = entities)
         end
     end
     local data: {SnapshotDataEntry} = {}
@@ -4121,7 +4121,7 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
                 error("snapshot write failed: " .. assert(reason), 2)
             end
         end
-        return new Snapshot(
+        return Snapshot(
             version = prelude.version,
             nextEntityId = prelude.nextEntityId,
             entityCount = prelude.entityCount,
@@ -4135,7 +4135,7 @@ function World.saveSnapshot(exclusive self: World, options: SnapshotOptions?): S
         )
     end
 
-    return new Snapshot(
+    return Snapshot(
         version = SNAPSHOT_VERSION,
         nextEntityId = self.allocator.nextFreshSlot,
         entityCount = entityCount,
@@ -4194,7 +4194,7 @@ local function loadComponentInput(component: components.Component, value: any, e
             seen[target] = true
             edges[index] = edge
         end
-        return new components.RelationshipBatch(componentType = component, values = edges)
+        return components.RelationshipBatch(componentType = component, values = edges)
     end
     if component.storageType == "tag" then
         return component
@@ -4203,11 +4203,11 @@ local function loadComponentInput(component: components.Component, value: any, e
         if type(value) ~= component.scalarKind then
             error("snapshot value for " .. component.componentName .. " has the wrong scalar type", 3)
         end
-        return new components.ScalarInstance(componentType = component, value = value)
+        return components.ScalarInstance(componentType = component, value = value)
     end
     if (component.storageType == "table" or component.storageType == "ffi") then
         local tableComponent = component as components.TableComponent<any>
-        return new components.TableInstance(
+        return components.TableInstance(
             componentType = tableComponent,
             value = tableComponent.snapshotLoad(snapshotvalue.clone(value), world)
         )
@@ -4222,7 +4222,7 @@ end
 local function copyComponentTable(source: {SnapshotComponentEntry}): {SnapshotComponentEntry}
     local result: {SnapshotComponentEntry} = {}
     for index = 1, #source do
-        result[index] = new SnapshotComponentEntry(name = source[index].name)
+        result[index] = SnapshotComponentEntry(name = source[index].name)
     end
 
     return result
@@ -4261,7 +4261,7 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
             for column = 1, #frame.columns do
                 names[column] = frame.columns[column].component.componentName
             end
-            saved[index] = new SnapshotArchetype(components = names, entities = {})
+            saved[index] = SnapshotArchetype(components = names, entities = {})
         end
         local states: {string} = {}
         for index = 1, #decoded.data do
@@ -4269,7 +4269,7 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
                 states = decoded.data[index].value as {string}
             end
         end
-        snapshot = new Snapshot(
+        snapshot = Snapshot(
             version = prelude.version,
             nextEntityId = prelude.nextEntityId,
             entityCount = prelude.entityCount,
@@ -4301,10 +4301,10 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
                     for index = 1, #names do
                         values[names[index]] = row[index + 1]
                     end
-                    entities[#entities + 1] = new SnapshotEntity(id = row[1] as integer, values = values)
+                    entities[#entities + 1] = SnapshotEntity(id = row[1] as integer, values = values)
                 end
                 total = total + #entities
-                saved[#saved + 1] = new SnapshotArchetype(components = names, entities = entities)
+                saved[#saved + 1] = SnapshotArchetype(components = names, entities = entities)
             end
             local states: {string} = {}
             for _, entry in ipairs((source.data or {}) as {SnapshotDataEntry}) do
@@ -4312,7 +4312,7 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
                     states = entry.value as {string}
                 end
             end
-            snapshot = new Snapshot(
+            snapshot = Snapshot(
                 version = source.version as integer,
                 nextEntityId = source.nextEntityId as integer,
                 entityCount = total,
@@ -4447,7 +4447,7 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
                         end
                         ::nextSavedColumn::
                     end
-                    preparedEntities[row] = new RestoreEntity(id = id, inputs = inputs)
+                    preparedEntities[row] = RestoreEntity(id = id, inputs = inputs)
                 end
             end
         end
@@ -4480,7 +4480,7 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
                     inputs[#inputs + 1] = loadComponentInput(component, entity.values[component.componentName], self)
                 end
             end
-            preparedEntities[entityIndex] = new RestoreEntity(id = id, inputs = inputs)
+            preparedEntities[entityIndex] = RestoreEntity(id = id, inputs = inputs)
             counted = counted + 1
         end
     end
@@ -4595,7 +4595,7 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
                 end
                 queueSpawnBatch(
                     self,
-                    new SpawnBatch(
+                    SpawnBatch(
                         index = #self.spawnBatches + 1,
                         target = target,
                         values = {},
@@ -4652,7 +4652,7 @@ function World.loadSnapshot(exclusive self: World, source: any): SnapshotPrelude
     if top ~= nil then
         self.autoStateComponent = self.stateComponents[top]
     end
-    local prelude = new SnapshotPrelude(
+    local prelude = SnapshotPrelude(
         version = snapshot.version,
         nextEntityId = snapshot.nextEntityId,
         entityCount = snapshot.entityCount,
@@ -4925,7 +4925,7 @@ function World.addSystem(exclusive self: World, config: SystemConfig): string
     if self.systemNames[name] ~= nil then
         error("System " .. name .. " already registered", 2)
     end
-    local system = new RegisteredSystem(
+    local system = RegisteredSystem(
         name = name,
         phase = config.phase,
         run = config.run,
@@ -5412,7 +5412,7 @@ end
 --- Returns or lazily installs generic fixed-iteration tracking for engine consumers.
 export function fixedTracking(exclusive world: World, create: boolean?): archetype.FixedState?
     if create and world.dirtyQueue.fixed == nil then
-        world.dirtyQueue.fixed = new archetype.FixedState(
+        world.dirtyQueue.fixed = archetype.FixedState(
             tracked = {},
             trackedList = {},
             versions = setmetatable({}, {
@@ -5516,7 +5516,7 @@ function World.getStats(borrows self: World, fill: WorldStats?): WorldStats
         return fill
     end
 
-    return new WorldStats(
+    return WorldStats(
         entities = self.liveCount,
         archetypes = self.archetypeCount,
         components = componentCount,

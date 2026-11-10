@@ -63,7 +63,7 @@ end
 --- Writes `bytes` to a temporary file, runs `body` on its path and removes
 --- the file.
 local function temporary(bytes: string, suffix: string, body: function(path: string): nil): nil
-    local file = assert(files.createTemporaryFile(new files.TemporaryOptions(suffix = suffix)))
+    local file = assert(files.createTemporaryFile(files.TemporaryOptions(suffix = suffix)))
     local path = file:toString()
     assert(files.write(path, bytes))
     body(path)
@@ -315,7 +315,7 @@ local function newHarness(): Harness
         return true
     end
 
-    return new Harness(backend = backend, commands = commands, opened = opened, clock = clock)
+    return Harness(backend = backend, commands = commands, opened = opened, clock = clock)
 end
 
 --- Flushes the mixer and decodes every event it has sent.
@@ -328,7 +328,7 @@ local function allSent(harness: Harness, mixer: audio.Audio): {Sent}
             local rest = command.data % OP
             local event: Sent
             if op == 1 then
-                event = new Sent(
+                event = Sent(
                     voice = command.handle,
                     kind = "notesOff",
                     a = rest // 256 % 256,
@@ -337,7 +337,7 @@ local function allSent(harness: Harness, mixer: audio.Audio): {Sent}
                     at = command.at
                 )
             else
-                event = new Sent(
+                event = Sent(
                     voice = command.handle,
                     kind = op == 0 and "message" or op == 2 and "reset" or "unknown",
                     a = rest % 256,
@@ -404,7 +404,7 @@ end
 
 --- A SoundFont the harness never reads: the backend is handed only its id.
 local function font(): gm.SoundFont
-    return new gm.SoundFont(path = "font.sf2", id = 1)
+    return gm.SoundFont(path = "font.sf2", id = 1)
 end
 
 --- A song of four notes, one every half second, two seconds long.

@@ -230,7 +230,7 @@ function suite.acceptsTheLegacyPayloadAndUnsignedStateWords(): nil
     test.equal(saved.data[1].key, "tecs.random")
     saved.data[1].value = {seed = 42, streams = {loot = {1782179806, 3659676363, 1046902905, 2627504192}}}
     world:loadSnapshot(saved)
-    const expected = new random.Xoshiro128()
+    const expected = random.Xoshiro128()
     expected:setState({1782179806, -635290933, 1046902905, -1667463104})
     sameDraws(world:randomStream("loot"), expected)
 end
@@ -287,7 +287,7 @@ end
 function suite.suppliesTheNuppGeneratorDirectlyToJitterPredicates(): nil
     const world = ecs.newWorld()
     const stream = world:randomStream("game.jitter")
-    const expected = new random.Xoshiro128()
+    const expected = random.Xoshiro128()
     expected:setState(stream:state())
     world:addSystem({
         phase = ecs.phases.Update,

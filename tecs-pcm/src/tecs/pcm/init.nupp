@@ -142,7 +142,7 @@ end
 
 --- Makes the Sound for a clip.
 local function sound(name: string, clip: integer, duration: number?): audio.Sound
-    local made = new audio.Sound(
+    local made = audio.Sound(
         name = name,
         duration = duration,
         decoder = DECODER,
@@ -200,7 +200,7 @@ export function load(path: string, options: LoadOptions?): (audio.Sound?, string
     local made = sound(path, id, duration)
     made.reload = reloader(path)
     sounds[path] = made
-    entries[path] = new Entry(clip = id, resident = resident, path = path, stream = stream, streamSeconds = threshold)
+    entries[path] = Entry(clip = id, resident = resident, path = path, stream = stream, streamSeconds = threshold)
 
     return made
 end
@@ -227,7 +227,7 @@ export function loadBytes(name: string, bytes: string): (audio.Sound?, string?)
     local duration = info.duration as number
     local made = sound(name, id, duration >= 0 and duration or nil)
     sounds[name] = made
-    entries[name] = new Entry(clip = id, resident = true, path = nil, stream = false, streamSeconds = STREAM_SECONDS)
+    entries[name] = Entry(clip = id, resident = true, path = nil, stream = false, streamSeconds = STREAM_SECONDS)
 
     return made
 end
@@ -277,14 +277,14 @@ export function codecs(): {string}
 end
 
 --- The asset kind that loads a Sound resident through `tecs.assets`.
-export const PCM: assets.Kind = new assets.Kind(
+export const PCM: assets.Kind = assets.Kind(
     name = assets.SOUND,
     open = function(path: string): (assets.Job?, string?)
         if path == "" then
             return nil, "a sound needs a path"
         end
 
-        return new assets.Job(
+        return assets.Job(
             poll = function(): (assets.Status, any?, string?)
                 local made, why = load(path, {stream = false})
                 if made == nil then
@@ -301,14 +301,14 @@ export const PCM: assets.Kind = new assets.Kind(
 )
 
 --- The asset kind that streams a Sound from its file as it plays.
-export const PCM_STREAM: assets.Kind = new assets.Kind(
+export const PCM_STREAM: assets.Kind = assets.Kind(
     name = assets.SOUND .. ".stream",
     open = function(path: string): (assets.Job?, string?)
         if path == "" then
             return nil, "a streamed sound needs a path"
         end
 
-        return new assets.Job(
+        return assets.Job(
             poll = function(): (assets.Status, any?, string?)
                 local made, why = load(path, {stream = true})
                 if made == nil then

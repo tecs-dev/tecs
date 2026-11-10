@@ -78,7 +78,7 @@ local function spec(
         values[id] = number as number
     end
 
-    return new Spec(kind = kind, name = name, names = names, values = values, params = "")
+    return Spec(kind = kind, name = name, names = names, values = values, params = "")
 end
 
 --- A lookahead peak limiter: nothing past `ceiling` leaves it.

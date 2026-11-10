@@ -297,10 +297,10 @@ export const MaterialComponent: components.FFIComponent<Material> = components.n
     -- the material by name because an id holds only for one build's file set.
     name = "Material",
     construct = function(value: integer?, param: number?): Material
-        return new Material(value or 0, param or 0.25)
+        return Material(value or 0, param or 0.25)
     end,
     default = function(): Material
-        return new Material(0, 0.25)
+        return Material(0, 0.25)
     end,
     save = function(value: Material): any
         return {material = name(value.id), param = value.param}
@@ -320,6 +320,6 @@ export const MaterialComponent: components.FFIComponent<Material> = components.n
             resolved = found
         end
 
-        return new Material(resolved, (stored.param as number?) or 0.25)
+        return Material(resolved, (stored.param as number?) or 0.25)
     end,
 })

@@ -62,10 +62,10 @@ function suite.createsTypedTableComponentInstances(): nil
     local position = components.newComponent({
         name = "test.TablePosition",
         construct = function(x: number, y: number): Point
-            return new Point(x = x, y = y)
+            return Point(x = x, y = y)
         end,
         default = function(): Point
-            return new Point(x = 0, y = 0)
+            return Point(x = 0, y = 0)
         end
     })
     local instance = position(3, 4)

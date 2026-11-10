@@ -236,7 +236,7 @@ export function bind(name: string): EntityRef
         error("sequence.bind requires a non-empty binding name", 2)
     end
 
-    return new sequencetypes.EntityRef(bindName = name, isBinding = true)
+    return sequencetypes.EntityRef(bindName = name, isBinding = true)
 end
 
 --- Builds a step that runs a registered action.
@@ -256,7 +256,7 @@ export function call(action: string, ...: any): Node
         error("sequence.call requires a non-empty action name", 2)
     end
 
-    return new sequencetypes.Node(kind = "call", text = action, args = {...})
+    return sequencetypes.Node(kind = "call", text = action, args = {...})
 end
 
 --- Builds a step that waits a duration in seconds.
@@ -273,7 +273,7 @@ export function wait(seconds: number): Node
         error("sequence.wait requires a non-negative duration", 2)
     end
 
-    return new sequencetypes.Node(kind = "wait", number = seconds)
+    return sequencetypes.Node(kind = "wait", number = seconds)
 end
 
 --- Builds a step that waits a whole number of ticks of the program's clock.
@@ -286,7 +286,7 @@ export function waitSteps(steps: integer): Node
         error("sequence.waitSteps requires a non-negative whole number", 2)
     end
 
-    return new sequencetypes.Node(kind = "waitSteps", number = steps)
+    return sequencetypes.Node(kind = "waitSteps", number = steps)
 end
 
 --- Builds a step that blocks until `signal` raises a named signal.
@@ -302,7 +302,7 @@ export function waitSignal(name: string): Node
         error("sequence.waitSignal requires a non-empty signal name", 2)
     end
 
-    return new sequencetypes.Node(kind = "waitSignal", text = name)
+    return sequencetypes.Node(kind = "waitSignal", text = name)
 end
 
 --- Builds a step that blocks until a registered query matches or stops
@@ -326,7 +326,7 @@ export function waitQuery(name: string, condition: QueryCondition): Node
         error("sequence.waitQuery condition must be 'any' or 'empty'", 2)
     end
 
-    return new sequencetypes.Node(kind = "waitQuery", text = name, count = condition == "any" and 1 or 0)
+    return sequencetypes.Node(kind = "waitQuery", text = name, count = condition == "any" and 1 or 0)
 end
 
 --- Builds a step that emits a sequence event at address zero.
@@ -344,7 +344,7 @@ export function emit(event: string, ...: any): Node
         error("sequence.emit requires a non-empty event name", 2)
     end
 
-    return new sequencetypes.Node(kind = "emit", text = event, args = {...})
+    return sequencetypes.Node(kind = "emit", text = event, args = {...})
 end
 
 --- Builds a step that repeats a block.
@@ -362,7 +362,7 @@ export function loop(count: integer?, nodes: {Node}): Node
         error("sequence.loop requires a non-empty block", 2)
     end
 
-    return new sequencetypes.Node(kind = "loop", count = count, nodes = nodes)
+    return sequencetypes.Node(kind = "loop", count = count, nodes = nodes)
 end
 
 --- Builds a step that starts a branch alongside the rest of the program.
@@ -382,7 +382,7 @@ export function fork(nodes: {Node}): Node
         error("sequence.fork requires a non-empty block", 2)
     end
 
-    return new sequencetypes.Node(kind = "fork", nodes = nodes)
+    return sequencetypes.Node(kind = "fork", nodes = nodes)
 end
 
 --- Builds a step that waits for every branch not yet joined.
@@ -391,7 +391,7 @@ end
 --- finishes the waiting playback resumes within that same tick.
 --- @return a step for `define`, not to be put in a second program
 export function join(): Node
-    return new sequencetypes.Node(kind = "join")
+    return sequencetypes.Node(kind = "join")
 end
 
 --- Builds a step that forks several blocks and waits for all of them.
@@ -411,7 +411,7 @@ export function parallel(blocks: {{Node}}): Node
         end
     end
 
-    return new sequencetypes.Node(kind = "parallel", blocks = blocks)
+    return sequencetypes.Node(kind = "parallel", blocks = blocks)
 end
 
 --- Builds a step that plays a registered timeline on a bound entity.
@@ -438,7 +438,7 @@ export function playTween(timeline: string, target: EntityRef, params: {[string]
         error("sequence.playTween requires a sequence.bind(name) target", 2)
     end
 
-    return new sequencetypes.Node(kind = "playTween", text = timeline, args = {target, params})
+    return sequencetypes.Node(kind = "playTween", text = timeline, args = {target, params})
 end
 
 --- Builds a step that waits for the playback the most recent `playTween`
@@ -450,7 +450,7 @@ end
 --- preceded falls straight through without costing a tick.
 --- @return a step for `define`, not to be put in a second program
 export function waitTween(): Node
-    return new sequencetypes.Node(kind = "waitTween")
+    return sequencetypes.Node(kind = "waitTween")
 end
 
 --- Builds a step that evaluates a registered evaluator every tick until it
@@ -473,7 +473,7 @@ export function eval(evaluator: string, data: any): Node
         error("sequence.eval requires a non-empty evaluator name", 2)
     end
 
-    return new sequencetypes.Node(kind = "eval", text = evaluator, args = data)
+    return sequencetypes.Node(kind = "eval", text = evaluator, args = data)
 end
 
 --- Builds a step that waits for work outside the sequencer to finish.
@@ -500,7 +500,7 @@ export function await(provider: string, target: EntityRef, key: string?): Node
         error("sequence.await requires a sequence.bind(name) target", 2)
     end
 
-    return new sequencetypes.Node(kind = "await", text = provider, args = {target, key})
+    return sequencetypes.Node(kind = "await", text = provider, args = {target, key})
 end
 
 -------------------------------------------------------------------------------
@@ -1068,7 +1068,7 @@ export function status(exclusive world: ecs.World, handle: Handle): Status?
         condition = cursor.waitCondition == 1 and "any" or "empty"
     end
 
-    return new sequencetypes.Status(
+    return sequencetypes.Status(
         state = cursor.state,
         program = cursor.program.name,
         version = cursor.program.version,

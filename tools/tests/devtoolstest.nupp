@@ -85,7 +85,7 @@ function suite.benchmarkModulesCannotShadowRuntimeModules(): nil
 end
 
 function suite.taskLauncherPreservesArgumentsAndFailureStatus(): nil
-    with scratch = assert(files.createTemporaryDirectory(new files.TemporaryOptions(prefix = "tecs task args "))) do
+    with scratch = assert(files.createTemporaryDirectory(files.TemporaryOptions(prefix = "tecs task args "))) do
         const root = scratch:toString()
         assert(files.createDirectory(root .. "/tools/tecs/dev"))
         assert(files.copy(commands.root .. "/tools/run.nupp", root .. "/tools/run.nupp"))
@@ -125,7 +125,7 @@ end
 
 function suite.commandsRunTogetherActuallyOverlap(): nil
     with
-        scratch = assert(files.createTemporaryDirectory(new files.TemporaryOptions(prefix = "tecs parallel commands ")))
+        scratch = assert(files.createTemporaryDirectory(files.TemporaryOptions(prefix = "tecs parallel commands ")))
     do
         const root = scratch:toString()
         const first = root .. "/first"

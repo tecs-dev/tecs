@@ -121,10 +121,10 @@ export const PointLight2DComponent: components.FFIComponent<PointLight2D> = comp
         b: number?,
         intensity: number?
     ): PointLight2D
-        return new PointLight2D(height or 64, radius or 256, r or 1, g or 1, b or 1, intensity or 1)
+        return PointLight2D(height or 64, radius or 256, r or 1, g or 1, b or 1, intensity or 1)
     end,
     default = function(): PointLight2D
-        return new PointLight2D(64, 256, 1, 1, 1, 1)
+        return PointLight2D(64, 256, 1, 1, 1, 1)
     end,
 })
 
@@ -151,10 +151,10 @@ export const Occluder2DComponent: components.FFIComponent<Occluder2D> = componen
     -- from the Teal implementation, and so is its `height` field name.
     name = "Occluder2D",
     construct = function(height: number?): Occluder2D
-        return new Occluder2D(height or 1.0)
+        return Occluder2D(height or 1.0)
     end,
     default = function(): Occluder2D
-        return new Occluder2D(1.0)
+        return Occluder2D(1.0)
     end,
 })
 
@@ -181,10 +181,10 @@ export const DropShadow2DComponent: components.FFIComponent<DropShadow2D> = comp
     -- from the Teal implementation, and so is its `height` field name.
     name = "DropShadow2D",
     construct = function(height: number?): DropShadow2D
-        return new DropShadow2D(height or 1.0)
+        return DropShadow2D(height or 1.0)
     end,
     default = function(): DropShadow2D
-        return new DropShadow2D(1.0)
+        return DropShadow2D(1.0)
     end,
 })
 
@@ -310,7 +310,7 @@ export function setShadows(spec: ShadowSpec?): nil
         return
     end
 
-    shadowSettings = new Shadows(
+    shadowSettings = Shadows(
         steps = reading(spec.steps, 24, 4, 256, "shadow steps"),
         margin = reading(spec.margin, 200, 0, huge / 2, "shadow margin"),
         -- The default matches `PointLight2D`'s own default height, so an
@@ -340,7 +340,7 @@ export function setBloom(spec: BloomSpec?): nil
         return
     end
 
-    bloomSettings = new Bloom(
+    bloomSettings = Bloom(
         threshold = reading(spec.threshold, 0.8, 0, huge / 2, "bloom threshold"),
         knee = reading(spec.knee, 0.1, 0.0001, huge / 2, "bloom knee"),
         intensity = reading(spec.intensity, 0.7, 0, huge / 2, "bloom intensity")

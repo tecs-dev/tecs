@@ -198,7 +198,7 @@ export function loadSoundFont(path: string): (SoundFont?, string?)
     if id == 0 then
         return nil, reason("'" .. path .. "' did not load")
     end
-    local font = new SoundFont(path = path, id = id)
+    local font = SoundFont(path = path, id = id)
     fonts[path] = font
 
     return font
@@ -218,7 +218,7 @@ export function loadSoundFontBytes(name: string, bytes: string): (SoundFont?, st
     if id == 0 then
         return nil, reason("'" .. name .. "' did not load")
     end
-    local font = new SoundFont(path = name, id = id)
+    local font = SoundFont(path = name, id = id)
     fonts[name] = font
 
     return font
@@ -287,13 +287,13 @@ export function new(mixer: audio.Audio, font: SoundFont, options: Options?): (Sy
         if not mixer.available then
             -- A mixer with no output starts no voice, and its synth still
             -- answers every call, so a game needs no branch for it.
-            return new Synth(voice = 0, mixer = mixer, destroyed = false)
+            return Synth(voice = 0, mixer = mixer, destroyed = false)
         end
 
         return nil, failure or "the mixer started no synthesizer"
     end
 
-    return new Synth(voice = voice, mixer = mixer, destroyed = false)
+    return Synth(voice = voice, mixer = mixer, destroyed = false)
 end
 
 --- Sends any short MIDI message at `at` on the mixer's clock.

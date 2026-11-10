@@ -28,7 +28,7 @@ local function fake(times: {number}, duration: number): Fake
     local index: integer = 1
 
     local function log(what: string, song: number, at: number): nil
-        calls[#calls + 1] = new Call(what = what, song = song, at = at)
+        calls[#calls + 1] = Call(what = what, song = song, at = at)
     end
 
     local function locate(target: number): integer
@@ -43,7 +43,7 @@ local function fake(times: {number}, duration: number): Fake
         return found
     end
 
-    local driver = new sequencer.Driver(
+    local driver = sequencer.Driver(
         duration = duration,
         loopStart = nil,
         loopEnd = nil,
@@ -88,7 +88,7 @@ local function fake(times: {number}, duration: number): Fake
         end
     )
 
-    return new Fake(driver = driver, calls = calls, clock = clock)
+    return Fake(driver = driver, calls = calls, clock = clock)
 end
 
 --- Returns the calls of `what` made so far.

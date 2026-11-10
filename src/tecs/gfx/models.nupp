@@ -648,7 +648,7 @@ function Model.newInstance(self: Model): Instance
         end
         primitives[
             index
-        ] = new Primitive(
+        ] = Primitive(
             transform = Transform3D(),
             mesh = self._meshes[draw.mesh],
             bounds = self._bounds[draw.mesh],
@@ -658,7 +658,7 @@ function Model.newInstance(self: Model): Instance
             morph = morphs[index] or mesh.MeshMorphComponent({})
         )
     end
-    const instance = new Instance(
+    const instance = Instance(
         primitives = primitives,
         animation = 0,
         time = 0,
@@ -847,7 +847,7 @@ local function register(bytes: string, path: string, options: LoadOptions?): Mod
         for channel = 1, animation.channelCount do
             channels[channel] = source.channels[animation.firstChannel + channel]
         end
-        animations[index] = new Animation(name = animation.name, duration = animation.duration, channels = channels)
+        animations[index] = Animation(name = animation.name, duration = animation.duration, channels = channels)
         byName[animation.name] = byName[animation.name] ~= nil and 0 or index
     end
     local meshes: {MeshInput} = {}
@@ -864,7 +864,7 @@ local function register(bytes: string, path: string, options: LoadOptions?): Mod
         materials[index] = mesh.MeshMaterialComponent(nextId, index)
         materialNames[index] = (material as {name: string}).name
     end
-    local model = new Model(
+    local model = Model(
         path = path,
         id = nextId,
         animations = animations,

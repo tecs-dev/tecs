@@ -89,7 +89,7 @@ end
 
 --- Creates an empty log.
 export function newBuilder(format: string, version: integer, rate: integer): Builder
-    return new Builder(
+    return Builder(
         format = format,
         version = version,
         rate = rate,
@@ -118,7 +118,7 @@ export function addChip(
     local index = #builder.chips
     builder.chips[
         index + 1
-    ] = new Chip(model = model, clock = clock, second = second, left = left, right = right, pieces = {})
+    ] = Chip(model = model, clock = clock, second = second, left = left, right = right, pieces = {})
 
     return index
 end
@@ -156,7 +156,7 @@ export function addMemory(exclusive builder: Builder, chip: integer, class: stri
         pieces = {}
         entry.pieces[class] = pieces
     end
-    pieces[#pieces + 1] = new Piece(offset = offset, data = data)
+    pieces[#pieces + 1] = Piece(offset = offset, data = data)
 end
 
 --- Assembles the pieces of one image into the bytes a chip reads: each at its

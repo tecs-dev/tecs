@@ -41,14 +41,14 @@ export const DEFAULT_BUDGET: integer = 512
 --- Creates an empty sequencer state for one world.
 --- @return the state with no cursors and three idle clocks
 export function newState(): sequencetypes.WorldState
-    return new sequencetypes.WorldState(
+    return sequencetypes.WorldState(
         cursors = {},
         freeSlots = {},
         nextSlot = 1,
         generations = {},
         actions = {},
         budget = DEFAULT_BUDGET,
-        clocks = new sequencetypes.Clocks(
+        clocks = sequencetypes.Clocks(
             fixed = sequencetypes.newClock(),
             frame = sequencetypes.newClock(),
             presentation = sequencetypes.newClock()
@@ -152,7 +152,7 @@ export function alloc(
     end
     local generation = (state.generations[slot] or 0) + 1
     state.generations[slot] = generation
-    local cursor = new sequencetypes.Cursor(
+    local cursor = sequencetypes.Cursor(
         slot = slot,
         generation = generation,
         alive = true,

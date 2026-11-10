@@ -403,7 +403,7 @@ local function grownCapacity(capacity: integer, needed: integer): integer
 end
 
 local function newBuffers(): Buffers
-    return new Buffers(
+    return Buffers(
         batch = ffi.new<TecsPhysicsBatch>(),
         createBodies = carray(TecsPhysicsBodyCreate, INITIAL_CAPACITY),
         createBodyCapacity = INITIAL_CAPACITY,
@@ -1037,7 +1037,7 @@ export function create(options: contract.Options?): contract.Simulation
 
     local function resolveEntities(entities: {integer}): contract.EntityHandles
         local count = #entities
-        local result = new contract.EntityHandles(
+        local result = contract.EntityHandles(
             bodyIndex1 = {},
             bodyGeneration = {},
             colliderIndex1 = {},
@@ -1137,7 +1137,7 @@ export function create(options: contract.Options?): contract.Simulation
         tecsPhysicsWorldDestroy(world)
     end
 
-    return new contract.Simulation(
+    return contract.Simulation(
         id = id,
         subStepCount = tonumber(tecsPhysicsSubstepCount(world)) as integer,
         workerCount = tonumber(tecsPhysicsWorkerCount(world)) as integer,

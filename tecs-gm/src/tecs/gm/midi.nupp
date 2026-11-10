@@ -269,7 +269,7 @@ local function begin(bytes: string, name: string): (Parser?, string?)
         end
     end
 
-    return new Parser(
+    return Parser(
         bytes = bytes,
         name = name,
         format = format,
@@ -317,7 +317,7 @@ local function nextTrack(exclusive self: Parser): boolean
             local finish = math.min(start + length - 1, #bytes)
             local track = #self.infos + 1
             local offset = self.format == 2 and self.patternEnd or 0
-            self.reading = new Reading(
+            self.reading = Reading(
                 track = track,
                 position = start,
                 finish = finish,
@@ -337,7 +337,7 @@ end
 
 --- Ends the track being read at `tick`.
 local function endTrack(exclusive self: Parser, reading: Reading): nil
-    self.infos[#self.infos + 1] = new Track(name = reading.name, events = reading.count, endTick = reading.tick)
+    self.infos[#self.infos + 1] = Track(name = reading.name, events = reading.count, endTick = reading.tick)
     if reading.tick > self.patternEnd then
         self.patternEnd = reading.tick
     end
@@ -410,7 +410,7 @@ local function readEvents(exclusive self: Parser, budget: integer): string?
                     add(
                         self,
                         reading,
-                        new Event(
+                        Event(
                             tick = reading.tick,
                             time = 0,
                             track = reading.track,
@@ -433,7 +433,7 @@ local function readEvents(exclusive self: Parser, budget: integer): string?
                 add(
                     self,
                     reading,
-                    new Event(
+                    Event(
                         tick = reading.tick,
                         time = 0,
                         track = reading.track,
@@ -470,7 +470,7 @@ local function readEvents(exclusive self: Parser, budget: integer): string?
                 add(
                     self,
                     reading,
-                    new Event(
+                    Event(
                         tick = reading.tick,
                         time = 0,
                         track = reading.track,
@@ -538,8 +538,8 @@ local function finish(exclusive self: Parser): Song
     else
         ppq = self.division
     end
-    local tempos: {Tempo} = {new Tempo(tick = 0, time = 0, microsecondsPerQuarter = DEFAULT_TEMPO)}
-    local song = new Song(
+    local tempos: {Tempo} = {Tempo(tick = 0, time = 0, microsecondsPerQuarter = DEFAULT_TEMPO)}
+    local song = Song(
         format = self.format,
         ppq = ppq,
         framesPerSecond = framesPerSecond,
@@ -571,7 +571,7 @@ local function finish(exclusive self: Parser): Song
                     else
                         tempos[
                             #tempos + 1
-                        ] = new Tempo(tick = event.tick, time = event.time, microsecondsPerQuarter = micro)
+                        ] = Tempo(tick = event.tick, time = event.time, microsecondsPerQuarter = micro)
                     end
                 end
             elseif event.meta == META_MARKER then
@@ -644,7 +644,7 @@ end
 --- The file is read and parsed on the loader's readiness pump, up to 65 536
 --- events a pass, so `handle:value() as tecs.gm.midi.Song` is the
 --- cast its caller writes. The collector owns the song.
-export const kind: assets.Kind = new assets.Kind(
+export const kind: assets.Kind = assets.Kind(
     name = assets.MUSIC_MIDI,
     open = function(path: string): (assets.Job?, string?)
         local read, reason = assets.readJob(path)
@@ -653,7 +653,7 @@ export const kind: assets.Kind = new assets.Kind(
         end
         local parser: Parser? = nil
 
-        return new assets.Job(
+        return assets.Job(
             poll = function(): (assets.Status, any?, string?)
                 local current = parser
                 if current == nil then
@@ -716,7 +716,7 @@ local function driver(voice: synth.Synth, first: Song): music.Driver
         end
     end
 
-    result = new music.Driver(
+    result = music.Driver(
         duration = song.duration,
         loopStart = song.loopStart,
         loopEnd = song.loopEnd,

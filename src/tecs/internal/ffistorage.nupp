@@ -114,7 +114,7 @@ local function fieldsOf(element: any, opaque: boolean): {Field}
             const spelling = scalar .. (count > 0 and "[" .. tostring(count) .. "]" or "")
             result[
                 #result + 1
-            ] = new Field(name = field.name as string, spelling = spelling, count = count, scalar = scalar)
+            ] = Field(name = field.name as string, spelling = spelling, count = count, scalar = scalar)
         elseif typeKind(field) ~= 8 then
             error("FFI component bitfields and anonymous fields are unsupported", 3)
         end
@@ -146,7 +146,7 @@ export function new(sample: any, opaque: boolean?): Storage
         parts[index] = fields[index].name .. ":" .. fields[index].spelling
     end
 
-    return new Storage(
+    return Storage(
         element = element,
         arrayType = ffi.typeof(spelling, element),
         width = width,
@@ -200,7 +200,7 @@ export function allocate(storage: Storage, capacity: integer): any
     else
         column = ffi.new(storage.arrayType, capacity + 1)
     end
-    backing[column] = new Backing(owner = owner, capacity = capacity, storage = storage)
+    backing[column] = Backing(owner = owner, capacity = capacity, storage = storage)
 
     return column
 end

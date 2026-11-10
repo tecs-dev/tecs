@@ -230,10 +230,10 @@ export function compile(
     clock: sequencetypes.ClockId,
     nodes: {sequencetypes.Node}
 ): sequencetypes.Program
-    local state = new Compiler(code = {}, consts = {}, constIndex = {}, loopCounts = {})
+    local state = Compiler(code = {}, consts = {}, constIndex = {}, loopCounts = {})
     compileBlock(state, nodes, 0)
     emitOp(state, END, -1, -1)
-    local program = new sequencetypes.Program(
+    local program = sequencetypes.Program(
         name = name,
         version = version,
         clock = clock,
@@ -364,7 +364,7 @@ export function ahead(program: sequencetypes.Program, pc: integer, offset: integ
         elseif op == CALL or op == EMIT then
             out[
                 #out + 1
-            ] = new Step(
+            ] = Step(
                 ticks = ticks,
                 kind = op == CALL and "call" or "emit",
                 name = consts[a] as string,

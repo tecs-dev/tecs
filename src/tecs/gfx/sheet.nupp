@@ -863,7 +863,7 @@ local function newSheet(name: string, imageWidth: number, imageHeight: number, l
         error("gfx.sheet: sheet '" .. name .. "' needs the pixel size of its image", level)
     end
 
-    return new Sheet(
+    return Sheet(
         name = name,
         id = 0,
         count = 0,
@@ -1047,7 +1047,7 @@ end
 --- @return a builder whose methods chain
 --- @raises string when the name is empty or either dimension is not positive
 export function build(name: string, imageWidth: number, imageHeight: number): Builder
-    return new Builder(sheet = newSheet(name, imageWidth, imageHeight, 3), tags = {}, slices = {})
+    return Builder(sheet = newSheet(name, imageWidth, imageHeight, 3), tags = {}, slices = {})
 end
 
 --- Appends a frame to the sheet under construction.
@@ -1409,10 +1409,10 @@ end
 export const Pivot = components.newFFIComponent({
     name = "Pivot",
     construct = function(x: number?, y: number?, sheetId: integer?, sliceId: integer?): PivotValue
-        return new PivotValue(x ?? 0.5, y ?? 0.5, sheetId ?? 0, sliceId ?? 0)
+        return PivotValue(x ?? 0.5, y ?? 0.5, sheetId ?? 0, sliceId ?? 0)
     end,
     default = function(): PivotValue
-        return new PivotValue(0.5, 0.5, 0, 0)
+        return PivotValue(0.5, 0.5, 0, 0)
     end,
     save = function(value: PivotValue): any
         const source = byId(value.sheet)
@@ -1427,7 +1427,7 @@ export const Pivot = components.newFFIComponent({
         const stored = value as {[string]: any}
         const name = stored.sheet as string?
         const source = name ~= nil and byName(name) or nil
-        return new PivotValue(
+        return PivotValue(
             (stored.x as number?) ?? 0.5,
             (stored.y as number?) ?? 0.5,
             source ~= nil and source.id or 0,

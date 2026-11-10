@@ -19,10 +19,10 @@ end
 const point = ecs.newComponent(Point, {
     name = "test.RequirePoint",
     construct = function(x: number): Point
-        return new Point(x = x)
+        return Point(x = x)
     end,
     default = function(): Point
-        return new Point(x = 5)
+        return Point(x = 5)
     end,
     requires = {health(42)}
 })
@@ -226,13 +226,13 @@ function suite.supportsDataRelationshipsAndRequiredEdges(): nil
         reverseIndex = true,
         requires = {marker},
         construct = function(target: integer, weight: number): Edge
-            return new Edge(target = target, weight = weight)
+            return Edge(target = target, weight = weight)
         end,
         save = function(value: Edge): any
             return {target = value.target, weight = value.weight}
         end,
         load = function(value: any): Edge
-            return new Edge(target = value.target, weight = value.weight)
+            return Edge(target = value.target, weight = value.weight)
         end
     })
     const world = ecs.newWorld()

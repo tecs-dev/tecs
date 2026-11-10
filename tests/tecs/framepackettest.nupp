@@ -85,7 +85,7 @@ local function header(borrows reader: ScalarReader): Header
     local casters = reader:readUint32()
     test.equal(reader:readUint32(), 0)
 
-    local read = new Header(
+    local read = Header(
         flags = flags as integer,
         graphBytes = graphBytes as integer,
         graphRevision = revision as integer,
@@ -121,7 +121,7 @@ local function header(borrows reader: ScalarReader): Header
 end
 
 local function light(borrows reader: ScalarReader): Light
-    return new Light(
+    return Light(
         x = reader:readFloat32(),
         y = reader:readFloat32(),
         height = reader:readFloat32(),
@@ -134,7 +134,7 @@ local function light(borrows reader: ScalarReader): Light
 end
 
 local function batch(borrows reader: ScalarReader): Batch
-    return new Batch(
+    return Batch(
         image = reader:readUint32() as integer,
         sampler = reader:readUint32() as integer,
         lane = reader:readUint32() as integer,

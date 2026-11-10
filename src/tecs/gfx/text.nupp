@@ -170,7 +170,7 @@ export function newText(value: string?, font: fonts.Font?, size: number?, align:
         error("gfx.text.newText: wrapWidth cannot be negative", 2)
     end
 
-    return new Text(
+    return Text(
         text = value or "",
         font = font,
         size = size or 16.0,
@@ -192,7 +192,7 @@ export const TextComponent: ecs.ComponentDefinition<Text> = ecs.newComponent(Tex
         return newText(value, font, size, align, wrapWidth)
     end,
     default = function(): Text
-        return new Text(text = "", font = nil, size = 16.0, align = "left", wrapWidth = 0.0, width = 0.0, height = 0.0)
+        return Text(text = "", font = nil, size = 16.0, align = "left", wrapWidth = 0.0, width = 0.0, height = 0.0)
     end,
     save = function(value: Text): any
         return {
@@ -210,7 +210,7 @@ export const TextComponent: ecs.ComponentDefinition<Text> = ecs.newComponent(Tex
         const name = stored.font as string?
         const align = (stored.align as string?) or "left"
 
-        return new Text(
+        return Text(
             text = (stored.text as string?) or "",
             font = name ~= nil and fonts.find(name) or nil,
             size = (stored.size as number?) or 16.0,
@@ -531,7 +531,7 @@ local function stateFor(exclusive world: ecs.World): Install
     if existing ~= nil then
         return existing
     end
-    const created = new Install(
+    const created = Install(
         texts = world:newQuery({
             include = {TextComponent, rendercomponents.Transform2DComponent},
             exclude = {ecs.Disabled}
@@ -559,7 +559,7 @@ end
 local neutralTint = carray(rendercomponents.Tint, 1)
 
 @unsafe do
-    neutralTint[0] = new rendercomponents.Tint(1, 1, 1, 1)
+    neutralTint[0] = rendercomponents.Tint(1, 1, 1, 1)
 end
 
 local function stale(
@@ -611,7 +611,7 @@ local function remember(
 ): nil
     local built = state.built[entity]
     if built == nil then
-        built = new Built(
+        built = Built(
             text = "",
             font = nil,
             size = 0.0,

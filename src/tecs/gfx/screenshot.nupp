@@ -28,7 +28,7 @@ local serial: integer = 0
 --- Requests the next rendered frame; poll `ready` from subsequent updates.
 export function request(): Capture
     serial = serial + 1
-    const capture = new Capture(ready = false, width = 0, height = 0, rgba = "", png = "", reason = nil)
+    const capture = Capture(ready = false, width = 0, height = 0, rgba = "", png = "", reason = nil)
     pending[serial] = capture
     queue[#queue + 1] = serial
 
