@@ -291,9 +291,11 @@ There are no cast callbacks anywhere in `src/`. Adding the first one is a decisi
 deliberately.
 
 Load a native library through `src/tecs/internal/nativelibrary.nupp`, which searches for `lib/` and then a
-Cargo target directory. Do not put a `from` clause on a `cdef function`: it binds eagerly to one platform's
-file name and only resolves where the system loader already looks. Declare bare symbols after calling
-`nativelibrary.open`. `src/tecs/physics/rapier.nupp` is the worked example.
+Cargo target directory and returns the loaded library. Keep that handle in a module-level `const` and name it
+in every declaration's `from` clause: `cdef function tecsPhysicsStep(...): int32 from library`. Do not write
+a string in that clause, which spells one platform's file name and only resolves where the system loader
+already looks, and do not declare bare symbols, which resolve through a process namespace that on Windows
+never includes a library loaded later. `src/tecs/physics/rapier.nupp` is the worked example.
 
 ### Testing
 

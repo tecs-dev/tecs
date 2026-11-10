@@ -9,15 +9,20 @@ three, and it binds at module load with no say in where the file is found. The
 loader path a developer would otherwise set is stripped from a protected
 process on macOS, so `DYLD_LIBRARY_PATH` is not an answer either.
 
-Loading a library into the process namespace instead lets every declaration
-name a bare symbol, and lets one search cover both a packaged install and a
-development checkout. Call `open` above the declarations that need it.
+`open` runs one search that covers both a packaged install and a development
+checkout, and returns the loaded library. Each declaration then names that
+handle in its `from` clause, so it binds its symbol from the library itself.
+Keep the handle in a module-level binding: a function pointer copied out of a
+library does not keep the library loaded.
 
 ```nupp
-tecs.internal.nativelibrary.open("tecs_physics", "TECS_PHYSICS_LIBRARY")
+const physics = tecs.internal.nativelibrary.open("tecs_physics", "TECS_PHYSICS_LIBRARY")
 
-cdef function tecsPhysicsStep(world: voidptr?, batch: voidptr?): uint32
+cdef function tecsPhysicsStep(world: voidptr?, batch: voidptr?): uint32 from physics
 ```
+
+Loading into the process namespace and declaring bare symbols does not work on
+Windows, whose default namespace never includes a library loaded later.
 ]]
 
 local ffi = require("ffi")
@@ -55,7 +60,7 @@ local function readable(path: string): boolean
     return true
 end
 
---- Loads a Tecs native library into the process namespace.
+--- Loads a Tecs native library and returns its handle.
 ---
 --- The environment variable named by `override` is tried first and names an
 --- exact file. Otherwise the search walks up from this module through eight
@@ -63,18 +68,17 @@ end
 --- directory. A plain load by file name runs last, so an installed library
 --- still resolves and so its own diagnostic is what a failure reports.
 ---
---- Loading is global, which is what lets a `cdef function` declared after this
---- call name a bare symbol rather than a file.
+--- The handle is what a `cdef function ... from` clause names, and has to stay
+--- reachable for as long as the functions bound from it are called.
 --- @param stem the library name without prefix or extension
 --- @param override the environment variable naming an exact file, if any
+--- @return the loaded library, for `from` clauses to bind from
 --- @raises string when no candidate can be loaded
-export function open(stem: string, override: string?): nil
+export function open(stem: string, override: string?): any
     if override ~= nil then
         local named = os.getenv(override)
         if named ~= nil then
-            ffi.load(named, true)
-
-            return
+            return ffi.load(named)
         end
     end
     local file = libraryFile(stem)
@@ -84,12 +88,11 @@ export function open(stem: string, override: string?): nil
         for _, relative in ipairs(RELATIVE) do
             local candidate = directory .. relative .. file
             if readable(candidate) then
-                ffi.load(candidate, true)
-
-                return
+                return ffi.load(candidate)
             end
         end
         directory = directory .. "/.."
     end
-    ffi.load(file, true)
+
+    return ffi.load(file)
 end
