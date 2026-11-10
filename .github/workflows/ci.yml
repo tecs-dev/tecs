@@ -24,6 +24,18 @@ jobs:
                   sudo apt-get install -y \
                     libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev \
                     libx11-dev libxcursor-dev libxi-dev libxrandr-dev
+            # Nupp's Windows embedding SDK is MinGW and refuses an MSVC Rust
+            # host, so the host links with the GNU toolchain and the services
+            # it loads are proven on that one. `rust-toolchain.toml` names a
+            # channel only, which rustup resolves to MSVC on this runner.
+            - name: Select the GNU Windows Rust toolchain
+              if: runner.os == 'Windows'
+              shell: bash
+              run: |
+                  channel=$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' rust-toolchain.toml)
+                  toolchain="${channel}-x86_64-pc-windows-gnu"
+                  rustup toolchain install "$toolchain" --profile minimal --component clippy,rustfmt
+                  echo "RUSTUP_TOOLCHAIN=$toolchain" >> "$GITHUB_ENV"
             - run: cargo fmt --all -- --check
             # `tecs-winit-host` is excluded from everything that builds it here.
             # Its build script links `libnupp.a` out of a Nupp embedding SDK,
@@ -34,10 +46,7 @@ jobs:
             # there. `cargo fmt` needs no build, so it still covers the whole
             # workspace.
             - run: cargo clippy --locked --workspace --exclude tecs-winit-host --all-targets -- -D warnings
-            - if: runner.os == 'Windows'
-              run: cargo check --locked --workspace --exclude tecs-winit-host --all-targets
-            - if: runner.os != 'Windows'
-              run: cargo test --locked --workspace --exclude tecs-winit-host --all-targets
+            - run: cargo test --locked --workspace --exclude tecs-winit-host --all-targets
 
     nupp:
         strategy:
@@ -181,8 +190,9 @@ jobs:
     # Both supported Unix platforms are covered, because the run path a release
     # records is spelled differently on each and only the platform can say
     # whether its loader honours it for a library opened by name at run time.
-    # Windows is not here: no runner in this workflow stages a Nupp SDK for
-    # MSVC yet, so `windows-x64` is configured and unproven.
+    # Windows is not here yet, so `windows-x64` is configured and unproven.
+    # Nupp stages a MinGW embedding SDK for the `x86_64-pc-windows-gnu` Rust
+    # host, and the host build has not been taught to link one.
     package:
         strategy:
             fail-fast: false
