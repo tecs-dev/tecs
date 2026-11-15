@@ -61,9 +61,8 @@ for _, name in ipairs({
 }) do
     developmentTasks["ex-" .. name] = {
         description = "Build and run the " .. name .. " component",
-        build = "ex-" .. name,
         cwd = "tools",
-        argv = { "nupp", "run", "tecs/dev/main.nupp", "host", name },
+        argv = { "nupp", "run", "tecs/dev/main.nupp", "host", "ex-" .. name },
     }
 end
 developmentTasks["ex-nativesmoke"].description = "Run the native library loading smoke test"
@@ -73,7 +72,7 @@ developmentTasks["ex-uistandalone"].argv = {
     "run",
     "tecs/dev/main.nupp",
     "host",
-    "uistandalone",
+    "ex-uistandalone",
     "--width",
     "960",
     "--height",
@@ -524,7 +523,9 @@ return {
         },
     },
 
-    test = { build = "headless", argv = { "nupp", "run", "tools/run.nupp", "test" } },
+    -- The test command builds `headless` itself, after Cargo has built the
+    -- native services its bindings resolve.
+    test = { argv = { "nupp", "run", "tools/run.nupp", "test" } },
 
     tasks = developmentTasks,
 }

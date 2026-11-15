@@ -148,19 +148,21 @@ jobs:
                   echo "$PWD/bin" >> "$GITHUB_PATH"
             - name: Stage the Nupp embedding SDK
               working-directory: tecs
-              run: echo "NUPP_SDK=$(../nupp/scripts/toolchain host-library base,native-files,native-net | tail -1)" >> "$GITHUB_ENV"
+              run: echo "NUPP_SDK=$(../nupp/scripts/toolchain host-library base,native-files,native-net,native-compression,native-uuid,native-time,native-tls,native-process | tail -1)" >> "$GITHUB_ENV"
+            # A component build resolves the libraries its bindings name and
+            # refuses a missing one, so the services come first. No loader path
+            # is exported here. The build script records the SDK as a run path,
+            # because the static library references the embedding library
+            # beside it and a binary that linked cleanly otherwise aborts at
+            # startup.
+            - working-directory: tecs
+              run: cargo build --locked -p tecs-audio -p tecs-gamepad -p tecs-physics -p tecs-ui -p tecs-assets
             - working-directory: tecs
               run: nupp build --target ex-host
             - working-directory: tecs
               run: cargo fmt -p tecs-winit-host -- --check
             - working-directory: tecs
               run: cargo clippy -p tecs-winit-host --all-targets -- -D warnings
-            # No loader path is exported here. The build script records the
-            # SDK as a run path, because the static library references the
-            # embedding library beside it and a binary that linked cleanly
-            # otherwise aborts at startup.
-            - working-directory: tecs
-              run: cargo build --locked -p tecs-audio -p tecs-gamepad -p tecs-physics
             - working-directory: tecs
               run: cargo test -p tecs-winit-host
             - working-directory: tecs
@@ -234,7 +236,7 @@ jobs:
                   echo "$PWD/bin" >> "$GITHUB_PATH"
             - name: Stage the Nupp embedding SDK
               working-directory: tecs
-              run: echo "NUPP_SDK=$(../nupp/scripts/toolchain host-library base,native-files,native-net | tail -1)" >> "$GITHUB_ENV"
+              run: echo "NUPP_SDK=$(../nupp/scripts/toolchain host-library base,native-files,native-net,native-compression,native-uuid,native-time,native-tls,native-process | tail -1)" >> "$GITHUB_ENV"
             # One command: it installs a clean release, holds it to
             # `check-package`, copies it somewhere unrelated, and runs the
             # native smoke component and the showcase from there with every

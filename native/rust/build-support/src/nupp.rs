@@ -1,6 +1,6 @@
 //! Nupp compiler and embedding SDK inputs used by native packaging.
-use crate::command::run;
-use anyhow::Result;
+
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 pub const OUTPUT: &str = "out/nupp";
@@ -67,8 +67,25 @@ pub fn sdk(root: &Path) -> Option<PathBuf> {
     path.join("libnupp.a").is_file().then_some(path)
 }
 
-pub fn build(root: &Path, target: &str) -> Result<PathBuf> {
-    run(compiler(root)?, ["build", "--target", target], root)?;
+/// Builds a manifest target, with `environment` set for the compiler.
+///
+/// The packager names each service library it built through the override
+/// variable the manifest declares for it, because a build refuses a library
+/// it cannot resolve.
+pub fn build(root: &Path, target: &str, environment: &[(&str, PathBuf)]) -> Result<PathBuf> {
+    let program = compiler(root)?;
+    let status = Command::new(&program)
+        .args(["build", "--target", target])
+        .envs(environment.iter().map(|(name, value)| (*name, value)))
+        .current_dir(root)
+        .status()
+        .with_context(|| format!("failed to start {}", program.display()))?;
+    if !status.success() {
+        anyhow::bail!(
+            "{} build --target {target} exited with {status}",
+            program.display()
+        );
+    }
     Ok(root.join(OUTPUT))
 }
 
