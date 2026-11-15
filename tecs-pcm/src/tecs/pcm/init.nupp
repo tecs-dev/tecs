@@ -30,10 +30,7 @@ found the way tecs finds its own services, or through `TECS_PCM_LIBRARY`.
 
 local assets = require("tecs.assets")
 local audio = require("tecs.audio")
-local nativelibrary = require("tecs.internal.nativelibrary")
 local ffilib = require("ffi")
-
-const library = nativelibrary.open("tecs_pcm", "TECS_PCM_LIBRARY")
 
 --- What a load reports about a clip: `tecs_pcm::ClipInfo`.
 cdef struct tecsPcmClipInfo
@@ -44,22 +41,27 @@ cdef struct tecsPcmClipInfo
     reserved: uint32
 end
 
-cdef function tecs_pcm_load(path: cstring, mode: uint32, streamSeconds: float, borrows info: tecsPcmClipInfo*): uint64 from library
+cdef function tecs_pcm_load(
+    path: cstring,
+    mode: uint32,
+    streamSeconds: float,
+    borrows info: tecsPcmClipInfo*
+): uint64 from"tecs_pcm"
 
 cdef function tecs_pcm_load_bytes(
     name: cstring,
     borrows bytes: cstring,
     length: uint64,
     borrows info: tecsPcmClipInfo*
-): uint64 from library
+): uint64 from"tecs_pcm"
 
-cdef function tecs_pcm_release(clip: uint64) from library
+cdef function tecs_pcm_release(clip: uint64) from"tecs_pcm"
 
-cdef function tecs_pcm_last_error(): cstring? from library
+cdef function tecs_pcm_last_error(): cstring? from"tecs_pcm"
 
-cdef function tecs_pcm_codecs(): cstring? from library
+cdef function tecs_pcm_codecs(): cstring? from"tecs_pcm"
 
-cdef function tecs_pcm_decoder(): voidptr? from library
+cdef function tecs_pcm_decoder(): voidptr? from"tecs_pcm"
 
 --- Reads a NUL-terminated C string the library owns.
 local readCString: function(value: cstring?): string = ffilib.string as any
@@ -97,6 +99,7 @@ end
 
 --- Every Sound this module made, by name, and its clip.
 local sounds: {[string]: audio.Sound} = {}
+
 local entries: {[string]: Entry} = {}
 
 --- Returns `value` as `width` little-endian bytes.

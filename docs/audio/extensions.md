@@ -25,9 +25,18 @@ at audio rate, in the callback, where it must not allocate, lock or block.
 None is compiled in by default. Build their native libraries with
 `nupp task extensions`, and run their tests with `nupp task test-pcm`,
 `nupp task test-gm` and `nupp task test-ymfm`. Each is its own Nupp project
-over the tecs sources, and finds its library the way tecs finds its own
-services, or through `TECS_PCM_LIBRARY`, `TECS_GM_LIBRARY` and
-`TECS_YMFM_LIBRARY`.
+over the tecs sources, and its manifest names its library the way tecs names
+its own services: a Cargo target directory, or an exact file through
+`TECS_PCM_LIBRARY`, `TECS_GM_LIBRARY` and `TECS_YMFM_LIBRARY`.
+
+A game that uses an extension declares that library in its own `nupp.lua`,
+under the name the extension's declarations use:
+
+```lua
+libraries = {
+    tecs_ymfm = { env = "TECS_YMFM_LIBRARY", search = { "../tecs/target/release", "../tecs/target/debug" } },
+},
+```
 
 `tecs-gm` and `tecs-ymfm` drive their voices with Decoder events on the mixer's one clock, so a
 note or a register write lines up with every clip by arithmetic.

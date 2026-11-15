@@ -3,9 +3,8 @@ module tecs.platform.audionative
 --[[
 The `tecsaudio` binding behind the audio backend contract.
 
-Loading this module loads `libtecsaudio` through
-`tecs.internal.nativelibrary`, so a build that cannot find the library raises
-here rather than anywhere later. `tecs.audio` requires it through `pcall` for
+Loading this module loads the `tecsaudio` library its declarations name, so a
+build that cannot find the library raises here rather than anywhere later. `tecs.audio` requires it through `pcall` for
 exactly that reason and falls back to `tecs.platform.audiobackend.silent` when
 it is absent.
 
@@ -22,10 +21,7 @@ local backend <const> = assert(tecs.platform.audionative.open(48000, 2, 32))
 ]]
 
 local audiobackend = require("tecs.platform.audiobackend")
-local nativelibrary = require("tecs.internal.nativelibrary")
 local ffilib = require("ffi")
-
-const library = nativelibrary.open("tecsaudio", "TECS_AUDIO_LIBRARY")
 
 --- Reads a NUL-terminated C string the library owns.
 ---
@@ -110,84 +106,84 @@ end
 -- pointer lives in the closure set below rather than in a lexical scope, so
 -- there is no owner for an affine obligation to sit on.
 
-cdef function tecs_audio_open(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr? from library
+cdef function tecs_audio_open(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr? from"tecsaudio"
 
-cdef function tecs_audio_open_offline(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr? from library
+cdef function tecs_audio_open_offline(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr? from"tecsaudio"
 
-cdef function tecs_audio_open_or_void(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr? from library
+cdef function tecs_audio_open_or_void(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr? from"tecsaudio"
 
-cdef function tecs_audio_open_void(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr? from library
+cdef function tecs_audio_open_void(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr? from"tecsaudio"
 
-cdef function tecs_audio_close(borrows device: voidptr?) from library
+cdef function tecs_audio_close(borrows device: voidptr?) from"tecsaudio"
 
-cdef function tecs_audio_available(borrows device: voidptr?): int32 from library
-cdef function tecs_audio_failed(borrows device: voidptr?): int32 from library
-cdef function tecs_audio_microphone_failed(borrows microphone: voidptr?): int32 from library
+cdef function tecs_audio_available(borrows device: voidptr?): int32 from"tecsaudio"
+cdef function tecs_audio_failed(borrows device: voidptr?): int32 from"tecsaudio"
+cdef function tecs_audio_microphone_failed(borrows microphone: voidptr?): int32 from"tecsaudio"
 
-cdef function tecs_audio_frequency(borrows device: voidptr?): uint32 from library
+cdef function tecs_audio_frequency(borrows device: voidptr?): uint32 from"tecsaudio"
 
-cdef function tecs_audio_channels(borrows device: voidptr?): uint32 from library
+cdef function tecs_audio_channels(borrows device: voidptr?): uint32 from"tecsaudio"
 
-cdef function tecs_audio_output_state(borrows device: voidptr?): uint32 from library
+cdef function tecs_audio_output_state(borrows device: voidptr?): uint32 from"tecsaudio"
 
-cdef function tecs_audio_output_drops(borrows device: voidptr?): uint32 from library
+cdef function tecs_audio_output_drops(borrows device: voidptr?): uint32 from"tecsaudio"
 
-cdef function tecs_audio_output_reopens(borrows device: voidptr?): uint32 from library
+cdef function tecs_audio_output_reopens(borrows device: voidptr?): uint32 from"tecsaudio"
 
-cdef function tecs_audio_output_reason(borrows device: voidptr?): cstring? from library
+cdef function tecs_audio_output_reason(borrows device: voidptr?): cstring? from"tecsaudio"
 
-cdef function tecs_audio_output_frequency(borrows device: voidptr?): uint32 from library
+cdef function tecs_audio_output_frequency(borrows device: voidptr?): uint32 from"tecsaudio"
 
-cdef function tecs_audio_output_channels(borrows device: voidptr?): uint32 from library
+cdef function tecs_audio_output_channels(borrows device: voidptr?): uint32 from"tecsaudio"
 
 cdef function tecs_audio_submit(
     borrows device: voidptr?,
     borrows commands: tecsAudioCommand*,
     count: uint32
-) from library
+) from"tecsaudio"
 
 cdef function tecs_audio_drain(
     borrows device: voidptr?,
     borrows events: tecsAudioEvent*,
     capacity: uint32
-): uint32 from library
+): uint32 from"tecsaudio"
 
 -- The bytes cross as a pointer and a length rather than as a C string: an
 -- encoded file is full of zeroes, so its length cannot come from a terminator.
 
-cdef function tecs_audio_position(borrows device: voidptr?, handle: uint32): float from library
+cdef function tecs_audio_position(borrows device: voidptr?, handle: uint32): float from"tecsaudio"
 
-cdef function tecs_audio_seek(borrows device: voidptr?, handle: uint32, seconds: float): int32 from library
+cdef function tecs_audio_seek(borrows device: voidptr?, handle: uint32, seconds: float): int32 from"tecsaudio"
 
-cdef function tecs_audio_now(borrows device: voidptr?): number from library
+cdef function tecs_audio_now(borrows device: voidptr?): number from"tecsaudio"
 
-cdef function tecs_audio_open_memory(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr? from library
+cdef function tecs_audio_open_memory(frequency: uint32, channels: uint32, maxVoices: uint32): voidptr? from"tecsaudio"
 
 cdef function tecs_audio_render(
     borrows device: voidptr?,
     borrows out: tecsAudioSample*,
     frames: uint32
-): uint32 from library
+): uint32 from"tecsaudio"
 
-cdef function tecs_audio_listen(borrows device: voidptr?, frames: uint32) from library
+cdef function tecs_audio_listen(borrows device: voidptr?, frames: uint32) from"tecsaudio"
 
-cdef function tecs_audio_listened(borrows device: voidptr?): uint32 from library
+cdef function tecs_audio_listened(borrows device: voidptr?): uint32 from"tecsaudio"
 
-cdef function tecs_audio_listen_started(borrows device: voidptr?): number from library
+cdef function tecs_audio_listen_started(borrows device: voidptr?): number from"tecsaudio"
 
-cdef function tecs_audio_listen_summary(borrows device: voidptr?): cstring? from library
+cdef function tecs_audio_listen_summary(borrows device: voidptr?): cstring? from"tecsaudio"
 
-cdef function tecs_audio_listen_save(borrows device: voidptr?, path: string): int32 from library
+cdef function tecs_audio_listen_save(borrows device: voidptr?, path: string): int32 from"tecsaudio"
 
-cdef function tecs_audio_listen_stop(borrows device: voidptr?) from library
+cdef function tecs_audio_listen_stop(borrows device: voidptr?) from"tecsaudio"
 
-cdef function tecs_audio_late(borrows device: voidptr?): uint64 from library
+cdef function tecs_audio_late(borrows device: voidptr?): uint64 from"tecsaudio"
 
-cdef function tecs_audio_hold(borrows device: voidptr?, held: int32): int32 from library
+cdef function tecs_audio_hold(borrows device: voidptr?, held: int32): int32 from"tecsaudio"
 
-cdef function tecs_audio_register_decoder(borrows device: voidptr?, borrows vtable: voidptr?): uint32 from library
+cdef function tecs_audio_register_decoder(borrows device: voidptr?, borrows vtable: voidptr?): uint32 from"tecsaudio"
 
-cdef function tecs_audio_register_effect(borrows device: voidptr?, borrows vtable: voidptr?): uint32 from library
+cdef function tecs_audio_register_effect(borrows device: voidptr?, borrows vtable: voidptr?): uint32 from"tecsaudio"
 
 cdef function tecs_audio_decoder_open(
     borrows device: voidptr?,
@@ -197,7 +193,7 @@ cdef function tecs_audio_decoder_open(
     paramsLength: uint64,
     borrows bytes: cstring,
     bytesLength: uint64
-): int32 from library
+): int32 from"tecsaudio"
 
 cdef function tecs_audio_effect_prepare(
     borrows device: voidptr?,
@@ -205,17 +201,17 @@ cdef function tecs_audio_effect_prepare(
     id: uint64,
     borrows params: cstring,
     paramsLength: uint64
-): int32 from library
+): int32 from"tecsaudio"
 
 cdef function tecs_audio_meters(
     borrows device: voidptr?,
     borrows out: tecsAudioMeter*,
     max: uint32
-): uint32 from library
+): uint32 from"tecsaudio"
 
-cdef function tecs_audio_last_error(borrows device: voidptr?): cstring? from library
+cdef function tecs_audio_last_error(borrows device: voidptr?): cstring? from"tecsaudio"
 
-cdef function tecs_audio_layout(kind: uint32): uint32 from library
+cdef function tecs_audio_layout(kind: uint32): uint32 from"tecsaudio"
 
 -- Device listing and recording. Neither a listing nor a capture crosses as a
 -- struct: a device name has no fixed width worth choosing, and a capture is a
@@ -223,21 +219,21 @@ cdef function tecs_audio_layout(kind: uint32): uint32 from library
 -- interleaved float samples a read produces are the one raw block, which the C
 -- ABI already fixes at four bytes each.
 
-cdef function tecs_audio_open_error(): cstring? from library
+cdef function tecs_audio_open_error(): cstring? from"tecsaudio"
 
-cdef function tecs_audio_devices(recording: uint32): voidptr? from library
+cdef function tecs_audio_devices(recording: uint32): voidptr? from"tecsaudio"
 
-cdef function tecs_audio_devices_count(borrows list: voidptr?): uint32 from library
+cdef function tecs_audio_devices_count(borrows list: voidptr?): uint32 from"tecsaudio"
 
-cdef function tecs_audio_devices_id(borrows list: voidptr?, index: uint32): uint32 from library
+cdef function tecs_audio_devices_id(borrows list: voidptr?, index: uint32): uint32 from"tecsaudio"
 
-cdef function tecs_audio_devices_name(borrows list: voidptr?, index: uint32): cstring? from library
+cdef function tecs_audio_devices_name(borrows list: voidptr?, index: uint32): cstring? from"tecsaudio"
 
-cdef function tecs_audio_devices_frequency(borrows list: voidptr?, index: uint32): uint32 from library
+cdef function tecs_audio_devices_frequency(borrows list: voidptr?, index: uint32): uint32 from"tecsaudio"
 
-cdef function tecs_audio_devices_channels(borrows list: voidptr?, index: uint32): uint32 from library
+cdef function tecs_audio_devices_channels(borrows list: voidptr?, index: uint32): uint32 from"tecsaudio"
 
-cdef function tecs_audio_devices_free(borrows list: voidptr?) from library
+cdef function tecs_audio_devices_free(borrows list: voidptr?) from"tecsaudio"
 
 cdef function tecs_audio_open_microphone(
     device: uint32,
@@ -245,23 +241,23 @@ cdef function tecs_audio_open_microphone(
     frequency: uint32,
     channels: uint32,
     bufferFrames: uint32
-): voidptr? from library
+): voidptr? from"tecsaudio"
 
 cdef function tecs_audio_open_microphone_offline(
     frequency: uint32,
     channels: uint32,
     bufferFrames: uint32
-): voidptr? from library
+): voidptr? from"tecsaudio"
 
-cdef function tecs_audio_microphone_close(borrows microphone: voidptr?) from library
+cdef function tecs_audio_microphone_close(borrows microphone: voidptr?) from"tecsaudio"
 
-cdef function tecs_audio_microphone_frequency(borrows microphone: voidptr?): uint32 from library
+cdef function tecs_audio_microphone_frequency(borrows microphone: voidptr?): uint32 from"tecsaudio"
 
-cdef function tecs_audio_microphone_channels(borrows microphone: voidptr?): uint32 from library
+cdef function tecs_audio_microphone_channels(borrows microphone: voidptr?): uint32 from"tecsaudio"
 
-cdef function tecs_audio_microphone_available(borrows microphone: voidptr?): uint32 from library
+cdef function tecs_audio_microphone_available(borrows microphone: voidptr?): uint32 from"tecsaudio"
 
-cdef function tecs_audio_microphone_overruns(borrows microphone: voidptr?): uint32 from library
+cdef function tecs_audio_microphone_overruns(borrows microphone: voidptr?): uint32 from"tecsaudio"
 
 -- The library declares these two as `float *`. They are declared here as
 -- `tecsAudioSample *`, which is the same memory: `carray` needs a struct type,
@@ -274,19 +270,19 @@ cdef function tecs_audio_microphone_read(
     borrows microphone: voidptr?,
     borrows out: tecsAudioSample*,
     maxFrames: uint32
-): int32 from library
+): int32 from"tecsaudio"
 
 cdef function tecs_audio_microphone_write(
     borrows microphone: voidptr?,
     borrows samples: tecsAudioSample*,
     frames: uint32
-): uint32 from library
+): uint32 from"tecsaudio"
 
-cdef function tecs_audio_microphone_pause(borrows microphone: voidptr?): int32 from library
+cdef function tecs_audio_microphone_pause(borrows microphone: voidptr?): int32 from"tecsaudio"
 
-cdef function tecs_audio_microphone_resume(borrows microphone: voidptr?): int32 from library
+cdef function tecs_audio_microphone_resume(borrows microphone: voidptr?): int32 from"tecsaudio"
 
-cdef function tecs_audio_microphone_last_error(borrows microphone: voidptr?): cstring? from library
+cdef function tecs_audio_microphone_last_error(borrows microphone: voidptr?): cstring? from"tecsaudio"
 
 --- Commands buffered before one crossing, and events pulled back in one.
 ---

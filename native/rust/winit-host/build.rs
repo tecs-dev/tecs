@@ -111,8 +111,8 @@ fn target_os() -> String {
 /// runtime refuses to load one whose features the embedding library was not
 /// built with. `base` alone was enough while `tecs.host` reached for neither,
 /// and it stopped being enough the moment the tree gained a module that opens a
-/// file or a socket: `tecs.internal.nativelibrary` searches the filesystem for
-/// a native service, and `tecs.mcp` listens. The failure is a refusal to load
+/// file or a socket: `tecs.files` resolves content paths, and `tecs.mcp`
+/// listens. The failure is a refusal to load
 /// the component, not a link error, so it appears at run time in a host that
 /// built cleanly.
 ///

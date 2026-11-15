@@ -9,10 +9,10 @@ silent fallback rather than failing. That is right for a game and wrong for a
 release test, which is why this component requires the five binding modules
 directly and raises when one cannot be loaded.
 
-Loading a binding module is all this does. Each one calls
-`tecs.internal.nativelibrary.open` at its top, so the search that has to find
-`lib/` beside the installed executable runs before any device is touched, and
-nothing here opens a speaker, a controller or a physics world.
+Loading a binding module is all this does. Each one binds its declarations
+when it loads, so the search that has to find the release's `lib/` runs before
+any device is touched, and nothing here opens a speaker, a controller or a
+physics world.
 
 ```sh
 tecs-host --component nativesmoke.nuppc --entry nativesmoke.create \
@@ -26,8 +26,8 @@ const host = require("tecs.host")
 --- The binding modules a release has to be able to load, with the library each
 --- one names.
 ---
---- The library stems are the compatibility surface `nativelibrary.open` is
---- called with, and they are spelled here only so a failure names the file a
+--- The library stems are the compatibility surface each binding's `from`
+--- clause names, and they are spelled here only so a failure names the file a
 --- packager has to go and find.
 const SERVICES: {
     {string}

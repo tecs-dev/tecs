@@ -154,16 +154,13 @@ the YMF288 is the dearest.
 ]]
 
 local audio = require("tecs.audio")
-local nativelibrary = require("tecs.internal.nativelibrary")
+cdef function tecs_ymfm_decoder(): voidptr? from"tecs_ymfm"
 
-const library = nativelibrary.open("tecs_ymfm", "TECS_YMFM_LIBRARY")
-
-cdef function tecs_ymfm_decoder(): voidptr? from library
-
-cdef function tecs_ymfm_kind(name: cstring): uint32 from library
+cdef function tecs_ymfm_kind(name: cstring): uint32 from"tecs_ymfm"
 
 --- Event operations, from `tecs-audio-abi`: bit 40 up.
 local OP_SHIFT: integer = 1099511627776
+
 local OP_RESET: integer = 2
 local OP_PORT: integer = 3
 
@@ -358,12 +355,12 @@ export type Options = {
 
 --- One emulated FM chip, playing as one voice of a mixer.
 ---
---- Every writing method returns whether its writes went to a sounding voice,
---- which is false when the chip could not take one, its voice was stopped,
---- or it has been destroyed. None of them raises for that, because a write
---- that cannot be played is not a reason for a frame to stop. A register, port or value outside the chip's
---- range raises, because it is a mistake in the call. Nothing here is thread
---- safe: call it from the thread that owns the mixer.
+--- Every writing method returns whether its writes went to a sounding voice, which is
+--- false when the chip could not take one, its voice was stopped, or it has been
+--- destroyed. None of them raises for that, because a write that cannot be played is
+--- not a reason for a frame to stop. A register, port or value outside the chip's range
+--- raises, because it is a mistake in the call. Nothing here is thread safe: call it
+--- from the thread that owns the mixer.
 export record Fm
     --- Read-only. Reports the rate of the chip's clock in frames a second,
     --- which is the unit of `at`: one frame is `1 / rate` seconds.
@@ -409,7 +406,6 @@ export record Fm
     playing: function(borrows self: Fm): boolean
     handle: function(exclusive self: Fm): integer
 end
-
 
 --- Writes a register address the way the chip's documentation does.
 local function hex(value: integer): string
@@ -541,9 +537,7 @@ export function new(mixer: audio.Audio, options: Options?): (Fm?, string?)
     local clock = (options and options.clock) or found.clock
     if clock < MIN_CLOCK or clock > MAX_CLOCK or clock ~= math.floor(clock) then
         error(
-            "tecs.ymfm.new: clock must be a whole number of hertz from 100000 to 100000000, got " .. tostring(
-                clock
-            ),
+            "tecs.ymfm.new: clock must be a whole number of hertz from 100000 to 100000000, got " .. tostring(clock),
             2
         )
     end

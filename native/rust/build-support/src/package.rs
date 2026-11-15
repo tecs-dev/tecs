@@ -87,8 +87,8 @@ const MATERIAL_SOURCE: &str = "src/tecs/gpu/materials.nupp";
 /// The Rust service crates a package installs, and the library stem each one
 /// produces.
 ///
-/// The stems are the compatibility surface `tecs.internal.nativelibrary.open`
-/// is called with, so they are spelled here to match those calls rather than to
+/// The stems are the compatibility surface each binding's `from` clause names,
+/// so they are spelled here to match those clauses rather than to
 /// match the crate names, which differ from them on purpose.
 const SERVICES: &[(&str, &str)] = &[
     ("tecs-audio", "tecsaudio"),
@@ -590,10 +590,9 @@ fn build_native(root: &Path, preset: Preset, sdk: &Path) -> Result<()> {
 ///
 /// Cargo gives a `cdylib` the absolute path it wrote it to as its install name,
 /// so a copied library still says where it was built. Nothing in Tecs links
-/// against these three by name, since `tecs.internal.nativelibrary` loads them
-/// into the process namespace at run time, but a shipped file that names a
-/// Cargo target directory is a build-machine path in a release, and `check`
-/// refuses one.
+/// against these by name, since each component loads them by path at run
+/// time, but a shipped file that names a Cargo target directory is a
+/// build-machine path in a release, and `check` refuses one.
 ///
 /// The alternative was a per-crate `-install_name` link argument, and it loses:
 /// Cargo applies `RUSTFLAGS` to a whole invocation, so three different install
@@ -1570,7 +1569,7 @@ mod tests {
             }
             let text = fs::read_to_string(entry.path()).unwrap();
             for (_, stem) in SERVICES {
-                if text.contains(&format!("nativelibrary.open(\"{stem}\"")) {
+                if text.contains(&format!("from \"{stem}\"")) {
                     opened.insert(*stem);
                 }
             }

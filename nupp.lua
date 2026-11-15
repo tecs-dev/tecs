@@ -234,6 +234,18 @@ return {
     -- is included for the same reason: the Teal tree checks `bench/` too.
     include = { "src", "examples/nupp", "tests", "bench/nupp" },
 
+    -- The Rust services, by the stem each binding's `from` clause names. A
+    -- stem is also the name a project that does not configure it loads by,
+    -- so it matches the file's base name. The environment variable names an
+    -- exact file; otherwise a release Cargo build wins over a debug one.
+    libraries = {
+        tecsaudio = { env = "TECS_AUDIO_LIBRARY", search = { "target/release", "target/debug" } },
+        tecsgamepad = { env = "TECS_GAMEPAD_LIBRARY", search = { "target/release", "target/debug" } },
+        tecs_physics = { env = "TECS_PHYSICS_LIBRARY", search = { "target/release", "target/debug" } },
+        tecs_ui = { env = "TECS_UI_LIBRARY", search = { "target/release", "target/debug" } },
+        tecs_assets = { env = "TECS_ASSETS_LIBRARY", search = { "target/release", "target/debug" } },
+    },
+
     build = {
         outDir = "out/nupp",
         default = "headless",
@@ -305,7 +317,6 @@ return {
                     "tecs.internal.hostcancellation",
                     "tecs.internal.idallocator",
                     "tecs.internal.inverseindex",
-                    "tecs.internal.nativelibrary",
                     "tecs.internal.mcpbindings",
                     "tecs.internal.mcpregistry",
                     "tecs.internal.mcpsandbox",

@@ -3,9 +3,8 @@ module tecs.platform.gamepadnative
 --[[
 The `tecsgamepad` binding behind the gamepad backend contract.
 
-Loading this module loads `libtecsgamepad` through
-`tecs.internal.nativelibrary`, so a build that cannot find the library raises
-here rather than anywhere later. `tecs.input` requires it through `pcall` for
+Loading this module loads the `tecsgamepad` library its declarations name, so a
+build that cannot find the library raises here rather than anywhere later. `tecs.input` requires it through `pcall` for
 exactly that reason and falls back to `tecs.platform.gamepadbackend.none` when
 it is absent, which is what makes a headless test and a machine with no
 controller support behave the same.
@@ -24,10 +23,6 @@ local backend <const> = assert(tecs.platform.gamepadnative.open())
 
 local ffi = require("ffi")
 local gamepadbackend = require("tecs.platform.gamepadbackend")
-local nativelibrary = require("tecs.internal.nativelibrary")
-
-const library = nativelibrary.open("tecsgamepad", "TECS_GAMEPAD_LIBRARY")
-
 cdef struct tecsGamepadEvent
     kind: uint32
     device: uint32
@@ -55,42 +50,42 @@ end
 -- cannot hold here: the pointer lives in the closure set below rather than in
 -- a lexical scope, so there is no owner for an affine obligation to sit on.
 
-cdef function tecs_gamepad_open(): voidptr? from library
+cdef function tecs_gamepad_open(): voidptr? from"tecsgamepad"
 
-cdef function tecs_gamepad_open_detached(): voidptr? from library
+cdef function tecs_gamepad_open_detached(): voidptr? from"tecsgamepad"
 
-cdef function tecs_gamepad_close(borrows context: voidptr?) from library
+cdef function tecs_gamepad_close(borrows context: voidptr?) from"tecsgamepad"
 
-cdef function tecs_gamepad_available(borrows context: voidptr?): int32 from library
+cdef function tecs_gamepad_available(borrows context: voidptr?): int32 from"tecsgamepad"
 
-cdef function tecs_gamepad_poll(borrows context: voidptr?): uint32 from library
+cdef function tecs_gamepad_poll(borrows context: voidptr?): uint32 from"tecsgamepad"
 
 cdef function tecs_gamepad_drain(
     borrows context: voidptr?,
     borrows events: tecsGamepadEvent*,
     capacity: uint32
-): uint32 from library
+): uint32 from"tecsgamepad"
 
 cdef function tecs_gamepad_attached(
     borrows context: voidptr?,
     borrows devices: tecsGamepadDevice*,
     capacity: uint32
-): uint32 from library
+): uint32 from"tecsgamepad"
 
 cdef function tecs_gamepad_info(
     borrows context: voidptr?,
     device: uint32,
     borrows info: tecsGamepadInfo*
-): int32 from library
+): int32 from"tecsgamepad"
 
 cdef function tecs_gamepad_has(
     borrows context: voidptr?,
     device: uint32,
     kind: uint32,
     code: uint32
-): int32 from library
+): int32 from"tecsgamepad"
 
-cdef function tecs_gamepad_string(borrows context: voidptr?, device: uint32, which: uint32): cstring? from library
+cdef function tecs_gamepad_string(borrows context: voidptr?, device: uint32, which: uint32): cstring? from"tecsgamepad"
 
 cdef function tecs_gamepad_rumble(
     borrows context: voidptr?,
@@ -98,11 +93,11 @@ cdef function tecs_gamepad_rumble(
     low: float,
     high: float,
     seconds: float
-): int32 from library
+): int32 from"tecsgamepad"
 
-cdef function tecs_gamepad_last_error(borrows context: voidptr?): cstring? from library
+cdef function tecs_gamepad_last_error(borrows context: voidptr?): cstring? from"tecsgamepad"
 
-cdef function tecs_gamepad_layout(kind: uint32): uint32 from library
+cdef function tecs_gamepad_layout(kind: uint32): uint32 from"tecsgamepad"
 
 --- Observations pulled back in one crossing, and the device list beside them.
 ---

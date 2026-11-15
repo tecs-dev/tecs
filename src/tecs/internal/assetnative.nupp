@@ -3,21 +3,18 @@ module tecs.internal.assetnative
 local ffi = require("ffi")
 local readCString: function(value: any): string = ffi.string as any
 local readBytes: function(value: any, length: integer): string = ffi.string as any
-local nativelibrary = require("tecs.internal.nativelibrary")
-const library = nativelibrary.open("tecs_assets", "TECS_ASSETS_LIBRARY")
-
 cdef function tecsAssetLoad(
     borrows path: cstring,
     length: uint64,
     kind: uint32,
     transparent: uint32
-): voidptr? from library
-cdef function tecsAssetError(): cstring from library
-cdef function tecsAssetData(borrows result: voidptr): cstring from library
-cdef function tecsAssetLength(borrows result: voidptr): uint64 from library
-cdef function tecsAssetWidth(borrows result: voidptr): uint32 from library
-cdef function tecsAssetHeight(borrows result: voidptr): uint32 from library
-cdef function tecsAssetDestroy(borrows result: voidptr) from library
+): voidptr? from"tecs_assets"
+cdef function tecsAssetError(): cstring from"tecs_assets"
+cdef function tecsAssetData(borrows result: voidptr): cstring from"tecs_assets"
+cdef function tecsAssetLength(borrows result: voidptr): uint64 from"tecs_assets"
+cdef function tecsAssetWidth(borrows result: voidptr): uint32 from"tecs_assets"
+cdef function tecsAssetHeight(borrows result: voidptr): uint32 from"tecs_assets"
+cdef function tecsAssetDestroy(borrows result: voidptr) from"tecs_assets"
 
 --- Decodes a TMX map or image and copies its owned result before release.
 export function load(path: string, kind: integer, transparent: {integer}?): string, integer, integer
