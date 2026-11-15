@@ -295,9 +295,9 @@ says.
 
 ## Tests
 
-- Suites are Nupp under `tests/`, and discovery reads `tests/*test.nupp`
-  without recursing. A suite importing `tecs.internal.*` lives at
-  `tests/tecs/<name>test.nupp` with a one-line forwarder where discovery looks.
+- Suites are Nupp under `tests/`, and discovery finds every `*test.nupp`
+  beneath it, so a suite name must be unique across the tree. A suite
+  importing `tecs.internal.*` lives at `tests/tecs/<name>test.nupp`.
 - One `nupp test` runs them all; `nupp task verify` adds the Rust half
   and the host.
 - Do not sleep and hope: drive a deterministic number of frames and assert

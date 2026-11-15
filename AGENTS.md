@@ -165,8 +165,7 @@ reference without preserving the native library's loading boundary.
 
 `tecs.internal.*` modules are implementation details with no stability guarantee, and the compiler enforces
 that: a module may statically import `tecs.internal.*` only if its own first namespace segment is `tecs`. That
-is why test suites reaching internals live in `tests/tecs/` with a one-line forwarder at `tests/<name>.nupp`,
-which is where discovery looks.
+is why test suites reaching internals live in `tests/tecs/`.
 
 A module with children lives in `name/init.nupp`. Prefer a flat `module.nupp` when there are none.
 
@@ -300,9 +299,9 @@ never includes a library loaded later. `src/tecs/physics/rapier.nupp` is the wor
 ### Testing
 
 - Add or update tests when changing behavior, fixing bugs or extending public APIs.
-- Suites are Nupp under `tests/`, and discovery reads `tests/*test.nupp` without recursing. A suite that
-  imports `tecs.internal.*` lives at `tests/tecs/<name>test.nupp` with a one-line forwarder where discovery
-  looks, because the checker restricts internal imports to the `tecs` namespace.
+- Suites are Nupp under `tests/`, and discovery finds every `*test.nupp` beneath it, so a suite name must be
+  unique across the tree. A suite that imports `tecs.internal.*` lives at `tests/tecs/<name>test.nupp`,
+  because the checker restricts internal imports to the `tecs` namespace.
 - `tests/tecs/compatibilitytest.nupp` pins every externally typed string the tree declares. A rename fails
   there rather than changing what a save file means. Read it as the specification of that surface.
 - `nupp check` covers `src`, `examples/nupp`, `tests` and `bench/nupp`, so a test calling a function
