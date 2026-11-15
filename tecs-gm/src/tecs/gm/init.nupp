@@ -40,31 +40,30 @@ module finds it the way tecs finds its own services, or through
 ]]
 
 local audio = require("tecs.audio")
-local nativelibrary = require("tecs.internal.nativelibrary")
 local ffilib = require("ffi")
-
-const library = nativelibrary.open("tecs_gm", "TECS_GM_LIBRARY")
 
 --- Reads a NUL-terminated C string the library owns.
 local readCString: function(value: cstring?): string = ffilib.string as any
 
-cdef function tecs_gm_load_font(path: cstring): uint64 from library
+cdef function tecs_gm_load_font(path: cstring): uint64 from"tecs_gm"
 
-cdef function tecs_gm_load_font_bytes(borrows bytes: cstring, length: uint64): uint64 from library
+cdef function tecs_gm_load_font_bytes(borrows bytes: cstring, length: uint64): uint64 from"tecs_gm"
 
-cdef function tecs_gm_release_font(font: uint64) from library
+cdef function tecs_gm_release_font(font: uint64) from"tecs_gm"
 
-cdef function tecs_gm_last_error(): cstring? from library
+cdef function tecs_gm_last_error(): cstring? from"tecs_gm"
 
-cdef function tecs_gm_decoder(): voidptr? from library
+cdef function tecs_gm_decoder(): voidptr? from"tecs_gm"
 
 --- Notes a synthesizer sounds at once unless asked otherwise.
 local DEFAULT_POLYPHONY: integer = 64
+
 local MIN_POLYPHONY: integer = 8
 local MAX_POLYPHONY: integer = 256
 
 --- Event operations, from `tecs-audio-abi`: bit 40 up.
 local OP_SHIFT: integer = 1099511627776
+
 local OP_NOTES_OFF: integer = 1
 local OP_RESET: integer = 2
 
@@ -170,8 +169,9 @@ end
 local function check(name: string, what: string, value: integer, low: integer, high: integer): nil
     if value % 1 ~= 0 or value < low or value > high then
         error(
-            "tecs.gm.Synth." .. name .. ": " .. what .. " must be from " .. tostring(low) .. " to " .. tostring(high)
-                .. ", got " .. tostring(value),
+            "tecs.gm.Synth." .. name .. ": " .. what .. " must be from " .. tostring(
+                low
+            ) .. " to " .. tostring(high) .. ", got " .. tostring(value),
             3
         )
     end
@@ -303,7 +303,8 @@ end
 --- @param data1 from 0 to 127
 --- @param data2 from 0 to 127
 --- @param at seconds on the mixer's clock, or nil for at once
---- @return whether the event was taken: true on a mixer with no output, false for a destroyed synth or a voice that stopped
+--- @return whether the event was taken: true on a mixer with no output, false for a
+---     destroyed synth or a voice that stopped
 --- @raises string when a byte is out of range
 function Synth.send(exclusive self: Synth, status: integer, data1: integer, data2: integer, at: number?): boolean
     check("send", "status", status, 0x80, 0xFF)
@@ -385,7 +386,8 @@ end
 --- @param channel from 0 to 15, or nil for every channel
 --- @param immediate true cuts the notes without their release
 --- @param at seconds on the mixer's clock, or nil for at once
---- @return whether the event was taken: true on a mixer with no output, false for a destroyed synth or a voice that stopped
+--- @return whether the event was taken: true on a mixer with no output, false for a
+---     destroyed synth or a voice that stopped
 --- @raises string when the channel is out of range
 function Synth.allNotesOff(exclusive self: Synth, channel: integer?, immediate: boolean?, at: number?): boolean
     if channel ~= nil then
@@ -408,7 +410,8 @@ end
 ---
 --- @param self the synth
 --- @param at seconds on the mixer's clock, or nil for at once
---- @return whether the event was taken: true on a mixer with no output, false for a destroyed synth or a voice that stopped
+--- @return whether the event was taken: true on a mixer with no output, false for a
+---     destroyed synth or a voice that stopped
 function Synth.reset(exclusive self: Synth, at: number?): boolean
     if self.destroyed then
         return false

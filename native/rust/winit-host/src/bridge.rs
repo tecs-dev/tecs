@@ -380,8 +380,13 @@ impl Bridge {
             .context("register the image residency handler")?;
         let bytes = std::fs::read(component_path)
             .with_context(|| format!("read Nupp component {}", component_path.display()))?;
+        // A chunk named `@` and a path is a file to Lua, and a native library
+        // the component carries is found by walking up from that file to a
+        // `lib` directory, so the name is the component's absolute path.
+        let located = std::path::absolute(component_path)
+            .with_context(|| format!("resolve Nupp component {}", component_path.display()))?;
         let component = runtime
-            .load_component(&bytes, &component_path.display().to_string())
+            .load_component(&bytes, &format!("@{}", located.display()))
             .context("load the Tecs Nupp component")?;
         let handles = EXPORT_NAMES
             .iter()

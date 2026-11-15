@@ -74,10 +74,10 @@ override removed, which is the only way to find out whether an install is reloca
 Packaging is native only. The Nupp toolchain stages an embedding library for the machine it runs on, so a
 Windows release is built on Windows.
 
-Two things a packager learns the hard way. The five service libraries resolve in a release through the
-_executable's_ run path, not through the ancestor walk in `tecs.internal.nativelibrary`: that walk starts at
-the module's source directory, which a compiled component no longer has, so what actually finds them is a load
-by bare name reaching the loader's search of `lib/`. The headless host checks `tecs.host.crashed` and fails on guarded application errors. The smoke component also prints a success line, which the packaging test verifies.
+Two things a packager learns the hard way. A build copies the five service libraries a component uses into
+`out/nupp/lib`, and the component loads each one from the first `lib/` directory at or above its own file, so
+the host names the component's chunk after its absolute path. An installed component in
+`share/tecs/components` finds the release's `lib/` that way. The headless host checks `tecs.host.crashed` and fails on guarded application errors. The smoke component also prints a success line, which the packaging test verifies.
 
 Both `nupp task run` and the host's own `cargo build` need a Nupp embedding SDK, which
 `native/rust/winit-host/build.rs` stages through the Nupp compiler's `scripts/toolchain` in a checkout beside
@@ -289,18 +289,14 @@ side owning every buffer Rust borrows for exactly that call.
 There are no cast callbacks anywhere in `src/`. Adding the first one is a decision worth making
 deliberately.
 
-Load a native library through `src/tecs/internal/nativelibrary.nupp`, which searches for `lib/` and then a
-Cargo target directory and returns the loaded library. Keep that handle in a module-level `const` and name it
-in every declaration's `from` clause: `cdef function tecsPhysicsStep(...): int32 from library`. Do not write
-a string in that clause, which spells one platform's file name and only resolves where the system loader
-already looks, and do not declare bare symbols, which resolve through a process namespace that on Windows
-never includes a library loaded later. `src/tecs/physics/rapier.nupp` is the worked example.
-
-Do not call `ffi.load` for a Tecs library anywhere else. A declaration copies its function pointer out of the
-handle once, when its module loads, and LuaJIT unloads a library when its handle is collected, after which
-every bound function jumps into unmapped memory. `nativelibrary.open` keeps every handle it returns for the
-life of the process; a module-level `const` alone does not, because nothing reads it after the declarations
-bind.
+Name a native library by its logical name in every declaration's `from` clause:
+`cdef function tecsPhysicsStep(...): int32 from "tecs_physics"`. The `libraries` table in `nupp.lua` maps
+each name to an environment override and the Cargo target directories, and each extension's manifest
+declares its own. A logical name is the library's base name, so a project that does not configure it still
+loads it by that name through the platform loader. Do not declare bare symbols, which resolve through a
+process namespace that on Windows never includes a library loaded later, and do not call `ffi.load` for a
+Tecs library: the Nupp runtime keeps every library a declaration names loaded for the life of the process.
+`src/tecs/physics/rapier.nupp` is the worked example.
 
 ### Testing
 

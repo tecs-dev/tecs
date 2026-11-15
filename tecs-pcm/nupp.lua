@@ -4,6 +4,12 @@
 -- extends.
 return {
     include = { "src", "tests", "../src" },
+    -- This extension's library and the audio service its tests reach, as the
+    -- root manifest names them.
+    libraries = {
+        tecs_pcm = { env = "TECS_PCM_LIBRARY", search = { "../target/release", "../target/debug" } },
+        tecsaudio = { env = "TECS_AUDIO_LIBRARY", search = { "../target/release", "../target/debug" } },
+    },
     build = {
         outDir = "../out/tecs-pcm",
         default = "pcm",

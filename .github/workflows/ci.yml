@@ -55,18 +55,16 @@ jobs:
                 os: [macos-15, ubuntu-latest]
         runs-on: ${{ matrix.os }}
         env:
-            # Nupp main with the open pull requests Tecs needs: cdef bindings
-            # from a library handle, and the checker and test runner fixes.
-            # NUPP_REPOSITORY returns to nupp-lang/nupp once they land.
-            NUPP_REPOSITORY: albanmgicquel/nupp
-            NUPP_REF: 74e1e1ffd5118cd72615438b9a7cf76f2d1256b1
+            # The ECS requires logical native libraries from the project
+            # manifest and the runtime's process-lifetime library roots.
+            NUPP_REF: 9f234f819b983672b43a495afbe5060a77cdae06
         steps:
             - uses: actions/checkout@v4
               with:
                   path: tecs
             - uses: actions/checkout@v4
               with:
-                  repository: ${{ env.NUPP_REPOSITORY }}
+                  repository: nupp-lang/nupp
                   ref: ${{ env.NUPP_REF }}
                   path: nupp
             - name: Build the Nupp compiler
@@ -122,8 +120,7 @@ jobs:
     host:
         runs-on: macos-15
         env:
-            NUPP_REPOSITORY: albanmgicquel/nupp
-            NUPP_REF: 74e1e1ffd5118cd72615438b9a7cf76f2d1256b1
+            NUPP_REF: 9f234f819b983672b43a495afbe5060a77cdae06
         steps:
             # Two checkouts side by side. The Nupp compiler release installed by
             # Homebrew ships no `libnupp.a`, so it cannot satisfy
@@ -137,7 +134,7 @@ jobs:
                   path: tecs
             - uses: actions/checkout@v4
               with:
-                  repository: ${{ env.NUPP_REPOSITORY }}
+                  repository: nupp-lang/nupp
                   ref: ${{ env.NUPP_REF }}
                   path: nupp
             - name: Build the Nupp compiler
@@ -207,15 +204,14 @@ jobs:
                       preset: linux-x64
         runs-on: ${{ matrix.os }}
         env:
-            NUPP_REPOSITORY: albanmgicquel/nupp
-            NUPP_REF: 74e1e1ffd5118cd72615438b9a7cf76f2d1256b1
+            NUPP_REF: 9f234f819b983672b43a495afbe5060a77cdae06
         steps:
             - uses: actions/checkout@v4
               with:
                   path: tecs
             - uses: actions/checkout@v4
               with:
-                  repository: ${{ env.NUPP_REPOSITORY }}
+                  repository: nupp-lang/nupp
                   ref: ${{ env.NUPP_REF }}
                   path: nupp
             # `winit`, `wgpu`, `cpal` and `gilrs` each want a development
@@ -268,15 +264,14 @@ jobs:
             pages: write
             id-token: write
         env:
-            NUPP_REPOSITORY: albanmgicquel/nupp
-            NUPP_REF: 74e1e1ffd5118cd72615438b9a7cf76f2d1256b1
+            NUPP_REF: 9f234f819b983672b43a495afbe5060a77cdae06
         steps:
             - uses: actions/checkout@v4
               with:
                   path: tecs
             - uses: actions/checkout@v4
               with:
-                  repository: ${{ env.NUPP_REPOSITORY }}
+                  repository: nupp-lang/nupp
                   ref: ${{ env.NUPP_REF }}
                   path: nupp
             - name: Build the Nupp compiler
