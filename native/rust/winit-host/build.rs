@@ -126,8 +126,12 @@ fn target_os() -> String {
 // component rather than failing later. `native-uuid` arrives the same way,
 // through `nupp.util`, whose UUID functions bind the native UUID provider: no
 // Tecs module names a UUID, and the component still refuses to start without
-// it.
-const HOST_FEATURES: &str = "base,native-files,native-net,native-compression,native-uuid";
+// it. `native-time`, `native-tls` and `native-process` arrive with Nupp main
+// counting every module a component carries: `io.net` names its TLS client
+// inside a function, and standard I/O names `io.internal.process` as a dynamic
+// require, so a component that never opens either still declares both.
+const HOST_FEATURES: &str =
+    "base,native-files,native-net,native-compression,native-uuid,native-time,native-tls,native-process";
 
 /// Names the run path a packaged link records instead of the staged SDK's
 /// absolute one.

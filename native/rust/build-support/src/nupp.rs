@@ -4,7 +4,8 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 pub const OUTPUT: &str = "out/nupp";
-const HOST_FEATURES: &str = "base,native-files,native-net,native-compression,native-uuid";
+const HOST_FEATURES: &str =
+    "base,native-files,native-net,native-compression,native-uuid,native-time,native-tls,native-process";
 
 pub fn compiler(root: &Path) -> Result<PathBuf> {
     if let Some(root) = std::env::var_os("NUPP_COMPILER_ROOT") {
