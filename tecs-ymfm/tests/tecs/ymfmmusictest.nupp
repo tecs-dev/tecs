@@ -1,14 +1,16 @@
 local assets = require("tecs.assets")
 local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
-local compression = require("nupp.compression")
-local files = require("nupp.io.files")
+local encodings = require("bytes")
 local hostpump = require("os.host")
 local musicfm = require("tecs.ymfm.music")
 
 -- The chip index the native library knows a chip by, which a chip's
 -- Decoder parameters carry.
-cdef function tecs_ymfm_kind(name: cstring): uint32
+local nativelibrary = require("tecs.internal.nativelibrary")
+const library = nativelibrary.open("tecs_ymfm", "TECS_YMFM_LIBRARY")
+
+cdef function tecs_ymfm_kind(name: cstring): uint32 from library
 
 local suite = {}
 
@@ -192,9 +194,9 @@ end
 --- Writes `bytes` to a temporary file, runs `body` on its path and removes
 --- the file.
 local function temporary(bytes: string, suffix: string, body: function(path: string): nil): nil
-    local file = assert(files.createTemporaryFile(files.TemporaryOptions(suffix = suffix)))
-    local path = file:toString()
-    assert(files.write(path, bytes))
+    local file = assert(os.mktemp(nil, suffix))
+    local path = file:tostring()
+    assert(os.writeatomic(path, bytes))
     body(path)
     file:close()
 end
@@ -372,7 +374,7 @@ end
 
 function suite.inflatesAVgzFile(): nil
     local plain = vgm(header({[0x50] = 3579545}), "\x5A\x20\x01" .. wait(10))
-    local packed = compression.format("gzip"):compress(plain)
+    local packed = encodings.compress("gzip"):compress(plain)
     local log = assert(musicfm.parse(packed, "song.vgz"))
     assert.eq(log.count, 1)
     assert.eq(log.length, 10)
@@ -450,7 +452,7 @@ end
 
 function suite.loadsAVgzFileThroughItsKind(): nil
     local plain = vgm(header({[0x50] = 3579545}), "\x5A\x20\x01" .. wait(10))
-    temporary(compression.format("gzip"):compress(plain), ".vgz", function(path: string): nil
+    temporary(encodings.compress("gzip"):compress(plain), ".vgz", function(path: string): nil
         local loader, handle, reason = load(musicfm.kind, path)
         assert(handle ~= nil, reason or "no handle")
         local held = assert(handle)
@@ -605,7 +607,7 @@ local function fmLog(): musicfm.RegisterLog
     local commands = "\x52\x28\xF0" .. "\x52\xA0\x22" .. "\x53\x30\x71" .. wait(
         22050
     ) .. "\x52\x28\xF1" .. wait(22050) .. "\x52\x28\x00" .. wait(4410)
-    return assert(
+    return (assert(
         musicfm.parse(
             vgm(
                 header({
@@ -615,7 +617,7 @@ local function fmLog(): musicfm.RegisterLog
                 block(0x82, le32(16) .. le32(0) .. "\1\2") .. "\x58\x10\x00" .. commands
             )
         )
-    )
+    ))
 end
 
 function suite.playsALogOnChipsOfItsOwn(): nil
@@ -697,7 +699,7 @@ function suite.loopsALogFromItsLoopWrite(): nil
     file.loop = #first
     local harness = newHarness()
     local mixer = audio.newAudio({backend = harness.backend, maxVoices = 8})
-    local player = assert(musicfm.playLog(mixer, assert(musicfm.parse(vgm(file, first .. looped)))))
+    local player = assert(musicfm.playLog(mixer, (assert(musicfm.parse(vgm(file, first .. looped))))))
     for step = 1, 12 do
         harness.clock[1] = step * 0.05
         mixer:update()

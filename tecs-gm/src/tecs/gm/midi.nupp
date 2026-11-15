@@ -894,7 +894,7 @@ export function playSong(
     if voice == nil then
         return nil, reason
     end
-    local made = assert(voice)
+    local made = voice
 
     return music.newPlayer(mixer, driver(made, song), nil, options)
 end
@@ -936,7 +936,7 @@ export function play(
     if voice == nil then
         return nil, reason
     end
-    local made = assert(voice)
+    local made = voice
 
     return music.newPlayer(mixer, driver(made, song as Song), handle, options)
 end

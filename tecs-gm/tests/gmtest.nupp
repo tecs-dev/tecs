@@ -168,7 +168,7 @@ end
 local function made(harness: Harness, options: gm.Options?): (audio.Audio, gm.Synth)
     local mixer = audio.newAudio({backend = harness.backend, maxVoices = 2})
 
-    return mixer, assert(gm.new(mixer, font(), options))
+    return mixer, (assert(gm.new(mixer, font(), options)))
 end
 
 function suite.refusesAMissingSoundFontAndAnEmptyPath(): nil
@@ -459,7 +459,7 @@ local function soundFontPath(): string
         assert.suite.skip("TECS_TEST_SOUNDFONT names no SoundFont")
     end
 
-    return assert(path)
+    return (assert(path))
 end
 
 function suite.loadsARealSoundFontOncePerPath(): nil

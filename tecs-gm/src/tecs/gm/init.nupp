@@ -43,20 +43,20 @@ local audio = require("tecs.audio")
 local nativelibrary = require("tecs.internal.nativelibrary")
 local ffilib = require("ffi")
 
-nativelibrary.open("tecs_gm", "TECS_GM_LIBRARY")
+const library = nativelibrary.open("tecs_gm", "TECS_GM_LIBRARY")
 
 --- Reads a NUL-terminated C string the library owns.
 local readCString: function(value: cstring?): string = ffilib.string as any
 
-cdef function tecs_gm_load_font(path: cstring): uint64
+cdef function tecs_gm_load_font(path: cstring): uint64 from library
 
-cdef function tecs_gm_load_font_bytes(borrows bytes: cstring, length: uint64): uint64
+cdef function tecs_gm_load_font_bytes(borrows bytes: cstring, length: uint64): uint64 from library
 
-cdef function tecs_gm_release_font(font: uint64)
+cdef function tecs_gm_release_font(font: uint64) from library
 
-cdef function tecs_gm_last_error(): cstring?
+cdef function tecs_gm_last_error(): cstring? from library
 
-cdef function tecs_gm_decoder(): voidptr?
+cdef function tecs_gm_decoder(): voidptr? from library
 
 --- Notes a synthesizer sounds at once unless asked otherwise.
 local DEFAULT_POLYPHONY: integer = 64
