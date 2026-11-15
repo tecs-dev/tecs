@@ -1,8 +1,7 @@
 local gates = require("tecs.dev.gates")
 local docs = require("tecs.dev.docs")
-local files = require("nupp.io.files")
 local commands = require("tecs.dev.commands")
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 
 local suite = {}
 
@@ -64,10 +63,10 @@ end
 
 function suite.previewResolvesCleanRoutesAndRefusesTraversal(): nil
     do
-        local scratch = assert(files.createTemporaryDirectory())
-        const root = scratch:toString()
-        assert(files.createDirectory(root .. "/nested"))
-        assert(files.write(root .. "/nested/index.html", "example"))
+        local scratch = assert(os.mktempdir())
+        const root = scratch:tostring()
+        assert(os.mkdir(root .. "/nested"))
+        assert(os.writeatomic(root .. "/nested/index.html", "example"))
         assert.eq(docs.resolve(root, "/nested?query=yes"), root .. "/nested/index.html")
         assert.eq(docs.resolve(root, "/../nested"), nil)
         assert.eq(docs.resolve(root, "/%2e%2e/nested"), nil)
@@ -77,34 +76,34 @@ function suite.previewResolvesCleanRoutesAndRefusesTraversal(): nil
 end
 
 function suite.benchmarkModulesCannotShadowRuntimeModules(): nil
-    for _, found in ipairs(assert(files.glob(commands.root .. "/bench/nupp/**/*.nupp"))) do
-        const relative = found:toString():sub(#commands.root + #"/bench/nupp/" + 1)
-        assert.eq(files.exists(commands.root .. "/src/" .. relative), false)
-        assert.eq(files.exists(commands.root .. "/src/" .. relative:gsub("%.nupp$", "/init.nupp")), false)
+    for _, found in ipairs((assert(os.glob(commands.root .. "/bench/nupp/**/*.nupp")))) do
+        const relative = found:tostring():sub(#commands.root + #"/bench/nupp/" + 1)
+        assert.eq(os.exists(commands.root .. "/src/" .. relative), false)
+        assert.eq(os.exists(commands.root .. "/src/" .. relative:gsub("%.nupp$", "/init.nupp")), false)
     end
 end
 
 function suite.taskLauncherPreservesArgumentsAndFailureStatus(): nil
     do
-        local scratch = assert(files.createTemporaryDirectory(files.TemporaryOptions(prefix = "tecs task args ")))
-        const root = scratch:toString()
-        assert(files.createDirectory(root .. "/tools/tecs/dev"))
-        assert(files.copy(commands.root .. "/tools/run.nupp", root .. "/tools/run.nupp"))
+        local scratch = assert(os.mktempdir("tecs task args "))
+        const root = scratch:tostring()
+        assert(os.mkdir(root .. "/tools/tecs/dev"))
+        assert(os.copy(commands.root .. "/tools/run.nupp", root .. "/tools/run.nupp"))
         assert(
-            files.write(
+            os.writeatomic(
                 root .. "/nupp.lua",
                 [[
 return {tasks = {probe = {argv = {"nupp", "run", "tools/run.nupp", "first argument"}}}}
 ]]
             )
         )
-        assert(files.write(root .. "/tools/nupp.lua", 'return {include = {"."}}'))
+        assert(os.writeatomic(root .. "/tools/nupp.lua", 'return {include = {"."}}'))
         assert(
-            files.write(
+            os.writeatomic(
                 root .. "/tools/tecs/dev/main.nupp",
                 [[
-local json = require("nupp.codec.json")
-print(json.encode({...}))
+local json = require("serde.json")
+print(json.encodevalue({...}))
 os.exit(7)
 ]]
             )
@@ -116,30 +115,40 @@ os.exit(7)
             false,
             root
         )
-        assert.eq(result.exit.exitCode, 7)
-        const args = json.decode(result.output)
+        assert.eq(result.exit.exitcode, 7)
+        const args = json.decodevalue(result.output)
         assert.eq(args[1], "first argument")
         assert.eq(args[2], literal)
         assert.eq(args[3], "--flag=value with spaces")
     end
 end
 
+function suite.aSignalInTheSecondByteStillFails(): nil
+    local function exited(code: integer, killed: boolean?): io.Process.Exit
+        return {exitcode = code, killed = killed == true, timedout = false}
+    end
+
+    assert.eq(commands.failure(exited(0)), nil)
+    assert.eq(commands.failure(exited(7)), 7)
+    assert.eq(commands.failure(exited(2816)), 139)
+    assert.eq(commands.failure(exited(0, true)), 1)
+    assert.eq(commands.failure(exited(-1073741819)), 1)
+end
+
 function suite.commandsRunTogetherActuallyOverlap(): nil
-    with
-        scratch = assert(files.createTemporaryDirectory(files.TemporaryOptions(prefix = "tecs parallel commands ")))
     do
-        const root = scratch:toString()
+        local scratch = assert(os.mktempdir("tecs parallel commands "))
+        const root = scratch:tostring()
         const first = root .. "/first"
         const second = root .. "/second"
 
         local function rendezvous(mine: string, peer: string): string
             return (
                 [[
-local files = require("nupp.io.files")
 
-assert(files.write(%q, "ready"))
+assert(os.writeatomic(%q, "ready"))
 for _ = 1, 100 do
-    if files.isFile(%q) then
+    if os.stat(%q) == "file" then
         return
     end
     coroutine.sleep(20)
@@ -151,8 +160,8 @@ error("the peer command never started")
 
         const firstProgram = root .. "/first.nupp"
         const secondProgram = root .. "/second.nupp"
-        assert(files.write(firstProgram, rendezvous(first, second)))
-        assert(files.write(secondProgram, rendezvous(second, first)))
+        assert(os.writeatomic(firstProgram, rendezvous(first, second)))
+        assert(os.writeatomic(secondProgram, rendezvous(second, first)))
         assert.eq(
             commands.runTogether({
                 {args = {commands.compiler(), "run", firstProgram}, cwd = root},

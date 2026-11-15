@@ -85,7 +85,7 @@ Every command runs from the repository root and needs a
 `rust-toolchain.toml` pins.
 
 ```bash
-nupp check --strict           # Type-check every Nupp source, strictly
+nupp check                    # Type-check every Nupp source
 nupp test                     # Build and run the test suites
 nupp task ex-flatcolor           # Build a component and run it through the Rust host
 nupp task ex-tiled               # TMX map with animated tiles and collision

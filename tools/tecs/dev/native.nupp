@@ -1,8 +1,7 @@
 module tecs.dev.native
 
 local commands = require("tecs.dev.commands")
-local json = require("nupp.codec.json")
-local path = require("nupp.io.path")
+local json = require("serde.json")
 
 --- Builds native services and selects exactly the artifacts Cargo produced.
 export function libraries(release: boolean?): {[string]: string}
@@ -37,12 +36,12 @@ export function libraries(release: boolean?): {[string]: string}
     }
     local result: {[string]: string} = {}
     for line in output:gmatch("[^\r\n]+") do
-        const event = assert(json.decode(line))
+        const event = assert(json.decodevalue(line))
         if event.reason == "compiler-artifact" and event.target then
             const variable = names[event.target.name]
             if variable then
                 for _, filename in ipairs(event.filenames or {}) do
-                    const extension = path.newPath(filename):extension()
+                    const extension = io.Path.of(filename):extension()
                     if extension == "so" or extension == "dylib" or extension == "dll" then
                         result[variable] = filename
                     end

@@ -226,7 +226,7 @@ end
 uistandaloneExports[#uistandaloneExports + 1] = "uistandalone.create"
 
 return {
-    -- `tests` is included because leaving it out meant `nupp check --strict`
+    -- `tests` is included because leaving it out meant `nupp check`
     -- never read a test file. Two suites called `suspension.gather` and
     -- `suspension.all`, neither of which exists, and both passed review: the
     -- checker was never pointed at them, and the test runner's build cache
