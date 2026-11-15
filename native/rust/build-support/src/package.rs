@@ -84,18 +84,18 @@ const MATERIALS: &str = "assets/materials";
 /// The Nupp module whose builtin material list a pack has to agree with.
 const MATERIAL_SOURCE: &str = "src/tecs/gpu/materials.nupp";
 
-/// The Rust service crates a package installs, and the library stem each one
-/// produces.
+/// The Rust service crates a package installs, the library stem each one
+/// produces, and the variable `nupp.lua` reads to override where it is.
 ///
 /// The stems are the compatibility surface each binding's `from` clause names,
 /// so they are spelled here to match those clauses rather than to
 /// match the crate names, which differ from them on purpose.
-const SERVICES: &[(&str, &str)] = &[
-    ("tecs-audio", "tecsaudio"),
-    ("tecs-gamepad", "tecsgamepad"),
-    ("tecs-physics", "tecs_physics"),
-    ("tecs-ui", "tecs_ui"),
-    ("tecs-assets", "tecs_assets"),
+const SERVICES: &[(&str, &str, &str)] = &[
+    ("tecs-audio", "tecsaudio", "TECS_AUDIO_LIBRARY"),
+    ("tecs-gamepad", "tecsgamepad", "TECS_GAMEPAD_LIBRARY"),
+    ("tecs-physics", "tecs_physics", "TECS_PHYSICS_LIBRARY"),
+    ("tecs-ui", "tecs_ui", "TECS_UI_LIBRARY"),
+    ("tecs-assets", "tecs_assets", "TECS_ASSETS_LIBRARY"),
 ];
 
 /// The Cargo package that produces the host executable.
@@ -307,9 +307,23 @@ pub fn install(root: &Path, preset: Preset, components: &[String]) -> Result<Pat
         components.to_vec()
     };
 
+    // A component build resolves every library its bindings name, and refuses
+    // one that is missing, so the services are built first. They land under
+    // the preset's target triple, which the manifest's search directories do
+    // not cover, so each one is named to the build through its override.
+    build_native(root, preset, &sdk)?;
+    let artifacts = root
+        .join("target")
+        .join(preset.rust_target)
+        .join(if preset.release { "release" } else { "debug" });
+    let overrides: Vec<(&str, PathBuf)> = SERVICES
+        .iter()
+        .map(|(_, stem, variable)| (*variable, artifacts.join(service_library(preset, stem))))
+        .collect();
+
     let mut built = Vec::new();
     for component in &selected {
-        nupp::build(root, component)?;
+        nupp::build(root, component, &overrides)?;
         let name = component.strip_prefix("ex-").unwrap_or(component);
         let path = root.join(nupp::OUTPUT).join(format!("{name}.nuppc"));
         if !path.is_file() {
@@ -321,8 +335,6 @@ pub fn install(root: &Path, preset: Preset, components: &[String]) -> Result<Pat
         }
         built.push(path);
     }
-
-    build_native(root, preset, &sdk)?;
 
     let prefix = root.join(OUTPUT);
     if prefix.exists() {
@@ -337,15 +349,11 @@ pub fn install(root: &Path, preset: Preset, components: &[String]) -> Result<Pat
         fs::create_dir_all(&directory)?;
     }
 
-    let artifacts = root
-        .join("target")
-        .join(preset.rust_target)
-        .join(if preset.release { "release" } else { "debug" });
     let executable = prefix.join("bin").join(executable_name(preset));
     copy_file(&artifacts.join(host_artifact(preset)), &executable)?;
     let runtime = runtime_library(preset, &sdk);
     copy_file(&sdk.join(&runtime), &libraries.join(&runtime))?;
-    for (_, stem) in SERVICES {
+    for (_, stem, _) in SERVICES {
         let file = service_library(preset, stem);
         copy_file(&artifacts.join(&file), &libraries.join(&file))?;
     }
@@ -561,7 +569,7 @@ fn build_native(root: &Path, preset: Preset, sdk: &Path) -> Result<()> {
         command.arg("--release");
     }
     command.args(["--package", HOST_PACKAGE]);
-    for (package, _) in SERVICES {
+    for (package, _, _) in SERVICES {
         command.args(["--package", package]);
     }
     command.env("NUPP_SDK", sdk).current_dir(root);
@@ -830,7 +838,7 @@ fn write_inventory(root: &Path, preset: Preset, prefix: &Path) -> Result<()> {
         "{p}",
     ]);
     tree.args(["--package", HOST_PACKAGE]);
-    for (package, _) in SERVICES {
+    for (package, _, _) in SERVICES {
         tree.args(["--package", package]);
     }
     let output = tree
@@ -1041,7 +1049,7 @@ fn check_contents(
     };
     let mut expected: Vec<String> = SERVICES
         .iter()
-        .map(|(_, stem)| library_file(platform, stem))
+        .map(|(_, stem, _)| library_file(platform, stem))
         .collect();
     expected.push(library_file(platform, "nupp"));
     for file in expected {
@@ -1456,7 +1464,7 @@ mod tests {
             ),
             ("lib/libnupp.dylib".to_owned(), b"runtime".to_vec()),
         ];
-        for (_, stem) in SERVICES {
+        for (_, stem, _) in SERVICES {
             files.push((format!("lib/lib{stem}.dylib"), b"service".to_vec()));
         }
         for (relative, content) in files {
@@ -1568,13 +1576,16 @@ mod tests {
                 continue;
             }
             let text = fs::read_to_string(entry.path()).unwrap();
-            for (_, stem) in SERVICES {
-                if text.contains(&format!("from \"{stem}\"")) {
+            for (_, stem, _) in SERVICES {
+                // `nupp fmt` writes `from"stem"`; a hand-written space reads the same.
+                if text.contains(&format!("from\"{stem}\""))
+                    || text.contains(&format!("from \"{stem}\""))
+                {
                     opened.insert(*stem);
                 }
             }
         }
-        let expected: BTreeSet<_> = SERVICES.iter().map(|(_, stem)| *stem).collect();
+        let expected: BTreeSet<_> = SERVICES.iter().map(|(_, stem, _)| *stem).collect();
         assert_eq!(
             opened, expected,
             "a packaged service library is named by no module, or a module names one the package \

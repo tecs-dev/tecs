@@ -4,8 +4,8 @@ local json = require("serde.json")
 local native = require("tecs.dev.native")
 local ffi = require("ffi")
 
-local function host(args: {string}, build: boolean): nil
-    if build and (args[1] == "--help" or args[1] == "-h") then
+local function host(args: {string}, usage: boolean): nil
+    if usage and (args[1] == "--help" or args[1] == "-h") then
         print(
             "Usage: nupp task run [target] [--entry MODULE.create] [host arguments...]\nExamples: nupp task ex-lighting; nupp task run mygame --headless --frames 5"
         )
@@ -29,13 +29,14 @@ local function host(args: {string}, build: boolean): nil
             "fetch the original scene first: nupp task fetch " .. name
         )
     end
-    if build then
-        commands.run({commands.compiler(), "build", "--target", target})
-    end
+    -- A component build refuses a native library it cannot resolve, so Cargo
+    -- builds the services first and the build is handed their paths.
+    const libraries = native.libraries()
+    commands.run({commands.compiler(), "build", "--target", target}, libraries)
     const component = "out/nupp/" .. componentName .. ".nuppc"
     assert(os.stat(commands.root .. "/" .. component) == "file", "target " .. target .. " did not produce a component")
     local env = commands.sdk()
-    for name, value in pairs(native.libraries()) do
+    for name, value in pairs(libraries) do
         env[name] = value
     end
     commands.run(
@@ -76,6 +77,7 @@ local function test(args: {string}): nil
         end
     end
     const env = native.libraries()
+    commands.run({commands.compiler(), "build", "--target", "headless"}, env)
     const result = commands.capture(
         commands.append({commands.compiler(), "test", "--internal-runner", "--json"}, args),
         env

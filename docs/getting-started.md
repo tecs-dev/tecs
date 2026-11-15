@@ -206,14 +206,14 @@ Then `nupp task run mygame`. To give the game a short command, add a task:
 ```lua
 tasks = {
     mygame = {
-        build = "mygame",
         cwd = "tools",
         argv = {"nupp", "run", "tecs/dev/main.nupp", "host", "mygame"},
     },
 }
 ```
 
-`nupp task mygame` builds the component before starting its host. The entry defaults to `<target>.create`, so
+`nupp task mygame` builds the native services, then the component, then starts its host. The component
+build comes second because it resolves the libraries its bindings name and refuses one that is missing. The entry defaults to `<target>.create`, so
 nothing else has to be named.
 
 ::: warning

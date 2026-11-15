@@ -77,7 +77,10 @@ Windows release is built on Windows.
 Two things a packager learns the hard way. A build copies the five service libraries a component uses into
 `out/nupp/lib`, and the component loads each one from the first `lib/` directory at or above its own file, so
 the host names the component's chunk after its absolute path. An installed component in
-`share/tecs/components` finds the release's `lib/` that way. The headless host checks `tecs.host.crashed` and fails on guarded application errors. The smoke component also prints a success line, which the packaging test verifies.
+`share/tecs/components` finds the release's `lib/` that way. A build also refuses a library it cannot resolve,
+so the services are built before any component: `nupp test`, the `ex-*` tasks and packaging run Cargo first,
+and a bare `nupp build --target ex-host` in a fresh checkout needs `cargo build` for the five service crates
+before it. The headless host checks `tecs.host.crashed` and fails on guarded application errors. The smoke component also prints a success line, which the packaging test verifies.
 
 Both `nupp task run` and the host's own `cargo build` need a Nupp embedding SDK, which
 `native/rust/winit-host/build.rs` stages through the Nupp compiler's `scripts/toolchain` in a checkout beside
