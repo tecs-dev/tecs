@@ -610,12 +610,7 @@ end
 --- @param fields the fields read, lined up with the target's own
 --- @return the source
 export function sourceOwn(component: components.Component, fields: {string}): TrackSource
-    return TrackSource(
-        kind = "self",
-        componentName = component.componentName,
-        component = component,
-        fields = fields
-    )
+    return TrackSource(kind = "self", componentName = component.componentName, component = component, fields = fields)
 end
 
 --- Reads a moving destination from the live entity holding a world key.

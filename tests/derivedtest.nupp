@@ -226,12 +226,7 @@ end
 function suite.managedAndNativeEdgesRoundTripWithoutHandwrittenCodecs(): nil
     const world = ecs.newWorld()
     const target = world:spawn()
-    const id = world:spawn(
-        Velocity(3, 4),
-        Description(text = "saved"),
-        Follow(target = target),
-        Spring(target, 0.75)
-    )
+    const id = world:spawn(Velocity(3, 4), Description(text = "saved"), Follow(target = target), Spring(target, 0.75))
     for _, format in ipairs({"table", "binary"}) do
         const snapshot = world:saveSnapshot({format = format as "table" | "binary"})
         const loaded = ecs.newWorld()

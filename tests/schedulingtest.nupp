@@ -2,7 +2,6 @@ const {type World} = require("tecs.ecs")
 const {type Phase} = require("tecs.ecs")
 const ecs = require("tecs.ecs")
 
-
 local suite = {}
 
 local function noop(_dt: number, exclusive _world: World): nil

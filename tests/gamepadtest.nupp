@@ -87,9 +87,7 @@ local function newFake(): Fake
     return Fake(
         backend = backend,
         push = function(kind: integer, device: integer, code: integer, value: number?): nil
-            pending[
-                #pending + 1
-            ] = gamepadbackend.Event(kind = kind, device = device, code = code, value = value ?? 0)
+            pending[#pending + 1] = gamepadbackend.Event(kind = kind, device = device, code = code, value = value ?? 0)
         end,
         attach = function(id: integer): nil
             if indexOf(id) == 0 then

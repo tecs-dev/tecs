@@ -95,10 +95,7 @@ function suite.usesCustomComponentSnapshotHooks(): nil
         load = function(value: any): SnapshotPosition
             local packed = assert((value as {[string]: string}).packed)
             local divider = assert(packed:find(":"))
-            return SnapshotPosition(
-                x = assert(tonumber(packed:sub(1, divider - 1))),
-                label = packed:sub(divider + 1)
-            )
+            return SnapshotPosition(x = assert(tonumber(packed:sub(1, divider - 1))), label = packed:sub(divider + 1))
         end,
     })
     local world = ecs.newWorld()

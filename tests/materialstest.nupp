@@ -1,4 +1,3 @@
-
 local ecs = require("tecs.ecs")
 local gfx = require("tecs.gfx")
 local materials = require("tecs.gpu.materials")

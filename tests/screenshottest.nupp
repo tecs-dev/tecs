@@ -1,4 +1,3 @@
-
 local screenshot = require("tecs.gfx.screenshot")
 local suite = {}
 

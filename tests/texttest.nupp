@@ -54,10 +54,7 @@ local function quads(borrows world: ecs.World, entity: integer): {number}
 end
 
 local function close(actual: number, expected: number, message: string): nil
-    assert(
-        math.abs(actual - expected) < 0.001,
-        message .. ": " .. tostring(actual) .. " vs " .. tostring(expected)
-    )
+    assert(math.abs(actual - expected) < 0.001, message .. ": " .. tostring(actual) .. " vs " .. tostring(expected))
 end
 
 -------------------------------------------------------------------------------

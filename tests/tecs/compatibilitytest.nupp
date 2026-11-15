@@ -19,7 +19,6 @@ actually carries rather than what it eventually should.
 ]]
 const tiled = require("tecs.tiled")
 
-
 local assets = require("tecs.assets")
 local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
@@ -329,14 +328,11 @@ end
 function suite.aLoggerNameStampsItsLines(): nil
     local seen: {string} = {}
     local previousLevel = nupplog.setlevel("debug")
-    local previousSink = nupplog.setsink(nupplog.callback(function(
-        _severity: nupplog.Severity,
-        module: string,
-        _line: integer,
-        _message: string
-    ): nil
-        seen[#seen + 1] = module
-    end))
+    local previousSink = nupplog.setsink(
+        nupplog.callback(function(_severity: nupplog.Severity, module: string, _line: integer, _message: string): nil
+            seen[#seen + 1] = module
+        end)
+    )
     nupplog.named("tecs.audio"):info("probe")
     own.drop(nupplog.setsink(previousSink))
     nupplog.setlevel(previousLevel)

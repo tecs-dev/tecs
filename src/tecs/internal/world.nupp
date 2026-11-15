@@ -3147,11 +3147,7 @@ local function publishMutationBatch(exclusive world: World, batch: MutationBatch
                 if batch.resetComponent ~= nil then
                     supplied[batch.resetComponent.componentId] = components.defaultValue(batch.resetComponent)
                 end
-                publishMove(
-                    world,
-                    PendingMove(id = id, target = target, values = supplied, isSealed = true),
-                    notices
-                )
+                publishMove(world, PendingMove(id = id, target = target, values = supplied, isSealed = true), notices)
                 if writerIds ~= nil then
                     writerIds[#writerIds + 1] = id
                 end

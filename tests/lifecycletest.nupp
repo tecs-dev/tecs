@@ -1,4 +1,3 @@
-
 local ecs = require("tecs.ecs")
 
 local suite = {}

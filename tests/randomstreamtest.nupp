@@ -2,7 +2,6 @@ const {type Snapshot} = require("tecs.ecs")
 const ecs = require("tecs.ecs")
 const json = require("serde.json")
 
-
 local suite = {}
 
 local function equalWords(first: {integer}, second: {integer}): nil

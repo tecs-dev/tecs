@@ -443,17 +443,11 @@ function Window.setResizable(exclusive self: Window, resizable: boolean): intege
 end
 
 function Window.setFullscreen(exclusive self: Window, fullscreen: boolean): integer
-    return enqueue(
-        self,
-        SetFullscreenCommand(kind = "setFullscreen", serial = serial(self), fullscreen = fullscreen)
-    )
+    return enqueue(self, SetFullscreenCommand(kind = "setFullscreen", serial = serial(self), fullscreen = fullscreen))
 end
 
 function Window.setCursorVisible(exclusive self: Window, visible: boolean): integer
-    return enqueue(
-        self,
-        SetCursorVisibleCommand(kind = "setCursorVisible", serial = serial(self), visible = visible)
-    )
+    return enqueue(self, SetCursorVisibleCommand(kind = "setCursorVisible", serial = serial(self), visible = visible))
 end
 
 function Window.setCursorGrab(exclusive self: Window, mode: CursorGrab): integer
