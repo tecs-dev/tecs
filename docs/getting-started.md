@@ -30,7 +30,7 @@ load failure in a host that built cleanly.
 ## Check, test, run
 
 ```bash
-nupp check --strict           # Type-check every Nupp source, strictly
+nupp check                    # Type-check every Nupp source
 nupp test                     # Build native services; require every test to pass
 nupp task ex-flatcolor           # Open a window and render the example
 nupp task ex-lighting --frames 120

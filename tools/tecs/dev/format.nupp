@@ -1,8 +1,6 @@
 module tecs.dev.format
 
 local commands = require("tecs.dev.commands")
-local files = require("nupp.io.files")
-local path = require("nupp.io.path")
 
 --- Formats the requested files, or all supported source files when none are named.
 export function apply(paths: {string}, check: boolean): nil
@@ -42,7 +40,7 @@ export function apply(paths: {string}, check: boolean): nil
         if name:sub(1, 13) == "assets/fonts/" then
             continue
         end
-        const extension = path.newPath(name):extension() or ""
+        const extension = io.Path.of(name):extension() or ""
         local tool = web[extension] and "prettier" or extension == "lua" and "stylua" or nil
         if #paths > 0 then
             tool = extension == "nupp" and "nupp" or extension == "rs" and "rustfmt" or tool
@@ -52,7 +50,7 @@ export function apply(paths: {string}, check: boolean): nil
         end
         local generated = false
         local count = 0
-        for line in (assert(files.read(commands.root .. "/" .. name)) .. "\n"):gmatch("([^\n]*)\n") do
+        for line in (assert(commands.read(commands.root .. "/" .. name)) .. "\n"):gmatch("([^\n]*)\n") do
             count = count + 1
             if count > 5 then
                 break

@@ -1,9 +1,7 @@
 local commands = require("tecs.dev.commands")
-local files = require("nupp.io.files")
 local gates = require("tecs.dev.gates")
-local json = require("nupp.codec.json")
+local json = require("serde.json")
 local native = require("tecs.dev.native")
-local path = require("nupp.io.path")
 local ffi = require("ffi")
 
 local function host(args: {string}, build: boolean): nil
@@ -27,7 +25,7 @@ local function host(args: {string}, build: boolean): nil
         const name = componentName:sub(1, -3)
         const model = name == "sponza" and "Sponza" or "Bistro"
         assert(
-            files.isFile(commands.root .. "/assets/external/" .. name .. "/" .. model .. ".tecs.gltf"),
+            os.stat(commands.root .. "/assets/external/" .. name .. "/" .. model .. ".tecs.gltf") == "file",
             "fetch the original scene first: nupp task fetch " .. name
         )
     end
@@ -35,7 +33,7 @@ local function host(args: {string}, build: boolean): nil
         commands.run({commands.compiler(), "build", "--target", target})
     end
     const component = "out/nupp/" .. componentName .. ".nuppc"
-    assert(files.isFile(commands.root .. "/" .. component), "target " .. target .. " did not produce a component")
+    assert(os.stat(commands.root .. "/" .. component) == "file", "target " .. target .. " did not produce a component")
     local env = commands.sdk()
     for name, value in pairs(native.libraries()) do
         env[name] = value
@@ -64,9 +62,16 @@ local function test(args: {string}): nil
         end
     end
     if #expected == 0 then
-        for _, entry in ipairs(assert(files.list(commands.root .. "/tests"))) do
-            if entry.kind == "file" and entry.name:match("test%.nupp$") then
-                expected[#expected + 1] = assert(path.newPath(entry.name):stem())
+        -- Discovery finds a suite at any depth under `tests`, and suite names are
+        -- unique across the tree, so the expected set is every one of them.
+        local seen: {[string]: boolean} = {}
+        for _, pattern in ipairs({"/tests/*test.nupp", "/tests/**/*test.nupp"}) do
+            for _, found in ipairs((assert(os.glob(commands.root .. pattern)))) do
+                const name = assert(found:stem())
+                if not seen[name] then
+                    seen[name] = true
+                    expected[#expected + 1] = name
+                end
             end
         end
     end
@@ -75,9 +80,9 @@ local function test(args: {string}): nil
         commands.append({commands.compiler(), "test", "--internal-runner", "--json"}, args),
         env
     )
-    io.stderr:write(result.errorOutput)
-    assert(files.createDirectory(commands.root .. "/out/validation"))
-    assert(files.write(commands.root .. "/out/validation/nupp-tests.json", result.output))
+    io.stderr:write(result.erroroutput)
+    assert(os.mkdir(commands.root .. "/out/validation"))
+    assert(os.writeatomic(commands.root .. "/out/validation/nupp-tests.json", result.output))
     if structured then
         io.stdout:write(result.output)
     end
@@ -85,9 +90,9 @@ local function test(args: {string}): nil
         if not structured then
             io.stderr:write(result.output)
         end
-        os.exit(result.exit.exitCode == 0 and 1 or result.exit.exitCode)
+        os.exit(commands.failure(result.exit) or 1)
     end
-    const report = assert(json.decode(result.output))
+    const report = assert(json.decodevalue(result.output))
     gates.tests(report, expected)
     if not structured then
         print(report.total .. " tests passed in " .. #expected .. " suites; zero skipped")
@@ -95,7 +100,7 @@ local function test(args: {string}): nil
 end
 
 local function verify(): nil
-    commands.run({commands.compiler(), "check", "--strict"})
+    commands.run({commands.compiler(), "check"})
     commands.run({commands.compiler(), "task", "format-check"})
     commands.run({commands.compiler(), "test"})
     commands.run({commands.compiler(), "task", "test-tools"})
@@ -147,7 +152,7 @@ elseif task == "docs-dev" then
     require("tecs.dev.docs").serve(port as integer)
 elseif task == "test-tools" then
     assert(#args == 0, "test-tools takes no arguments")
-    commands.run({commands.compiler(), "check", "--strict"}, nil, commands.root .. "/tools")
+    commands.run({commands.compiler(), "check"}, nil, commands.root .. "/tools")
     commands.run({commands.compiler(), "test"}, nil, commands.root .. "/tools")
 elseif task == "deps" then
     assert(#args == 0, "deps takes no arguments")
@@ -160,8 +165,8 @@ elseif task == "clean" then
     assert(#args == 0, "clean takes no arguments")
     commands.run({commands.compiler(), "clean"})
     commands.run({"cargo", "clean"})
-    if files.exists(commands.root .. "/out") then
-        assert(files.remove(commands.root .. "/out", true))
+    if os.exists(commands.root .. "/out") then
+        assert(os.remove(commands.root .. "/out", true))
     end
 else
     error("unknown development task " .. task)

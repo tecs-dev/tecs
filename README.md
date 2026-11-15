@@ -82,7 +82,7 @@ A checkout needs the Rust toolchain `rust-toolchain.toml` pins and a current
 `nupp task deps` installs the two formatters on macOS.
 
 ```bash
-nupp check --strict           # Type-check every Nupp source, strictly
+nupp check                    # Type-check every Nupp source
 nupp test                     # Build native services; require every test to pass
 nupp task ex-flatcolor           # Open a window and render the example
 nupp task ex-lighting --frames 120

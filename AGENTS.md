@@ -29,7 +29,7 @@ Use the Nupp compiler on `PATH`; for sibling checkouts, add the absolute
 ```bash
 nupp task deps                # Install the development formatters
 nupp tasks                    # List the targets nupp.lua configures
-nupp check --strict           # Type-check every Nupp source, strictly
+nupp check                    # Type-check every Nupp source
 nupp task format              # Format every supported source language in place
 nupp task format-check        # Report sources that are not formatted
 nupp test                     # Build and run the test suites
@@ -305,7 +305,7 @@ never includes a library loaded later. `src/tecs/physics/rapier.nupp` is the wor
   looks, because the checker restricts internal imports to the `tecs` namespace.
 - `tests/tecs/compatibilitytest.nupp` pins every externally typed string the tree declares. A rename fails
   there rather than changing what a save file means. Read it as the specification of that surface.
-- `nupp check --strict` covers `src`, `examples/nupp`, `tests` and `bench/nupp`, so a test calling a function
+- `nupp check` covers `src`, `examples/nupp`, `tests` and `bench/nupp`, so a test calling a function
   that does not exist fails the gate rather than slipping through.
 - Rust tests run with `cargo test --workspace`. `nupp task verify` runs both halves plus the host.
 - A `src/tecs/**.nupp` module absent from the `headless` target's `entries` in `nupp.lua` is neither built nor

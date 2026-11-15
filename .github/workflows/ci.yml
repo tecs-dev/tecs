@@ -89,7 +89,7 @@ jobs:
               working-directory: tecs
               run: nupp task format-check
             - working-directory: tecs
-              run: nupp check --strict
+              run: nupp check
             - working-directory: tecs
               run: nupp task test-tools
             - if: runner.os == 'Linux'

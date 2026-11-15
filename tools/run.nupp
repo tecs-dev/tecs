@@ -1,34 +1,32 @@
-local path = require("nupp.io.path")
-local process = require("nupp.io.process")
-local system = require("nupp.system")
-
 -- Enter the tooling project before compiling its modules. The game manifest
 -- must never acquire the process-launch capabilities its development tools use.
-const root = assert(path.currentDirectory()):toString()
+const root = assert(io.cwd()):tostring()
 const compilerRoot = os.getenv("NUPP_COMPILER_ROOT")
 -- A checkout's `bin/nupp` is a shell script Windows cannot start; `bin/nupp.cmd`
 -- runs it under Git Bash.
-const launcher = system.platform == "windows" and "/bin/nupp.cmd" or "/bin/nupp"
+const launcher = os.info().platform == "windows" and "/bin/nupp.cmd" or "/bin/nupp"
 local args = {compilerRoot and compilerRoot .. launcher or "nupp", "run", "tecs/dev/main.nupp"}
 for _, value in ipairs({...} as {string}) do
     args[#args + 1] = value
 end
-const options: process.Options = {
-    args = args,
+const spawned, problem = io.popen(args, {
     cwd = root .. "/tools",
     env = {TECS_PROJECT_ROOT = root},
     stdin = "inherit",
     stdout = "inherit",
     stderr = "inherit"
-}
-const spawned, problem = process.spawn(options)
+})
 if spawned == nil then
     error("cannot start " .. args[1] .. ": " .. tostring(problem), 0)
 end
 do
     local child = spawned
-    const status = child:wait()
-    if not status:succeeded() then
-        os.exit(status.exitCode == 0 and 1 or status.exitCode)
+    const exit = child:wait()
+    -- A parent shell keeps only the low byte of an exit code, and on Windows a
+    -- child Git Bash saw die from a signal exits with the signal in the second
+    -- byte, so a segfault (2816) would read as success. It exits `128 + signal`.
+    const code = exit.exitcode
+    if exit.killed or exit.timedout or code ~= 0 then
+        os.exit(code > 0 and code < 256 and code or code % 256 == 0 and code < 65536 and 128 + code // 256 or 1)
     end
 end

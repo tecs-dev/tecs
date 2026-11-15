@@ -1,10 +1,5 @@
 module tecs.dev.commands
 
-local files = require("nupp.io.files")
-local path = require("nupp.io.path")
-local process = require("nupp.io.process")
-local system = require("nupp.system")
-
 export type Invocation = {
     args: {string},
     env: {[string]: string}?,
@@ -12,25 +7,47 @@ export type Invocation = {
 }
 
 --- The engine checkout, independent of the tooling process's working directory.
-export const root: string = os.getenv("TECS_PROJECT_ROOT") or assert(path.newPath(".."):absolute()):toString()
+export const root: string = os.getenv("TECS_PROJECT_ROOT") or assert(io.Path.of(".."):absolute()):tostring()
 
 --- Starts a child process.
+--- @param args the program and its arguments
 --- @param options how to start it
 --- @return the running child, which the caller closes
 --- @raises string when the child cannot be started
-local function spawn(options: process.Options): process.Process
-    const child, problem = process.spawn(options)
+local function spawn(args: {string}, options: io.Process.Options): io.Process
+    const child, problem = io.popen(args, options)
     if child == nil then
-        error("cannot start " .. options.args[1] .. ": " .. tostring(problem), 0)
+        error("cannot start " .. args[1] .. ": " .. tostring(problem), 0)
     end
 
     return child
 end
 
+--- Whether an exit is a success, and the code to exit with when it is not.
+---
+--- On Windows, a child that `bin/nupp.cmd` ran under Git Bash and that died
+--- from a signal exits with the signal in the second byte, 2816 for a
+--- segfault. A parent shell keeps only the low byte of an exit code, so that
+--- one reads as success; it is reported as the shell's `128 + signal` instead.
+--- @param exit how the child ended
+--- @return nil on success, otherwise a code from 1 to 255
+export function failure(exit: io.Process.Exit): integer?
+    if not exit.killed and not exit.timedout and exit.exitcode == 0 then
+        return nil
+    end
+    const code = exit.exitcode
+    if code > 0 and code < 256 then
+        return code
+    elseif code >= 256 and code % 256 == 0 and code < 65536 then
+        return 128 + code // 256
+    end
+
+    return 1
+end
+
 --- Runs an argv without a shell and preserves the child's exit status.
 export function run(args: {string}, env: {[string]: string}?, cwd: string?): nil
-    const options: process.Options = {
-        args = args,
+    const options: io.Process.Options = {
         cwd = cwd or root,
         env = env,
         stdin = "inherit",
@@ -38,69 +55,66 @@ export function run(args: {string}, env: {[string]: string}?, cwd: string?): nil
         stderr = "inherit"
     }
     do
-        local child = spawn(options)
-        const status = child:wait()
-        if not status:succeeded() then
-            os.exit(status.exitCode == 0 and 1 or status.exitCode)
+        local child = spawn(args, options)
+        const code = failure(child:wait())
+        if code ~= nil then
+            os.exit(code)
         end
     end
 end
 
 --- Captures both streams, draining them together until the child exits.
-export function capture(args: {string}, env: {[string]: string}?, clearEnv: boolean?, cwd: string?): process.Result
-    const options: process.Options = {args = args, cwd = cwd or root, env = env, clearEnv = clearEnv}
+export function capture(args: {string}, env: {[string]: string}?, clearEnv: boolean?, cwd: string?): io.Process.Result
+    const options: io.Process.Options = {
+        cwd = cwd or root,
+        env = env,
+        clearenv = clearEnv,
+        stdin = "pipe",
+        stdout = "pipe",
+        stderr = "pipe"
+    }
     do
-        local child = spawn(options)
-        return assert(child:communicate())
+        local child = spawn(args, options)
+        const result = assert(child:communicate())
+        return result
     end
-end
-
-local function waitFor(borrows child: process.Process): process.Exit
-    return child:wait()
 end
 
 --- Runs independent commands concurrently and returns the first failing exit code.
 export function runTogether(invocations: {Invocation}): integer
-    -- The group retains each process's exact affine cleanup policy. The table only
-    -- keeps checked aliases, whose cleanup policy cannot currently be named here.
-    local children: {any} = {}
-    do
-        local group = nupp.managedGroup()
-        for _, invocation in ipairs(invocations) do
-            const options: process.Options = {
-                args = invocation.args,
-                cwd = invocation.cwd or root,
-                env = invocation.env,
-                stdin = "inherit",
-                stdout = "inherit",
-                stderr = "inherit"
-            }
-            children[#children + 1] = group:adopt(own.manage(spawn(options)))
+    -- Each child is owned by one frame of this recursion: every command starts
+    -- before the first is waited on, and a start that raises unwinds the frames
+    -- that hold the others, whose cleanup ends them.
+    local function from(index: integer): integer
+        const invocation = invocations[index]
+        if invocation == nil then
+            return 0
         end
+        const options: io.Process.Options = {
+            cwd = invocation.cwd or root,
+            env = invocation.env,
+            stdin = "inherit",
+            stdout = "inherit",
+            stderr = "inherit"
+        }
+        local child = spawn(invocation.args, options)
+        const later = from(index + 1)
+        const code = failure(child:wait())
 
-        local exitCode: integer = 0
-        for _, child in ipairs(children) do
-            const status, problem = (child as any):with(waitFor)
-            if status == nil then
-                error(problem and problem.message or "the formatter process could not be observed", 0)
-            end
-            const exit = status as process.Exit
-            if exitCode == 0 and not exit:succeeded() then
-                exitCode = exit.exitCode == 0 and 1 or exit.exitCode
-            end
-        end
-
-        return exitCode
+        return code or later
     end
+
+    return from(1)
 end
 
 --- Returns successful command output, reporting failures on stderr.
 export function output(args: {string}, env: {[string]: string}?): string
     const result = capture(args, env)
-    io.stderr:write(result.errorOutput)
-    if not result:succeeded() then
+    io.stderr:write(result.erroroutput)
+    const code = failure(result.exit)
+    if code ~= nil then
         io.stderr:write(result.output)
-        os.exit(result.exit.exitCode == 0 and 1 or result.exit.exitCode)
+        os.exit(code)
     end
 
     return result.output
@@ -116,7 +130,21 @@ export function compiler(): string
         return os.getenv("NUPP") or "nupp"
     end
 
-    return compilerRoot .. (system.platform == "windows" and "/bin/nupp.cmd" or "/bin/nupp")
+    return compilerRoot .. (os.info().platform == "windows" and "/bin/nupp.cmd" or "/bin/nupp")
+end
+
+--- Reads a whole file.
+--- @param name the file to read
+--- @return its bytes, or nil and a reason when it cannot be read
+export function read(name: string): (string?, string?)
+    const file, problem = io.open(name, "rb")
+    if file == nil then
+        return nil, problem
+    end
+    const text = file:read("a")
+    file:close()
+
+    return text
 end
 
 --- Appends the caller's arguments without interpreting flags or quoting.
@@ -135,7 +163,7 @@ export function sources(paths: {string}?): {string}
     local result: {string} = {}
     local seen: {[string]: boolean} = {}
     for name in listing:gmatch("[^%z]+") do
-        if not seen[name] and files.isFile(root .. "/" .. name) then
+        if not seen[name] and os.stat(root .. "/" .. name) == "file" then
             seen[name] = true
             result[#result + 1] = name
         end
@@ -149,12 +177,12 @@ end
 export function sdk(): {[string]: string}
     const configured = os.getenv("NUPP_SDK")
     if configured then
-        assert(files.isFile(path.newPath(configured, "libnupp.a")), "NUPP_SDK has no libnupp.a")
+        assert(os.stat(io.Path.of(configured, "libnupp.a")) == "file", "NUPP_SDK has no libnupp.a")
         return {NUPP_SDK = configured}
     end
     const compilerRoot = os.getenv("NUPP_COMPILER_ROOT")
     assert(
-        compilerRoot and files.isFile(compilerRoot .. "/scripts/toolchain"),
+        compilerRoot and os.stat(compilerRoot .. "/scripts/toolchain") == "file",
         "set NUPP_SDK to a staged Nupp embedding SDK"
     )
     const text = output({
@@ -174,7 +202,7 @@ export function sdk(): {[string]: string}
         "base,native-files,native-net,native-compression,native-uuid"
     })
     const directory = assert(text:match("([^\r\n]+)%s*$"), "the SDK staging command returned no path")
-    assert(files.isFile(path.newPath(directory, "libnupp.a")), "the staged SDK has no libnupp.a")
+    assert(os.stat(io.Path.of(directory, "libnupp.a")) == "file", "the staged SDK has no libnupp.a")
 
     return {NUPP_SDK = directory}
 end

@@ -1,14 +1,13 @@
 module tecs.dev.docs
 
 local commands = require("tecs.dev.commands")
-local files = require("nupp.io.files")
 local net = require("io.net")
 
 --- Checks metadata and house style before Nupp validates the generated links.
 export function pages(): nil
-    for _, page in ipairs(assert(files.glob(commands.root .. "/docs/**/*.md"))) do
-        const name = page:toString()
-        const text = assert(files.read(name))
+    for _, page in ipairs((assert(os.glob(commands.root .. "/docs/**/*.md")))) do
+        const name = page:tostring()
+        const text = assert(commands.read(name))
         const front = text:match("^%-%-%-\r?\n(.-)\r?\n%-%-%-")
         const description = front and ("\n" .. front):match("\ndescription:%s*([^\r\n]+)")
         assert(description and description:gsub("[\"'%s]", "") ~= "", name .. " has no non-empty description")
@@ -25,8 +24,8 @@ end
 export function check(): nil
     pages()
     do
-        local scratch = assert(files.createTemporaryDirectory())
-        build(scratch:toString() .. "/site")
+        local scratch = assert(os.mktempdir())
+        build(scratch:tostring() .. "/site")
     end
     print("OK: documentation metadata, build, links and anchors")
 end
@@ -43,10 +42,10 @@ export function resolve(output: string, target: string): string?
         end
     end
     const candidate = output .. route
-    if files.isFile(candidate) then
+    if os.stat(candidate) == "file" then
         return candidate
     end
-    if files.isFile(candidate .. "/index.html") then
+    if os.stat(candidate .. "/index.html") == "file" then
         return candidate .. "/index.html"
     end
 
@@ -56,11 +55,12 @@ end
 local function fingerprint(): string
     local parts: {string} = {}
     for _, pattern in ipairs({"docs/**/*", "src/**/*.nupp", "nupp.lua"}) do
-        for _, found in ipairs(assert(files.glob(commands.root .. "/" .. pattern))) do
-            const name = found:toString()
-            const info = assert(files.info(name))
-            if info.kind == "file" then
-                parts[#parts + 1] = name .. ":" .. tostring(info.modified) .. ":" .. tostring(info.size)
+        for _, found in ipairs((assert(os.glob(commands.root .. "/" .. pattern)))) do
+            const name = found:tostring()
+            const kind, size, modified, _, problem = os.stat(name)
+            assert(kind, problem)
+            if kind == "file" then
+                parts[#parts + 1] = name .. ":" .. tostring(modified) .. ":" .. tostring(size)
             end
         end
     end
@@ -87,7 +87,7 @@ local function respond(borrows connection: net.Stream, output: string): nil
     else
         const resolved = target and resolve(output, target)
         if resolved then
-            body = assert(files.read(resolved))
+            body = assert(commands.read(resolved))
             code = "200 OK"
             const types: {
                 [string]: string
@@ -142,12 +142,9 @@ export function serve(port: integer): nil
                     continue
                 end
                 previous = current
-                with
-                    scratch = assert(
-                        files.createTemporaryDirectory(files.TemporaryOptions(directory = commands.root .. "/out"))
-                    )
                 do
-                    const fresh = scratch:toString() .. "/site"
+                    local scratch = assert(os.mktempdir(nil, nil, commands.root .. "/out"))
+                    const fresh = scratch:tostring() .. "/site"
                     const result = commands.capture({
                         commands.compiler(),
                         "build",
@@ -156,10 +153,10 @@ export function serve(port: integer): nil
                         "--output",
                         fresh
                     })
-                    io.stderr:write(result.errorOutput)
+                    io.stderr:write(result.erroroutput)
                     if result:succeeded() then
-                        assert(files.remove(output, true))
-                        assert(files.rename(fresh, output))
+                        assert(os.remove(output, true))
+                        assert(os.rename(fresh, output))
                         print("Rebuilt documentation")
                     else
                         io.stderr:write(result.output .. "\nKeeping the last successful site\n")
