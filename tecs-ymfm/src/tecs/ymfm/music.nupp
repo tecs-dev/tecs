@@ -52,7 +52,7 @@ byte offset where reading stopped. A file is at most 64 MiB, inflated.
 local assets = require("tecs.assets")
 local audio = require("tecs.audio")
 local chipfm = require("tecs.ymfm")
-local compression = require("nupp.compression")
+local encodings = require("bytes")
 local dro = require("tecs.ymfm.dro")
 local music = require("tecs.audio.sequencer")
 local registerlog = require("tecs.ymfm.registerlog")
@@ -277,7 +277,7 @@ local function inflate(bytes: string, name: string): (string?, string?)
         return bytes
     end
     local ok, result = pcall(function(): string
-        return compression.format("gzip"):decompress(bytes, {maxOutputBytes = MAX_BYTES})
+        return encodings.compress("gzip"):decompress(bytes, {maxoutputbytes = MAX_BYTES})
     end)
     if not ok then
         return nil, name .. ": the gzip stream cannot be inflated: " .. tostring(result)
@@ -400,7 +400,7 @@ local function makeChips(mixer: audio.Audio, log: RegisterLog, options: music.Pl
 
             return nil, reason
         end
-        local fm = assert(chip)
+        local fm = chip
         -- Images first: an image set once the voice has started restarts
         -- it, and the restarted voice would lose its placement.
         for class, image in pairs(entry.memory) do

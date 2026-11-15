@@ -2,17 +2,22 @@ local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
 local fm = require("tecs.ymfm")
 
+local nativelibrary = require("tecs.internal.nativelibrary")
+
+const library = nativelibrary.open("tecs_ymfm", "TECS_YMFM_LIBRARY")
+
 -- What the native library reports about each chip, to hold this module's
 -- own tables to it.
-cdef function tecs_ymfm_kind(name: cstring): uint32
 
-cdef function tecs_ymfm_rate(kind: uint32, clock: uint32): uint32
+cdef function tecs_ymfm_kind(name: cstring): uint32 from library
 
-cdef function tecs_ymfm_default_clock(kind: uint32): uint32
+cdef function tecs_ymfm_rate(kind: uint32, clock: uint32): uint32 from library
 
-cdef function tecs_ymfm_limits(kind: uint32): uint32
+cdef function tecs_ymfm_default_clock(kind: uint32): uint32 from library
 
-cdef function tecs_ymfm_reads(kind: uint32, class: uint32): int32
+cdef function tecs_ymfm_limits(kind: uint32): uint32 from library
+
+cdef function tecs_ymfm_reads(kind: uint32, class: uint32): int32 from library
 
 local suite = {}
 
@@ -176,7 +181,7 @@ end
 local function made(harness: Harness, options: fm.Options?): (audio.Audio, fm.Fm)
     local mixer = audio.newAudio({backend = harness.backend, maxVoices = 2})
 
-    return mixer, assert(fm.new(mixer, options))
+    return mixer, (assert(fm.new(mixer, options)))
 end
 
 function suite.startsTheChipAsOneVoiceOfTheMixerOnItsFirstWrite(): nil

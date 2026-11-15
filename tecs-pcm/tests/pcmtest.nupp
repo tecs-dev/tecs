@@ -2,7 +2,6 @@ local assets = require("tecs.assets")
 local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
 local effects = require("tecs.audio.effects")
-local files = require("nupp.io.files")
 local hostpump = require("os.host")
 local pcm = require("tecs.pcm")
 
@@ -65,9 +64,9 @@ end
 --- Writes `bytes` to a temporary WAV file, runs `body` on its path and
 --- removes the file.
 local function temporary(bytes: string, body: function(path: string): nil): nil
-    local file = assert(files.createTemporaryFile(files.TemporaryOptions(suffix = ".wav")))
-    local path = file:toString()
-    assert(files.write(path, bytes))
+    local file = assert(os.mktemp(nil, ".wav"))
+    local path = file:tostring()
+    assert(os.writeatomic(path, bytes))
     body(path)
     file:close()
 end
@@ -215,7 +214,7 @@ function suite.reReadsAFileSoundInPlaceThroughTheMixer(): nil
         local sound = assert(pcm.load(path))
         local params = sound.params
         local id = mixer:addSound(sound)
-        assert(files.write(path, silenceWav(0.2)))
+        assert(os.writeatomic(path, silenceWav(0.2)))
 
         local ok, reason = mixer:reload(path)
         assert(ok)
@@ -226,7 +225,7 @@ function suite.reReadsAFileSoundInPlaceThroughTheMixer(): nil
         assert.eq(mixer:sound(path), sound)
 
         -- A file that no longer decodes leaves the Sound as it was.
-        assert(files.write(path, "not audio any more"))
+        assert(os.writeatomic(path, "not audio any more"))
         local failed, why = mixer:reload(path)
         assert(not failed)
         assert(#assert(why) > 0)

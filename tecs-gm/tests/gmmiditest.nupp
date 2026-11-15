@@ -1,7 +1,6 @@
 local assets = require("tecs.assets")
 local audio = require("tecs.audio")
 local audiobackend = require("tecs.platform.audiobackend")
-local files = require("nupp.io.files")
 local gm = require("tecs.gm")
 local hostpump = require("os.host")
 local midi = require("tecs.gm.midi")
@@ -62,9 +61,9 @@ end
 --- Writes `bytes` to a temporary file, runs `body` on its path and removes
 --- the file.
 local function temporary(bytes: string, suffix: string, body: function(path: string): nil): nil
-    local file = assert(files.createTemporaryFile(files.TemporaryOptions(suffix = suffix)))
-    local path = file:toString()
-    assert(files.write(path, bytes))
+    local file = assert(os.mktemp(nil, suffix))
+    local path = file:tostring()
+    assert(os.writeatomic(path, bytes))
     body(path)
     file:close()
 end
@@ -419,13 +418,13 @@ local function scale(loop: boolean): midi.Song
         track = track .. at(480, 0x80, 65, 0) .. finish(0)
     end
 
-    return assert(midi.parse(smf(0, 480, {track})))
+    return (assert(midi.parse(smf(0, 480, {track}))))
 end
 
 local function midiPlayer(harness: Harness, song: midi.Song, options: music.PlayOptions?): (audio.Audio, music.Player)
     local mixer = audio.newAudio({backend = harness.backend, maxVoices = 8})
 
-    return mixer, assert(midi.playSong(mixer, font(), song, options))
+    return mixer, (assert(midi.playSong(mixer, font(), song, options)))
 end
 
 function suite.schedulesAheadOnTheMixerClock(): nil
@@ -561,7 +560,7 @@ function suite.seeksByResettingAndChasingTheSongState(): nil
         80
     ) .. at(0, 0x91, 40, 100) .. at(960, 0x81, 40, 0) .. at(0, 0x91, 43, 100) .. at(480, 0x81, 43, 0) .. finish(0)
     local harness = newHarness()
-    local mixer, player = midiPlayer(harness, assert(midi.parse(smf(0, 480, {track}))))
+    local mixer, player = midiPlayer(harness, (assert(midi.parse(smf(0, 480, {track})))))
     harness.clock[1] = 1
     local before = #allSent(harness, mixer)
     player:seek(1.5)
@@ -589,7 +588,7 @@ function suite.mutesAChannelAndPausesTheSong(): nil
         100
     ) .. at(0, 0x91, 62, 100) .. at(480, 0x80, 60, 0) .. at(0, 0x81, 62, 0) .. finish(0)
     local harness = newHarness()
-    local mixer, player = midiPlayer(harness, assert(midi.parse(smf(0, 480, {track}))))
+    local mixer, player = midiPlayer(harness, (assert(midi.parse(smf(0, 480, {track})))))
     assert.eq(#sentOf(harness, mixer, "message", 0x91), 1)
     player:setMuted(1, true)
     local cut = sentOf(harness, mixer, "notesOff")
@@ -677,7 +676,7 @@ function suite.followsAReloadOfTheSongHandle(): nil
         assert.eq(held:holds(), 1, "the player holds the song")
         harness.clock[1] = 1
         mixer:update()
-        assert(files.write(path, smf(0, 480, {at(0, 0x90, 72, 100) .. at(9600, 0x80, 72, 0) .. finish(0)})))
+        assert(os.writeatomic(path, smf(0, 480, {at(0, 0x90, 72, 100) .. at(9600, 0x80, 72, 0) .. finish(0)})))
         underPump(function(): boolean
             assert(loader:reload(midi.kind, held))
 

@@ -156,11 +156,11 @@ the YMF288 is the dearest.
 local audio = require("tecs.audio")
 local nativelibrary = require("tecs.internal.nativelibrary")
 
-nativelibrary.open("tecs_ymfm", "TECS_YMFM_LIBRARY")
+const library = nativelibrary.open("tecs_ymfm", "TECS_YMFM_LIBRARY")
 
-cdef function tecs_ymfm_decoder(): voidptr?
+cdef function tecs_ymfm_decoder(): voidptr? from library
 
-cdef function tecs_ymfm_kind(name: cstring): uint32
+cdef function tecs_ymfm_kind(name: cstring): uint32 from library
 
 --- Event operations, from `tecs-audio-abi`: bit 40 up.
 local OP_SHIFT: integer = 1099511627776
