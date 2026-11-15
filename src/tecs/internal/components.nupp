@@ -13,7 +13,6 @@ local componentids = require("tecs.internal.componentids")
 local snapshotvalue = require("tecs.internal.snapshotvalue")
 local ffistorage = require("tecs.internal.ffistorage")
 local derived = require("tecs.internal.derived")
-local derive = require("nupp.derive")
 local ffi = require("ffi")
 
 --- A registered component definition.
@@ -881,8 +880,7 @@ export function fromType(witness: any, options: any, relationship: boolean): Com
     if type(witness) ~= "table" and type(witness) ~= "cdata" then
         error("component type must be a record or struct declaration", 2)
     end
-    const entry = derive.entry(witness)
-    const metadata = entry and entry.schema.data and entry.schema.data.tecs or nil
+    const metadata = types.reflect.derived(witness, "tecs")
     if metadata ~= nil and (metadata.relationship == true) ~= relationship then
         error("component factory does not match the declaration's ECS derive", 2)
     end
@@ -900,7 +898,7 @@ export function fromType(witness: any, options: any, relationship: boolean): Com
     if type(configured.name) ~= "string" or configured.name == "" then
         error("component requires an ECS derive or an explicit non-empty name", 2)
     end
-    const initializer = derive.initializer(witness)
+    const initializer = types.reflect.initializer(witness)
     const native = type(witness) == "cdata"
     if relationship and configured.default ~= nil then
         error("relationship construction requires a target; use construct, not default", 2)
@@ -961,8 +959,7 @@ local function derivedDefinition(witness: any): Component
     if known ~= nil then
         return known
     end
-    const entry = derive.entry(witness)
-    const metadata = entry and entry.schema.data and entry.schema.data.tecs or nil
+    const metadata = types.reflect.derived(witness, "tecs")
     if metadata == nil then
         error("ECS value must derive Component or Relationship", 3)
     end
@@ -1002,7 +999,7 @@ end
 local function valueDefinition(value: any): Component?
     if type(value) == "table" then
         const witness = getmetatable(value)
-        if witness ~= nil and derive.entry(witness) ~= nil then
+        if witness ~= nil and types.reflect.derived(witness as Type<any>, "tecs") ~= nil then
             return derivedDefinition(witness)
         end
     elseif type(value) == "cdata" then
@@ -1016,18 +1013,18 @@ local function valueDefinition(value: any): Component?
         if cached ~= nil then
             return cached
         end
-        if derive.entry(witness) ~= nil then
+        if types.reflect.derived(witness as Type<any>, "tecs") ~= nil then
             const definition = derivedDefinition(witness)
             nativeReferences[typeId] = definition
             return definition
         end
         -- A borrowed row has a reference CType. Resolve it once per reference type.
         local found: Component? = nil
-        derive.forEach(function(entry: derive.Entry): nil
-            if entry.schema.data.tecs ~= nil and type(entry.mt) == "cdata" and ffi.istype(entry.mt, value) then
-                found = derivedDefinition(entry.mt)
+        for declaration in types.reflect.declarations("tecs") do
+            if type(declaration) == "cdata" and ffi.istype(declaration, value) then
+                found = derivedDefinition(declaration)
             end
-        end)
+        end
         if found ~= nil then
             nativeReferences[typeId] = found
         end
@@ -1218,16 +1215,15 @@ export function findByName(name: string): Component?
         return known
     end
     local found: Component? = nil
-    derive.forEach(function(entry: derive.Entry): nil
-        const metadata = entry.schema.data.tecs
-        if metadata ~= nil and metadata.name == name then
-            const candidate = derivedDefinition(entry.mt)
+    for declaration, metadata in types.reflect.declarations("tecs") do
+        if metadata.name == name then
+            const candidate = derivedDefinition(declaration)
             if found ~= nil and found ~= candidate then
                 error("duplicate derived component name " .. name, 2)
             end
             found = candidate
         end
-    end)
+    end
 
     return found
 end
@@ -1259,11 +1255,9 @@ end
 --- Returns a fresh name-to-component snapshot of the registry.
 --- @return the caller-owned registry snapshot
 export function declared(): {[string]: Component}
-    derive.forEach(function(entry: derive.Entry): nil
-        if entry.schema.data.tecs ~= nil then
-            derivedDefinition(entry.mt)
-        end
-    end)
+    for declaration in types.reflect.declarations("tecs") do
+        derivedDefinition(declaration)
+    end
     local result: {[string]: Component} = {}
     for name, component in pairs(registeredByName) do
         if targetById[component.componentId] == nil then
