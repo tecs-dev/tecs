@@ -296,6 +296,12 @@ a string in that clause, which spells one platform's file name and only resolves
 already looks, and do not declare bare symbols, which resolve through a process namespace that on Windows
 never includes a library loaded later. `src/tecs/physics/rapier.nupp` is the worked example.
 
+Do not call `ffi.load` for a Tecs library anywhere else. A declaration copies its function pointer out of the
+handle once, when its module loads, and LuaJIT unloads a library when its handle is collected, after which
+every bound function jumps into unmapped memory. `nativelibrary.open` keeps every handle it returns for the
+life of the process; a module-level `const` alone does not, because nothing reads it after the declarations
+bind.
+
 ### Testing
 
 - Add or update tests when changing behavior, fixing bugs or extending public APIs.

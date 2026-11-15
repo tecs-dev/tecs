@@ -12,8 +12,10 @@ process on macOS, so `DYLD_LIBRARY_PATH` is not an answer either.
 `open` runs one search that covers both a packaged install and a development
 checkout, and returns the loaded library. Each declaration then names that
 handle in its `from` clause, so it binds its symbol from the library itself.
-Keep the handle in a module-level binding: a function pointer copied out of a
-library does not keep the library loaded.
+A declaration copies its function pointer out of the handle once, when its
+module loads, and the copy does not keep the library loaded. LuaJIT unloads a
+library when its handle is collected, so `open` keeps every handle it returns
+for the life of the process.
 
 ```nupp
 const physics = tecs.internal.nativelibrary.open("tecs_physics", "TECS_PHYSICS_LIBRARY")
@@ -60,21 +62,12 @@ local function readable(path: string): boolean
     return true
 end
 
---- Loads a Tecs native library and returns its handle.
----
---- The environment variable named by `override` is tried first and names an
---- exact file. Otherwise the search walks up from this module through eight
---- ancestors, looking under each for `lib` and then for a Cargo target
---- directory. A plain load by file name runs last, so an installed library
---- still resolves and so its own diagnostic is what a failure reports.
----
---- The handle is what a `cdef function ... from` clause names, and has to stay
---- reachable for as long as the functions bound from it are called.
+--- Runs the search `open` describes and loads the first library it finds.
 --- @param stem the library name without prefix or extension
 --- @param override the environment variable naming an exact file, if any
---- @return the loaded library, for `from` clauses to bind from
+--- @return the loaded library
 --- @raises string when no candidate can be loaded
-export function open(stem: string, override: string?): any
+local function load(stem: string, override: string?): any
     if override ~= nil then
         local named = os.getenv(override)
         if named ~= nil then
@@ -95,4 +88,33 @@ export function open(stem: string, override: string?): any
     end
 
     return ffi.load(file)
+end
+
+--- Every handle `open` returned, by stem. Once the declarations bound from a
+--- handle have copied their function pointers out, nothing else references it.
+local opened: {[string]: any} = {}
+
+--- Loads a Tecs native library and returns its handle.
+---
+--- The environment variable named by `override` is tried first and names an
+--- exact file. Otherwise the search walks up from this module through eight
+--- ancestors, looking under each for `lib` and then for a Cargo target
+--- directory. A plain load by file name runs last, so an installed library
+--- still resolves and so its own diagnostic is what a failure reports.
+---
+--- The handle is what a `cdef function ... from` clause names. A stem loads
+--- once per process: a later call returns the same handle, and this module
+--- keeps it reachable so the functions bound from it stay callable.
+--- @param stem the library name without prefix or extension
+--- @param override the environment variable naming an exact file, if any
+--- @return the loaded library, for `from` clauses to bind from
+--- @raises string when no candidate can be loaded
+export function open(stem: string, override: string?): any
+    local handle = opened[stem]
+    if handle == nil then
+        handle = load(stem, override)
+        opened[stem] = handle
+    end
+
+    return handle
 end
