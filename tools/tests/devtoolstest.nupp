@@ -142,12 +142,15 @@ function suite.commandsRunTogetherActuallyOverlap(): nil
         const first = root .. "/first"
         const second = root .. "/second"
 
+        -- Each side waits up to 30 seconds for the other to start. Starting
+        -- means compiling through `nupp run`, which takes seconds on a busy
+        -- runner, and only a run that never overlaps waits that long.
         local function rendezvous(mine: string, peer: string): string
             return (
                 [[
 
 assert(os.writeatomic(%q, "ready"))
-for _ = 1, 100 do
+for _ = 1, 1500 do
     if os.stat(%q) == "file" then
         return
     end
