@@ -1,4 +1,3 @@
-
 local framepacket = require("tecs.internal.framepacket")
 local gfx = require("tecs.gfx")
 local host = require("tecs.host")

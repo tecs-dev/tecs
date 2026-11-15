@@ -1,4 +1,3 @@
-
 local passes = require("tecs.gpu.passes")
 
 local suite = {}

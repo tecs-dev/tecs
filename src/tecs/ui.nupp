@@ -1740,7 +1740,17 @@ export function install(exclusive world: World, options: Options?): nil
     end
 
     world:observe(0, MouseMotion, function(event: MouseMotion): nil
-        queue(platformevents.pointerMoved(event.x, event.y, event.dx, event.dy, event.window, event.timestamp, event.sequence))
+        queue(
+            platformevents.pointerMoved(
+                event.x,
+                event.y,
+                event.dx,
+                event.dy,
+                event.window,
+                event.timestamp,
+                event.sequence
+            )
+        )
     end)
     world:observe(0, MouseDown, function(event: MouseDown): nil
         queue(

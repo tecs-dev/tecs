@@ -190,7 +190,10 @@ local function reply(id: any, result: {[string]: any}): string
 end
 
 local function fail(id: any, code: integer, message: string): string
-    return json.encodevalue({jsonrpc = "2.0", id = id ?? json.NULL, error = {code = code, message = message}}, json.NULL)
+    return json.encodevalue(
+        {jsonrpc = "2.0", id = id ?? json.NULL, error = {code = code, message = message}},
+        json.NULL
+    )
 end
 
 --- Runs one tool handler and returns the JSON-RPC result object for it.

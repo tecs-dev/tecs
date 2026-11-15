@@ -1,4 +1,3 @@
-
 local application = require("tecs.application")
 local assets = require("tecs.assets")
 local ecs = require("tecs.ecs")

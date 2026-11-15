@@ -3,7 +3,6 @@ const {type Archetype} = require("tecs.ecs")
 const {OnSpawn} = require("tecs.ecs")
 const {OnDespawn} = require("tecs.ecs")
 
-
 local record Point
     x: number
 end

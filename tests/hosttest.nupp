@@ -1,4 +1,3 @@
-
 local ecs = require("tecs.ecs")
 local gfx = require("tecs.gfx")
 local application = require("tecs.application")

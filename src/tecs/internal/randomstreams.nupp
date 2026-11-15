@@ -6,7 +6,6 @@ Generation and state transitions belong to `nupp.random`; this module owns
 only the Tecs stream naming and persistence contract.
 ]]
 
-
 -- This persisted key and seed derivation are compatibility surfaces from Teal.
 
 --- Names the reserved world snapshot participant.
@@ -46,10 +45,7 @@ end
 local function streamSeed(seed: integer, name: string): integer
     local hash = math.i32.wrap(0x811C9DC5)
     for index = 1, #name do
-        hash = math.i32.mul(
-            math.i32.xorbits(hash, math.i32.wrap(string.byte(name, index))),
-            math.i32.wrap(0x01000193)
-        )
+        hash = math.i32.mul(math.i32.xorbits(hash, math.i32.wrap(string.byte(name, index))), math.i32.wrap(0x01000193))
     end
 
     return mix32(math.i32.xorbits(hash, mix32(math.i32.wrap(seed)))) as integer

@@ -1,7 +1,6 @@
 const ecs = require("tecs.ecs")
 const {type World} = require("tecs.ecs")
 
-
 const tag = ecs.newTagComponent({name = "test.ConditionalBarrier"})
 local suite = {}
 

@@ -2,7 +2,6 @@ const ecs = require("tecs.ecs")
 const {type RunIf} = require("tecs.ecs")
 const {type World} = require("tecs.ecs")
 
-
 local suite = {}
 
 function suite.removesDelayedAnonymousSystemsAfterOneRun(): nil

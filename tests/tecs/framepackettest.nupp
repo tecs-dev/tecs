@@ -766,9 +766,7 @@ function suite.bulkInstancesMatchScalarRoundingAndOwnTheirBytes(): nil
         local x = values[(index - 1) % #values + 1]
         local expected = bytes.Buffer.create()
         local writer = expected:writer():scalar()
-        writer:writefloat32(math.f32.narrow(x))
-            :writefloat32(math.f32.narrow(-0.1))
-            :writefloat32(math.f32.narrow(0.3))
+        writer:writefloat32(math.f32.narrow(x)):writefloat32(math.f32.narrow(-0.1)):writefloat32(math.f32.narrow(0.3))
         own.drop(writer)
         assert.eq(original:sub(at, at + 11), expected:tostring())
         own.drop(expected)

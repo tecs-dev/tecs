@@ -1,6 +1,5 @@
 module tecs.internal.meshlights
 
-
 local mesh = require("tecs.internal.meshcomponents")
 local components = require("tecs.internal.components")
 local world = require("tecs.internal.world")

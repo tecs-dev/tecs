@@ -58,7 +58,9 @@ local function equalTree(actual: any, expected: any): nil
 end
 
 function suite.restoredInputSchemasMatchTheHistoricalWireListing(): nil
-    local historical = json.decodevalue(assert(assert(io.open("tests/fixtures/mcp/historical-tools.json", "rb")):read("a")))
+    local historical = json.decodevalue(
+        assert(assert(io.open("tests/fixtures/mcp/historical-tools.json", "rb")):read("a"))
+    )
     local checked = 0
     for _, tool in ipairs(historical.tools) do
         if schemas.inputs[tool.name] ~= nil then

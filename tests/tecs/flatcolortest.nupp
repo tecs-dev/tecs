@@ -1,4 +1,3 @@
-
 local flatcolor = require("flatcolor")
 local framepacket = require("tecs.internal.framepacket")
 local host = require("tecs.host")
