@@ -31,6 +31,19 @@ function suite.completedCapturesReturnPixelsAndPngAndSaveThem(): nil
     assert.eq(assert(io.open(path, "rb")):read("a"), "png bytes")
 end
 
+function suite.reportsAFileFlushFailure(): nil
+    if os.info().platform ~= "linux" then
+        return
+    end
+    local capture = screenshot.request()
+    local id = assert(screenshot.nextRequest())
+    screenshot.complete(id, 1, 1, "rgba", "png bytes", nil)
+    -- This small write is buffered; /dev/full refuses the flush at close.
+    const saved, reason = screenshot.save(capture, "/dev/full")
+    assert.eq(saved, false)
+    assert(reason ~= nil)
+end
+
 function suite.shutdownCompletesPendingRequestsWithCancellation(): nil
     local capture = screenshot.request()
     screenshot.cancelPending()

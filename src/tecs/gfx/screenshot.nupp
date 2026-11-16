@@ -76,7 +76,7 @@ export function save(capture: Capture, path: string): boolean, string?
         return false, problem
     end
 
-    return closed ~= false, failure
+    return closed == true, failure
 end
 
 --- Consumes a queued request for the rendering host.

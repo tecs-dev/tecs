@@ -4146,7 +4146,7 @@ local function saveSnapshotWith(
             end
             const written, problem = file:write(output:tostring())
             const closed, failure = file:close()
-            if written == nil or closed == false then
+            if written == nil or not closed then
                 error("snapshot write failed: " .. (problem or failure or target), 3)
             end
         end
