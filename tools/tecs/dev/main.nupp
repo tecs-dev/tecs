@@ -77,6 +77,9 @@ local function test(args: {string}): nil
         end
     end
     const env = native.libraries()
+    -- The outer test command built the launcher in its own output directory.
+    -- The internal runner must load the game modules built here instead.
+    env.NUPP_TEST_BUILD = commands.root .. "/out/nupp"
     commands.run({commands.compiler(), "build", "--target", "headless"}, env)
     const result = commands.capture(
         commands.append({commands.compiler(), "test", "--internal-runner", "--json"}, args),

@@ -199,7 +199,7 @@ export function sdk(): {[string]: string}
         "CARGO_ENCODED_RUSTFLAGS",
         compilerRoot .. "/scripts/toolchain",
         "host-library",
-        "base,native-files,native-net,native-compression,native-uuid"
+        "base,native-files,native-net,native-compression,native-uuid,native-time,native-tls,native-process"
     })
     const directory = assert(text:match("([^\r\n]+)%s*$"), "the SDK staging command returned no path")
     assert(os.stat(io.Path.of(directory, "libnupp.a")) == "file", "the staged SDK has no libnupp.a")

@@ -172,7 +172,8 @@ jobs:
             # the suites run in the full Nupp runtime and never load a
             # component, so this is the only step that reads the reduced one.
             - working-directory: tecs
-              run: nupp task ex-flatcolor --headless --frames 2
+              # Exercise SDK auto-staging as well as the preconfigured SDK above.
+              run: env -u NUPP_SDK nupp task ex-flatcolor --headless --frames 2
             - working-directory: tecs
               run: nupp task ex-sprites --headless --frames 3
             - working-directory: tecs

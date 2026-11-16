@@ -249,6 +249,12 @@ return {
         outDir = "out/nupp",
         default = "headless",
         targets = {
+            ["test-launcher"] = {
+                kind = "modules",
+                description = "Build the test launcher before native services exist",
+                sources = { "tools/run.nupp" },
+                outDir = "out/test-launcher",
+            },
             headless = {
                 kind = "modules",
                 description = "Build the headless Tecs modules",
@@ -523,9 +529,9 @@ return {
         },
     },
 
-    -- The test command builds `headless` itself, after Cargo has built the
-    -- native services its bindings resolve.
-    test = { argv = { "nupp", "run", "tools/run.nupp", "test" } },
+    -- Nupp always builds this target before the test command. Only the launcher
+    -- can build before Cargo supplies the libraries `headless` resolves.
+    test = { build = "test-launcher", argv = { "nupp", "run", "tools/run.nupp", "test" } },
 
     tasks = developmentTasks,
 }
