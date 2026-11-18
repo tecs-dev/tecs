@@ -1,0 +1,589 @@
+local controller = require("tecs.controller")
+local ecs = require("tecs.ecs")
+local gamepadbackend = require("tecs.platform.gamepadbackend")
+local input = require("tecs.input")
+local platformevents = require("tecs.platform.events")
+
+const suite = {}
+
+local function key(state: input.Input, down: boolean, name: string): nil
+    state:handleEvent(platformevents.key(down, name, "", nil, 0, false))
+end
+
+local function addPad(state: input.Input, id: integer): input.Gamepad
+    state:handleEvent(platformevents.gamepadDevice(true, id))
+    return assert(state:gamepadById(id))
+end
+
+local function movement(): controller.Bindings
+    return {
+        controls = {
+            jump = {"key:Space", "button:south"},
+            attack = {"key:KeyZ", "mouse:left", "button:west"},
+            left = {"key:KeyA", "axis:leftX-"},
+            right = {"key:KeyD", "axis:leftX+"},
+            up = {"key:KeyW", "axis:leftY-"},
+            down = {"key:KeyS", "axis:leftY+"},
+            aimX = {"axis:rightX"},
+            accelerate = {"axis:rightTrigger+"},
+        },
+        pairs = {move = {"left", "right", "up", "down"}},
+    }
+end
+
+function suite.readsKeyboardAndMouseBindingsAndUnknownActions(): nil
+    const state = input.newInput()
+    const manager = controller.newManager(state)
+    const player = manager:addController(movement())
+    assert(manager:get(1) == player)
+    assert(manager:get(2) == nil)
+    assert.eq(player.deadzone, 0.5)
+    assert(not player.auto)
+    assert(player.gamepad == nil)
+    assert(not player:isDown("jump"))
+    key(state, true, "Space")
+    assert(player:isPressed("jump"))
+    assert(player:isDown("jump"))
+    assert.eq(player:getRaw("jump"), 1)
+    state:beginFrame()
+    assert(player:isDown("jump"))
+    assert(not player:isPressed("jump"))
+    key(state, false, "Space")
+    assert(player:isReleased("jump"))
+    assert(not player:isDown("jump"))
+    state:handleEvent(platformevents.pointerButton(true, 1, 0, 0))
+    assert(player:isDown("attack"))
+    assert(player:isPressed("attack"))
+    state:beginFrame()
+    state:handleEvent(platformevents.pointerButton(false, 1, 0, 0))
+    assert(player:isReleased("attack"))
+    assert(not player:isDown("missing"))
+    assert(not player:isPressed("missing"))
+    assert(not player:isReleased("missing"))
+    assert.eq(player:getRaw("missing"), 0)
+    const horizontal, vertical = player:getPair("missing")
+    assert.eq(horizontal, 0)
+    assert.eq(vertical, 0)
+end
+
+function suite.preservesPhysicalEdgesWhenAnotherBindingRemainsHeld(): nil
+    const state = input.newInput()
+    const player = controller.newManager(state):addController(movement())
+    key(state, true, "KeyZ")
+    state:beginFrame()
+    state:handleEvent(platformevents.pointerButton(true, 1, 0, 0))
+    assert(player:isPressed("attack"))
+    key(state, false, "KeyZ")
+    assert(player:isReleased("attack"))
+    assert(player:isDown("attack"))
+end
+
+function suite.latchesShortKeyboardMouseAndGamepadTapsForOneFixedStep(): nil
+    const state = input.newInput()
+    const pad = addPad(state, 1)
+    const player = controller.newManager(state)
+        :addController({controls = {jump = {"key:Space"}, attack = {"mouse:left"}, fire = {"button:west"}},}, {
+            gamepad = pad
+        })
+    key(state, true, "Space")
+    key(state, false, "Space")
+    state:handleEvent(platformevents.pointerButton(true, 1, 0, 0))
+    state:handleEvent(platformevents.pointerButton(false, 1, 0, 0))
+    state:handleEvent(platformevents.gamepadButton(true, 1, 3))
+    state:handleEvent(platformevents.gamepadButton(false, 1, 3))
+    state:beginFrame()
+    assert(not player:isPressed("jump"))
+    state:enterFixedPhase()
+    assert(player:isPressed("jump"))
+    assert(player:isReleased("jump"))
+    assert(player:isPressed("attack"))
+    assert(player:isReleased("attack"))
+    assert(player:isPressed("fire"))
+    assert(player:isReleased("fire"))
+    assert(not player:isDown("attack"))
+    state:exitFixedPhase()
+    state:enterFixedPhase()
+    assert(not player:isPressed("jump"))
+    assert(not player:isReleased("jump"))
+    assert(not player:isPressed("attack"))
+    assert(not player:isReleased("attack"))
+    assert(not player:isPressed("fire"))
+    assert(not player:isReleased("fire"))
+    state:exitFixedPhase()
+end
+
+function suite.respectsCaptureWithoutInventingEdgesWhenGameplayResumes(): nil
+    const state = input.newInput()
+    const pad = addPad(state, 1)
+    const player = controller.newManager(state):addController(movement(), {gamepad = pad, deadzone = 0.1})
+    key(state, true, "Space")
+    state:handleEvent(platformevents.gamepadAxis(1, 1, 0.8))
+    state:handleEvent(platformevents.gamepadButton(true, 1, 3))
+    state:pushLayer("menu")
+    assert(not player:isDown("jump"))
+    assert(not player:isPressed("jump"))
+    assert(not player:isReleased("jump"))
+    assert.eq(player:getRaw("right"), 0)
+    assert(not player:isDown("attack"))
+    state:popLayer()
+    assert(player:isDown("jump"))
+    assert(not player:isPressed("jump"))
+    assert(not player:isReleased("jump"))
+    assert.eq(player:getRaw("right"), 0.8)
+    state:enterFixedPhase()
+    assert(not player:isPressed("jump"))
+    assert(not player:isPressed("attack"))
+    state:exitFixedPhase()
+end
+
+function suite.readsRawDirectionalAndNumericGamepadBindings(): nil
+    const state = input.newInput()
+    const pad = addPad(state, 1)
+    const player = controller.newManager(state):addController(movement(), {gamepad = pad})
+    state:handleEvent(platformevents.gamepadAxis(1, 1, 0.4))
+    assert.eq(player:getRaw("right"), 0)
+    state:handleEvent(platformevents.gamepadAxis(1, 1, -0.75))
+    assert.eq(player:getRaw("left"), 0.75)
+    assert.eq(player:getRaw("right"), 0)
+    assert(not player:isPressed("left"))
+    assert(not player:isReleased("left"))
+    state:handleEvent(platformevents.gamepadAxis(1, 3, -0.8))
+    assert.eq(player:getRaw("aimX"), -0.8)
+    state:handleEvent(platformevents.gamepadAxis(1, 6, 0.6))
+    assert.eq(player:getRaw("accelerate"), 0.6)
+    player:rebind({controls = {fire = {"button:3"}, aim = {"axis:3"}, click = {"mouse:3"}}})
+    state:handleEvent(platformevents.gamepadButton(true, 1, 3))
+    assert(player:isPressed("fire"))
+    assert.eq(player:getRaw("aim"), -0.8)
+    state:handleEvent(platformevents.pointerButton(true, 3, 0, 0))
+    assert(player:isDown("click"))
+end
+
+function suite.prefersTheFirstNonzeroBindingAndCancelsOppositeDirections(): nil
+    const state = input.newInput()
+    const pad = addPad(state, 1)
+    const player = controller.newManager(state):addController(movement(), {gamepad = pad, deadzone = 0})
+    state:handleEvent(platformevents.gamepadAxis(1, 1, 0.25))
+    assert.eq(player:getRaw("right"), 0.25)
+    key(state, true, "KeyD")
+    assert.eq(player:getRaw("right"), 1)
+    key(state, true, "KeyA")
+    key(state, true, "KeyW")
+    const horizontal, vertical = player:getPair("move")
+    assert.eq(horizontal, 0)
+    assert.eq(vertical, -1)
+end
+
+function suite.preservesPartialAnalogMagnitudeAndLimitsDigitalDiagonals(): nil
+    const state = input.newInput()
+    const pad = addPad(state, 1)
+    const player = controller.newManager(state):addController(movement(), {gamepad = pad, deadzone = 0})
+    state:handleEvent(platformevents.gamepadAxis(1, 1, 0.3))
+    state:handleEvent(platformevents.gamepadAxis(1, 2, 0.4))
+    local horizontal, vertical = player:getPairNormalized("move")
+    assert(math.abs(horizontal - 0.3) < 0.000001)
+    assert(math.abs(vertical - 0.4) < 0.000001)
+    state:handleEvent(platformevents.gamepadAxis(1, 1, 0))
+    state:handleEvent(platformevents.gamepadAxis(1, 2, 0))
+    key(state, true, "KeyD")
+    key(state, true, "KeyW")
+    horizontal, vertical = player:getPairNormalized("move")
+    assert(math.abs(horizontal - math.sqrt(0.5)) < 0.000001)
+    assert(math.abs(vertical + math.sqrt(0.5)) < 0.000001)
+    assert(math.abs(horizontal * horizontal + vertical * vertical - 1) < 0.000001)
+end
+
+function suite.copiesMappingsAndRejectsAnInvalidRebindAtomically(): nil
+    const state = input.newInput()
+    const bindings = movement()
+    const player = controller.newManager(state):addController(bindings)
+    const jump: {string} = assert(bindings.controls.jump)
+    jump[1] = "key:KeyQ"
+    assert(bindings ~= player.bindings)
+    key(state, true, "Space")
+    assert(player:isDown("jump"))
+    assert.raises(
+        function(): nil
+            player:rebind({controls = {jump = {"key:KeyQ"}}, pairs = {move = {"jump", "missing", "jump", "jump"}}})
+        end,
+        "unknown action"
+    )
+    assert(player:isDown("jump"))
+    player:rebind({controls = {jump = {"key:KeyQ"}}})
+    assert(not player:isDown("jump"))
+    key(state, true, "KeyQ")
+    assert(player:isDown("jump"))
+    assert.eq(player:getRaw("left"), 0)
+end
+
+function suite.validatesBindingsAndPairsBeforeRegisteringAPlayer(): nil
+    const manager = controller.newManager(input.newInput())
+    const invalid = {
+        "key",
+        "key:",
+        ":Space",
+        "key:Space:extra",
+        "mouse:0",
+        "mouse:side",
+        "button:triangle",
+        "button:0",
+        "axis:leftX++",
+        "axis:0",
+        "axis:throttle",
+        "hat:xu",
+        "hat:0u",
+        "hat:1",
+        "hat:1banana",
+        "unknown:value"
+    }
+    for index = 1, #invalid do
+        assert.raises(function(): nil
+            manager:addController({controls = {jump = {invalid[index]}}})
+        end)
+    end
+    assert.raises(
+        function(): nil
+            manager:addController({controls = {[""] = {"key:Space"}}})
+        end,
+        "names must not be empty"
+    )
+    assert.raises(
+        function(): nil
+            manager:addController({controls = {jump = {"key:Space"}}, pairs = {move = {"jump"}}})
+        end,
+        "exactly four"
+    )
+    assert.eq(#manager.controllers, 0)
+end
+
+function suite.retainsLegacyHatMappingsAndReportsUnavailableQueries(): nil
+    const manager = controller.newManager(input.newInput())
+    const directions = {"c", "u", "ru", "r", "rd", "d", "ld", "l", "lu"}
+    for index = 1, #directions do
+        const text = "hat:2" .. directions[index]
+        const player = manager:addController({controls = {direction = {text}}})
+        const bindings: {string} = assert(player.bindings.controls.direction)
+        assert.eq(bindings[1], text)
+        assert.raises(
+            function(): nil
+                local _ = player:getRaw("direction")
+            end,
+            "hat bindings are unavailable"
+        )
+    end
+    const player = manager:addController({
+        controls = {left = {"hat:1l"}, right = {"hat:1r"}, up = {"hat:1u"}, down = {"hat:1d"}},
+        pairs = {move = {"left", "right", "up", "down"}},
+    })
+    assert.raises(
+        function(): nil
+            local _ = player:isDown("up")
+        end,
+        "hat bindings are unavailable"
+    )
+    assert.raises(
+        function(): nil
+            local _ = player:isPressed("up")
+        end,
+        "hat bindings are unavailable"
+    )
+    assert.raises(
+        function(): nil
+            local _ = player:isReleased("up")
+        end,
+        "hat bindings are unavailable"
+    )
+    assert.raises(
+        function(): nil
+            local _ = player:getPair("move")
+        end,
+        "hat bindings are unavailable"
+    )
+    assert.raises(
+        function(): nil
+            local _ = player:getPairNormalized("move")
+        end,
+        "hat bindings are unavailable"
+    )
+    player:rebind({controls = {up = {"hat:3lu"}}})
+    const bindings: {string} = assert(player.bindings.controls.up)
+    assert.eq(bindings[1], "hat:3lu")
+    assert.raises(
+        function(): nil
+            local _ = player:getRaw("up")
+        end,
+        "hat bindings are unavailable"
+    )
+end
+
+function suite.onlyReportsAnUnavailableHatWhenTheQueryEvaluatesIt(): nil
+    const state = input.newInput()
+    const player = controller.newManager(state):addController({
+        controls = {
+            jump = {"key:Space", "hat:1u"},
+            left = {"hat:1l"},
+            right = {"hat:1r"},
+            up = {"hat:1u"},
+            down = {"hat:1d"},
+        },
+        pairs = {move = {"left", "right", "up", "down"}},
+    })
+    key(state, true, "Space")
+    assert(player:isDown("jump"))
+    assert(player:isPressed("jump"))
+    assert.eq(player:getRaw("jump"), 1)
+    state:beginFrame()
+    key(state, false, "Space")
+    assert(player:isReleased("jump"))
+    assert.raises(
+        function(): nil
+            local _ = player:getRaw("jump")
+        end,
+        "hat bindings are unavailable"
+    )
+    state:pushLayer("menu")
+    assert(not player:isDown("up"))
+    assert(not player:isPressed("up"))
+    assert(not player:isReleased("up"))
+    assert.eq(player:getRaw("up"), 0)
+    const horizontal, vertical = player:getPairNormalized("move")
+    assert.eq(horizontal, 0)
+    assert.eq(vertical, 0)
+    state:popLayer()
+    assert.raises(
+        function(): nil
+            local _ = player:isDown("up")
+        end,
+        "hat bindings are unavailable"
+    )
+end
+
+function suite.assignsDistinctGamepadsAndPrefersActivityEvenUnderCapture(): nil
+    const state = input.newInput()
+    const first = addPad(state, 1)
+    const second = addPad(state, 2)
+    state:handleEvent(platformevents.gamepadButton(true, 2, 1))
+    state:pushLayer("menu")
+    const manager = controller.newManager(state)
+    const player1 = manager:addController(movement(), {auto = true})
+    const player2 = manager:addController(movement(), {auto = true})
+    const player3 = manager:addController(movement(), {auto = true})
+    assert(player1.gamepad == second)
+    assert(player2.gamepad == first)
+    assert(player3.gamepad == nil)
+    assert(not player1:isDown("jump"))
+    manager:removeController(player1)
+    assert(player1.gamepad == nil)
+    assert(not player1.auto)
+    manager:refreshDevices()
+    assert(player3.gamepad == second)
+    assert(manager:get(1) == player2)
+end
+
+function suite.prefersSignificantAxisActivityAndIgnoresDrift(): nil
+    const state = input.newInput()
+    const first = addPad(state, 1)
+    const second = addPad(state, 2)
+    const manager = controller.newManager(state)
+    state:handleEvent(platformevents.gamepadAxis(2, 1, 0.4))
+    const player = manager:addController(movement(), {auto = true})
+    assert(player.gamepad == first)
+    player:resetGamepad(nil)
+    state:handleEvent(platformevents.gamepadAxis(2, 1, -0.8))
+    player:resetGamepad({auto = true})
+    assert(player.gamepad == second)
+end
+
+function suite.reassignsAfterDisconnectAndLeavesManualPlayersUnassigned(): nil
+    const state = input.newInput()
+    const first = addPad(state, 1)
+    const second = addPad(state, 2)
+    const manager = controller.newManager(state)
+    const player = manager:addController(movement(), {auto = true})
+    const manual = manager:addController(movement(), {gamepad = first})
+    state:handleEvent(platformevents.gamepadButton(true, 1, 1))
+    assert(player:isDown("jump"))
+    state:handleEvent(platformevents.gamepadDevice(false, 1))
+    assert(not player:isDown("jump"))
+    manager:refreshDevices()
+    assert(player.gamepad == second)
+    assert(manual.gamepad == nil)
+    assert(not manual.auto)
+    state:handleEvent(platformevents.gamepadDevice(false, 2))
+    manager:refreshDevices()
+    assert(player.gamepad == nil)
+    const reconnected = addPad(state, 1)
+    manager:refreshDevices()
+    assert(player.gamepad == reconnected)
+    assert(reconnected ~= first)
+    assert(not first.connected)
+end
+
+function suite.resetsAssignmentsAndNotifiesOnlyWhenTheDeviceChanges(): nil
+    const state = input.newInput()
+    const first = addPad(state, 1)
+    const second = addPad(state, 2)
+    const manager = controller.newManager(state)
+    const player = manager:addController(movement(), {auto = true, deadzone = 0.25})
+    local notifications = 0
+    player.onGamepadChanged = function(
+        changed: controller.Controller,
+        current: input.Gamepad?,
+        previous: input.Gamepad?
+    ): nil
+        assert(changed == player)
+        assert(current ~= previous)
+        notifications = notifications + 1
+    end
+    player:setGamepad(first)
+    assert.eq(notifications, 0)
+    assert(not player.auto)
+    player:setGamepad(second)
+    assert.eq(notifications, 1)
+    player:resetGamepad(nil)
+    assert(player.gamepad == nil)
+    assert.eq(notifications, 2)
+    player:resetGamepad({auto = true, deadzone = 0})
+    assert(player.gamepad == first)
+    assert(player.auto)
+    assert.eq(player.deadzone, 0)
+    player:rebind({controls = {jump = {"button:south"}}})
+    assert(player.gamepad == first)
+    assert.eq(player.deadzone, 0)
+    player:resetGamepad({gamepad = second, auto = true})
+    assert(player.gamepad == second)
+    assert(not player.auto)
+end
+
+function suite.rejectsForeignAndRetiredGamepadsAndInvalidConfiguration(): nil
+    const state = input.newInput()
+    const pad = addPad(state, 1)
+    const foreign = addPad(input.newInput(), 1)
+    const manager = controller.newManager(state)
+    const player = manager:addController(movement(), {gamepad = pad})
+    assert.raises(
+        function(): nil
+            player:setGamepad(foreign)
+        end,
+        "this input state"
+    )
+    assert(player.gamepad == pad)
+    assert.raises(
+        function(): nil
+            player:resetGamepad({deadzone = -0.1})
+        end,
+        "deadzone"
+    )
+    assert(player.gamepad == pad)
+    assert.raises(
+        function(): nil
+            manager:addController(movement(), {deadzone = 1.1})
+        end,
+        "deadzone"
+    )
+    assert.raises(
+        function(): nil
+            manager:addController(movement(), {deadzone = 0 / 0})
+        end,
+        "deadzone"
+    )
+    state:handleEvent(platformevents.gamepadDevice(false, 1))
+    assert.raises(
+        function(): nil
+            player:setGamepad(pad)
+        end,
+        "connected"
+    )
+    assert.eq(#manager.controllers, 1)
+end
+
+function suite.playsIdentificationRumbleAndReportsUnsupportedDevices(): nil
+    const backend = gamepadbackend.none()
+    local calls = 0
+    local strength: number = 0
+    local duration: number = 0
+    backend.rumble = function(_id: integer, low: number, high: number, seconds: number): boolean
+        assert.eq(low, high)
+        calls = calls + 1
+        strength = low
+        duration = seconds
+
+        return true
+    end
+    const state = input.newInput(backend)
+    const pad = addPad(state, 1)
+    const player = controller.newManager(state):addController(movement(), {gamepad = pad})
+    assert.eq(calls, 1)
+    assert.eq(strength, 0.5)
+    assert.eq(duration, 0.2)
+    assert(player:notifyWithRumble(0.75, 0.4))
+    assert.eq(strength, 0.75)
+    assert.eq(duration, 0.4)
+    assert.raises(
+        function(): nil
+            local _ = player:notifyWithRumble(2)
+        end,
+        "strength"
+    )
+    assert.raises(
+        function(): nil
+            local _ = player:notifyWithRumble(0.5, math.huge)
+        end,
+        "duration"
+    )
+    player:setGamepad(nil)
+    assert(not player:notifyWithRumble())
+    player:setGamepad(pad)
+    state:handleEvent(platformevents.gamepadDevice(false, 1))
+    assert(not player:notifyWithRumble())
+end
+
+function suite.installsAfterInputAndRefreshesAssignmentsBeforeGameplay(): nil
+    const world = ecs.newWorld()
+    assert(controller.of(world) == nil)
+    assert.raises(
+        function(): nil
+            local _ = controller.install(world)
+        end,
+        "install tecs.input first"
+    )
+    const backend = gamepadbackend.none()
+    local emitted = false
+    backend.drain = function(out: {gamepadbackend.Event}): integer
+        if emitted then
+            return 0
+        end
+        emitted = true
+        out[1].kind = gamepadbackend.KIND_ADDED
+        out[1].device = 1
+        out[2].kind = gamepadbackend.KIND_BUTTON_DOWN
+        out[2].device = 1
+        out[2].code = 1
+
+        return 2
+    end
+    const state = input.install(world, backend)
+    const manager = controller.install(world)
+    assert(controller.of(world) == manager)
+    assert.raises(
+        function(): nil
+            local _ = controller.install(world)
+        end,
+        "already installed"
+    )
+    const player = manager:addController(movement(), {auto = true})
+    local observed = false
+    world:addSystem({
+        name = "test.logicalInput",
+        phase = ecs.phases.Update,
+        run = function(): nil
+            assert(player.gamepad == state:gamepadById(1))
+            assert(player:isDown("jump"))
+            observed = true
+        end
+    })
+    world:update(0)
+    assert(observed)
+end
+
+return suite

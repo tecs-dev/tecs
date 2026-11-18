@@ -98,7 +98,7 @@ nupp build --target docs      # Render this site into out/docs
 [Getting started](getting-started.md) walks through building the tree, running
 an example, and writing a component of your own. Continue with
 [the ECS guides](ecs/index.md), [Shapes and graphics](gfx/index.md),
-[Tiled maps](tiled/index.md) and [Building interfaces](ui/index.md).
+[Input and controllers](input/index.md), [Tiled maps](tiled/index.md) and [Building interfaces](ui/index.md).
 
 ## The reference
 

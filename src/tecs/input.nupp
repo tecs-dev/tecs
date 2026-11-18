@@ -3,6 +3,9 @@ module tecs.input
 --[[
 Keyboard, pointer, touch and gamepad state folded from typed platform events.
 
+Use [](tecs.controller) to map these physical controls to rebindable logical
+actions, per-player gamepads and movement pairs.
+
 Live state survives frame boundaries. Frame edges clear before each sealed host
 batch, while latched edges accumulate until the first fixed step consumes
 them. Blocking layers move capture and clear pending edges without inventing

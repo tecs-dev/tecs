@@ -1,0 +1,659 @@
+module tecs.controller
+
+--[[
+Rebindable logical controls over [](tecs.input), based on Baton-style bindings.
+
+Each [](tecs.controller.Controller) represents one player's controls. Bind an
+action to several physical inputs, combine four actions into a movement pair,
+and replace bindings at runtime. The manager assigns gamepads without depending
+on a window system or a native gamepad library.
+
+Queries read Input's base layer. A blocking menu suppresses every logical
+control, and fixed-step queries use Input's latched digital edges. Press and
+release queries report an edge from any bound key, mouse button or gamepad
+button, even when another binding remains held. Axis bindings are continuous
+and do not produce press or release edges.
+
+Bindings use `key:Space`, `mouse:left`, `button:south`, `axis:leftX`, and
+`axis:leftX+` or `axis:leftX-`. Device names follow `tecs.input`; the mapping
+layer does not translate a backend's vocabulary. Legacy hat bindings such as
+`hat:1u` remain valid in mappings. Evaluating one raises an unsupported error
+until Input exposes joystick hats again. A blocked capture layer still reads
+neutral, and an earlier successful binding can answer without evaluating a
+later unavailable binding. Positional D-pad bindings work with current Input.
+
+```nupp
+const manager = tecs.controller.install(world)
+const player = manager:addController({
+    controls = {
+        jump = {"key:Space", "button:south"},
+        left = {"key:KeyA", "axis:leftX-"},
+        right = {"key:KeyD", "axis:leftX+"},
+        up = {"key:KeyW", "axis:leftY-"},
+        down = {"key:KeyS", "axis:leftY+"},
+    },
+    pairs = {move = {"left", "right", "up", "down"}},
+}, {auto = true})
+const moveX, moveY = player:getPairNormalized("move")
+```
+]]
+
+const {type Key} = require("types")
+local ecs = require("tecs.ecs")
+local input = require("tecs.input")
+
+--- Defines actions and optional four-direction movement pairs.
+export type Bindings = {
+    --- Caller-writable. Maps action names to ordered binding lists. The
+    --- controller copies the lists; the first nonzero binding supplies a value.
+    controls: {[string]: {string}},
+
+    --- Caller-writable. Maps pair names to exactly four existing actions in
+    --- left, right, up, down order. Nil defines no pairs.
+    pairs: {[string]: {string}}?
+}
+
+--- Configures one player's gamepad assignment and axis filtering.
+export type GamepadConfig = {
+    --- Caller-writable. Selects a connected gamepad from the manager's
+    --- [](tecs.input.Input). Nil leaves assignment to `auto`.
+    gamepad: input.Gamepad?,
+
+    --- Caller-writable. Enables exclusive automatic assignment of an
+    --- available gamepad. Nil defaults to false; an explicit gamepad wins.
+    auto: boolean?,
+
+    --- Caller-writable. Sets the minimum axis magnitude from zero to one.
+    --- Nil defaults to 0.5 when creating a controller and preserves the current
+    --- threshold when resetting its assignment.
+    deadzone: number?
+}
+
+local type Source = "key" | "mouse" | "button" | "axis" | "hat"
+
+local record Binding
+    source: Source
+    key: string
+    mouse: integer
+    button: input.GamepadButton | integer
+    axis: input.GamepadAxis | integer
+    direction: integer
+end
+
+--- Represents one player's logical input over a manager's shared input state.
+export record Controller
+    --- Read-only. Reports a copy of the current mapping. Change mappings with
+    --- `rebind`; callers must not edit the returned tables.
+    bindings: Bindings
+
+    --- Read-only. Reports the assigned gamepad, or nil when none is assigned.
+    --- A disconnected object stays harmless until the manager refreshes it.
+    gamepad: input.Gamepad?
+
+    --- Read-only. Reports the axis magnitude threshold configured at creation
+    --- or through `resetGamepad`.
+    deadzone: number
+
+    --- Read-only. Reports whether the manager automatically assigns a gamepad.
+    auto: boolean
+
+    --- Caller-writable. Receives this controller, the new gamepad and the old
+    --- gamepad after assignment changes. Nil disables notification.
+    onGamepadChanged: (function(player: Controller, current: input.Gamepad?, previous: input.Gamepad?): nil)?
+
+    @private manager: ControlManager
+    @private actions: {[string]: {Binding}}
+
+    --- Reports a press from any bound digital input in the active edge tier.
+    --- @param self the player whose input to read.
+    --- @param action the logical action name; an unknown name reads false.
+    --- @return whether a bound key, mouse button or gamepad button was pressed.
+    --- @raises string when evaluation reaches a hat binding that Input cannot read.
+    isPressed: function(borrows self: Controller, action: string): boolean
+
+    --- Reports whether an action has a nonzero value.
+    --- @param self the player whose input to read.
+    --- @param action the logical action name; an unknown name reads false.
+    --- @return whether any binding supplies a nonzero value.
+    --- @raises string when evaluation reaches a hat binding that Input cannot read.
+    isDown: function(borrows self: Controller, action: string): boolean
+
+    --- Reports a release from any bound digital input in the active edge tier.
+    --- @param self the player whose input to read.
+    --- @param action the logical action name; an unknown name reads false.
+    --- @return whether a bound key, mouse button or gamepad button was released.
+    --- @raises string when evaluation reaches a hat binding that Input cannot read.
+    isReleased: function(borrows self: Controller, action: string): boolean
+
+    --- Returns the first nonzero binding value in declaration order.
+    --- @param self the player whose input to read.
+    --- @param action the logical action name; an unknown name reads zero.
+    --- @return zero or one for digital bindings, zero to one for directional
+    --- axes, or the signed value for raw axes, after deadzone filtering.
+    --- @raises string when evaluation reaches a hat binding that Input cannot read.
+    getRaw: function(borrows self: Controller, action: string): number
+
+    --- Returns right minus left and down minus up for a movement pair.
+    --- @param self the player whose input to read.
+    --- @param name the configured pair name; an unknown name reads zeroes.
+    --- @return the horizontal value clamped to minus one through one.
+    --- @return the vertical value clamped to minus one through one.
+    --- @raises string when a pair's evaluation reaches a hat binding that Input cannot
+    ---     read.
+    getPair: function(borrows self: Controller, name: string): (number, number)
+
+    --- Limits a movement pair to unit length while preserving smaller inputs.
+    --- @param self the player whose input to read.
+    --- @param name the configured pair name; an unknown name reads zeroes.
+    --- @return the horizontal value with diagonal speed limited.
+    --- @return the vertical value with partial analog magnitude preserved.
+    --- @raises string when a pair's evaluation reaches a hat binding that Input cannot
+    ---     read.
+    getPairNormalized: function(borrows self: Controller, name: string): (number, number)
+
+    --- Validates, compiles and copies a replacement mapping atomically.
+    --- @param self the player whose mapping to replace.
+    --- @param bindings the complete replacement actions and pairs.
+    --- @return nil after the new mapping is installed.
+    --- @raises string when a name, binding source, device control or pair is invalid.
+    rebind: function(exclusive self: Controller, bindings: Bindings): nil
+
+    --- Assigns a gamepad manually and disables automatic assignment.
+    --- @param self the player whose gamepad to change.
+    --- @param gamepad a connected device owned by the manager's input, or nil
+    --- to leave this player with keyboard and mouse controls only.
+    --- @return nil after assignment and any change callback complete.
+    --- @raises string when the gamepad is disconnected or belongs to another input.
+    setGamepad: function(self: Controller, gamepad: input.Gamepad?): nil
+
+    --- Resets assignment and optionally enables automatic assignment.
+    --- @param self the player whose assignment to reset.
+    --- @param config the new assignment policy, or nil to disable gamepad input.
+    --- @return nil after assignment and any change callbacks complete.
+    --- @raises string when the deadzone is outside zero to one or the gamepad
+    --- is disconnected or belongs to another input.
+    resetGamepad: function(self: Controller, config: GamepadConfig?): nil
+
+    --- Plays a brief identification rumble on this player's gamepad.
+    --- @param self the player whose gamepad to identify.
+    --- @param strength the motor strength from zero to one, defaulting to 0.5.
+    --- @param seconds the duration in seconds, defaulting to 0.2; zero stops it.
+    --- @return whether the gamepad accepted the effect.
+    --- @raises string when strength or duration is non-finite or outside its range.
+    notifyWithRumble: function(borrows self: Controller, strength: number?, seconds: number?): boolean
+end
+
+--- Owns the logical controllers that share one input state.
+export record ControlManager
+    --- Read-only. Reports the manager's controller list in creation order.
+    --- Callers must use `addController` and `removeController` to change it.
+    controllers: {Controller}
+
+    @private state: input.Input
+
+    --- Creates and registers one player's copied mapping.
+    --- @param self the manager that owns the player.
+    --- @param bindings the logical actions and optional movement pairs.
+    --- @param config the gamepad policy, defaulting to manual assignment and
+    --- an axis deadzone of 0.5.
+    --- @return the newly registered controller.
+    --- @raises string when the mapping, deadzone or selected gamepad is invalid.
+    addController: function(self: ControlManager, bindings: Bindings, config: GamepadConfig?): Controller
+
+    --- Removes a player, clears its gamepad and disables automatic assignment.
+    --- @param self the manager to update.
+    --- @param player the controller to remove; an absent controller is ignored.
+    --- @return nil after removal and any change callback complete.
+    removeController: function(self: ControlManager, player: Controller): nil
+
+    --- Returns a player by its current position in the controller list.
+    --- @param self the manager to read.
+    --- @param index the one-based player index.
+    --- @return the controller, or nil when no player occupies that index.
+    get: function(borrows self: ControlManager, index: integer): Controller?
+
+    --- Clears disconnected assignments and fills automatic players in order.
+    --- @param self the manager to refresh. Installed managers refresh after
+    --- input polls gamepads in `Ingress`; standalone managers call this directly.
+    --- @return nil after assignment and any change callbacks complete.
+    refreshDevices: function(self: ControlManager): nil
+end
+
+const buttons = {
+    "south",
+    "east",
+    "west",
+    "north",
+    "back",
+    "guide",
+    "start",
+    "leftStick",
+    "rightStick",
+    "leftShoulder",
+    "rightShoulder",
+    "dpadUp",
+    "dpadDown",
+    "dpadLeft",
+    "dpadRight",
+} as {input.GamepadButton}
+const axes = {"leftX", "leftY", "rightX", "rightY", "leftTrigger", "rightTrigger"} as {input.GamepadAxis}
+const hatDirections: {
+    [string]: boolean
+} = {c = true, u = true, ru = true, r = true, rd = true, d = true, ld = true, l = true, lu = true}
+const unsupportedHat = "controller: joystick hat bindings are unavailable in the current input backend"
+const managerKey: Key<ControlManager> = types.Key("tecs.controller")
+
+local function positiveCode(value: string): integer?
+    if not value:match("^%d+$") then
+        return nil
+    end
+    const parsed = tonumber(value)
+    if parsed == nil or parsed < 1 or parsed > 2147483647 then
+        return nil
+    end
+
+    return parsed as integer
+end
+
+local function parseBinding(text: string): Binding
+    const source, value = text:match("^([^:]+):([^:]+)$")
+    if source == nil or value == nil then
+        error("controller: invalid binding '" .. text .. "'; expected source:value", 3)
+    end
+    const binding = Binding(source = "key", key = "", mouse = 1, button = 1, axis = 1, direction = 0)
+    if source == "key" then
+        binding.key = value
+    elseif source == "mouse" then
+        binding.source = "mouse"
+        const names: {[string]: integer} = {left = 1, middle = 2, right = 3, back = 4, forward = 5}
+        const code = names[value] ?? positiveCode(value)
+        if code == nil then
+            error("controller: unknown mouse button in '" .. text .. "'", 3)
+        end
+        binding.mouse = code
+    elseif source == "button" then
+        binding.source = "button"
+        const code = positiveCode(value)
+        if code ~= nil then
+            binding.button = code
+            return binding
+        end
+        for index = 1, #buttons do
+            if buttons[index] == value then
+                binding.button = buttons[index]
+                return binding
+            end
+        end
+        error("controller: unknown gamepad button in '" .. text .. "'", 3)
+    elseif source == "axis" then
+        binding.source = "axis"
+        local name = value
+        const suffix = value:sub(-1)
+        if suffix == "+" or suffix == "-" then
+            name = value:sub(1, -2)
+            binding.direction = suffix == "+" and 1 or -1
+        end
+        const code = positiveCode(name)
+        if code ~= nil then
+            binding.axis = code
+            return binding
+        end
+        for index = 1, #axes do
+            if axes[index] == name then
+                binding.axis = axes[index]
+                return binding
+            end
+        end
+        error("controller: unknown gamepad axis in '" .. text .. "'", 3)
+    elseif source == "hat" then
+        const hatIndex, direction = value:match("^(%d+)(%a+)$")
+        if hatIndex == nil or positiveCode(hatIndex) == nil or direction == nil or not hatDirections[direction] then
+            error("controller: invalid hat binding '" .. text .. "'; expected a positive index and hat direction", 3)
+        end
+        binding.source = "hat"
+    else
+        error("controller: unknown binding source '" .. source .. "'; use key, mouse, button, axis or hat", 3)
+    end
+
+    return binding
+end
+
+local function validateConfig(borrows manager: ControlManager, config: GamepadConfig?): nil
+    if config == nil then
+        return
+    end
+    const deadzone = config.deadzone
+    if deadzone ~= nil and (deadzone ~= deadzone or deadzone < 0 or deadzone > 1) then
+        error("controller: deadzone must be between zero and one", 3)
+    end
+    const pad = config.gamepad
+    if pad ~= nil and (not pad.connected or manager.state:gamepadById(pad.id) ~= pad) then
+        error("controller: gamepad must be connected to this input state", 3)
+    end
+end
+
+function Controller.rebind(exclusive self: Controller, bindings: Bindings): nil
+    const compiled: {[string]: {Binding}} = {}
+    const copied: Bindings = {controls = {}, pairs = {}}
+    for name, sources in pairs(bindings.controls) do
+        if name == "" then
+            error("controller: action names must not be empty", 2)
+        end
+        const action: {Binding} = {}
+        const texts: {string} = {}
+        for index = 1, #sources do
+            action[index] = parseBinding(sources[index])
+            texts[index] = sources[index]
+        end
+        compiled[name] = action
+        copied.controls[name] = texts
+    end
+    const copiedPairs = assert(copied.pairs)
+    for name, actions in pairs(bindings.pairs ?? {}) do
+        if name == "" or #actions ~= 4 then
+            error("controller: pairs need a non-empty name and exactly four actions", 2)
+        end
+        const names: {string} = {}
+        for index = 1, 4 do
+            if compiled[actions[index]] == nil then
+                error("controller: pair '" .. name .. "' names unknown action '" .. actions[index] .. "'", 2)
+            end
+            names[index] = actions[index]
+        end
+        copiedPairs[name] = names
+    end
+    self.actions = compiled
+    self.bindings = copied
+end
+
+local function digitalEdge(borrows player: Controller, action: string, pressed: boolean): boolean
+    const bindings = player.actions[action]
+    if bindings == nil then
+        return false
+    end
+    const state = player.manager.state
+    if not state:canRead() then
+        return false
+    end
+    const pad = player.gamepad
+    for index = 1, #bindings do
+        const binding = bindings[index]
+        if binding.source == "hat" then
+            error(unsupportedHat, 3)
+        elseif binding.source == "key" then
+            if pressed then
+                if state:keyPressed(binding.key) then
+                    return true
+                end
+            elseif state:keyReleased(binding.key) then
+                return true
+            end
+        elseif binding.source == "mouse" then
+            if pressed then
+                if state:mousePressed(binding.mouse) then
+                    return true
+                end
+            elseif state:mouseReleased(binding.mouse) then
+                return true
+            end
+        elseif binding.source == "button" and pad ~= nil then
+            if pressed then
+                if pad:buttonPressed(binding.button) then
+                    return true
+                end
+            elseif pad:buttonReleased(binding.button) then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+function Controller.isPressed(borrows self: Controller, action: string): boolean
+    return digitalEdge(self, action, true)
+end
+
+function Controller.isReleased(borrows self: Controller, action: string): boolean
+    return digitalEdge(self, action, false)
+end
+
+function Controller.getRaw(borrows self: Controller, action: string): number
+    const bindings = self.actions[action]
+    if bindings == nil then
+        return 0
+    end
+    const state = self.manager.state
+    if not state:canRead() then
+        return 0
+    end
+    const pad = self.gamepad
+    for index = 1, #bindings do
+        const binding = bindings[index]
+        local value: number = 0
+        if binding.source == "hat" then
+            error(unsupportedHat, 2)
+        elseif binding.source == "key" then
+            value = state:keyDown(binding.key) and 1 or 0
+        elseif binding.source == "mouse" then
+            value = state:mouseDown(binding.mouse) and 1 or 0
+        elseif binding.source == "button" and pad ~= nil then
+            value = pad:buttonDown(binding.button) and 1 or 0
+        elseif binding.source == "axis" and pad ~= nil then
+            value = pad:axis(binding.axis, self.deadzone)
+            if binding.direction ~= 0 then
+                value = math.max(0, value * binding.direction)
+            end
+        end
+        if value ~= 0 then
+            return value
+        end
+    end
+
+    return 0
+end
+
+function Controller.isDown(borrows self: Controller, action: string): boolean
+    return self:getRaw(action) ~= 0
+end
+
+function Controller.getPair(borrows self: Controller, name: string): number, number
+    const pair = assert(self.bindings.pairs)[name]
+    if pair == nil then
+        return 0, 0
+    end
+
+    return math.max(
+        -1,
+        math.min(1, self:getRaw(pair[2]) - self:getRaw(pair[1]))
+    ), math.max(-1, math.min(1, self:getRaw(pair[4]) - self:getRaw(pair[3])))
+end
+
+function Controller.getPairNormalized(borrows self: Controller, name: string): number, number
+    const horizontal, vertical = self:getPair(name)
+    const squared = horizontal * horizontal + vertical * vertical
+    if squared > 1 then
+        const scale = 1 / math.sqrt(squared)
+        return horizontal * scale, vertical * scale
+    end
+
+    return horizontal, vertical
+end
+
+function Controller.notifyWithRumble(borrows self: Controller, strength: number?, seconds: number?): boolean
+    const amount = strength ?? 0.5
+    const duration = seconds ?? 0.2
+    if amount ~= amount or amount < 0 or amount > 1 then
+        error("controller: rumble strength must be between zero and one", 2)
+    end
+    if duration ~= duration or duration < 0 or duration == math.huge then
+        error("controller: rumble duration must be finite and non-negative", 2)
+    end
+    const pad = self.gamepad
+
+    return pad ~= nil and pad:rumble(amount, amount, duration)
+end
+
+local function assign(player: Controller, pad: input.Gamepad?): nil
+    const previous = player.gamepad
+    if previous == pad then
+        return
+    end
+    player.gamepad = pad
+    if pad ~= nil then
+        player:notifyWithRumble()
+    end
+    const changed = player.onGamepadChanged
+    if changed ~= nil then
+        changed(player, pad, previous)
+    end
+end
+
+function Controller.setGamepad(self: Controller, gamepad: input.Gamepad?): nil
+    validateConfig(self.manager, {gamepad = gamepad})
+    self.auto = false
+    assign(self, gamepad)
+end
+
+local function isAssigned(borrows manager: ControlManager, pad: input.Gamepad): boolean
+    for index = 1, #manager.controllers do
+        if manager.controllers[index].gamepad == pad then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function active(borrows manager: ControlManager, pad: input.Gamepad): boolean
+    const layer = manager.state:topLayer()
+    for index = 1, #buttons do
+        if pad:buttonDown(buttons[index], layer) then
+            return true
+        end
+    end
+    for index = 1, #axes do
+        if math.abs(pad:axis(axes[index], 0, layer)) > 0.5 then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function autoAssign(manager: ControlManager, player: Controller): nil
+    if not player.auto or player.gamepad ~= nil then
+        return
+    end
+    const available = manager.state:gamepads()
+    local candidate: input.Gamepad? = nil
+    for index = 1, #available do
+        const pad = available[index]
+        if not isAssigned(manager, pad) then
+            if active(manager, pad) then
+                candidate = pad
+                break
+            end
+            if candidate == nil then
+                candidate = pad
+            end
+        end
+    end
+    assign(player, candidate)
+end
+
+function Controller.resetGamepad(self: Controller, config: GamepadConfig?): nil
+    validateConfig(self.manager, config)
+    if config ~= nil and config.deadzone ~= nil then
+        self.deadzone = config.deadzone
+    end
+    self.auto = config ~= nil and config.auto == true and config.gamepad == nil
+    assign(self, config and config.gamepad or nil)
+    autoAssign(self.manager, self)
+end
+
+function ControlManager.addController(self: ControlManager, bindings: Bindings, config: GamepadConfig?): Controller
+    validateConfig(self, config)
+    const player = Controller(
+        bindings = {controls = {}, pairs = {}},
+        gamepad = nil,
+        deadzone = config and config.deadzone or 0.5,
+        auto = false,
+        onGamepadChanged = nil,
+        manager = self,
+        actions = {}
+    )
+    player:rebind(bindings)
+    self.controllers[#self.controllers + 1] = player
+    player:resetGamepad(config)
+
+    return player
+end
+
+function ControlManager.removeController(self: ControlManager, player: Controller): nil
+    for index = 1, #self.controllers do
+        if self.controllers[index] == player then
+            table.remove(self.controllers, index)
+            player.auto = false
+            assign(player, nil)
+            return
+        end
+    end
+end
+
+function ControlManager.get(borrows self: ControlManager, index: integer): Controller?
+    return self.controllers[index]
+end
+
+function ControlManager.refreshDevices(self: ControlManager): nil
+    for index = 1, #self.controllers do
+        const player = self.controllers[index]
+        const pad = player.gamepad
+        if pad ~= nil and not pad.connected then
+            assign(player, nil)
+        end
+    end
+    for index = 1, #self.controllers do
+        autoAssign(self, self.controllers[index])
+    end
+end
+
+--- Creates a standalone manager over an existing input state.
+--- @param state the input state supplying physical controls and capture layers.
+--- @return a new manager; callers refresh its device assignments themselves.
+export function newManager(state: input.Input): ControlManager
+    return ControlManager(controllers = {}, state = state)
+end
+
+--- Installs a logical controller manager in a world that already owns input.
+--- @param world the world whose input and gamepad polling the manager shares.
+--- @return the new manager, also available through `of`.
+--- @raises string when input is not installed or a controller manager already exists.
+export function install(exclusive world: ecs.World): ControlManager
+    if world.resources:get(managerKey) ~= nil then
+        error("controller.install: a controller manager is already installed", 2)
+    end
+    const state = input.of(world)
+    if state == nil then
+        error("controller.install: install tecs.input first", 2)
+    end
+    const manager = newManager(state)
+    world.resources:set(managerKey, manager)
+    world:addSystem({
+        name = "tecs.AssignControllers",
+        phase = ecs.phases.Ingress,
+        after = {"tecs.PollGamepads"},
+        run = function(_dt: number): nil
+            manager:refreshDevices()
+        end,
+    })
+
+    return manager
+end
+
+--- Returns a world's installed logical controller manager.
+--- @param world the world to inspect.
+--- @return the installed manager, or nil when none is installed.
+export function of(borrows world: ecs.World): ControlManager?
+    return world.resources:get(managerKey)
+end

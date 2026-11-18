@@ -28,6 +28,7 @@ local animation = require("tecs.gfx.animation")
 local gamepadbackend = require("tecs.platform.gamepadbackend")
 local gfx = require("tecs.gfx")
 local input = require("tecs.input")
+local controller = require("tecs.controller")
 local layers = require("tecs.gfx.layers")
 local nupplog = require("debug.log")
 local materials = require("tecs.gpu.materials")
@@ -473,6 +474,13 @@ function suite.inputSystemNames(): nil
     local world = ecs.newWorld()
     input.install(world, gamepadbackend.none())
     containsAll(systemNames(world), {"tecs.PollGamepads", "tecs.EnterFixedInput", "tecs.ExitFixedInput"})
+end
+
+function suite.controllerSystemNames(): nil
+    const world = ecs.newWorld()
+    input.install(world, gamepadbackend.none())
+    controller.install(world)
+    containsAll(systemNames(world), {"tecs.AssignControllers"})
 end
 
 -------------------------------------------------------------------------------

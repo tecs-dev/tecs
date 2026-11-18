@@ -293,6 +293,7 @@ return {
                     "tecs.gpu.passes",
                     "tecs.host",
                     "tecs.input",
+                    "tecs.controller",
                     "tecs.mcp",
                     "tecs.physics",
                     "tecs.physics.contract",
